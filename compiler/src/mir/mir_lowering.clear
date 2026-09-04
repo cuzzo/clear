@@ -463,7 +463,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF input.schema_lookup EXISTS AS schema_lookup_value THEN
       MUTABLE schema_lookup_value_mutable = COPY schema_lookup_value;
       MUTABLE external_lookup = COPY schema_lookup_value_mutable;
-      mIRLoweringSchemas__replace_lookup_proc_mut(&schemas, %(name) USE(external_lookup, schemas) -> (IF mIRLoweringSchemas__lookup(schemas, name) != NIL THEN mIRLoweringSchemas__lookup(schemas, name) ELSE UNWRAP (external_lookup(name)) END));
+      mIRLoweringSchemas__replace_lookup_proc_mut(&schemas, %(name) USE(external_lookup, schemas) -> (mIRLoweringSchemas__lookup(schemas, name) OR_ELSE UNWRAP (external_lookup(name))));
     END
     rtoc_self_view.state = MIRLoweringState{ input: COPY input, schemas: schemas, counters: mIRLoweringCounters__new(), function_state: COPY FunctionState{ current_function_context: NIL, pending_stmts: List[], current_decl_alloc: NIL, current_expected_type: NIL, current_sink_type: NIL, current_reassignment_target: NIL, current_bindings: {}, current_binding_types: {}, fn_alloc_marked_names: {}, lowered_alloc_names: Set[], lowered_guarded_cleanup_names: Set[], decl_zig_name_map: {}, guarded_cleanup_names: {}, fn_name_rename_map: {}, node_store_types: Set[] }, runtime: COPY MIRLoweringRuntimeState{ rt_name: "rt", emitter: NIL }, program: COPY MIRLoweringProgramState{ fn_sigs: COPY input.fn_sigs, importer: COPY input.importer, source_dir: COPY input.source_dir, debug_mode: input.debug_mode, target: COPY input.target, shard_context: NIL, emitted_extern_modules: Set[], pipeline_host: NIL, emitted_types: Set[], emitted_require_modules: Set[], emitted_import_type_aliases: Set[], used_sharded_map: FALSE, use_debug_allocator: NIL, fn_nodes: {}, function_counter_snapshots: {}, runtime_init_consts: List[], module_const_inits: Set[], module_global_names: Set[] }, capture: MIRLoweringCaptureState{ current_bg_pointer_captures: NIL, current_lambda_pointer_params: Set[], current_fiber_capture_symbols: {}, do_capture_map: NIL, current_stream_is_inf: NIL, current_stream_local: NIL, current_stream_close_label: NIL, current_fsm_inherited_alloc_names: Set[], current_fsm_inherited_guarded_names: Set[], current_fsm_owned_result_guards: {}, last_fsm_result_transfer_facts: List[] }, capabilities: COPY MIRLoweringCapabilityState{ locked_unwrap_map: NIL, rc_unwrap_map: NIL, with_alias_alloc_map: NIL, with_alias_owner_map: NIL, polymorphic_alias_type_map: NIL, if_bind_aliases: Set[], if_bind_pointer_aliases: Set[], atomic_emit_raw: FALSE }, ownership: COPY MIRLoweringOwnershipState{ next_lowered_node_id: 0, finalized_body_ids: Set[], finalized_node_ids: Set[] }, test: COPY MIRLoweringTestState{ active_stubs: {}, stub_label_counter: 0 } };
     rtoc_self_view.active_lifecycle_registry = COPY input.lifecycle_registry;
@@ -4277,8 +4277,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN :frame;
       END
     END
-    IF (IF mIRLowering__symbol_storage_for_node(rtoc_self_view, root) != NIL THEN mIRLowering__symbol_storage_for_node(rtoc_self_view, root) ELSE mIRLowering__function_state(rtoc_self_view).current_decl_alloc END) != NIL THEN
-    RETURN ((IF mIRLowering__symbol_storage_for_node(rtoc_self_view, root) != NIL THEN mIRLowering__symbol_storage_for_node(rtoc_self_view, root) ELSE mIRLowering__function_state(rtoc_self_view).current_decl_alloc END))?;
+    IF (mIRLowering__symbol_storage_for_node(rtoc_self_view, root) OR_ELSE mIRLowering__function_state(rtoc_self_view).current_decl_alloc) != NIL THEN
+    RETURN ((mIRLowering__symbol_storage_for_node(rtoc_self_view, root) OR_ELSE mIRLowering__function_state(rtoc_self_view).current_decl_alloc))?;
     ELSE
     RETURN :frame;
     END
@@ -19208,7 +19208,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       rtoc_ternary_value_700 = NIL;
     END
-    rtoc_ternary_value_700? }), resolved_allocs: resolved_allocs, sink_alloc: COPY ((IF (IF inlineAllocMetadata__value_alloc(resolved_allocs) != NIL THEN inlineAllocMetadata__value_alloc(resolved_allocs) ELSE inlineAllocMetadata__primary(resolved_allocs) END) != NIL THEN (IF inlineAllocMetadata__value_alloc(resolved_allocs) != NIL THEN inlineAllocMetadata__value_alloc(resolved_allocs) ELSE inlineAllocMetadata__primary(resolved_allocs) END) ELSE inlineAllocMetadata__shard_alloc(resolved_allocs) END)) };
+    rtoc_ternary_value_700? }), resolved_allocs: resolved_allocs, sink_alloc: COPY ((IF (inlineAllocMetadata__value_alloc(resolved_allocs) OR_ELSE inlineAllocMetadata__primary(resolved_allocs)) != NIL THEN (inlineAllocMetadata__value_alloc(resolved_allocs) OR_ELSE inlineAllocMetadata__primary(resolved_allocs)) ELSE inlineAllocMetadata__shard_alloc(resolved_allocs) END)) };
 }
 END
 PRIVATE FN mIRLowering__indexed_assignment_target_var(self: MIRLowering, target_node: Locatable) RETURNS ?String

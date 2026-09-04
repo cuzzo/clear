@@ -1625,7 +1625,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF rtoc_expr_node IS_A StructInit AS rtoc_structInit THEN
         IF !((rtoc_structInit.fields).empty?()) THEN
                 FOR _ IN (rtoc_structInit.fields) DO
-            MUTABLE field_alloc: ?String@symbol = (IF mIR__struct_init_field_alloc(_) != NIL THEN mIR__struct_init_field_alloc(_) ELSE owner_alloc END);
+            MUTABLE field_alloc: ?String@symbol = (mIR__struct_init_field_alloc(_) OR_ELSE owner_alloc);
             TRY (mIRChecker__check_aggregate_expr_mut(&rtoc_self_view, ruby_wrap_optional_Emittable_MIRCheckerAggregateExpr(mIR__struct_init_field_value(_)), field_alloc, alloc_by_name));
                 END
         END
