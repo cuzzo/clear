@@ -13979,7 +13979,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     panic("MIRLowering: unsupported dotted type expression {}");
 }
 END
-PRIVATE FN mIRLowering__binary_operation_plan(MUTABLE self: MIRLowering, node: BinaryOp) RETURNS !BinaryOperationPlan
+PRIVATE FN mIRLowering__binary_operation_plan(MUTABLE self: MIRLowering, MUTABLE node: BinaryOp) RETURNS !BinaryOperationPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13987,7 +13987,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRLowering__classify_binary_operation(rtoc_self_view, facts));
 }
 END
-PRIVATE FN mIRLowering__binary_operand_facts(MUTABLE self: MIRLowering, node: BinaryOp) RETURNS !BinaryOperandFacts
+PRIVATE FN mIRLowering__binary_operand_facts(MUTABLE self: MIRLowering, MUTABLE node: BinaryOp) RETURNS !BinaryOperandFacts
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -14425,7 +14425,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     panic("{}work on tagged unions. Either compare against a unit variant {}std.meta.activeTag(s) == .Variant -- or use a MATCH expression to discriminate the active variant.\\n(See transpile-tests/255_union_equality.clear.)");
 }
 END
-PRIVATE FN mIRLowering__lower_lazy_boolean_op(MUTABLE self: MIRLowering, node: BinaryOp) RETURNS !MIRBinOp
+PRIVATE FN mIRLowering__lower_lazy_boolean_op(MUTABLE self: MIRLowering, MUTABLE node: BinaryOp) RETURNS !MIRBinOp
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -14440,7 +14440,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__lower_boolean_operand(MUTABLE self: MIRLowering, node: Locatable) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_boolean_operand(MUTABLE self: MIRLowering, MUTABLE node: Locatable) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -14451,7 +14451,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN Emittable{ MIRBinOp: COPY MIRBinOp{ op: "!=", left: COPY lowered, right: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
 }
 END
-PRIVATE FN mIRLowering__unit_variant_access(self: MIRLowering, node: Locatable) RETURNS !?UnitVariantAccess
+PRIVATE FN mIRLowering__unit_variant_access(self: MIRLowering, MUTABLE node: Locatable) RETURNS !?UnitVariantAccess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -14537,7 +14537,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     panic("lower_smooth: unsupported pipeline op {}; legacy pipeline fallback has been removed");
 }
 END
-PRIVATE FN mIRLowering__complex_pipeline_sink_alloc(MUTABLE self: MIRLowering, mir_result: ?PipelineLoweringResult, result_type: Type, node: BinaryOp) RETURNS !?String@symbol
+PRIVATE FN mIRLowering__complex_pipeline_sink_alloc(MUTABLE self: MIRLowering, mir_result: ?PipelineLoweringResult, result_type: Type, MUTABLE node: BinaryOp) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -14733,7 +14733,7 @@ PRIVATE FN mIRLowering__lower_or_else(MUTABLE self: MIRLowering, MUTABLE node: B
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE msg_mir: ?Emittable = NIL;
-    MUTABLE facts = TRY (mIRLowering__or_else_facts(rtoc_self_view, node));
+    MUTABLE facts = TRY (mIRLowering__or_else_facts(rtoc_self_view, &node));
     MUTABLE left: Emittable = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable);
     IF node.right IS_A OrElseRaise THEN
       IF left IS_A ExternTrampoline AS extern_trampoline THEN

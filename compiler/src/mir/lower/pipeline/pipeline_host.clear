@@ -486,10 +486,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (pipelinePlaceholderRewriter__substitute( &rtoc_local_receiver_25, node)) };
 }
 END
-PUB FN pipelineHost__pipeline_result_heap?(self: PipelineHost, smooth_node: BinaryOp) RETURNS Bool
+PUB FN pipelineHost__pipeline_result_heap?(MUTABLE self: PipelineHost, smooth_node: BinaryOp) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (pipelineHost__pipeline_alloc(rtoc_self_view, smooth_node) == :heap);
 }
 END
