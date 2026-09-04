@@ -1231,6 +1231,11 @@ module Annotator
 
         # 1. Visit collection to determine element type
         visit(node.collection)
+        # FOR MUTABLE captures each element by pointer, so the body's writes
+        # land on the collection: the collection is mutated here.
+        if node.is_mutable == true && node.collection.is_a?(AST::Identifier)
+          mark_var_mutated(T.unsafe(node.collection).name)
+        end
         coll_type = node.collection.full_type!(context: "FOR collection")
         ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
 

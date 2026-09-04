@@ -555,11 +555,34 @@ module MIRLoweringControlFlow
     plan.collection_setup.empty? ? loop_stmt : MIR::ScopeBlock.new(plan.collection_setup + [loop_stmt])
   end
 
+  # Mirrors the capture choice in for_each_loop_stmt: only struct elements are
+  # captured by pointer, because primitives are Copy and cannot be written
+  # through.
+  sig { params(node: AST::ForEach, var: String, blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  def with_for_each_pointer_capture(node, var, &blk)
+    T.bind(self, MIRLowering) rescue nil
+    return blk.call unless node.is_mutable == true
+
+    elem = (Type.new(node.collection.full_type!).element_type rescue nil)
+    return blk.call unless elem&.resolved && struct_schemas.key?(elem.resolved)
+
+    previous = capture_state.current_lambda_pointer_params
+    capture_state.current_lambda_pointer_params = previous | [var]
+    begin
+      blk.call
+    ensure
+      capture_state.current_lambda_pointer_params = previous
+    end
+  end
+
   sig { params(node: AST::ForEach).returns(ForEachPlan) }
   def for_each_plan(node)
     T.bind(self, MIRLowering) rescue nil
     var = zig_safe_name(node.var_name)
-    body = lower_body(node.body)
+    # FOR MUTABLE captures a struct element as `|*var|`, so inside the body the
+    # binding IS the pointer: a `&var` argument must pass it through rather
+    # than take the address of the capture slot.
+    body = with_for_each_pointer_capture(node, var) { lower_body(node.body) }
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
     rt = MIR::Ident.new(runtime_binding_name)
     # A loop source is not in coercion position: an ambient expected type

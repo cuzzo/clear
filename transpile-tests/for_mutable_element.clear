@@ -1,0 +1,49 @@
+# FOR MUTABLE var IN collection captures each element by pointer, so writes in
+# the body land on the collection itself -- Rust's `for x in v.iter_mut()`.
+# Without it, Ruby's `list.each { |x| mutate(x) }` has no translation: a plain
+# FOR binds a copy and the mutation is silently discarded.
+STRUCT Item { n: Int64, tag: String }
+STRUCT Holder { items: []Item }
+
+FN bump(MUTABLE it: Item) RETURNS Void ->
+    it.n = it.n + 100_i64;
+    RETURN;
+END
+
+FN scale_all(MUTABLE h: Holder) RETURNS Void ->
+    FOR MUTABLE it IN h.items DO
+        it.n = it.n * 2_i64;
+    END
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE items = [Item{ n: 1_i64, tag: "a" }, Item{ n: 2_i64, tag: "b" }];
+    FOR MUTABLE it IN items DO
+        it.n = it.n * 10_i64;
+    END
+    ASSERT items[0].n == 10_i64, "first written in place";
+    ASSERT items[1].n == 20_i64, "second written in place";
+
+    # A callee taking MUTABLE writes through the same pointer.
+    FOR MUTABLE it IN items DO
+        bump(&it);
+    END
+    ASSERT items[0].n == 110_i64, "callee wrote through the element pointer";
+    ASSERT items[1].n == 120_i64, "and through the second";
+
+    # Owned children survive: writing one field must not disturb the others.
+    ASSERT items[0].tag == "a", "untouched field intact";
+
+    # The collection may live behind a field and a MUTABLE parameter.
+    MUTABLE h = Holder{ items: [Item{ n: 3_i64, tag: "c" }] };
+    scale_all(&h);
+    ASSERT (h.items[0]?.n OR_ELSE 0_i64) == 6_i64, "wrote through a field collection";
+
+    # A plain FOR still binds a copy, leaving the collection untouched.
+    FOR it IN items DO
+        ASSERT it.n > 0_i64, "readable";
+    END
+    ASSERT items[0].n == 110_i64, "plain FOR did not write back";
+    RETURN;
+END

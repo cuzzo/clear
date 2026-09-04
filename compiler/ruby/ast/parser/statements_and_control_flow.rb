@@ -588,9 +588,14 @@ class ClearParser
   # FOR var IN (start ..= end) DO body END   — range iteration
   # FOR var IN (start ..< end) DO body END   — range iteration
   # FOR var IN collection DO body END         — collection iteration
+  # FOR MUTABLE var IN collection DO body END — captures each element by
+  #   pointer so the body's writes land on the collection, the way Rust's
+  #   `for x in v.iter_mut()` does.
   sig { returns(T.any(AST::ForRange, AST::ForEach)) }
   def parse_for_range
     tok = consume(:KEYWORD, 'FOR')
+    mutable = match?(:KEYWORD, 'MUTABLE')
+    consume(:KEYWORD, 'MUTABLE') if mutable
     var_name = consume(:VAR_ID).text!
     consume(:KEYWORD, 'IN')
 
@@ -609,9 +614,11 @@ class ClearParser
     end
 
     if expr.is_a?(AST::RangeLit)
+      raise_source_error!(tok, 'FOR MUTABLE iterates a collection; a range yields fresh values with nothing to write back.') if mutable
+
       AST::ForRange.new(tok, var_name, expr.start, expr.finish, expr.inclusive, body, nil)
     else
-      AST::ForEach.new(tok, var_name, expr, body, nil, false)
+      AST::ForEach.new(tok, var_name, expr, body, nil, mutable)
     end
   end
 
