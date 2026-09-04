@@ -2463,7 +2463,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ret_type = COPY functionSignature__return_type(fsig);
     END
     MUTABLE heap_return = ((ret_type != NIL) AND ((type__heap?(ret_type) OR type__dynamic?(ret_type))));
-    MUTABLE has_takes_heap = fn_node.params |> ANY (_.takes AND !(((type__primitive?(_.type) OR type__id_handle?(_.type)))));
+    MUTABLE has_takes_heap = fn_node.params |> ANY ((_.takes OR_ELSE FALSE) AND !(((type__primitive?(_.type) OR type__id_handle?(_.type)))));
     MUTABLE has_catch = capabilityAuditSession__function_has_catch_clauses?(rtoc_self_view, fn_node);
     MUTABLE has_raise = TRY (capabilityAuditSession__function_raises_directly?(rtoc_self_view, name));
     MUTABLE thunk_uses_rt = (!((fn_node.thunk_plan == NIL)) OR !((fn_node.mutual_thunk_plan == NIL)));

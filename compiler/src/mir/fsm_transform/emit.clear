@@ -824,7 +824,7 @@ PRIVATE FN emit__register_owned_suspend_result_cleanups_mut(segment_specs: []Fsm
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segment_specs.length() DO
     MUTABLE desc: ?SuspendDescriptor = COPY segment_specs[rtoc_idx]?.descriptor;
-    IF !((((desc != NIL) AND desc.result_needs_cleanup) AND desc.result_var)) THEN
+    IF !((((desc != NIL) AND (desc.result_needs_cleanup OR_ELSE FALSE)) AND desc.result_var)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END

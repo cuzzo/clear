@@ -9006,7 +9006,7 @@ PRIVATE FN mIRLowering__takes_param_ownership_mir(self: MIRLowering, node: Funct
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_314: []Emittable = List[]; rtoc_empty_list_314 } );
-    MUTABLE rtoc_each_items_316 = (node.params |> WHERE (_.takes OR (IF _.symbol != NIL THEN
+    MUTABLE rtoc_each_items_316 = (node.params |> WHERE ((_.takes OR_ELSE FALSE) OR (IF _.symbol != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_315 = CAST(_.symbol AS SymbolEntry);
     symbolEntry__kept_identity(rtoc_local_receiver_315) }
     ELSE
@@ -9283,7 +9283,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN Emittable{ FieldGet: COPY widened };
       END
     END
-    IF (((callee_param != NIL) AND callee_param.takes) AND (callee_param.carrier_contract == :monomorphic)) THEN
+    IF (((callee_param != NIL) AND (callee_param.takes OR_ELSE FALSE)) AND (callee_param.carrier_contract == :monomorphic)) THEN
       IF wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx) THEN
         RETURN Emittable{ AddressOf: COPY AddressOf{ expr: COPY arg, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
@@ -9382,7 +9382,7 @@ PRIVATE FN mIRLowering__owned_slice_argument_required?(self: MIRLowering, callee
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN !(!(((((((callee_param != NIL) AND callee_param.takes) AND moved_arg) AND TRY (type__direct_indexable_collection?(ti))) AND !(type__collection?(callee_param_type))))));
+    RETURN !(!(((((((callee_param != NIL) AND (callee_param.takes OR_ELSE FALSE)) AND moved_arg) AND TRY (type__direct_indexable_collection?(ti))) AND !(type__collection?(callee_param_type))))));
 }
 END
 PRIVATE FN mIRLowering__borrowed_array_argument_required?(self: MIRLowering, ti: Type, ast_arg: Locatable, callee_param_type: Type) RETURNS !Bool

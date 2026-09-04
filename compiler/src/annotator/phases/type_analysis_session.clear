@@ -4041,7 +4041,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (facts.is_give AND !(facts.param.takes)) THEN
       TRY (typeAnalysisSession__record_deferred_give_validation_mut(&rtoc_self_view, facts));
     END
-    IF !((facts.param.takes OR facts.is_give)) THEN
+    IF !(((facts.param.takes OR_ELSE FALSE) OR facts.is_give)) THEN
       RETURN;
     END
     MUTABLE inner_identifier_branch_value: ?Identifier = NIL;
@@ -5393,7 +5393,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(item_type, node, MUTABLE selector_effect, source, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_112 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_112, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    IF (UNWRAP (aST__node_right( Locatable{ BinaryOp: COPY node })) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR locatable__stream_mode(node.right)))) THEN
+    IF (UNWRAP (aST__node_right( Locatable{ BinaryOp: COPY node })) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR (locatable__stream_mode(node.right) OR_ELSE FALSE)))) THEN
         MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, FALSE, %() USE(item_type, node, rtoc_self_view) -> {
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))));
       rubyToClearVoid__type_analysis_session()
@@ -8717,7 +8717,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (expr_value_mutable IS_A CopyNode OR expr_value_mutable IS_A KeepNode) THEN
         RETURN NIL;
       END
-      IF (TRUE AND aST__node__container_borrow(expr_value_mutable)) THEN
+      IF (TRUE AND (aST__node__container_borrow(expr_value_mutable) OR_ELSE FALSE)) THEN
         MUTABLE receiver: ?Locatable = (aST__node_object(expr_value_mutable) OR_ELSE aST__node_target(expr_value_mutable));
         IF receiver EXISTS AS receiver_value THEN
           RETURN typeAnalysisSession__root_variable_name(rtoc_self_view, receiver_value);
@@ -8925,7 +8925,7 @@ PRIVATE FN typeAnalysisSession__validate_tight_node_mut(self: TypeAnalysisSessio
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A FuncCall AS func_call THEN
-      IF (TRUE AND func_call.extern_call) THEN
+      IF (TRUE AND (func_call.extern_call OR_ELSE FALSE)) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castTightLoopNodeToLocatable(loop_node)), TypeAnalysisCodeOrMessage{ SymbolValue: :TIGHT_CALLS_EXTERN_FN }, [], CAST({:name: funcCall__name(func_call)} AS {String@symbol}Any)));
       END
       MUTABLE fn: ?FunctionDef = COPY fn_nodes[funcCall__name(func_call)];
@@ -13692,7 +13692,7 @@ PRIVATE FN typeAnalysisSession__consume_match_subject_if_takes_mut(self: TypeAna
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE expr = COPY node.expr;
-    IF !(((node.takes AND matchSubjectPlan__union?(plan)) AND expr IS_A Identifier)) THEN
+    IF !((((node.takes OR_ELSE FALSE) AND matchSubjectPlan__union?(plan)) AND expr IS_A Identifier)) THEN
       RETURN;
     END
     MUTABLE source_name = expr.name();
@@ -16939,7 +16939,7 @@ PRIVATE FN typeAnalysisSession__retryable_with_call_fallible?(self: TypeAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (TRUE AND aST__node__can_fail( UNWRAP (castNodeToLocatable(node)))) THEN
+    IF (TRUE AND (aST__node__can_fail( UNWRAP (castNodeToLocatable(node))) OR_ELSE FALSE)) THEN
       RETURN TRUE;
     END
     IF (aST__node_error_union_type(node) OR_ELSE FALSE) THEN
