@@ -2189,7 +2189,7 @@ FN mIRLowering__emitted_guarded_cleanup_for_name?(self: MIRLowering, nodes: []Em
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN nodes |> ANY (IF !((_ IS_A Cleanup OR _ IS_A ErrCleanup)) THEN FALSE ELSE ((emittable__name(_) == name) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_37: ?CleanupEntry@multiowned = emittable__cleanup_entry(_);
-    cleanupEntry__has_moved_guard?( UNWRAP (UNWRAP (rtoc_local_receiver_37))) }) END);
+    cleanupEntry__has_moved_guard?( UNWRAP (rtoc_local_receiver_37)) }) END);
 }
 END
 FN mIRLowering__dedupe_transfer_marks(self: MIRLowering, marks: []Emittable) RETURNS ![]Emittable
@@ -4361,7 +4361,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE owner: ?String = COPY (IF mIRLowering__capability_state(rtoc_self_view).with_alias_owner_map != NIL THEN
-      (mIRLowering__capability_state(rtoc_self_view).with_alias_owner_map)[UNWRAP (UNWRAP (root).name)]
+      (mIRLowering__capability_state(rtoc_self_view).with_alias_owner_map)[UNWRAP (root).name]
     ELSE
       NIL
     END);
@@ -5087,7 +5087,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         mIRLowering__program_state(rtoc_self_view).emitted_types.insert(name);
         IF UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A UnionDef THEN
           FOR rtoc_key IN UNWRAP (rtoc_each_items_155[rtoc_idx]).variants().keys() DO
-      MUTABLE var_data: Any = COPY UNWRAP (UNWRAP (rtoc_each_items_155[rtoc_idx]).variants()[rtoc_key]);
+      MUTABLE var_data: Any = COPY UNWRAP (rtoc_each_items_155[rtoc_idx]).variants([rtoc_key]);
       IF !(schemas__inline_struct?(var_data)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -5805,7 +5805,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRY (mIRLowering__owned_sink_value?(rtoc_self_view, cast__expr(mir_cast), ast_node));
     END
     IF (value IS_A TryExpr OR value IS_A TryOptional) THEN
-      RETURN TRY (mIRLowering__owned_sink_value?(rtoc_self_view, UNWRAP (UNWRAP (UNWRAP (UNWRAP (emittable__expr(value))))), ast_node));
+      RETURN TRY (mIRLowering__owned_sink_value?(rtoc_self_view, UNWRAP (emittable__expr(value)), ast_node));
     END
     IF (ast_node IS_A MoveNode OR ast_node IS_A KeepNode) THEN
       RETURN TRUE;
@@ -15233,7 +15233,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       is_locked_unwrapped = FALSE;
     END
     MUTABLE target_sync =   IF target_node IS_A OptionalUnwrap THEN
-      (IF locatable__symbol(UNWRAP (UNWRAP (UNWRAP (UNWRAP (aST__node_target( target_node)))))) != NIL THEN
+      (IF locatable__symbol(UNWRAP (aST__node_target( target_node))) != NIL THEN
       (target_node.target.symbol).sync()
     ELSE
       NIL
