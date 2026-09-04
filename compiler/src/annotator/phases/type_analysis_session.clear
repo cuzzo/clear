@@ -1429,20 +1429,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__og_move(self: TypeAnalysisSession, from_value: String, to: String, at_token: ?Token = NIL, action: String@symbol = :move) RETURNS !?[Set]String
+PRIVATE FN typeAnalysisSession__og_move(self: TypeAnalysisSession, from_value: String, to: String, at_token: ?Token = NIL, action: String@symbol = :move) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_30 = typeAnalysisSession__ownership_graph(rtoc_self_view);
-    TRY (ownershipGraph__transfer(&rtoc_mutable_receiver_30, from_value, to, at_token, action)) };
+    MUTABLE rtoc_mutable_receiver_30 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    TRY (ownershipGraph__transfer(&rtoc_mutable_receiver_30, from_value, to, at_token, action));
 }
 END
-PRIVATE FN typeAnalysisSession__og_set_moved(self: TypeAnalysisSession, name: String, at_token: ?Token = NIL, action: String@symbol = :move, consumer_param_type: ?TypeTypeInput = NIL) RETURNS !?[Set]String
+PRIVATE FN typeAnalysisSession__og_set_moved(self: TypeAnalysisSession, name: String, at_token: ?Token = NIL, action: String@symbol = :move, consumer_param_type: ?TypeTypeInput = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_31 = typeAnalysisSession__ownership_graph(rtoc_self_view);
-    TRY (ownershipGraph__mark_moved(rtoc_local_receiver_31, name, at_token, action, consumer_param_type)) };
+    MUTABLE rtoc_local_receiver_31 = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    TRY (ownershipGraph__mark_moved(rtoc_local_receiver_31, name, at_token, action, consumer_param_type));
 }
 END
 PRIVATE FN typeAnalysisSession__og_set_live(self: TypeAnalysisSession, name: String) RETURNS ?String@symbol
@@ -3752,7 +3752,7 @@ PRIVATE FN typeAnalysisSession__call_arity_plan(self: TypeAnalysisSession, site:
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE params = TRY (functionSignature__params(signature));
-    RETURN CallArityPlan{ site: COPY site, params: COPY params, min_args: params |> COUNT _.required, max_args: params.length(), given_args: site.args.length() };
+    RETURN CallArityPlan{ site: COPY site, params: COPY params, min_args: params |> COUNT (_.required == TRUE), max_args: params.length(), given_args: site.args.length() };
 }
 END
 PRIVATE FN typeAnalysisSession__verify_call_arity_mut(self: TypeAnalysisSession, plan: CallArityPlan) RETURNS !Void
@@ -6036,7 +6036,7 @@ PRIVATE FN typeAnalysisSession__pipe_arity_plan(self: TypeAnalysisSession, sig: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE params = TRY (functionSignature__params(sig));
-    RETURN PipeArityPlan{ params: COPY params, min_args: params |> COUNT _.required, max_args: params.length(), given_args: COPY given_args };
+    RETURN PipeArityPlan{ params: COPY params, min_args: params |> COUNT (_.required == TRUE), max_args: params.length(), given_args: COPY given_args };
 }
 END
 PRIVATE FN typeAnalysisSession__analyze_each_op(MUTABLE self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !?String@symbol
@@ -16832,7 +16832,10 @@ PRIVATE FN typeAnalysisSession__with_requires_binding?(self: TypeAnalysisSession
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN !(!((((TRUE AND fn_node.requires) AND fn_node.requires.contains?(bound_name)))));
+    IF bound_name EXISTS AS bound_name_value THEN
+      RETURN fn_node.requires.contains?(bound_name_value);
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN typeAnalysisSession__retryable_with_fallible_sources(self: TypeAnalysisSession, node: WithBlock) RETURNS ![]String
