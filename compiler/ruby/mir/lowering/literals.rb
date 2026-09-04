@@ -553,6 +553,17 @@ module MIRLoweringLiterals
     else
       Type.new(node.coerced_type_info || node.full_type!)
     end
+    # A symbol-keyed literal whose values disagree is stamped
+    # `HashMap<String@symbol, Auto>` so an enclosing declaration can supply the
+    # value type. When nothing does, Auto reaches the backend and renders as
+    # `CheatLib.StringMap(Auto)` -- an identifier Zig does not have.
+    if ti.value_type.to_s == 'Auto'
+      Kernel.raise CompilerError.new(node.token,
+        "Map literal values have no common type, and nothing here says what the " \
+        "value type should be. Annotate the binding (`x: {String@symbol}T = ...`) " \
+        "or give every value the same type -- CLEAR has no dynamic value.",
+        nil)
+    end
     map_alloc = function_state.current_decl_alloc || alloc_for_node(node)
     HashLiteralPlan.new(
       type_info: ti,

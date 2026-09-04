@@ -1,0 +1,22 @@
+# A symbol-keyed map literal whose values disagree is stamped
+# HashMap<String@symbol, Auto> so an enclosing declaration can supply the value
+# type. When one does, the literal builds normally; when nothing does, Auto used
+# to reach the backend and render as `CheatLib.StringMap(Auto)`, an identifier
+# Zig does not have.
+UNION Kw { StringValue: String, IntValue: Int64 }
+
+FN main() RETURNS Void ->
+    # The declared value type resolves Auto.
+    kw: {String@symbol}Kw = {:got: Kw{ StringValue: "a" }, :expected: Kw{ IntValue: 2_i64 }};
+    ASSERT kw.length() == 2, "both entries built";
+    IF kw[:got] EXISTS AS got THEN
+        IF got IS_A String AS s THEN
+            ASSERT s == "a", "string value survived";
+        END
+    END
+
+    # Uniform values need no annotation at all.
+    plain = {:a: 1_i64, :b: 2_i64};
+    ASSERT plain.length() == 2, "uniform literal infers its value type";
+    RETURN;
+END
