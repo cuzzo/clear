@@ -5811,7 +5811,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "REDUCE", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__initial_value(node.right)));
-    MUTABLE acc_type = locatable__resolved_type(UNWRAP (locatable__initial_value(node.right)));
+    MUTABLE acc_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__initial_value(node.right)));
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(acc_type, item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_130 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_130, "acc", NIL, acc_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
@@ -19403,7 +19403,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((type != NIL)) THEN
       RETURN;
     END
-    MUTABLE carrier =   IF type__multiowned?(type) THEN
+    MUTABLE carrier =   IF type__multiowned?(UNWRAP (type)) THEN
       :multiowned
     ELSE_IF type__shared?(type) THEN
       :shared

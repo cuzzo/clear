@@ -9476,7 +9476,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, cast__expr(mir_cast));
     ELSE_IF UNWRAP (arg) IS_A TryExpr AS try_expr THEN
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, tryExpr__expr(try_expr));
-    ELSE_IF arg IS_A TryOptional AS try_optional THEN
+    ELSE_IF UNWRAP (arg) IS_A TryOptional AS try_optional THEN
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, tryOptional__expr(try_optional));
     ELSE_IF arg IS_A AddressOf AS address_of THEN
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, addressOf__expr(address_of));
@@ -16480,7 +16480,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (((node.own OR_ELSE FALSE) AND UNWRAP (aST__node_value(Locatable{ CopyNode: COPY node })) IS_A Identifier) AND ((locatable__symbol(node.value) != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_606 = ((locatable__symbol(node.value))?);
     symbolEntry__carrier_contract(rtoc_local_receiver_606) } == :monomorphic))) THEN
       MUTABLE payload_ti: ?Type = TRY (type__from_node_mut(node.value, "OWN COPY monomorphic payload"));
-      MUTABLE projected = ComptimeCarrierPayload{ source: COPY TRY (mIRLowering__lower(&rtoc_self_view, node.value)), lowered_node_id: NIL, ownership_consumption: NIL };
+      MUTABLE projected = ComptimeCarrierPayload{ source: COPY TRY (mIRLowering__lower(&rtoc_self_view, &node.value)), lowered_node_id: NIL, ownership_consumption: NIL };
       RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: Emittable{ ComptimeCarrierPayload: COPY projected }, zig_type: COPY CAST(type__resolved( UNWRAP (payload_ti)) AS String), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY CAST(type__resolved( UNWRAP (payload_ti)) AS String)), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     IF node.own THEN
@@ -20377,7 +20377,7 @@ PRIVATE FN mIRLowering__union_match_payload_bindings(self: MIRLowering, c: Match
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE is_mutable = (((UNWRAP (locatable__expr(Locatable{ MatchStatement: COPY node })) IS_A Identifier AND (UNWRAP (locatable__expr( Locatable{ MatchStatement: COPY node })).was_moved == TRUE))) OR (c.binding_mutable == TRUE));
+    MUTABLE is_mutable = (((UNWRAP (locatable__expr(Locatable{ MatchStatement: COPY node })) IS_A Identifier AND (locatable__was_moved(UNWRAP (locatable__expr( Locatable{ MatchStatement: COPY node }))) == TRUE))) OR (c.binding_mutable == TRUE));
     MUTABLE payload = Ident{ name: COPY payload_name, lowered_node_id: NIL, ownership_consumption: NIL };
     IF c.indirect_payload_as THEN
       payload = Deref{ expr: Emittable{ Ident: COPY payload }, lowered_node_id: NIL, ownership_consumption: NIL };
