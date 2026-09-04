@@ -5394,7 +5394,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_mutable_receiver_112 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_112, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     IF (UNWRAP (aST__node_right( Locatable{ BinaryOp: COPY node })) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR (locatable__stream_mode(node.right) OR_ELSE FALSE)))) THEN
-        MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, FALSE, %() USE(item_type, node, rtoc_self_view) -> {
+        MUTABLE analysis: !CaptureAnalysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, FALSE, %() USE(item_type, node, rtoc_self_view) -> {
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))));
       rubyToClearVoid__type_analysis_session()
         });
@@ -13697,7 +13697,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE source_name: ?String = locatable__name(expr);
     MUTABLE rtoc_graph_13664 = typeAnalysisSession__ownership_graph(rtoc_self_view);
-    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_13664, source_name);
+    MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_13664, UNWRAP (UNWRAP (source_name)));
     IF graph_node EXISTS AS graph_node_value THEN
       IF (graph_node_value.kind != :borrowed) THEN
         expr.was_moved = TRUE;
