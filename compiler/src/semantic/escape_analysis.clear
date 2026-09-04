@@ -962,7 +962,7 @@ PUB FN escapeAnalysis__mark_loop_method_value_params_heap_mut(node: MethodCall, 
   END
 END
 PUB FN escapeAnalysis__walk_body(body: []Node, blk: FN(Locatable) -> Void) RETURNS Void ->
-  aST__each_locatable_list(body, FALSE, blk);
+  aST__each_locatable_list(castNodeListToLocatableList(body), FALSE, blk);
 END
 PUB FN escapeAnalysis__mark_expr_roots_heap_mut(expr: ?Locatable) RETURNS Void ->
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));

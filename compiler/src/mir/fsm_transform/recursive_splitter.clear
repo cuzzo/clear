@@ -172,7 +172,7 @@ PUB FN fsmRecursiveSplitter__split(body: []Locatable, lowering: MIRLowering, ctx
   END
 END
 PRIVATE FN fsmRecursiveSplitter__emit_stmts_or_nil(body: []Locatable, after_idx: Int64, MUTABLE builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !?Int64 ->
-  RETURN TRY (fsmRecursiveSplitter__emit_stmts(body, after_idx, &builder, lowering, ctx));
+  RETURN TRY (fsmRecursiveSplitter__emit_stmts(castLocatableListToSegmentStmtList(body), after_idx, &builder, lowering, ctx));
 CATCH UnsupportedShape
   RETURN NIL;
 END
@@ -616,6 +616,13 @@ FN castLocatableToOptionalSegmentStmt(value: Locatable) RETURNS ?SegmentStmt ->
     DEFAULT -> panic("Invalid cast to ?SegmentStmt");
   END
   panic("Invalid cast to ?SegmentStmt");
+END
+PUB FN castLocatableListToSegmentStmtList(values: []Locatable) RETURNS []SegmentStmt ->
+  MUTABLE out: []SegmentStmt = List[];
+  FOR value IN values DO
+    &out.append(castLocatableToSegmentStmt(value));
+  END
+  RETURN out;
 END
 FN castLocatableToSegmentStmt(value: Locatable) RETURNS SegmentStmt ->
   PARTIAL MATCH value START

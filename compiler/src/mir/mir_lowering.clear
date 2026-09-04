@@ -5293,7 +5293,7 @@ PRIVATE FN mIRLowering__collect_identifier_names(self: MIRLowering, nodes: []Nod
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names = Set[];
-    aST__each_locatable_list(nodes, FALSE, %(node: Locatable) USE(MUTABLE names) -> {
+    aST__each_locatable_list(castNodeListToLocatableList(nodes), FALSE, %(node: Locatable) USE(MUTABLE names) -> {
     IF node IS_A Identifier AS identifier THEN
         &names.insert(identifier__name(identifier));
     END
@@ -5497,7 +5497,7 @@ FN mIRLowering__lower_defer_stmt(MUTABLE self: MIRLowering, node: DeferStmt) RET
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, node.body));
+    MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(node).body));
     TRY (mIRLowering__reject_fallible_defer_body_mut(rtoc_self_view, node, body));
     RETURN MIRDeferStmt{ body: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_167: ?Emittable = NIL;
     IF (body.length() == 1) THEN
@@ -12000,7 +12000,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE action_mir: []Emittable = ( { MUTABLE rtoc_empty_list_467: []Emittable = List[]; rtoc_empty_list_467 } );
     MUTABLE exit_msg_mir: ?Emittable = NIL;
     IF (clause.action == ErrorActionKind.Block) THEN
-      action_mir = TRY (mIRLowering__lower_body(&rtoc_self_view, clause.body));
+      action_mir = TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(clause).body));
     ELSE_IF (clause.action == ErrorActionKind.Exit) THEN
       exit_msg_mir = TRY (mIRLowering__lower(&rtoc_self_view, castNodeToMIRLoweringLowerableStmt(UNWRAP (clause.message))));
     END
@@ -12257,7 +12257,7 @@ PRIVATE FN mIRLowering__mutable_snapshot_plan(self: MIRLowering, node: WithBlock
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE lowerer: MIRLowering@multiowned = CAST(rtoc_self_view AS MIRLowering@multiowned);
-    MUTABLE body_mir = TRY (mIRLowering__lower_body(&lowerer, node.body));
+    MUTABLE body_mir = TRY (mIRLowering__lower_body(&lowerer, castLocatableListToMIRLoweringLowerableStmtList(node).body));
     MUTABLE rt_name = mIRLowering__runtime_binding_name(lowerer);
     RETURN MutableSnapshotPlan{ node: node, with_label: COPY with_label, rt_name: COPY rt_name, alloc: :heap, body_mir: COPY body_mir, retries: (IF node.lock_error_clause != NIL THEN
       node.lock_error_clause.retries
@@ -19837,7 +19837,7 @@ PRIVATE FN mIRLowering__for_each_plan(MUTABLE self: MIRLowering, node: ForEach) 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE var = mIRLowering__zig_safe_name(rtoc_self_view, node.var_name);
-    MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, node.body));
+    MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(node).body));
     TRY (mIRLowering__finalize_loop_frame_alloc_scopes_mut(rtoc_self_view, body, node.mark_per_iter));
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE coll = mIRLowering__with_expected_type(rtoc_self_view, NIL, %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -20043,7 +20043,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE start_val: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.start_expr)));
     MUTABLE end_val: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.end_expr)));
     MUTABLE var = mIRLowering__zig_safe_name(rtoc_self_view, node.var_name);
-    MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, node.body));
+    MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(node).body));
     TRY (mIRLowering__finalize_loop_frame_alloc_scopes_mut(rtoc_self_view, body, node.mark_per_iter));
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE cmp: String = "";
@@ -20290,7 +20290,7 @@ PRIVATE FN mIRLowering__lower_match_branch(MUTABLE self: MIRLowering, stmts: []L
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expr_label EXISTS AS expr_label_value THEN
-      RETURN TRY (mIRLowering__lower_body_with_break(&rtoc_self_view, stmts, expr_label_value));
+      RETURN TRY (mIRLowering__lower_body_with_break(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(stmts), expr_label_value));
     ELSE
       RETURN TRY (mIRLowering__lower_body(&rtoc_self_view, stmts));
     END
@@ -22713,6 +22713,13 @@ FN castSchemasUnionSchemaVariantValueToTypeTypeInput__mir_lowering(value: Schema
     DEFAULT -> panic("Invalid cast to TypeTypeInput");
   END
   panic("Invalid cast to TypeTypeInput");
+END
+PUB FN castStmtListToEmittableList(values: []Stmt) RETURNS []Emittable ->
+  MUTABLE out: []Emittable = List[];
+  FOR value IN values DO
+    &out.append(castStmtToEmittable(value));
+  END
+  RETURN out;
 END
 FN castStmtToEmittable(value: Emittable) RETURNS Emittable ->
   PARTIAL MATCH value START

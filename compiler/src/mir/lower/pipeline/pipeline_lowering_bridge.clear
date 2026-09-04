@@ -111,7 +111,7 @@ PUB FN pipelineLoweringBridge__lower_body(MUTABLE self: PipelineLoweringBridge, 
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIRLowering__lower_body(&rtoc_self_view.lowering, nodes));
+    RETURN TRY (mIRLowering__lower_body(&rtoc_self_view.lowering, castLocatableListToMIRLoweringLowerableStmtList(nodes)));
 }
 END
 PUB FN pipelineLoweringBridge__emit_mir(self: PipelineLoweringBridge, node: Emittable) RETURNS !?String

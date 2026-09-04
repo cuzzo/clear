@@ -13867,6 +13867,13 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   RETURN COPY value;
 END
+PUB FN castNodeListToLocatableList(values: []Node) RETURNS []Locatable ->
+  MUTABLE out: []Locatable = List[];
+  FOR value IN values DO
+    &out.append(UNWRAP (castNodeToLocatable(value)));
+  END
+  RETURN out;
+END
 FN castNodeToLocatable(value: Node) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     Node.Program AS item -> RETURN Locatable{ Program: COPY item };,
@@ -16440,6 +16447,13 @@ FN castLocatableToMIRLoweringOwnershipScannerScanRoot(value: Locatable) RETURNS 
   panic("Invalid cast to MIRLoweringOwnershipScannerScanRoot");
 END
 
+PUB FN castLocatableListToMIRLoweringLowerableStmtList(values: []Locatable) RETURNS []MIRLoweringLowerableStmt ->
+  MUTABLE out: []MIRLoweringLowerableStmt = List[];
+  FOR value IN values DO
+    &out.append(castLocatableToMIRLoweringLowerableStmt(value));
+  END
+  RETURN out;
+END
 FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLoweringLowerableStmt ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ASTProgram: COPY cast_payload };,
