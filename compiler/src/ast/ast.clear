@@ -307,7 +307,7 @@ PUB STRUCT FunctionDef {
   matched_stdlib_def: ?FunctionSignature@multiowned,
   moved_guard_info: ?PassStateValue,
   mutates_receiver: ?Bool,
-  mutual_thunk_plan: ?PassStateValue,
+  mutual_thunk_plan: ?MutualThunkPlan,
   needs_heap_create: ?Bool,
   needs_mut_ref: ?Bool,
   needs_rt: ?Bool,
@@ -619,7 +619,7 @@ PUB STRUCT BindExpr {
   needs_heap_create: ?Bool,
   needs_mut_ref: ?Bool,
   ownership_transport_plan: ?OwnershipTransportPlan,
-  reassign_cleanup: ?PassStateValue,
+  reassign_cleanup: ?ReassignPlan,
   resource_close_plan: ?ResourceClosePlan,
   slot_size: ?Int64,
   source_range: ?SourceRange,
@@ -1304,7 +1304,7 @@ PUB STRUCT FuncCall {
   arg_families: ?PassStateValue,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
-  collapsed_errors: ?PassStateValue,
+  collapsed_errors: ?[Set]String@symbol,
   collection_return: ?Type,
   container_borrow: ?Bool,
   error_kind: ?String@symbol,
@@ -7350,7 +7350,7 @@ PUB STRUCT Drop {
   token: Token,
   name: String,
   can_fail: ?Bool,
-  cleanup_entry: ?PassStateValue,
+  cleanup_entry: ?CleanupEntry@multiowned,
   coerced_type_object: ?Type,
   collection_return: ?Type,
   container_borrow: ?Bool,
@@ -7411,7 +7411,7 @@ PUB STRUCT SuppressCleanup {
 }
 PUB STRUCT Return {
   token: Token,
-  escaped_vars: ?PassStateValue,
+  escaped_vars: ?[Set]String,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
   collection_return: ?Type,
@@ -7508,7 +7508,7 @@ PUB STRUCT FieldCleanup {
 PUB STRUCT ReassignPlan {
   alloc: ?String@symbol,
   zig_type: ?String,
-  lifecycle_plan: ?PassStateValue
+  lifecycle_plan: ?LifecyclePlan
 }
 # End Ruby module MIR
 FN castAssignmentNameToLocatable__ast(value: AssignmentName) RETURNS Locatable ->
