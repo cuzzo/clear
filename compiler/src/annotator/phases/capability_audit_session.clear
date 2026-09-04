@@ -2031,7 +2031,7 @@ PRIVATE FN capabilityAuditSession__auto_shape_slot_label(self: CapabilityAuditSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE name: Any = NIL;
+    MUTABLE name: String = "";
     MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__capability_audit_session(slot.decl_node) START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
         name = COPY item.name;,
@@ -2062,14 +2062,14 @@ PRIVATE FN capabilityAuditSession__auto_local_slot_label(self: CapabilityAuditSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE name: Any = NIL;
+    MUTABLE name: String = "";
     MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__capability_audit_session(slot.decl_node) START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
         name = COPY item.name;,
       AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
         name = COPY item.name;,
     END
-    RETURN "local '${name.toString()}'";
+    RETURN "local '${name}'";
 }
 END
 PRIVATE FN capabilityAuditSession__auto_token_for(self: CapabilityAuditSession, slot: Slot) RETURNS ?Token
@@ -2261,9 +2261,11 @@ PRIVATE FN capabilityAuditSession__effect_call_site_context_for(MUTABLE self: Ca
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     capabilityAuditSession__set_call_site_context_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_context(rtoc_self_view)[caller_name] OR_ELSE {}));
-    MUTABLE caller_context = UNWRAP (capabilityAuditSession__effect_call_site_context(rtoc_self_view)[caller_name]);
+    MUTABLE caller_context = COPY UNWRAP (capabilityAuditSession__effect_call_site_context(rtoc_self_view)[caller_name]);
     caller_context[callee_name] = (caller_context[callee_name] OR_ELSE {:loop: FALSE, :cond: FALSE});
-    RETURN caller_context[callee_name];
+    MUTABLE rtoc_result = COPY UNWRAP (caller_context[callee_name]);
+    capabilityAuditSession__set_call_site_context_mut(&rtoc_self_view, caller_name, COPY caller_context);
+    RETURN rtoc_result;
 }
 END
 PRIVATE FN capabilityAuditSession__effect_call_site_arg_families_for(MUTABLE self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS ![][][Set]String@symbol
@@ -2271,11 +2273,13 @@ PRIVATE FN capabilityAuditSession__effect_call_site_arg_families_for(MUTABLE sel
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     capabilityAuditSession__set_call_site_arg_families_mut(&rtoc_self_view, caller_name, (capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name] OR_ELSE {}));
-    MUTABLE caller_families = UNWRAP (capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name]);
+    MUTABLE caller_families = COPY UNWRAP (capabilityAuditSession__effect_call_site_arg_families(rtoc_self_view)[caller_name]);
     IF !(caller_families.contains?(callee_name)) THEN
       caller_families[callee_name] = [];
     END
-    RETURN caller_families[callee_name];
+    MUTABLE rtoc_result = COPY UNWRAP (caller_families[callee_name]);
+    capabilityAuditSession__set_call_site_arg_families_mut(&rtoc_self_view, caller_name, COPY caller_families);
+    RETURN rtoc_result;
 }
 END
 PRIVATE FN capabilityAuditSession__compute_effects_mut(MUTABLE self: CapabilityAuditSession) RETURNS !?{Any@multiowned}Any@multiowned
