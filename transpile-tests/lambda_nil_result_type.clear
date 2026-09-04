@@ -1,0 +1,22 @@
+# A routine body whose value is the bare NIL literal returns nothing, the way
+# Ruby's trailing `nil` does. `:NIL` is the literal's type, not a type a
+# signature can name: inferring it as a lambda's return type rendered a literal
+# `NIL` into the generated Zig, which is not an identifier there.
+FN main() RETURNS Void ->
+    f = %() -> { NIL };
+    f();
+
+    # A body with a real value still infers that value's type.
+    g = %() -> { 7_i64 };
+    ASSERT g() == 7_i64, "value-returning body keeps its type";
+
+    # The block keeps its statements and loses only the value.
+    h = %() -> { x = 5_i64; NIL };
+    h();
+
+    # A value block outside a routine body is untouched: its NIL is a real
+    # optional value, not a missing one.
+    v: ?Int64 = { y = 1_i64; NIL };
+    ASSERT v == NIL, "optional value block preserved";
+    RETURN;
+END

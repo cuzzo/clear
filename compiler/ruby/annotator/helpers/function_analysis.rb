@@ -193,10 +193,20 @@ module FunctionAnalysis
       end
     end
 
-    # A body whose value is the bare NIL literal returns nothing, the way
-    # Ruby's trailing `nil` does. `:NIL` is the literal's type, not a type a
-    # signature can name -- leaving it here renders `NIL` into Zig.
-    return_type == :NIL ? :Void : return_type
+    # A routine body whose value is the bare NIL literal returns nothing, the
+    # way Ruby's trailing `nil` does. `:NIL` is the literal's type, not a type
+    # a signature can name -- leaving it here renders `NIL` into Zig. Drop the
+    # result so the body is the statement sequence it actually is; lowering
+    # already emits a resultless block for that shape.
+    return return_type unless return_type == :NIL
+
+    body.result = nil if body.is_a?(AST::BlockExpr) && nil_literal?(body.result)
+    :Void
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def nil_literal?(node)
+    node.is_a?(AST::Literal) && node.type == :NIL
   end
 
   # The root scope also holds imported names and function entries; a routine
