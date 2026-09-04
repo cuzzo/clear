@@ -15,9 +15,8 @@ PUB STRUCT Scope {
 }
 
 UNION ScopeMutabilityInput { BoolValue: Bool, TokenMultiowned: Token@multiowned, Token: Token }
-UNION ScopeScopeTypeSchema { EnumSchemaMultiowned: EnumSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned }
 STRUCT ScopeTypeEntry {
-  schema: ScopeScopeTypeSchema
+  schema: SchemaValue
 }
 STRUCT ScopeBindings {
   entries: {String}SymbolEntry@multiowned
@@ -108,7 +107,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.entries = {};
 }
 END
-FN scopeTypes__declare(MUTABLE self: ScopeTypes, name: String@symbol, schema: ScopeScopeTypeSchema) RETURNS ScopeTypeEntry
+FN scopeTypes__declare(MUTABLE self: ScopeTypes, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -199,17 +198,17 @@ PUB FN scope__live_param_syms(fn_value: FunctionDef) RETURNS !{String}SymbolEntr
   acc
   };
 END
-PUB FN scope__install_type(MUTABLE self: Scope, name: String@symbol, schema: ScopeScopeTypeSchema) RETURNS ScopeTypeEntry
+PUB FN scope__install_type(MUTABLE self: Scope, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN scopeTypes__declare(&rtoc_self_view.type_store, name, schema);
 }
 END
-FN scope__declare_type(MUTABLE self: Scope, name: String@symbol, schema: ScopeScopeTypeSchema) RETURNS ScopeTypeEntry ->
+FN scope__declare_type(MUTABLE self: Scope, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry ->
   scope__install_type(&self, name, schema);
 END
-PUB FN scope__resolve_type_definition(self: Scope, name: String@symbol) RETURNS !?ScopeScopeTypeSchema
+PUB FN scope__resolve_type_definition(self: Scope, name: String@symbol) RETURNS !?SchemaValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -597,12 +596,12 @@ END
 
 # Ruby reads class.name and strips the module prefix; the variant name is
 # that name.
-PUB FN scopeScopeTypeSchema__variant_name(value: ScopeScopeTypeSchema) RETURNS String ->
+PUB FN scopeScopeTypeSchema__variant_name(value: SchemaValue) RETURNS String ->
   PARTIAL MATCH value START
-    ScopeScopeTypeSchema.EnumSchemaMultiowned AS item -> RETURN "EnumSchemaMultiowned";,
-    ScopeScopeTypeSchema.ResourceSchemaMultiowned AS item -> RETURN "ResourceSchemaMultiowned";,
-    ScopeScopeTypeSchema.StructSchemaMultiowned AS item -> RETURN "StructSchemaMultiowned";,
-    ScopeScopeTypeSchema.UnionSchemaMultiowned AS item -> RETURN "UnionSchemaMultiowned";,
+    SchemaValue.EnumSchemaMultiowned AS item -> RETURN "EnumSchemaMultiowned";,
+    SchemaValue.ResourceSchemaMultiowned AS item -> RETURN "ResourceSchemaMultiowned";,
+    SchemaValue.StructSchemaMultiowned AS item -> RETURN "StructSchemaMultiowned";,
+    SchemaValue.UnionSchemaMultiowned AS item -> RETURN "UnionSchemaMultiowned";,
     DEFAULT -> RETURN "";
   END
   RETURN "";
@@ -611,10 +610,10 @@ END
 # Ruby asks `respond_to?(:extern_module)` and then reads it. A union variant
 # either carries the field or it does not, so the question is answered here:
 # the variants that have it return it, the rest return NIL.
-PUB FN scopeScopeTypeSchema__extern_module(value: ScopeScopeTypeSchema) RETURNS ?String ->
+PUB FN scopeScopeTypeSchema__extern_module(value: SchemaValue) RETURNS ?String ->
   PARTIAL MATCH value START
-    ScopeScopeTypeSchema.ResourceSchemaMultiowned AS item -> RETURN COPY item.extern_module;,
-    ScopeScopeTypeSchema.StructSchemaMultiowned AS item -> RETURN COPY item.extern_module;,
+    SchemaValue.ResourceSchemaMultiowned AS item -> RETURN COPY item.extern_module;,
+    SchemaValue.StructSchemaMultiowned AS item -> RETURN COPY item.extern_module;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
@@ -623,10 +622,10 @@ END
 # Ruby asks `respond_to?(:methods)` and then reads it. A union variant
 # either carries the field or it does not, so the question is answered here:
 # the variants that have it return it, the rest return NIL.
-PUB FN scopeScopeTypeSchema__methods(value: ScopeScopeTypeSchema) RETURNS ?{String@symbol}FunctionSignature@multiowned ->
+PUB FN scopeScopeTypeSchema__methods(value: SchemaValue) RETURNS ?{String@symbol}FunctionSignature@multiowned ->
   PARTIAL MATCH value START
-    ScopeScopeTypeSchema.ResourceSchemaMultiowned AS item -> RETURN COPY item.methods;,
-    ScopeScopeTypeSchema.StructSchemaMultiowned AS item -> RETURN COPY item.methods;,
+    SchemaValue.ResourceSchemaMultiowned AS item -> RETURN COPY item.methods;,
+    SchemaValue.StructSchemaMultiowned AS item -> RETURN COPY item.methods;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
@@ -635,10 +634,10 @@ END
 # Ruby asks `respond_to?(:fields)` and then reads it. A union variant
 # either carries the field or it does not, so the question is answered here:
 # the variants that have it return it, the rest return NIL.
-PUB FN scopeScopeTypeSchema__fields(value: ScopeScopeTypeSchema) RETURNS ?{String}StructField ->
+PUB FN scopeScopeTypeSchema__fields(value: SchemaValue) RETURNS ?{String}StructField ->
   PARTIAL MATCH value START
-    ScopeScopeTypeSchema.ResourceSchemaMultiowned AS item -> RETURN COPY item.fields;,
-    ScopeScopeTypeSchema.StructSchemaMultiowned AS item -> RETURN COPY item.fields;,
+    SchemaValue.ResourceSchemaMultiowned AS item -> RETURN COPY item.fields;,
+    SchemaValue.StructSchemaMultiowned AS item -> RETURN COPY item.fields;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;

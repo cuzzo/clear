@@ -7085,7 +7085,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF accessed_value.empty?() THEN
         RETURN;
       END
-      MUTABLE schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(item_type)));
+      MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(item_type)));
       IF !(schemas__field_bearing?(schema)) THEN
         RETURN;
       END
@@ -7169,7 +7169,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__lookup_type_schema(self: TypeAnalysisSession, name: String@symbol) RETURNS !?ScopeScopeTypeSchema
+PRIVATE FN typeAnalysisSession__lookup_type_schema(self: TypeAnalysisSession, name: String@symbol) RETURNS !?SchemaValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -11690,12 +11690,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY typeAnalysisSession__phase_audit_inputs(rtoc_self_view).async_body_facts;
 }
 END
-PRIVATE FN typeAnalysisSession__record_async_body_fact_mut(self: TypeAnalysisSession, node: AsyncBodyNode, summary: BodyScanSummary, validation_node: AsyncValidationNode) RETURNS !AsyncBodyFact
+PRIVATE FN typeAnalysisSession__record_async_body_fact_mut(MUTABLE self: TypeAnalysisSession, node: AsyncBodyNode, summary: BodyScanSummary, validation_node: AsyncValidationNode) RETURNS !AsyncBodyFact
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fact = AsyncBodyFact{ node: COPY node, summary: COPY summary, validation_node: COPY validation_node };
-    (TRY (typeAnalysisSession__async_body_facts(rtoc_self_view))).append(fact);
+    &rtoc_self_view.audit_inputs.async_body_facts.append(COPY fact);
     RETURN fact;
 }
 END
@@ -11707,7 +11707,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__with_body_fact_scopes_cleared(rtoc_self_view, %() -> block()));
     rubyToClearVoid__type_analysis_session()
     });
-    TRY (typeAnalysisSession__record_async_body_fact_mut(rtoc_self_view, node, summary, validation_node));
+    TRY (typeAnalysisSession__record_async_body_fact_mut(&rtoc_self_view, node, summary, validation_node));
     RETURN summary;
 }
 END
@@ -12401,7 +12401,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       type__resolved(receiver_type)
     END;
-    MUTABLE schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, owner));
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, owner));
     IF !(schemas__struct?(schema)) THEN
       RETURN FALSE;
     END
@@ -12718,7 +12718,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       resolved
     END;
-    MUTABLE type_schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, base));
+    MUTABLE type_schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, base));
     IF !((((schemas__struct?(type_schema) OR schemas__resource?(type_schema))) AND ((type_schema.methods() != NIL) AND ((type_schema.methods())?).key?(node.name)))) THEN
       RETURN FALSE;
     END
@@ -13418,7 +13418,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF primitives.contains?(expr_type) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_NEEDS_STRUCT_TYPE }, [], CAST({:got: expr_type} AS {String@symbol}Any)));
     END
-    MUTABLE schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, UNWRAP (expr_type)));
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, UNWRAP (expr_type)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < pat.fields.length() DO
       IF patternField__wildcard?(pat.fields[rtoc_idx]?) THEN
@@ -15336,7 +15336,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ret_type_obj_branch_value = TRY (type__new( TypeConstructionInput{ Type: COPY ret_type }));
     END
     MUTABLE ret_type_obj: Type = ret_type_obj_branch_value?;
-    MUTABLE schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(ret_type_obj)));
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(ret_type_obj)));
     IF !(schemas__union?(schema)) THEN
       RETURN;
     END
@@ -15689,7 +15689,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (type__resolved(target) == symbol("NIL")) THEN
         RETURN;
       END
-      MUTABLE union_schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved((TRY (type__value_payload_type(target))))));
+      MUTABLE union_schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved((TRY (type__value_payload_type(target))))));
       MUTABLE value_node: ?Locatable = aST__node_value(UNWRAP (castNodeToLocatable(node)));
       IF TRY (unionPayloadCompatibility__unique_variant(target, CAST(value AS Type), union_schema)) THEN
         locatable__set_coerced_type_object_mut(&value_node, target);
@@ -16268,7 +16268,7 @@ PRIVATE FN typeAnalysisSession__visit_StructLit(MUTABLE self: TypeAnalysisSessio
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE display_name = COPY node.name;
-    MUTABLE schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, symbol(display_name)));
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, symbol(display_name)));
     IF schemas__union?(schema) THEN
       IF (node.fields.length() != 1) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_LITERAL_VARIANT_COUNT }, [], CAST({:name: node.name, :got: node.fields.length()} AS {String@symbol}Any)));
@@ -17936,7 +17936,7 @@ PRIVATE FN typeAnalysisSession__union_payload_variant(self: TypeAnalysisSession,
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE target_type = TRY (type__value_payload_type(expected_type));
-    MUTABLE schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(target_type)));
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(target_type)));
     RETURN castOptionalUnionPayloadCompatibilityReturnValueToOptionalTypeAnalysisSessionReturnValue(TRY (unionPayloadCompatibility__unique_variant(expected_type, actual_type, schema)));
 }
 END
@@ -18898,7 +18898,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF TRY (type__accepts?(expected, actual)) THEN
       RETURN TRUE;
     END
-    MUTABLE schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved((TRY (type__value_payload_type(expected))))));
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved((TRY (type__value_payload_type(expected))))));
     RETURN !(((TRY (unionPayloadCompatibility__unique_variant(expected, actual, schema))) == NIL));
 }
 END
@@ -19159,7 +19159,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE elem: ?Type = TRY (type__element_type( UNWRAP (vti)));
     IF elem EXISTS AS elem_value THEN
-      MUTABLE schema: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(elem_value)));
+      MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(elem_value)));
       IF !(schemas__union?(schema)) THEN
         RETURN NIL;
       END
@@ -22685,14 +22685,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 
 # The schema_lookup callback is declared FN(String@symbol) -> ?TypeSchemaLookupResult
-# by every callee. The scope answers with ScopeScopeTypeSchema, so the lookup
+# by every callee. The scope answers with SchemaValue, so the lookup
 # is wrapped here rather than at each call site; NIL stays NIL.
 PRIVATE FN typeAnalysisSession__schema_lookup_result(self: TypeAnalysisSession, name: String@symbol) RETURNS !?TypeSchemaLookupResult
   REQUIRES self: LOCAL
 ->
-  MUTABLE found: ?ScopeScopeTypeSchema = TRY (typeAnalysisSession__lookup_type_schema(self, name));
+  MUTABLE found: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(self, name));
   IF found EXISTS AS found_value THEN
-    RETURN castScopeScopeTypeSchemaToTypeSchemaLookupResult(found_value);
+    RETURN castSchemaValueToTypeSchemaLookupResult(found_value);
   END
   RETURN NIL;
 END

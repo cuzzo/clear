@@ -594,7 +594,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__lookup_type_schema(self: ResolutionSession, name: String@symbol) RETURNS !?ScopeScopeTypeSchema
+PRIVATE FN resolutionSession__lookup_type_schema(self: ResolutionSession, name: String@symbol) RETURNS !?SchemaValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -832,7 +832,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE entry: ?ScopeTypeEntry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_15 = TRY (resolutionSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type_entry(rtoc_local_receiver_15, symbol(owner_name))) };
-    MUTABLE schema: ?ScopeScopeTypeSchema = NIL;
+    MUTABLE schema: ?SchemaValue = NIL;
     IF entry != NIL THEN
       schema = COPY entry.schema;
     END
@@ -974,18 +974,18 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN resolutionSession__clone_imported_schema(self: ResolutionSession, schema: ScopeScopeTypeSchema) RETURNS !?ScopeScopeTypeSchema
+PRIVATE FN resolutionSession__clone_imported_schema(self: ResolutionSession, schema: SchemaValue) RETURNS !?SchemaValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF schema IS_A EnumSchema@multiowned AS enum_schema_multiowned THEN
-      RETURN ScopeScopeTypeSchema{ EnumSchemaMultiowned: COPY TRY (resolutionSession__clone_enum_schema(rtoc_self_view, enum_schema_multiowned)) };
+      RETURN SchemaValue{ EnumSchemaMultiowned: COPY TRY (resolutionSession__clone_enum_schema(rtoc_self_view, enum_schema_multiowned)) };
     ELSE_IF schema IS_A ResourceSchema@multiowned AS resource_schema_multiowned THEN
-      RETURN ScopeScopeTypeSchema{ ResourceSchemaMultiowned: COPY TRY (resolutionSession__clone_resource_schema(rtoc_self_view, resource_schema_multiowned)) };
+      RETURN SchemaValue{ ResourceSchemaMultiowned: COPY TRY (resolutionSession__clone_resource_schema(rtoc_self_view, resource_schema_multiowned)) };
     ELSE_IF schema IS_A StructSchema@multiowned AS struct_schema_multiowned THEN
-      RETURN ScopeScopeTypeSchema{ StructSchemaMultiowned: COPY TRY (resolutionSession__clone_struct_schema(rtoc_self_view, struct_schema_multiowned)) };
+      RETURN SchemaValue{ StructSchemaMultiowned: COPY TRY (resolutionSession__clone_struct_schema(rtoc_self_view, struct_schema_multiowned)) };
     ELSE_IF schema IS_A UnionSchema@multiowned AS union_schema_multiowned THEN
-      RETURN ScopeScopeTypeSchema{ UnionSchemaMultiowned: COPY TRY (resolutionSession__clone_union_schema(rtoc_self_view, union_schema_multiowned)) };
+      RETURN SchemaValue{ UnionSchemaMultiowned: COPY TRY (resolutionSession__clone_union_schema(rtoc_self_view, union_schema_multiowned)) };
     ELSE
       RETURN NIL;
     END
@@ -1568,7 +1568,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__reject_duplicate_extern_method_mut(self: ResolutionSession, node: ExternFnDecl, type_schema: ScopeScopeTypeSchema) RETURNS !Void
+PRIVATE FN resolutionSession__reject_duplicate_extern_method_mut(self: ResolutionSession, node: ExternFnDecl, type_schema: SchemaValue) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1899,7 +1899,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructDef: COPY node } }, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_IDENTITY_FIELD_UNSUPPORTED }, [], {:struct: node.name, :field: _, :param: CAST(type__resolved(ft) AS String)}));
     };
     TRY (resolutionSession__stamp_field_defaults_mut(rtoc_self_view, node.field_decls));
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ StructDef: COPY node }, symbol(node.name), ScopeScopeTypeSchema{ StructSchemaMultiowned: COPY TRY (structSchema__new(node.field_decls, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.generic_params, {}, {}, node.visibility)) }));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ StructDef: COPY node }, symbol(node.name), SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(node.field_decls, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.generic_params, {}, {}, node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
 }
 END
@@ -1938,7 +1938,7 @@ PRIVATE FN resolutionSession__register_enum_declaration(self: ResolutionSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), ScopeScopeTypeSchema{ EnumSchemaMultiowned: COPY TRY (enumSchema__new(node.variants, node.visibility)) }));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), SchemaValue{ EnumSchemaMultiowned: COPY TRY (enumSchema__new(node.variants, node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
 }
 END
@@ -1953,7 +1953,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ UnionDef: COPY node } }, ResolutionCodeOrMessage{ SymbolValue: :UNION_INLINE_IN_GENERIC }));
     END
     TRY (resolutionSession__register_inline_struct_variants_mut(rtoc_self_view, node));
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, symbol(node.name), ScopeScopeTypeSchema{ UnionSchemaMultiowned: COPY TRY (unionSchema__new(node.variants, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.visibility)) }));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, symbol(node.name), SchemaValue{ UnionSchemaMultiowned: COPY TRY (unionSchema__new(node.variants, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ UnionDef: COPY node }, :Void));
 }
 END
@@ -1980,7 +1980,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       CONTINUE;
     END
     MUTABLE synthetic_name = symbol("${node.name}_${_}");
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, synthetic_name, ScopeScopeTypeSchema{ StructSchemaMultiowned: COPY TRY (structSchema__new(variant_data.fields().transform_values(%(type) -> StructField{ type: type, default: NIL, borrowed: FALSE }), ( { MUTABLE rtoc_empty_list_60: []String@symbol = List[]; rtoc_empty_list_60 } ), ( { MUTABLE rtoc_empty_list_61: []GenericParamDecl = List[]; rtoc_empty_list_61 } ), {}, {})) }));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, synthetic_name, SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(variant_data.fields().transform_values(%(type) -> StructField{ type: type, default: NIL, borrowed: FALSE }), ( { MUTABLE rtoc_empty_list_60: []String@symbol = List[]; rtoc_empty_list_60 } ), ( { MUTABLE rtoc_empty_list_61: []GenericParamDecl = List[]; rtoc_empty_list_61 } ), {}, {})) }));
     MUTABLE entries = TRY (resolutionSession__inline_struct_deinit_entries(rtoc_self_view, variant_data));
     IF (entries.length() > 0) THEN
         TRY (inlineStructVariant__set_deinit_entries(&variant_data, entries));
@@ -1988,7 +1988,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN resolutionSession__declare_type_schema_mut(self: ResolutionSession, node: TypeDeclaration, name: String@symbol, schema: ScopeScopeTypeSchema) RETURNS !Void
+PRIVATE FN resolutionSession__declare_type_schema_mut(self: ResolutionSession, node: TypeDeclaration, name: String@symbol, schema: SchemaValue) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -1999,7 +1999,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     (TRY (resolutionSession__current_scope(rtoc_self_view))).declare_type(name, schema);
 }
 END
-PRIVATE FN resolutionSession__equivalent_extern_type_schema?(self: ResolutionSession, existing: ScopeScopeTypeSchema, incoming: ScopeScopeTypeSchema) RETURNS Bool
+PRIVATE FN resolutionSession__equivalent_extern_type_schema?(self: ResolutionSession, existing: SchemaValue, incoming: SchemaValue) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2029,7 +2029,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRUE;
 }
 END
-PRIVATE FN resolutionSession__extern_type_schema?(self: ResolutionSession, schema: ScopeScopeTypeSchema) RETURNS Bool
+PRIVATE FN resolutionSession__extern_type_schema?(self: ResolutionSession, schema: SchemaValue) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2338,7 +2338,7 @@ FN castOptionalSchemasUnionSchemaVariantValueToOptionalSchemasUnionSchemaVariant
   END
   panic("Invalid cast to ?SchemasUnionSchemaVariantInput");
 END
-FN castScopeScopeTypeSchemaToUnionSchemaMultiowned(value: ScopeScopeTypeSchema) RETURNS UnionSchema@multiowned ->
+FN castSchemaValueToUnionSchemaMultiowned(value: SchemaValue) RETURNS UnionSchema@multiowned ->
   IF value IS_A UnionSchema@multiowned AS cast_payload THEN
     RETURN cast_payload;
   END

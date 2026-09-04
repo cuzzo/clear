@@ -5095,15 +5095,15 @@ PUB FN type__from_function_signature(signature: FunctionSignature) RETURNS !Type
   RETURN TRY (type__function_type_from_parts(param_types, COPY functionSignature__return_type(signature), functionSignature__reentrant(signature), TypeSourceSignature{ FunctionSignature: COPY signature }, :clear, mutable_flags));
 END
 
-# ScopeScopeTypeSchema is a strict subset of TypeSchemaLookupResult: the four
+# SchemaValue is a strict subset of TypeSchemaLookupResult: the four
 # schema variants line up and only ArrayValue is additional. Callers declare
 # the lookup result type, so the scope's answer is re-wrapped into it.
-PUB FN castScopeScopeTypeSchemaToTypeSchemaLookupResult(value: ScopeScopeTypeSchema) RETURNS TypeSchemaLookupResult ->
+PUB FN castSchemaValueToTypeSchemaLookupResult(value: SchemaValue) RETURNS TypeSchemaLookupResult ->
   PARTIAL MATCH value START
-    ScopeScopeTypeSchema.EnumSchemaMultiowned AS cast_payload -> RETURN TypeSchemaLookupResult{ EnumSchemaMultiowned: COPY cast_payload };,
-    ScopeScopeTypeSchema.ResourceSchemaMultiowned AS cast_payload -> RETURN TypeSchemaLookupResult{ ResourceSchemaMultiowned: COPY cast_payload };,
-    ScopeScopeTypeSchema.StructSchemaMultiowned AS cast_payload -> RETURN TypeSchemaLookupResult{ StructSchemaMultiowned: COPY cast_payload };,
-    ScopeScopeTypeSchema.UnionSchemaMultiowned AS cast_payload -> RETURN TypeSchemaLookupResult{ UnionSchemaMultiowned: COPY cast_payload };,
+    SchemaValue.EnumSchemaMultiowned AS cast_payload -> RETURN TypeSchemaLookupResult{ EnumSchemaMultiowned: COPY cast_payload };,
+    SchemaValue.ResourceSchemaMultiowned AS cast_payload -> RETURN TypeSchemaLookupResult{ ResourceSchemaMultiowned: COPY cast_payload };,
+    SchemaValue.StructSchemaMultiowned AS cast_payload -> RETURN TypeSchemaLookupResult{ StructSchemaMultiowned: COPY cast_payload };,
+    SchemaValue.UnionSchemaMultiowned AS cast_payload -> RETURN TypeSchemaLookupResult{ UnionSchemaMultiowned: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to TypeSchemaLookupResult");
   END
   panic("Invalid cast to TypeSchemaLookupResult");
