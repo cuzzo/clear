@@ -8321,9 +8321,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE signature = TRY (type__function_type_for_expression(kind));
       RETURN TypeExpression{ kind: COPY type__function_type_expression_for(FunctionType{ params: COPY signature.params |> SELECT FunctionTypeParam{ type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(_.type), subst)) AS Type), mutable: FALSE }, return_type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(signature.return_type), subst)) AS Type), reentrant: signature.reentrant, source_signature: COPY signature.source_signature, abi: COPY signature.abi }), capabilities: COPY cap };
     ELSE_IF kind IS_A TupleTypeExpression AS rtoc_tuple_type_expression THEN
-      RETURN TypeExpression{ rtoc_tuple_type_expression: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY rtoc_tuple_type_expression.items |> SELECT typeAnalysisSession__apply_expression_subst(rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY rtoc_tuple_type_expression.items |> SELECT typeAnalysisSession__apply_expression_subst(rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A OptionalTypeExpression AS rtoc_optional_type_expression THEN
-      RETURN TypeExpression{ rtoc_optional_type_expression: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_optional_type_expression.inner, subst)  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_optional_type_expression.inner, subst)  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A FallibleTypeExpression) THEN
       MUTABLE error_set = kind.error_set;
       RETURN TypeExpression{ kind: COPY FallibleTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, kind.inner, subst), error_set: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_186: ?Void = NIL;
@@ -8334,13 +8334,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       rtoc_ternary_value_186? } }, capabilities: COPY cap };
     ELSE_IF kind IS_A FutureTypeExpression AS rtoc_future_type_expression THEN
-      RETURN TypeExpression{ rtoc_future_type_expression: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_future_type_expression.inner, subst)  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_future_type_expression.inner, subst)  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A LinearTypeExpression AS rtoc_linear_type_expression THEN
-      RETURN TypeExpression{ rtoc_linear_type_expression: TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ rtoc_linear_type_expression: COPY rtoc_linear_type_expression.kind, dimensions: COPY rtoc_linear_type_expression.dimensions, item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_linear_type_expression.item, subst), allocation_hint: rtoc_linear_type_expression.allocation_hint  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ LinearTypeExpression: COPY LinearTypeExpression{ kind: COPY rtoc_linear_type_expression.kind, dimensions: COPY rtoc_linear_type_expression.dimensions, item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_linear_type_expression.item, subst), allocation_hint: rtoc_linear_type_expression.allocation_hint  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A MapTypeExpression AS rtoc_map_type_expression THEN
-      RETURN TypeExpression{ rtoc_map_type_expression: TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_map_type_expression.key, subst), value: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_map_type_expression.value, subst), key_implicit: rtoc_map_type_expression.key_implicit, legacy_separator: COPY rtoc_map_type_expression.legacy_separator  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ MapTypeExpression: COPY MapTypeExpression{ key: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_map_type_expression.key, subst), value: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_map_type_expression.value, subst), key_implicit: rtoc_map_type_expression.key_implicit, legacy_separator: COPY rtoc_map_type_expression.legacy_separator  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A StreamTypeExpression AS rtoc_stream_type_expression THEN
-      RETURN TypeExpression{ rtoc_stream_type_expression: TypeExpressionKind{ StreamTypeExpression: COPY StreamTypeExpression{ cardinality: COPY rtoc_stream_type_expression.cardinality, item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_stream_type_expression.item, subst)  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ StreamTypeExpression: COPY StreamTypeExpression{ cardinality: COPY rtoc_stream_type_expression.cardinality, item: COPY typeAnalysisSession__apply_expression_subst(rtoc_self_view, rtoc_stream_type_expression.item, subst)  } }, capabilities: COPY cap };
     ELSE
       RETURN COPY expression;
     END
