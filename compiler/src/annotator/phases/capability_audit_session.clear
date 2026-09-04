@@ -3881,7 +3881,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       IF adj[UNWRAP (edges[rtoc_idx]).held] == NIL THEN
-          adj[edges[rtoc_idx]?.held] = Set[];
+          adj[UNWRAP (edges[rtoc_idx].held)] = Set[];
         END
         IF adj[edges[rtoc_idx]?.held] EXISTS AS rtoc_map_slot_30 THEN
           &rtoc_map_slot_30.insert(edges[rtoc_idx]?.acquired);

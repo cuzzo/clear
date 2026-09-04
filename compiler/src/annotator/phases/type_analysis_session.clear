@@ -1296,7 +1296,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       AST.RangeLit -> TRY (typeAnalysisSession__visit_RangeLit(&rtoc_self_view, &node)),
       Locatable.VarDecl AS var_decl -> TRY (typeAnalysisSession__visit_VarDecl(&rtoc_self_view, &var_decl)),
       Locatable.BindExpr AS bind_expr -> TRY (typeAnalysisSession__visit_BindExpr(&rtoc_self_view, &bind_expr)),
-      Locatable.Identifier AS identifier -> TRY (typeAnalysisSession__visit_Identifier(rtoc_self_view, &identifier)),
+      Locatable.Identifier AS identifier -> TRY (typeAnalysisSession__visit_Identifier(&rtoc_self_view, &identifier)),
       Locatable.Assignment AS assignment -> TRY (typeAnalysisSession__visit_Assignment(&rtoc_self_view, &assignment)),
       Locatable.TestBlock AS test_block -> TRY (typeAnalysisSession__visit_TestBlock(&rtoc_self_view, &test_block)),
       Locatable.WhenBlock AS when_block -> TRY (typeAnalysisSession__visit_WhenBlock(&rtoc_self_view, &when_block)),
@@ -12087,12 +12087,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF TRY (typeAnalysisSession__resolve_user_protocol_function_call_mut(&rtoc_self_view, &node)) THEN
       TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ FuncCall: COPY node }));
-      TRY (typeAnalysisSession__record_named_call_site_mut(rtoc_self_view, &node));
+      TRY (typeAnalysisSession__record_named_call_site_mut(&rtoc_self_view, &node));
       RETURN;
     END
     TRY (typeAnalysisSession__resolve_call(&rtoc_self_view, FunctionCallNode{ FuncCall: COPY node }, node.args));
     TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ FuncCall: COPY node }));
-    TRY (typeAnalysisSession__record_named_call_site_mut(rtoc_self_view, &node));
+    TRY (typeAnalysisSession__record_named_call_site_mut(&rtoc_self_view, &node));
     TRY (typeAnalysisSession__record_held_lock_call_site_mut(rtoc_self_view, node));
     NIL;
 }
@@ -12597,7 +12597,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ StaticCall: COPY node }, resolved_return));
     node.inherent_call = call;
     TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ FuncCall: COPY call }));
-    TRY (typeAnalysisSession__record_named_call_site_mut(rtoc_self_view, &call));
+    TRY (typeAnalysisSession__record_named_call_site_mut(&rtoc_self_view, &call));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_IntrinsicFunc(MUTABLE self: TypeAnalysisSession, MUTABLE node: Node, args: []Locatable, matched_def_input: ?FunctionSignature = NIL) RETURNS !?Type
@@ -12689,10 +12689,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__record_named_call_site_mut(self: TypeAnalysisSession, MUTABLE node: FuncCall) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_named_call_site_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: FuncCall) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(node.name IS_A String) THEN
       RETURN;
     END
@@ -15226,7 +15226,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__handle_assign_borrow(rtoc_self_view, Node{ BindExpr: COPY node }));
     TRY (typeAnalysisSession__mark_var_mutated(rtoc_self_view, node.name));
     typeAnalysisSession__og_set_live(rtoc_self_view, node.name);
-    TRY (typeAnalysisSession__stamp_atomic_bind_assignment_mut(rtoc_self_view, &node, (IF scope__resolve_entry(scope, node.name) != NIL THEN
+    TRY (typeAnalysisSession__stamp_atomic_bind_assignment_mut(&rtoc_self_view, &node, (IF scope__resolve_entry(scope, node.name) != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_380 = (scope__resolve_entry(scope, node.name));
     symbolEntry__sync(rtoc_local_receiver_380) }
     ELSE
@@ -15234,10 +15234,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END)));
 }
 END
-PRIVATE FN typeAnalysisSession__stamp_atomic_bind_assignment_mut(self: TypeAnalysisSession, MUTABLE node: BindExpr, target_sync: ?String@symbol) RETURNS !Void
+PRIVATE FN typeAnalysisSession__stamp_atomic_bind_assignment_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: BindExpr, target_sync: ?String@symbol) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((target_sync == :atomic)) THEN
       RETURN;
     END
@@ -15273,10 +15273,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__visit_Identifier(self: TypeAnalysisSession, MUTABLE node: Identifier) RETURNS !?SymbolEntry@multiowned
+PRIVATE FN typeAnalysisSession__visit_Identifier(MUTABLE self: TypeAnalysisSession, MUTABLE node: Identifier) RETURNS !?SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__predicate_identifier_allowed_mut(rtoc_self_view, node));
     MUTABLE scope_branch_value: ?Scope@multiowned = NIL;
     IF (typeAnalysisSession__smooth_depth(rtoc_self_view) > 0) THEN
@@ -18610,7 +18610,7 @@ PRIVATE FN typeAnalysisSession__visit_Placeholder(self: TypeAnalysisSession, nod
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE result: ?SymbolEntry@multiowned = TRY (typeAnalysisSession__visit_Identifier(rtoc_self_view, Identifier{ token: COPY node.token, name: "_", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL }));
+    MUTABLE result: ?SymbolEntry@multiowned = TRY (typeAnalysisSession__visit_Identifier(&rtoc_self_view, Identifier{ token: COPY node.token, name: "_", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL }));
     IF (result != NIL) THEN
       RETURN result;
     END
