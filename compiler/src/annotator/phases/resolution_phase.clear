@@ -1123,7 +1123,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN schema.variants DO
     &variants.append(COPY CAST(_ AS String));
     END
-    RETURN TRY (enumSchema__new(variants, schema.visibility));
+    RETURN TRY ( castStringListToSchemasEnumSchemaVariantInputItemList(enumSchema__new(variants, schema.visibility)));
 }
 END
 PRIVATE FN resolutionSession__clone_struct_schema(self: ResolutionSession, schema: StructSchema) RETURNS !StructSchema@multiowned
@@ -2062,7 +2062,7 @@ PRIVATE FN resolutionSession__register_enum_declaration(self: ResolutionSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), SchemaValue{ EnumSchemaMultiowned: COPY TRY (enumSchema__new(node.variants, node.visibility)) }));
+    TRY ( castStringListToSchemasEnumSchemaVariantInputItemList(resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), SchemaValue{ EnumSchemaMultiowned: COPY TRY (enumSchema__new(node.variants, node.visibility)) })));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
 }
 END

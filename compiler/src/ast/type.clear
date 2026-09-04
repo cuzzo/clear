@@ -406,6 +406,13 @@ PUB STRUCT Type {
 }
 
 PUB UNION TypeTypeInput { FunctionType: FunctionType, Type: Type, SymbolValue: String@symbol, StringValue: String }
+PUB FN castTypeListToTypeTypeInputList(values: []Type) RETURNS []TypeTypeInput ->
+  MUTABLE out: []TypeTypeInput = List[];
+  FOR value IN values DO
+    &out.append(TypeTypeInput{ Type: COPY value });
+  END
+  RETURN out;
+END
 PUB UNION TypeConstructionInput { FunctionType: FunctionType, Type: Type, SymbolValue: String@symbol, StringValue: String, TypeExpression: TypeExpression }
 UNION TypeRawParseInput { FunctionType: FunctionType, SymbolValue: String@symbol, StringValue: String }
 STRUCT ObservablePublishSpec {

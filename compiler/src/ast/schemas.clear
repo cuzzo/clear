@@ -18,6 +18,13 @@ PUB STRUCT EnumSchema {
 }
 
 PUB UNION SchemasEnumSchemaVariantInputItem { StringValue: String, SymbolValue: String@symbol }
+PUB FN castStringListToSchemasEnumSchemaVariantInputItemList(values: []String) RETURNS []SchemasEnumSchemaVariantInputItem ->
+  MUTABLE out: []SchemasEnumSchemaVariantInputItem = List[];
+  FOR value IN values DO
+    &out.append(SchemasEnumSchemaVariantInputItem{ StringValue: COPY value });
+  END
+  RETURN out;
+END
 FN enumSchema__initialize(MUTABLE self: EnumSchema, variants: []SchemasEnumSchemaVariantInputItem, visibility: String@symbol = :package) RETURNS !Void
   REQUIRES self: LOCAL
 ->

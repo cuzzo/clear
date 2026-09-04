@@ -19391,7 +19391,7 @@ PRIVATE FN typeAnalysisSession__stamp_keep_carrier_op_mut(self: TypeAnalysisSess
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((IF root IS_A Identifier AS identifier THEN (identifier.symbol != NIL) ELSE FALSE END) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_474: ?SymbolEntry@multiowned = locatable__symbol(root);
-    symbolEntry__carrier_polymorphic(rtoc_local_receiver_474) }) THEN
+    symbolEntry__carrier_polymorphic( UNWRAP (rtoc_local_receiver_474)) }) THEN
       node.carrier_op = IF ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_475 = root.symbol;
       symbolEntry__carrier_contract(rtoc_local_receiver_475) } == :monomorphic) THEN
         :monomorphic_keep
@@ -20117,7 +20117,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF TRUE THEN
       MUTABLE sym: ?SymbolEntry@multiowned = aST__node__symbol(val_node);
       IF sym THEN
-        sources = ruby_array_concat_SymbolEntry_multiowned(sources, CAST(TRY (symbolEntry__lifetime_sources(sym)) AS []SymbolEntry@multiowned));
+        sources = ruby_array_concat_SymbolEntry_multiowned( UNWRAP (sources), CAST(TRY (symbolEntry__lifetime_sources(sym)) AS []SymbolEntry@multiowned));
       END
     END
     sources = ruby_array_concat_SymbolEntry_multiowned(sources, TRY (typeAnalysisSession__collect_bg_sources_in_expr(rtoc_self_view, castLocatableToOptionalBgSourceWalkValue(val_node))));
