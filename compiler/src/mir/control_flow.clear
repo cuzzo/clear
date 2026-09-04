@@ -1322,7 +1322,7 @@ PRIVATE FN ownershipDataflow__collect_share_transfers_in(self: OwnershipDataflow
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, node, %(n: Locatable) USE(step, rtoc_self_view) -> {
+    TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, node, FALSE, %(n: Locatable) USE(step, rtoc_self_view) -> {
     IF n IS_A ShareNode AS share_node THEN
         TRY (ownershipDataflow__collect_share_transfer(rtoc_self_view, share_node, step));
     END
@@ -1360,7 +1360,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE consumed: []PlaceId = ( { MUTABLE rtoc_empty_list_17: []PlaceId = List[]; rtoc_empty_list_17 } );
     MUTABLE args = (stmt.args() OR_ELSE List[]);
     FOR _ IN args DO
-    TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, _, %(expr: Locatable) USE(MUTABLE consumed, state, rtoc_self_view) -> {
+    TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, _, FALSE, %(expr: Locatable) USE(MUTABLE consumed, state, rtoc_self_view) -> {
     IF !((expr IS_A BgBlock OR expr IS_A BgStreamBlock)) THEN
         RETURN;
     END
@@ -1960,7 +1960,7 @@ PUB FN loopFrameAnalysis__walk_all_nodes(nodes: ?ControlFlowNodeInput, visited: 
   });
 END
 PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {String}FunctionDef) RETURNS !Void ->
-  loopFrameAnalysis__walk_all_nodes(ControlFlowNodeInput{ ArrayValue: COPY body }, %(node: Locatable) USE(fn_nodes) -> {
+  loopFrameAnalysis__walk_all_nodes(ControlFlowNodeInput{ ArrayValue: COPY body }, Set[], %(node: Locatable) USE(fn_nodes) -> {
   MUTABLE dynamic_node = COPY node;
   IF !((IF node IS_A ConcurrentOp AS concurrent_op THEN dynamic_node.shard_context() ELSE FALSE END)) THEN
       RETURN;
@@ -1983,7 +1983,7 @@ PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {Str
 END
 PUB FN loopFrameAnalysis__key_allocates_frame?(expr: Locatable, fn_nodes: {String}FunctionDef) RETURNS !Bool ->
   MUTABLE found: Bool = FALSE;
-  loopFrameAnalysis__walk_all_nodes(castLocatableToOptionalControlFlowNodeInput(expr), %(node: Locatable) USE(fn_nodes) -> {
+  loopFrameAnalysis__walk_all_nodes(castLocatableToOptionalControlFlowNodeInput(expr), Set[], %(node: Locatable) USE(fn_nodes) -> {
   IF node IS_A FuncCall AS func_call THEN
       MUTABLE fn: ?FunctionDef = COPY fn_nodes[funcCall__name(func_call)];
       IF fn?.uses_frame THEN

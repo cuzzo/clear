@@ -193,7 +193,10 @@ module FunctionAnalysis
       end
     end
 
-    return_type
+    # A body whose value is the bare NIL literal returns nothing, the way
+    # Ruby's trailing `nil` does. `:NIL` is the literal's type, not a type a
+    # signature can name -- leaving it here renders `NIL` into Zig.
+    return_type == :NIL ? :Void : return_type
   end
 
   # The root scope also holds imported names and function entries; a routine

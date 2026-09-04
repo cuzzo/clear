@@ -13391,7 +13391,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         NIL
       ELSE
         blk_label
-      END, %() USE(node, MUTABLE rtoc_self_view) -> {
+      END, NIL, %() USE(node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_518 = node.body |> SELECT TRY (mIRLowering__lower(&rtoc_self_view, &_));
     rtoc_lambda_result_518
       });

@@ -41,7 +41,7 @@ PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?Tran
   MUTABLE captured_map = captured.keys().to_a();
   MUTABLE ctx_id: Int64 = COPY castOptionalTransformValueToInt64(ctx[:id]);
   MUTABLE promo_capture_map = ((captured_map + promoted_names)).to_h(%(n) USE(ctx_id) -> [n, "__ctx_${ctx_id.toString()}.${n}"]);
-  MUTABLE rec_segs = mIRLowering__with_fiber_capture_map(lowering, promo_capture_map, {:rt_override: castOptionalTransformValueToString(ctx[:bg_rt])}, %() USE(block_source, ctx, lowering) -> RecursiveSplitter.split(block_source.body(), lowering, {:ctx: ctx}));
+  MUTABLE rec_segs = mIRLowering__with_fiber_capture_map(lowering, promo_capture_map, {:rt_override: castOptionalTransformValueToString(ctx[:bg_rt])}, "__rt", %() USE(block_source, ctx, lowering) -> RecursiveSplitter.split(block_source.body(), lowering, {:ctx: ctx}));
   IF (rec_segs == NIL) THEN
     RETURN NIL;
   END
