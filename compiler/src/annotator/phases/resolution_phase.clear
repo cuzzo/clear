@@ -2137,7 +2137,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((scopeScopeTypeSchema__extern_module(existing) == scopeScopeTypeSchema__extern_module(incoming))) THEN
       RETURN FALSE;
     END
-    IF !((existing.as_type == incoming.as_type)) THEN
+    IF !((schemaValue__as_type(existing) == schemaValue__as_type(incoming))) THEN
       RETURN FALSE;
     END
     IF !((existing.type_params() == incoming.type_params())) THEN

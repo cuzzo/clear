@@ -9480,7 +9480,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, tryOptional__expr(try_optional));
     ELSE_IF UNWRAP (arg) IS_A AddressOf AS address_of THEN
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, addressOf__expr(address_of));
-    ELSE_IF arg IS_A Deref AS deref THEN
+    ELSE_IF UNWRAP (arg) IS_A Deref AS deref THEN
       RETURN mIRLowering__ownership_consumed_arg_names(rtoc_self_view, deref__expr(deref));
     ELSE
       RETURN TRY (mIRLowering__mir_ident_names(rtoc_self_view, arg));
