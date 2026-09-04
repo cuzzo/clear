@@ -2689,7 +2689,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE hint = TRY (capabilityAuditSession__fallibility_hint_for(&rtoc_self_view, rtoc_each_14));
     MUTABLE return_type = ret_t.resolved();
-    MUTABLE tok = IF respondsTo?(fn_node, "return_type_token") THEN
+    MUTABLE tok = IF TRUE THEN
         fn_node.return_type_token
       ELSE
         NIL

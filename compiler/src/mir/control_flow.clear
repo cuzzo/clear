@@ -1967,7 +1967,7 @@ PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {Str
   END
   MUTABLE ctx: PipelineShardContext = CAST(dynamic_node.shard_context() AS PipelineShardContext);
   MUTABLE key_allocates_frame = TRY (loopFrameAnalysis__key_allocates_frame?(ctx.key_expr, fn_nodes));
-  MUTABLE each_body = IF ((aST__node_op(node) EXISTS) AND respondsTo?(dynamic_node.op(), "body")) THEN
+  MUTABLE each_body = IF ((aST__node_op(node) EXISTS) AND TRUE) THEN
       dynamic_node.op().body()
     ELSE
       NIL

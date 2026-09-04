@@ -4009,7 +4009,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
       entry_value_mutable.mutable = TRUE;
-      IF respondsTo?(entry_value_mutable.reg, "mutable=") THEN
+      IF TRUE THEN
         entry_value_mutable.reg.mutable = TRUE;
       END
     ELSE
@@ -4640,7 +4640,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE param_layout = NIL;
     IF (param_sync == :atomic) THEN
         MUTABLE param_t = _.type();
-        IF (respondsTo?(param_t, "struct?") AND param_t.struct?()) THEN
+        IF (TRUE AND param_t.struct?()) THEN
           param_layout = :indirect;
         END
     END
@@ -6564,7 +6564,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE key_type = shard_op.key_expr.resolved_type;
     TRY (typeAnalysisSession__visit(&rtoc_self_view, shard_op.target_map));
     MUTABLE target_info = shard_op.target_map.full_type_mut({:context: "shard op target map"});
-    MUTABLE target_sync = IF respondsTo?(shard_op.target_map, "symbol") THEN
+    MUTABLE target_sync = IF TRUE THEN
       (IF shard_op.target_map.symbol != NIL THEN
       (shard_op.target_map.symbol).sync()
     ELSE
@@ -6713,7 +6713,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE modifier = inner_expr.right();
       IF (modifier IS_A OrElsePrune OR modifier IS_A OrElseRaise) THEN
         MUTABLE inner_fn_type = inner_expr.left().full_type_mut({:context: "inner pipeline left"});
-        MUTABLE is_error_union = ((respondsTo?(inner_expr.left(), "error_union_type") AND inner_expr.left().error_union_type));
+        MUTABLE is_error_union = ((TRUE AND inner_expr.left().error_union_type));
         IF inner_fn_type != NIL THEN
           is_error_union = inner_fn_type.error_union?();
         END
@@ -8664,7 +8664,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (aST__node__container_borrow(value_node) EXISTS) THEN
         value_node.container_borrow = TRUE;
       END
-      IF respondsTo?(node, "storage=") THEN
+      IF TRUE THEN
         node.storage = :borrow;
       END
       RETURN TRUE;
@@ -14437,7 +14437,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         node = DeclarationNode{ BindExpr: item_mutable };,
     END
     MUTABLE node_type = TRY (aST__full_type_mut(node));
-    IF (resource_result.is_resource AND respondsTo?(node_type, "is_resource=")) THEN
+    IF (resource_result.is_resource AND TRUE) THEN
       node_type.is_resource = TRUE;
     END
     TRY (capabilities__validate_mut(castDeclarationNodeToLocatable(node), node_type, %(n, msg) USE(rtoc_self_view) -> {
@@ -15002,7 +15002,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE transfer = COPY decision.transfer;
     MUTABLE source = COPY transfer.source;
     IF decision.materialize THEN
-      IF (respondsTo?(transfer.container, "implicit_layout_cost") AND (transfer.container.implicit_layout_cost == TRUE)) THEN
+      IF (TRUE AND (transfer.container.implicit_layout_cost == TRUE)) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, source, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_TRANSFER_REQUIRES_COPY }, [], CAST({:name: source.name} AS {String@symbol}Any)));
       END
       MUTABLE source_type = TRY (aST__full_type_mut(source));
@@ -15038,7 +15038,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     ELSE
       source.was_moved = TRUE;
-      IF respondsTo?(transfer.container, "was_moved=") THEN
+      IF TRUE THEN
         transfer.container.was_moved = TRUE;
       END
       TRY (typeAnalysisSession__og_set_moved(rtoc_self_view, source.name, source.token, :move));
@@ -17334,7 +17334,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF declared_payload EXISTS AS declared_payload_value THEN
       last_type = declared_payload?;
     END
-    IF (type__error_union?(last_type) AND ((node.body.last() != NIL) AND respondsTo?(((node.body.last())?), "retain_error_channel="))) THEN
+    IF (type__error_union?(last_type) AND ((node.body.last() != NIL) AND TRUE)) THEN
       node.body.last().retain_error_channel = TRUE;
     END
     MUTABLE payload_type = TRY (typeAnalysisSession__owned_async_payload_type(rtoc_self_view, last_type));
@@ -17835,13 +17835,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (value IS_A Identifier AND ((value.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_437 = ((value.symbol)?);
       symbolEntry__non_escaping(rtoc_local_receiver_437) })) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ReturnNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_FROM_WITH_SCOPED }, [], CAST({:name: value.name()} AS {String@symbol}Any)));
-      ELSE_IF ((value IS_A GetField AND respondsTo?(value.target, "symbol")) AND ((value.target.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_438 = ((value.target.symbol)?);
+      ELSE_IF ((value IS_A GetField AND TRUE) AND ((value.target.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_438 = ((value.target.symbol)?);
       symbolEntry__non_escaping(rtoc_local_receiver_438) })) THEN
         MUTABLE returned_type = TRY (aST__full_type_mut(value));
         IF !(TRY (type__implicitly_copyable?(returned_type, %(type: String@symbol) USE(rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(rtoc_self_view, type))))) THEN
           TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ReturnNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_FIELD_FROM_WITH_SCOPED }));
         END
-      ELSE_IF ((value IS_A GetIndex AND respondsTo?(value.target, "symbol")) AND ((value.target.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_439 = ((value.target.symbol)?);
+      ELSE_IF ((value IS_A GetIndex AND TRUE) AND ((value.target.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_439 = ((value.target.symbol)?);
       symbolEntry__non_escaping(rtoc_local_receiver_439) })) THEN
         returned_type = TRY (aST__full_type_mut(value));
         IF !(TRY (type__implicitly_copyable?(returned_type, %(type: String@symbol) USE(rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(rtoc_self_view, type))))) THEN
@@ -17884,7 +17884,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF !(value IS_A Identifier) THEN
-      IF ((type__heap_return_storage?(expected) AND respondsTo?(value, "storage=")) AND TRY (type__requires_move?((TRY (aST__full_type_mut(value)))))) THEN
+      IF ((type__heap_return_storage?(expected) AND TRUE) AND TRY (type__requires_move?((TRY (aST__full_type_mut(value)))))) THEN
         value.storage = :heap;
       END
     END
@@ -18013,7 +18013,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE left_value_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.left)) }));
       IF TRY (typeAnalysisSession__fault_recoverable_result?(rtoc_self_view, &node.left)) THEN
         t_left_type = TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(left_value_type)));
-        IF ((node.left IS_A BinaryOp AND node.left.smooth?()) AND respondsTo?(node.left, "error_union_type=")) THEN
+        IF ((node.left IS_A BinaryOp AND node.left.smooth?()) AND TRUE) THEN
           node.left.error_union_type = t_left_type;
         END
       ELSE_IF type__optional?(left_value_type) THEN
@@ -18694,7 +18694,7 @@ PRIVATE FN typeAnalysisSession__visit_TenseNavigation(MUTABLE self: TypeAnalysis
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.target));
-    IF (node.markers.startsWith?("!") AND respondsTo?(node.target, "retain_error_channel=")) THEN
+    IF (node.markers.startsWith?("!") AND TRUE) THEN
       node.target.retain_error_channel = TRUE;
     END
     MUTABLE receiver_type = (typeAnalysisSession__recoverable_result_type(rtoc_self_view, &node.target, "tense navigation receiver") OR_ELSE TRY (aST__full_type_mut(node.target)));
@@ -18990,7 +18990,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ MoveNode: COPY node }, TRY (aST__full_type_mut(node.value))));
     node.storage_override = node.value.storage();
-    IF respondsTo?(node.value, "was_moved=") THEN
+    IF TRUE THEN
       node.value.was_moved = TRUE;
     END
     node.was_moved = TRUE;
@@ -19556,7 +19556,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         lhs_name = COPY CAST(aST__node_name(UNWRAP (castNodeToLocatable(node))) AS String);
       END
-      MUTABLE move_tok = IF respondsTo?(aST__node_value(UNWRAP (castNodeToLocatable(node))), "token") THEN
+      MUTABLE move_tok = IF TRUE THEN
         aST__node_value(UNWRAP (castNodeToLocatable(node))).token()
       ELSE
         aST__node__token(node)
@@ -19799,7 +19799,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE loc: String = "";
-          IF respondsTo?(info.reg, "line") THEN
+          IF TRUE THEN
             loc = " (line ${info.reg.line})";
           ELSE
             loc = "";
@@ -20356,10 +20356,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE matched_def: ?FunctionSignature@multiowned = locatable__matched_stdlib_def(val);
       IF matched_def THEN
         IF !((TRY (functionSignature__intrinsic_lifetime( &matched_def))).empty?()) THEN
-          IF respondsTo?(val, "storage=") THEN
+          IF TRUE THEN
             val.storage = :borrow;
           END
-          IF respondsTo?(node, "storage=") THEN
+          IF TRUE THEN
             node.storage = :borrow;
           END
           RETURN NIL;
@@ -20372,7 +20372,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         IF ret_alloc THEN
           IF ([:heap, :frame]).contains?(ret_alloc) THEN
-            IF respondsTo?(val, "storage=") THEN
+            IF TRUE THEN
               val.storage = ret_alloc;
             END
           END

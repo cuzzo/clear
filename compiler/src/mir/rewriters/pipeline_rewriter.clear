@@ -195,7 +195,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END;
   MUTABLE replaced = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &argument));
-  IF (moved AND respondsTo?(replaced, "was_moved=")) THEN
+  IF (moved AND TRUE) THEN
       replaced.was_moved = TRUE;
       RETURN TRUE;
   END

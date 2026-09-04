@@ -3314,7 +3314,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE params = aST__node_params(sig);
-    IF (respondsTo?(params, "any?") AND (params |> ANY (respondsTo?(_, "takes") AND _.takes()))) THEN
+    IF (TRUE AND (params |> ANY (TRUE AND _.takes()))) THEN
       RETURN TRUE;
     END
     RETURN (TRUE AND TRY (functionSignature__takes_ownership?(&sig)));
@@ -3722,11 +3722,11 @@ FN mIRLowering__stamp_source_line_mut(self: MIRLowering, node: Emittable, line: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF line EXISTS AS line_value THEN
-      IF !(respondsTo?(node, "source_line=")) THEN
+      IF !(TRUE) THEN
         RETURN;
       END
       node.source_line = (emittable__source_line(node) OR_ELSE line_value);
-      IF (respondsTo?(node, "source_column=") AND (column != NIL)) THEN
+      IF (TRUE AND (column != NIL)) THEN
         node.source_column = (node.source_column() OR_ELSE column);
       END
     ELSE
@@ -6009,7 +6009,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF last_step EXISTS AS last_step_value THEN
         MUTABLE last_step_value_mutable = COPY last_step_value;
         MUTABLE expr_type = TRY (aST__full_type_mut(last_step_value_mutable.expr));
-        MUTABLE retained_error =       IF ((respondsTo?(last_step_value_mutable.expr, "retain_error_channel") AND (last_step_value_mutable.expr.retain_error_channel() == TRUE)) AND respondsTo?(last_step_value_mutable.expr, "error_union_type")) THEN
+        MUTABLE retained_error =       IF ((TRUE AND (last_step_value_mutable.expr.retain_error_channel() == TRUE)) AND TRUE) THEN
           last_step_value_mutable.expr.error_union_type
         ELSE
           NIL
@@ -6861,7 +6861,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE transfer_marks = alloc_names.intersection(result_names) |> UNNEST TRY (mIR__ownership_transfer_marks(_, :block_result, alloc_by_name[_], mIRLowering__pipeline_guarded_cleanup_name?(rtoc_self_view, _)));
     MUTABLE block = MIRBlockExpr{ label: COPY label, body: COPY ((scoped + transfer_marks) + [Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY result, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
     block.lazy_boundary = TRUE;
-    IF (respondsTo?(result, "result_type") AND result.result_type()) THEN
+    IF (TRUE AND result.result_type()) THEN
       block.result_type = TRY (type__new(result.result_type()));
     END
     RETURN Emittable{ MIRBlockExpr: COPY block };
@@ -7813,7 +7813,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(((emittable__mir?(parent) != NIL) AND emittable__mir?(parent))) THEN
       RETURN;
     END
-    IF !(respondsTo?(parent.class(), "members")) THEN
+    IF FALSE THEN
       mIRLowering__replace_t_struct_expr_child_mut(rtoc_self_view, &parent, old_child, new_child);
       RETURN;
     END
@@ -7847,7 +7847,7 @@ PRIVATE FN mIRLowering__replace_t_struct_expr_child_mut(self: MIRLowering, MUTAB
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(respondsTo?(parent.class(), "props")) THEN
+    IF FALSE THEN
       RETURN;
     END
     unsupportedRuby("CallNode at 1488:4: each_key block contains unsupported ReturnNode");
@@ -7965,7 +7965,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         expr.alloc = COPY alloc;
       END
       FOR MUTABLE rtoc_mutable_block_param_285 IN (TRY (emittable__ownership_source_exprs(expr)) OR_ELSE List[]) DO
-    MUTABLE has_alloc_metadata = (respondsTo?(rtoc_mutable_block_param_285, "has_alloc_metadata?") AND rtoc_mutable_block_param_285.has_alloc_metadata?());
+    MUTABLE has_alloc_metadata = (TRUE AND rtoc_mutable_block_param_285.has_alloc_metadata?());
     IF (has_alloc_metadata OR TRY (mIRLowering__mir_allocates?(rtoc_self_view, rtoc_mutable_block_param_285))) THEN
           mIRLowering__stamp_allocating_result_target_mut(rtoc_self_view, &rtoc_mutable_block_param_285, name, alloc);
     END
@@ -9865,7 +9865,7 @@ PRIVATE FN mIRLowering__finalize_call_result(self: MIRLowering, node: CallNode, 
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE call = Call{ callee: COPY callee, args: COPY args, try_wrap: can_fail, owned_return: owned_return, callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
     call.never_success = TRY (mIRLowering__call_never_returns_success?(rtoc_self_view, node));
-    IF respondsTo?(node, "full_type!") THEN
+    IF TRUE THEN
       MUTABLE retained_error =     IF ((TRUE AND ((MATCH node START CallNode.FuncCall AS item -> item.retain_error_channel, CallNode.MethodCall AS item -> item.retain_error_channel END) == TRUE)) AND TRUE) THEN
         (MATCH node START CallNode.FuncCall AS item -> item.error_union_type, CallNode.MethodCall AS item -> item.error_union_type END)
       ELSE
@@ -10677,9 +10677,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE receiver_mutates = (node.mutates_receiver OR TRY (functionSignature__mutates_receiver?(&entry_value_mutable)));
       MUTABLE target_var: ?String = NIL;
       MUTABLE first_arg = node__args(node).first();
-      IF ((IF node IS_A MethodCall AS method_call THEN receiver_mutates ELSE FALSE END) AND respondsTo?(node.object, "name")) THEN
+      IF ((IF node IS_A MethodCall AS method_call THEN receiver_mutates ELSE FALSE END) AND TRUE) THEN
         target_var = TRY (mIRLowering__extract_root_var_name(rtoc_self_view, node.object));
-      ELSE_IF (receiver_mutates AND ((first_arg != NIL) AND respondsTo?(UNWRAP (first_arg), "name"))) THEN
+      ELSE_IF (receiver_mutates AND ((first_arg != NIL) AND TRUE)) THEN
         target_var = TRY (mIRLowering__extract_root_var_name(rtoc_self_view, first_arg));
       END
       RETURN Emittable{ RegistryCall: COPY RegistryCall{ entry: entry_value_mutable, args: COPY TRY (mIRLowering__registry_call_args(rtoc_self_view, mir_args, stdlib_facts)), reason: "intrinsic", ownership_contract: ownership_contract, allocs: { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_390: ?Void = NIL;
@@ -11243,7 +11243,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         ((TRY (type__new(p_type))))
       END;
-    MUTABLE pp = !(!(((pt_obj AND (((TRUE AND type__needs_pointer_passing?(pt_obj)) OR (((_.mutable() AND respondsTo?(pt_obj, "list_collection?")) AND pt_obj.list_collection?()))))))));
+    MUTABLE pp = !(!(((pt_obj AND (((TRUE AND type__needs_pointer_passing?(pt_obj)) OR (((_.mutable() AND TRUE) AND pt_obj.list_collection?()))))))));
     pp = (pp OR (_.mutable() == TRUE));
     IF (_.mutable() AND !(type_str.startsWith?("*"))) THEN
         type_str = "*${type_str}";
@@ -16345,7 +16345,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE raw = node.message;
-    MUTABLE has_message = !(((((raw == NIL) OR (raw == :Any)) OR ((respondsTo?(raw, "empty?") AND raw.empty?())))));
+    MUTABLE has_message = !(((((raw == NIL) OR (raw == :Any)) OR ((TRUE AND raw.empty?())))));
     IF has_message THEN
       RETURN NIL;
     END
@@ -16706,7 +16706,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE bare = TRY (type__bare_data_type( UNWRAP (expected_ft)));
           MUTABLE default_ti = (TRY (type__from_node_mut(binary_op_mutable.right, "kept orelse default")));
           MUTABLE default_rc = ((default_ti != NIL) AND (TRY (type__any_rc?(default_ti)) == TRUE));
-          IF (!(default_rc) AND respondsTo?(binary_op_mutable.right, "matched_signature")) THEN
+          IF (!(default_rc) AND TRUE) THEN
             MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(binary_op_mutable.right.matched_signature);
             MUTABLE rt: ?Type@multiowned = NIL;
             IF sig != NIL THEN

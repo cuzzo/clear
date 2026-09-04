@@ -199,7 +199,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF (IF rtoc_mutable_block_param_2 IS_A Assignment AS assignment THEN assignment.field_pre_cleanup ELSE FALSE END) THEN
         MUTABLE target = rtoc_mutable_block_param_2.name();
-        MUTABLE target_name: ?String = IF (target IS_A GetField AND respondsTo?(target.target, "name")) THEN
+        MUTABLE target_name: ?String = IF (target IS_A GetField AND TRUE) THEN
           CAST(target.target.name() AS String)
         ELSE
           NIL

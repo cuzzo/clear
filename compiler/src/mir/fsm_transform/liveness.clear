@@ -187,7 +187,7 @@ PRIVATE FN liveness__stmt_decl_type(MUTABLE stmt: BindingStmt) RETURNS !?Type ->
   MUTABLE candidates: []?TypeTypeInput = List[];
   &candidates.append(TRY (aST__full_type_mut( castBindingStmtToLocatable(stmt))));
   &candidates.append(UNWRAP (CAST(bindingStmt__type(stmt) AS ?TypeTypeInput)));
-  IF respondsTo?(stmt, "declared_type") THEN
+  IF TRUE THEN
     &candidates.append(UNWRAP (CAST(stmt.declared_type() AS ?TypeTypeInput)));
   END
   MUTABLE value: ?Locatable = NIL;
