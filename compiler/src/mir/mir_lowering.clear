@@ -852,12 +852,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((access_nodes.first() != NIL) AND (access_nodes.first() IS_A Let)) THEN
       MUTABLE binding: Let = COPY castOptionalEmittableToLet(access_nodes.first());
       MUTABLE label = "__shared_node_access_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_12 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_12) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_12)) }}";
       MUTABLE original_init = COPY binding.init;
       MUTABLE body: []Emittable = prefix;
       IF TRY (mIRLowering__mir_allocates?(rtoc_self_view, original_init)) THEN
         MUTABLE value_name = "__shared_node_value_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_13 = mIRLowering__lowering_counters(rtoc_self_view);
-        mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_13) }}";
+        mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_13)) }}";
         MUTABLE value_type_branch_value: ?Type = NIL;
         IF (TRUE AND original_init.result_type()) THEN
           value_type_branch_value = TRY (type__new(original_init.result_type()));
@@ -1223,7 +1223,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN Emittable{ RcRetain: COPY RcRetain{ source: COPY mir, zig_base: COPY zig, func: COPY fn, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     MUTABLE capture = "__retain_rc_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_21 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_21) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_21)) }}";
     MUTABLE retained = IfOptional{ optional: COPY mir, capture: COPY capture, then_expr: Emittable{ RcRetain: COPY RcRetain{ source: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_base: COPY zig, func: COPY fn, lowered_node_id: NIL, ownership_consumption: NIL } }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     retained.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY ti }));
     RETURN Emittable{ IfOptional: COPY retained };
@@ -1426,7 +1426,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       cleanupEntry__mark_moved_guard_mut(&entry);
       mIRLowering__mark_guarded_cleanup_name_mut(rtoc_self_view, name);
       MUTABLE label = "__owned_branch_transfer_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_24 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_24) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_24)) }}";
       MUTABLE body = TRY (mIRLowering__ownership_transfer_marks(rtoc_self_view, name, :block_result, dest_alloc, TRUE));
       &body.append(CAST(BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY ident_mutable }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
       MUTABLE result = MIRBlockExpr{ label: COPY label, body: body |> SELECT castStmtToLocatable(_), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
@@ -1811,7 +1811,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF payload_type THEN
           IF (type__optional?(actual_type) AND type__optional?(coerced_type)) THEN
             MUTABLE capture = "_union_payload_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_30 = mIRLowering__lowering_counters(rtoc_self_view);
-            mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_30) }}";
+            mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_30)) }}";
             MUTABLE wrapped = StructInit{ zig_type: TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ Type: COPY target_type })), fields: [CAST({:name: variant_name_value_mutable, :value: Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL }} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL };
             MUTABLE result = IfOptional{ optional: COPY mir, capture: COPY capture, then_expr: Emittable{ StructInit: COPY wrapped }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
             result.result_type = COPY coerced_type;
@@ -2279,7 +2279,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF entry EXISTS AS entry_value THEN
         MUTABLE entry_value_mutable = COPY entry_value;
         MUTABLE discard_name = "__discard_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_40 = mIRLowering__lowering_counters(rtoc_self_view);
-        mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_40) }}";
+        mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_40)) }}";
         MUTABLE alloc = cleanupEntry__alloc(entry_value_mutable);
         MUTABLE materialized = BindingMaterialization{ name: COPY discard_name, expr: COPY mir, alloc: COPY alloc, type_info: COPY discard_type, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY TRY (mIRLowering__discard_owned_zig_type(rtoc_self_view, locatable_mutable, entry_value_mutable)) })), suppression: "_ = &${discard_name};", cleanup_entry: entry_value_mutable, cleanup_mode: :normal, scope: NIL, ownership_tracked: TRUE };
         TRY (mIRLowering__stamp_allocating_result_target_mut(rtoc_self_view, &mir, discard_name, alloc));
@@ -5519,7 +5519,7 @@ PUB FN mIRLowering__pipeline_iteration_loop_marks(self: MIRLowering) RETURNS ![]
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE mark_var = "__loop_mark_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_168 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_loop_mark_id(&rtoc_mutable_receiver_168) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_loop_mark_id(&rtoc_mutable_receiver_168)) }}";
     RETURN CAST([Emittable{ Let: COPY Let{ name: COPY mark_var, init: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "saveLoopMark", args: ( { MUTABLE rtoc_empty_list_170: []Any = List[]; rtoc_empty_list_170 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "restoreLoopMark", args: [CAST(Ident{ name: COPY mark_var, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
 }
 END
@@ -6825,7 +6825,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN result;
     END
     MUTABLE label = "__lazy_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_244 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_244) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_244)) }}";
     MUTABLE alloc_names = scoped |> REDUCE(Set[]) {
     IF _ IS_A AllocMark THEN
         &acc.insert(COPY CAST(_.name() AS String));
@@ -6922,7 +6922,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY expr;
     END
     MUTABLE name = "__tmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_251 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_251) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_251)) }}";
     MUTABLE ti = TRY (mIRLowering__alloc_mark_type_info(rtoc_self_view, expr, ast_node, "lazy allocating expression"));
     MUTABLE alloc = (mIRLowering__mir_owned_alloc(rtoc_self_view, expr) OR_ELSE :heap);
     MUTABLE materialized = BindingMaterialization{ name: COPY name, expr: COPY expr, alloc: COPY alloc, type_info: CAST(COPY ti AS Type), mutable: FALSE, annotation: NIL, suppression: NIL, cleanup_entry: NIL, cleanup_mode: :normal, scope: NIL, ownership_tracked: TRUE };
@@ -7010,7 +7010,7 @@ PRIVATE FN mIRLowering__hoist_evaluation_barrier(self: MIRLowering, expr: Emitta
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name = "__eval_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_253 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_253) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_253)) }}";
     mIRLowering__function_state(rtoc_self_view).pending_stmts.append(CAST(Let{ name: COPY name, init: COPY expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable));
     RETURN Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL };
 }
@@ -7378,7 +7378,7 @@ PRIVATE FN mIRLowering__hoist_normalized_value_expr(self: MIRLowering, expr: Emi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE name = "__tmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_261 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_261) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_261)) }}";
     RETURN CAST(Tuple{[Let{ name: COPY name, init: COPY expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }], Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL }} AS Tuple<[]Emittable, Ident>);
 }
 END
@@ -9350,7 +9350,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY arg;
     END
     MUTABLE name = "__mutable_arg_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_332 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_332) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_332)) }}";
     mIRLowering__function_state(rtoc_self_view).pending_stmts.append(CAST(Let{ name: COPY name, init: COPY arg, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable));
     RETURN Emittable{ Ident: COPY Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL } };
 }
@@ -9823,7 +9823,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF kept_edge EXISTS AS kept_edge_value THEN
       MUTABLE kept_edge_value_mutable = COPY kept_edge_value;
       MUTABLE name = "__tmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_351 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_351) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_351)) }}";
       MUTABLE materialized = BindingMaterialization{ name: COPY name, expr: COPY kept_edge_value_mutable, alloc: :heap, type_info: CAST(COPY TRY (mIRLowering__mir_alloc_mark_type_info(rtoc_self_view, kept_edge_value_mutable, facts.ast_arg, "kept edge handle")) AS Type), mutable: FALSE, cleanup_entry: cleanupEntry__build(:rc, :heap, TRUE), cleanup_mode: :err, annotation: NIL, suppression: NIL, scope: NIL, ownership_tracked: TRUE };
       mIRLowering__function_state(rtoc_self_view).pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(rtoc_self_view).pending_stmts, TRY (bindingMaterialization__statements(materialized)));
       mIRLowering__function_state(rtoc_self_view).lowered_alloc_names.insert(name);
@@ -10514,7 +10514,7 @@ PRIVATE FN mIRLowering__lower_safe_nav_method_call(MUTABLE self: MIRLowering, MU
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE snav_var = "_snav_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_385 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_safe_nav_id(&rtoc_mutable_receiver_385) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_safe_nav_id(&rtoc_mutable_receiver_385)) }}";
     MUTABLE explicit = node.object IS_A OptionalUnwrap;
     MUTABLE inner_ast_branch_value: ?Locatable = NIL;
     IF explicit THEN
@@ -11228,7 +11228,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lambda_type = TRY (aST__full_type_mut(Locatable{ LambdaLit: COPY node }));
     MUTABLE sig: FunctionSignature@multiowned = UNWRAP (type__function_signature(lambda_type));
     MUTABLE fn_name = "_lambda_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_417 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_lambda_id(&rtoc_mutable_receiver_417) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_lambda_id(&rtoc_mutable_receiver_417)) }}";
     MUTABLE params_list = sig.params();
     MUTABLE params_mir: []MIRParam = ([Emittable{ MIRParam: COPY MIRParam{ name: "_rt", zig_type: "*Runtime", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } }] + (params_list |> SELECT {
     MUTABLE p_type = _.type();
@@ -12925,7 +12925,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF mir IS_A MIRBgBlock AS mir_bg_block THEN
       MUTABLE mir_bg_block_mutable = COPY mir_bg_block;
       MUTABLE name = "__discard_bg_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_501 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_501) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_501)) }}";
       MUTABLE next_contract = callableContract__new((TRY (callableContract__no_ownership(0))).signature, TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding(name, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "DO branch BG discard", :heap)])), 0);
       RETURN CAST([Emittable{ Let: COPY Let{ name: COPY name, init: Emittable{ MIRBgBlock: COPY mir_bg_block_mutable }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "next", args: ( { MUTABLE rtoc_empty_list_503: []Any = List[]; rtoc_empty_list_503 } ), try_wrap: TRUE, callable_contract: COPY next_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
     END
@@ -13640,7 +13640,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF nextExprPlan__observable_string?(plan) THEN
       MUTABLE observable_string_inner = COPY plan.inner;
       MUTABLE observable_string_label = "__obs_next_string_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_531 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_531) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_531)) }}";
       MUTABLE materialize = MIRMethodCall{ receiver: COPY observable_string_inner, method: "materialize", args: [CAST(AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
       materialize.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY result_t }));
       MUTABLE block = MIRBlockExpr{ label: COPY observable_string_label, body: COPY [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY observable_string_inner, method: "wait", args: ( { MUTABLE rtoc_empty_list_532: []Any = List[]; rtoc_empty_list_532 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY observable_string_label, value: Emittable{ MIRMethodCall: COPY materialize }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
@@ -14110,7 +14110,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     RETURN BinaryOperationPlan{ kind: :optional_comparison, facts: COPY facts, optional_side: COPY optional_side, optional_capture: "__opt_cmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_543 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_543) }}", builtin: NIL, op_str: NIL, type_arg: NIL, variant: NIL, tag_source: NIL, union_error_type: NIL };
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_543)) }}", builtin: NIL, op_str: NIL, type_arg: NIL, variant: NIL, tag_source: NIL, union_error_type: NIL };
 }
 END
 PRIVATE FN mIRLowering__integer_division?(self: MIRLowering, facts: BinaryOperandFacts) RETURNS Bool
@@ -15947,12 +15947,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END;
         MUTABLE zig_t = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ StringValue: COPY CAST(payload_ti.resolved() AS String) }));
         MUTABLE temp = "__ind_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_580 = mIRLowering__lowering_counters(rtoc_self_view);
-        mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_580) }}_${_}";
+        mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_580)) }}_${_}";
         MUTABLE boxed =     IF field_ti.optional?() THEN
           {
       MUTABLE rtoc_value_block_marker = 0;
       capture = "__box_some_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_582 = mIRLowering__lowering_counters(rtoc_self_view);
-        mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_582) }}";
+        mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_582)) }}";
       IfOptional{ optional: COPY val, capture: COPY capture, then_expr: Emittable{ HeapCreate: COPY HeapCreate{ zig_type: COPY zig_t, init: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: :heap, label: "blk_${_}", lowered_node_id: NIL, ownership_consumption: NIL } }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL }
         }
         ELSE
@@ -15963,7 +15963,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE destroy: Emittable = Emittable{ DestroyPtr: COPY DestroyPtr{ ptr: Emittable{ Ident: COPY Ident{ name: COPY temp, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: Alloc{ SymbolValue: :heap }, lowered_node_id: NIL, ownership_consumption: NIL } };
         IF field_ti.optional?() THEN
           capture = "__box_free_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_583 = mIRLowering__lowering_counters(rtoc_self_view);
-          mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_583) }}";
+          mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_583)) }}";
           destroy = Emittable{ IfOptional: COPY IfOptional{ optional: Emittable{ Ident: COPY Ident{ name: COPY temp, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: COPY capture, then_expr: Emittable{ DestroyPtr: COPY DestroyPtr{ ptr: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: Alloc{ SymbolValue: :heap }, lowered_node_id: NIL, ownership_consumption: NIL } }, else_expr: Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
         END
         &hoisted.append(Emittable{ ErrDeferStmt: COPY ErrDeferStmt{ body: DeferBody{ Emittable: COPY destroy }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
@@ -16099,7 +16099,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           val = DeepCopy{ source: COPY val, zig_type: COPY zig_t, elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY zig_t), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
         END
         MUTABLE temp = "__ind_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_589 = mIRLowering__lowering_counters(rtoc_self_view);
-        mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_589) }}rtoc_mutable_block_param_590${rtoc_mutable_block_param_590._0}";
+        mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_589)) }}rtoc_mutable_block_param_590${rtoc_mutable_block_param_590._0}";
         MUTABLE hc: HeapCreate = castEmittableToHeapCreate(TRY (mIRLowering__with_ownership_consumption_for_value(rtoc_self_view, Emittable{ HeapCreate: COPY HeapCreate{ zig_type: COPY zig_t, init: COPY val, alloc: :heap, label: "blk_${rtoc_mutable_block_param_590._0}", lowered_node_id: NIL, ownership_consumption: NIL } }, val, rtoc_mutable_block_param_590._1, "MIR::HeapCreate", :owned_sink, :heap)));
         hoisted = ruby_array_concat_Emittable__mir_lowering(hoisted, CAST(TRY (bindingMaterialization__statements((BindingMaterialization{ name: COPY temp, expr: Emittable{ HeapCreate: COPY hc }, alloc: :heap, type_info: COPY TRY (aST__full_type_mut(rtoc_mutable_block_param_590._1)), mutable: FALSE, scope: :heap, annotation: NIL, suppression: NIL, cleanup_entry: NIL, cleanup_mode: :normal, ownership_tracked: TRUE }))) AS []Emittable));
         IF needs_deep_cleanup THEN
@@ -16133,7 +16133,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY result;
     END
     MUTABLE label = "__ind_blk_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_593 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_593) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_593)) }}";
     MUTABLE local_alloc_names = hoisted |> REDUCE(Set[]) {
     IF _ IS_A AllocMark AS alloc_mark THEN
         &acc.insert(COPY alloc_mark.name);
@@ -16225,7 +16225,7 @@ PRIVATE FN mIRLowering__lower_block_expr(MUTABLE self: MIRLowering, node: BlockE
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE label = "__blk_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_594 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_594) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_594)) }}";
     MUTABLE transfer_name: ?String = NIL;
     IF ((node.result != NIL) AND (node.result IS_A Identifier)) THEN
       MUTABLE raw_name = COPY CAST(node.result.name() AS String);
@@ -16525,7 +16525,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (type__optional?(ti) AND ((TRY (type__wrapped_type(ti)) != NIL) AND TRY (type__any_rc?((UNWRAP (TRY (type__wrapped_type(ti)))))))) THEN
         MUTABLE wrapped = UNWRAP (TRY (type__wrapped_type(ti)));
         MUTABLE capture = "__copy_rc_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_609 = mIRLowering__lowering_counters(rtoc_self_view);
-        mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_609) }}";
+        mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_609)) }}";
         MUTABLE func: String = "";
         IF type__shared?(wrapped) THEN
           func = "arcRetain";
@@ -16653,7 +16653,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (type__optional?( UNWRAP (ti)) AND ((TRY (type__wrapped_type( UNWRAP (ti))) != NIL) AND TRY (type__any_rc?((UNWRAP (TRY (type__wrapped_type( UNWRAP (ti))))))))) THEN
       MUTABLE wrapped = UNWRAP (TRY (type__wrapped_type( UNWRAP (ti))));
       MUTABLE capture = "__clone_rc_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_611 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_611) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_611)) }}";
       IF type__shared?(wrapped) THEN
         func = "arcRetain";
       ELSE
@@ -16743,7 +16743,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF still_live THEN
             MUTABLE payload = TRY (type__zig_type((TRY (type__bare_data_type( UNWRAP (expected_ft))))));
             MUTABLE capture = "__keep_val_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_617 = mIRLowering__lowering_counters(rtoc_self_view);
-            mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_617) }}";
+            mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_617)) }}";
             MUTABLE provided = RcRetain{ source: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_base: COPY payload, func: "rcRetain", lowered_node_id: NIL, ownership_consumption: NIL };
             MUTABLE out = IfOptional{ optional: Emittable{ Ident: COPY Ident{ name: mIRLowering__zig_safe_name(rtoc_self_view, identifier__name(identifier_mutable)), lowered_node_id: NIL, ownership_consumption: NIL } }, capture: COPY capture, then_expr: Emittable{ RcRetain: COPY provided }, else_expr: COPY wrapped, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
             out.result_type = handle_type;
@@ -16821,7 +16821,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE wrapped = UNWRAP (TRY (type__wrapped_type(source_ti)));
       source = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.value)));
       MUTABLE capture = "__share_rc_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_619 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_619) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_619)) }}";
       zig_base = TRY (mIRLowering__rc_payload_zig_type(rtoc_self_view, wrapped));
       MUTABLE shared_payload =     IF type__shared?(wrapped) THEN
         RcRetain{ source: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_base: COPY zig_base, func: "arcRetain", lowered_node_id: NIL, ownership_consumption: NIL }
@@ -17861,7 +17861,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rename_map = TRY (functionState__rename_map(mIRLowering__function_state(rtoc_self_view)));
     IF (CAST(node.name AS String) == "_") THEN
       safe_name = "__discard_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_662 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_662) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_662)) }}";
     ELSE
       safe_name = mIRLowering__zig_safe_name(rtoc_self_view, node.name);
     END
@@ -18874,7 +18874,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE optional_ptr: MethodCall = optional_ptr_branch_value?;
     MUTABLE capture = "__conditional_mut_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_690 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_690) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_690)) }}";
     MUTABLE target = FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY CAST(field.field AS String), lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE field_type = TRY (aST__full_type_mut(Locatable{ GetField: COPY field }));
     IF ((field.safe_nav_chain == TRUE) AND type__optional?(field_type)) THEN
@@ -19366,7 +19366,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY cond;
     END
     MUTABLE label = "__while_cond_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_710 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_710) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_710)) }}";
     MUTABLE body: []Emittable = ( { MUTABLE rtoc_empty_list_711: []Emittable = List[]; rtoc_empty_list_711 } );
     FOR _ IN pending_value DO
     &body.append(COPY _);
@@ -19400,7 +19400,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cond, cond_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(node, rtoc_self_view) -> TRY (mIRLowering__lower_control_condition(rtoc_self_view, node.condition)));
     IF node.expr_mode THEN
       MUTABLE label = "__if_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_712 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_712) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_712)) }}";
       then_body = TRY (mIRLowering__lower_body_with_break(&rtoc_self_view, node.then_branch, label));
       else_body = TRY (mIRLowering__lower_body_with_break(&rtoc_self_view, (node.else_branch OR_ELSE List[]), label));
       MUTABLE if_stmt = IfStmt{ cond: COPY cond, then_body: then_body, else_body: else_body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL };
@@ -19431,7 +19431,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE payload_bindings = TRY (mIRLowering__runtime_is_a_payload_bindings(rtoc_self_view, condition, CAST(subject AS Emittable), UNWRAP (variant)));
     IF node.expr_mode THEN
       MUTABLE label = "__if_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_713 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_713) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_713)) }}";
       then_body = (payload_bindings + TRY (mIRLowering__lower_body_with_break(&rtoc_self_view, node.then_branch, label)));
       else_body = TRY (mIRLowering__lower_body_with_break(&rtoc_self_view, (node.else_branch OR_ELSE List[]), label));
       MUTABLE block = MIRBlockExpr{ label: COPY label, body: [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY cond }, then_body: then_body, else_body: else_body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }] |> SELECT SegmentStmt{ Emittable: Emittable{ IfStmt: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
@@ -19457,7 +19457,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         suffix = "_L${mIRLowering__function_relative_line(rtoc_self_view, line_value).toString()}";
       ELSE
         suffix = "_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_714 = mIRLowering__lowering_counters(rtoc_self_view);
-        mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_714) }}";
+        mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_714)) }}";
       END
       safe = mIRLowering__zig_safe_name(rtoc_self_view, "${binding}${suffix}");
     END
@@ -19712,7 +19712,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE mark_var = "__loop_mark_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_730 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_loop_mark_id(&rtoc_mutable_receiver_730) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_loop_mark_id(&rtoc_mutable_receiver_730)) }}";
     MUTABLE save = Let{ name: COPY mark_var, init: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "saveLoopMark", args: ( { MUTABLE rtoc_empty_list_731: []Any = List[]; rtoc_empty_list_731 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
     MUTABLE restore = MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "restoreLoopMark", args: [CAST(Ident{ name: COPY mark_var, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     RETURN ([Emittable{ Let: COPY save }, Emittable{ MIRDeferStmt: COPY restore }] + suffix);
@@ -19788,7 +19788,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF TRY (type__stream_step?((TRY (type__from_node_mut(node.condition))))) THEN
       MUTABLE step_name = "__stream_step_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_738 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_738) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_738)) }}";
       MUTABLE step = Ident{ name: COPY step_name, lowered_node_id: NIL, ownership_consumption: NIL };
       MUTABLE item_arm = UnionMatchArm{ variant: "Item", payload: COPY node.binding_name, body: COPY body, pointer_payload: FALSE };
       MUTABLE closed_arm = UnionMatchArm{ variant: "Closed", payload: NIL, body: [Emittable{ BreakStmt: COPY BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], pointer_payload: FALSE };
@@ -19844,7 +19844,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE collection_setup: []Emittable = ( { MUTABLE rtoc_empty_list_740: []Emittable = List[]; rtoc_empty_list_740 } );
     IF TRY (mIRLowering__for_each_owned_collection_source?(rtoc_self_view, coll)) THEN
       MUTABLE source_name = "__for_src_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_741 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_741) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_741)) }}";
       MUTABLE source_alloc = TRY (mIRLowering__for_each_owned_collection_source_alloc(rtoc_self_view, coll, ct));
       MUTABLE entry = cleanupEntry__build(:uniform, source_alloc, FALSE, NIL, TRY (type__zig_type(ct)));
       collection_setup = ruby_array_concat_Emittable__mir_lowering(collection_setup, CAST(TRY (bindingMaterialization__statements((BindingMaterialization{ name: COPY source_name, expr: COPY CAST(coll AS Emittable), alloc: COPY source_alloc, type_info: COPY ct, mutable: FALSE, cleanup_entry: entry, annotation: NIL, suppression: NIL, cleanup_mode: :normal, scope: NIL, ownership_tracked: TRUE }))) AS []Emittable));
@@ -19886,7 +19886,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       loop_stmt = Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [Emittable{ Let: COPY iter_init }, Emittable{ WhileStmt: COPY while_stmt }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     ELSE_IF type__pool?(ct) THEN
       MUTABLE slot_var = "__pslot_idx_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_747 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_747) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_747)) }}";
       MUTABLE slot_ident = Ident{ name: COPY slot_var, lowered_node_id: NIL, ownership_consumption: NIL };
       MUTABLE slots_iter = IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ FieldGet: COPY FieldGet{ object: COPY coll, field: "capacity", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL };
       MUTABLE skip_dead = IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY coll, method: "isAliveIndex", args: [CAST(slot_ident AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ ContinueStmt: COPY ContinueStmt{ unused: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL };
@@ -19895,7 +19895,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       loop_stmt = Emittable{ ForStmt: COPY ForStmt{ iter: Emittable{ IterRange: COPY slots_iter }, capture: COPY slot_var, body: COPY full_body, index_capture: NIL, mark_per_iter: UNWRAP (mark_per_iter), tight: tight, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     ELSE_IF (type__canonical_stream?(ct) AND ((TRY (type__dynamic_stream?(ct)) OR TRY (type__bounded_stream?(ct))))) THEN
       MUTABLE step_name = "__stream_step_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_748 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_748) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_748)) }}";
       MUTABLE next_step = MIRMethodCall{ receiver: COPY coll, method: "nextStep", args: ( { MUTABLE rtoc_empty_list_749: []Any = List[]; rtoc_empty_list_749 } ), try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
       MUTABLE item_arm = UnionMatchArm{ variant: "Item", payload: COPY var, body: COPY body, pointer_payload: FALSE };
       MUTABLE closed_arm = UnionMatchArm{ variant: "Closed", payload: NIL, body: [Emittable{ BreakStmt: COPY BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], pointer_payload: FALSE };
@@ -19909,7 +19909,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       loop_stmt = Emittable{ WhileStmt: COPY WhileStmt{ cond: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY coll, method: "nextOrNull", args: ( { MUTABLE rtoc_empty_list_753: []Any = List[]; rtoc_empty_list_753 } ), try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, body: body, capture: COPY var, update: NIL, mark_per_iter: mark_per_iter, tight: tight, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     ELSE_IF (type__soa?(ct) AND ((type__list_collection?(ct) OR type__fixed_soa?(ct)))) THEN
       MUTABLE idx_var = "__soa_idx_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_754 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_754) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_754)) }}";
       MUTABLE iter_init = Let{ name: COPY idx_var, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "i64" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
       value_bind = Let{ name: COPY var, init: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY coll, method: "get", args: [CAST(MIRCast{ expr: Emittable{ Ident: COPY Ident{ name: COPY idx_var, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE cond = MIRBinOp{ op: "<", left: Emittable{ Ident: COPY Ident{ name: COPY idx_var, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY coll, method: "length", args: ( { MUTABLE rtoc_empty_list_755: []Any = List[]; rtoc_empty_list_755 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
@@ -20042,7 +20042,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       cmp = "<";
     END
     MUTABLE iter_var = "__for_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_760 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_760) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_760)) }}";
     RETURN ForRangePlan{ var: COPY var, start_value: COPY start_val, end_value: COPY end_val, body: COPY body, rt: COPY rt, comparison: COPY cmp, iter_var: COPY iter_var, mark_per_iter: IF (node.mark_per_iter == TRUE) THEN
       TRUE
     ELSE
@@ -20235,7 +20235,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE expr_label: String = "";
     IF node.expr_mode THEN
       expr_label = "__match_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_762 = mIRLowering__lowering_counters(rtoc_self_view);
-      mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_762) }}";
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_762)) }}";
     ELSE
       expr_label = "";
     END
@@ -20336,7 +20336,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     RETURN variants |> SELECT {
     MUTABLE payload_name = "__match_payload_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_763 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_763) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_763)) }}";
     MUTABLE arm_body = (TRY (mIRLowering__union_match_payload_bindings(rtoc_self_view, c, payload_name, node)) + COPY body);
     UnionMatchArmPlan{ variant: COPY _, body: COPY arm_body, payload_name: COPY payload_name, pointer_payload: (c.binding_mutable == TRUE) }
     };
@@ -20465,7 +20465,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE ast_value: ?Locatable = COPY returns[ret_i];
     ret_i = (ret_i + 1);
     MUTABLE name = "__tmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_766 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_766) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_766)) }}";
     MUTABLE return_value = _.value;
     MUTABLE entry: ?CleanupEntry@multiowned = TRY (mIRLowering__hoist_cleanup_entry(rtoc_self_view, return_value, ast_value));
     MUTABLE materialized = BindingMaterialization{ name: COPY name, expr: COPY return_value, alloc: :heap, type_info: CAST(COPY TRY (mIRLowering__mir_alloc_mark_type_info(rtoc_self_view, return_value, ast_value, "unhoisted return allocation")) AS Type), mutable: FALSE, cleanup_entry: entry, cleanup_mode: IF entry != NIL THEN
@@ -20521,7 +20521,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY value;
     END
     MUTABLE name = "__ret_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_767 = mIRLowering__lowering_counters(rtoc_self_view);
-    mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_767) }}";
+    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_767)) }}";
     mIRLowering__function_state(rtoc_self_view).pending_stmts.append(CAST(Let{ name: COPY name, init: COPY value, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable));
     RETURN Emittable{ Ident: COPY Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL } };
 }
