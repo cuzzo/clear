@@ -11,6 +11,9 @@ REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172" AS scope
 # bodies stay unimplemented until the self-hosted compiler drives imports
 # itself.
 PUB STRUCT CompiledModule {
+  # Ruby's CompiledModule Struct carries the parsed program alongside the
+  # scope; readers check it before walking its statements.
+  ast: ?Program,
   global_scope: Scope@multiowned,
   source_dir: String
 }
