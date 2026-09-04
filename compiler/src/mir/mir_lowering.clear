@@ -5407,7 +5407,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE stripped = mIRLowering__strip_try(rtoc_self_view, left);
     MUTABLE out = TryCatch{ expr: COPY stripped, catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     IF ((emittable__result_type(stripped) != NIL) AND emittable__result_type(stripped)) THEN
-      out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY emittable__result_type(stripped) }));
+      out.result_type = TRY (type__new((IF emittable__result_type(stripped) EXISTS AS rtoc_wrap_5409 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_5409 } ELSE NIL END)));
     ELSE_IF ((fallback != NIL) AND mIRLoweringFallback__responds_to_full_type?(fallback)) THEN
       out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(fallback)) }));
     END
@@ -10276,7 +10276,7 @@ PRIVATE FN mIRLowering__call_owned_return?(self: MIRLowering, node: Node) RETURN
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
     IF (aST__node_name( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
-      sig = TRY (mIRLowering__fn_sig_for(rtoc_self_view, MIRLoweringName{ SymbolValue: COPY aST__node_name(UNWRAP (castNodeToLocatable(node))) }));
+      sig = TRY (mIRLowering__fn_sig_for(rtoc_self_view, (IF aST__node_name(UNWRAP (castNodeToLocatable(node))) EXISTS AS rtoc_wrap_10278 THEN MIRLoweringName{ SymbolValue: COPY rtoc_wrap_10278 } ELSE NIL END)));
     END
     IF (aST__node__matched_signature(node) EXISTS) THEN
       sig = (sig OR_ELSE functionSignature__unwrap(node.matched_signature));
