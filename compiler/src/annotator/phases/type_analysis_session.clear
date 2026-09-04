@@ -3787,7 +3787,7 @@ PRIVATE FN typeAnalysisSession__default_argument_for(self: TypeAnalysisSession, 
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE default: ?Locatable = COPY param.default;
     IF UNWRAP (default) IS_A DefaultLit THEN
-      RETURN Locatable{ StructLit: COPY StructLit{ token: COPY locatable__token( UNWRAP (default)), name: COPY type__to_s(param.type), fields: COPY {}, storage: NIL, type_args: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, borrowed_field_names: NIL, field_tokens: {} } };
+      RETURN Locatable{ StructLit: COPY StructLit{ token: COPY UNWRAP (locatable__token(UNWRAP (default))), name: COPY type__to_s(param.type), fields: COPY {}, storage: NIL, type_args: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, borrowed_field_names: NIL, field_tokens: {} } };
     END
     RETURN CAST(COPY default AS Locatable);
 }
@@ -5594,11 +5594,15 @@ PRIVATE FN typeAnalysisSession__parse_batch_window_time_ns(self: TypeAnalysisSes
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE m = (compilerRegexCompile("\\A(\\d+(?:\\.\\d+)?)(ms|s|min|h)\\z")).match(str);
+    MUTABLE m: ?CompilerRegexScanner = compilerRegexMatchData(str, compilerRegexCompile("\\A(\\d+(?:\\.\\d+)?)(ms|s|min|h)\\z"));
     IF !(m) THEN
       RETURN NIL;
     END
-    RETURN TRY (((m[1].to_f() * UNWRAP (([CAST(Tuple{"ms", 1000000} AS Tuple<String, Int64>), CAST(Tuple{"s", 1000000000} AS Tuple<String, Int64>), CAST(Tuple{"min", 60000000000} AS Tuple<String, Int64>), CAST(Tuple{"h", 3600000000000} AS Tuple<String, Int64>)]).to_h()[m[2]]))).toInt());
+    scanner: CompilerRegexScanner = UNWRAP (m);
+    amount: Float64 = (compilerRegexCapture(scanner, 1)).toFloat();
+    unit: String = COPY compilerRegexCapture(scanner, 2);
+    MUTABLE scale: {String}Int64 = {"ms": 1000000, "s": 1000000000, "min": 60000000000, "h": 3600000000000};
+    RETURN ((amount * (UNWRAP (scale[unit])).toFloat())).toInt();
 }
 END
 PRIVATE FN typeAnalysisSession__analyze_batch_window_op(MUTABLE self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !?Int64
@@ -15439,7 +15443,7 @@ PRIVATE FN typeAnalysisSession__chain_root_name(self: TypeAnalysisSession, node:
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE curr: Locatable = COPY node;
     WHILE ((curr IS_A GetField OR curr IS_A GetIndex) OR curr IS_A OptionalUnwrap) DO
-      curr = aST__node_target(curr);
+      curr = UNWRAP (aST__node_target(curr));
     END
     IF curr IS_A Identifier AS identifier THEN
       RETURN COPY identifier__name(identifier);
@@ -19412,7 +19416,7 @@ PRIVATE FN typeAnalysisSession__get_root_object(self: TypeAnalysisSession, node:
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE curr: Locatable = COPY node;
     WHILE (curr IS_A GetField OR curr IS_A GetIndex) DO
-      curr = aST__node_target(curr);
+      curr = UNWRAP (aST__node_target(curr));
     END
     RETURN curr;
 }
