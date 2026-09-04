@@ -6520,12 +6520,13 @@ PRIVATE FN typeAnalysisSession__sharded_unsynced_identifier?(self: TypeAnalysisS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN typeAnalysisSession__sharded_unsynced_entry?(rtoc_self_view, (IF node.symbol != NIL THEN node.symbol ELSE (IF TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, node.name)) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_154 = (TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, node.name)));
-    scope__resolve_entry(rtoc_local_receiver_154, node.name) }
-    ELSE
-      NIL
-    END) END));
+    IF node.symbol EXISTS AS declared THEN
+      RETURN typeAnalysisSession__sharded_unsynced_entry?(rtoc_self_view, declared);
+    END
+    IF TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, node.name)) EXISTS AS scope THEN
+      RETURN typeAnalysisSession__sharded_unsynced_entry?(rtoc_self_view, scope__resolve_entry(scope, node.name));
+    END
+    RETURN typeAnalysisSession__sharded_unsynced_entry?(rtoc_self_view, NIL);
 }
 END
 PRIVATE FN typeAnalysisSession__sharded_get_index_access(self: TypeAnalysisSession, node: Locatable, context: String) RETURNS !?PipelineShardedAccess
@@ -10926,7 +10927,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(node.lock_error_clause) THEN
       RETURN;
     END
-    MUTABLE cap_types = lock_capabilities |> SELECT:? capabilityTransition__lock_identity(_) |> WHERE _ != NIL;
+    MUTABLE cap_types = CAST(((lock_capabilities |> SELECT:? capabilityTransition__lock_identity(_) |> WHERE _ != NIL) |> SELECT UNWRAP (_)) AS []String@symbol);
     typeAnalysisSession__phase_audit_inputs(rtoc_self_view).lock_analysis.clause_sites.append(COPY LockClauseSite{ node: COPY node, cap_types: COPY cap_types });
     NIL;
 }
