@@ -841,7 +841,7 @@ PRIVATE FN pipelineConcurrentLowerer__callback_prelude(self: PipelineConcurrentL
 END
 PRIVATE FN pipelineConcurrentLowerer__callback_body(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp, body_kind: PipelineConcurrentCallbackBodyKind, ret_type: Type, capture_map: {String}String, capture_symbols: {String}SymbolEntry) RETURNS ![]Emittable ->
   IF (body_kind == PipelineConcurrentCallbackBodyKind.Expr) THEN
-    MUTABLE expr_node = TRY (pipelineConcurrentLowerer__callback_expression(self, conc_op));
+    MUTABLE expr_node: ?Locatable = TRY (pipelineConcurrentLowerer__callback_expression(self, conc_op));
     MUTABLE expr_mir = pipelineConcurrentLowerer__callback_expr_mir_call(self, expr_node, "__item", capture_map, capture_symbols, "__rt");
     IF (expr_mir IS_A Call OR expr_mir IS_A MIRMethodCall) THEN
       emittable__set_try_wrap_mut(&expr_mir, FALSE);    END

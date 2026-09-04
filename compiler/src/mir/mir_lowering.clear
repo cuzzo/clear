@@ -1517,7 +1517,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF TRY (type__heap_ptr?( UNWRAP (ti))) THEN
           RETURN ti;
         END
-        RETURN TRY (type__new(TypeConstructionInput{ Type: COPY ti }, NIL, NIL, :indirect));
+        RETURN TRY (type__new((IF ti EXISTS AS rtoc_wrap_1519 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_1519 } ELSE NIL END), NIL, NIL, :indirect));
       ELSE
         RETURN ti;
       END
@@ -1558,7 +1558,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_26) };
     MUTABLE label = "__own_branch_${mIRLoweringGeneratedId__to_s(block_id)}";
     MUTABLE name = "__tmp_${mIRLoweringGeneratedId__to_s(tmp_id)}";
-    MUTABLE type_info = TRY (mIRLowering__alloc_mark_type_info(rtoc_self_view, mir, ast_node, "branch ownership placement"));
+    MUTABLE type_info: ?Type = TRY (mIRLowering__alloc_mark_type_info(rtoc_self_view, mir, ast_node, "branch ownership placement"));
     MUTABLE entry: ?CleanupEntry@multiowned = TRY (mIRLowering__hoist_cleanup_entry(rtoc_self_view, mir, ast_node));
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
@@ -6934,7 +6934,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE name = "__tmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_251 = mIRLowering__lowering_counters(rtoc_self_view);
     mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_251)) }}";
-    MUTABLE ti = TRY (mIRLowering__alloc_mark_type_info(rtoc_self_view, expr, ast_node, "lazy allocating expression"));
+    MUTABLE ti: ?Type = TRY (mIRLowering__alloc_mark_type_info(rtoc_self_view, expr, ast_node, "lazy allocating expression"));
     MUTABLE alloc = (mIRLowering__mir_owned_alloc(rtoc_self_view, expr) OR_ELSE :heap);
     MUTABLE materialized = BindingMaterialization{ name: COPY name, expr: COPY expr, alloc: COPY alloc, type_info: CAST(COPY ti AS Type), mutable: FALSE, annotation: NIL, suppression: NIL, cleanup_entry: NIL, cleanup_mode: :normal, scope: NIL, ownership_tracked: TRUE };
     mIRLowering__function_state( castStmtListToEmittableList(rtoc_self_view)).pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(rtoc_self_view).pending_stmts, TRY (bindingMaterialization__statements(materialized)));
@@ -11195,7 +11195,7 @@ PRIVATE FN mIRLowering__lower_c_abi_callback_arg(MUTABLE self: MIRLowering, arg:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE lowered = TRY (mIRLowering__lower_extern_arg(&rtoc_self_view, arg));
+    MUTABLE lowered: ?Emittable = TRY (mIRLowering__lower_extern_arg(&rtoc_self_view, arg));
     IF !((((source != NIL) AND (source.abi == :c)) AND (param != NIL))) THEN
       RETURN lowered;
     END
@@ -16397,7 +16397,7 @@ PRIVATE FN mIRLowering__pick_equality_helper(self: MIRLowering, left: Locatable,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE lt = TRY (mIRLowering__type_info_for(rtoc_self_view, left));
+    MUTABLE lt: ?Type = TRY (mIRLowering__type_info_for(rtoc_self_view, left));
     MUTABLE rt = TRY (mIRLowering__type_info_for(rtoc_self_view, right));
     IF (TRY (type__string_comparable_with?(lt, CAST(rt AS ?Type))) OR TRY (type__string_comparable_with?(rt, CAST(lt AS ?Type)))) THEN
       RETURN CAST(Tuple{"expectEqualStrings", List[]} AS Tuple<String, []String>);
