@@ -3283,7 +3283,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lambda_ctx = TRY (functionContext__new("<lambda>", TypeTypeInput{ SymbolValue: :Any }, ( { MUTABLE rtoc_empty_list_55: []FunctionContextLifetimeSource = List[]; rtoc_empty_list_55 } ), ( { MUTABLE rtoc_empty_list_56: []String@symbol = List[]; rtoc_empty_list_56 } ), ( { MUTABLE rtoc_empty_list_57: []GenericParamDecl = List[]; rtoc_empty_list_57 } )));
     typeAnalysisSession__push_function_context_mut( &rtoc_self_view, lambda_ctx);
     DEFER typeAnalysisSession__pop_function_context_mut( &rtoc_self_view);
-    MUTABLE return_type = TRY (typeAnalysisSession__with_body_fact_nested_body(rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__with_body_fact_lambda_body(rtoc_self_view, node, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__analyze_routine(&rtoc_self_view, RoutineNode{ LambdaLit: COPY node }, castLambdaBodyToRoutineBody(node.body), TypeTypeInput{ SymbolValue: :Any }, TRUE))))));
+    MUTABLE return_type: ?String@symbol = TRY (typeAnalysisSession__with_body_fact_nested_body(rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__with_body_fact_lambda_body(rtoc_self_view, node, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__analyze_routine(&rtoc_self_view, RoutineNode{ LambdaLit: COPY node }, castLambdaBodyToRoutineBody(node.body), TypeTypeInput{ SymbolValue: :Any }, TRUE))))));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ LambdaLit: COPY node }, TRY (typeAnalysisSession__build_lambda_signature(rtoc_self_view, (node.params OR_ELSE List[]), CAST(return_type AS String@symbol)))));
 }
 END
@@ -3860,7 +3860,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE variants = (3 ** count);
-    print("\x1B[36m[Note]\x1B[0m '${node.name}' has ${count} MONOMORPHIC parameters, so Zig may stencil up to ${variants.toString()} (3^${count}) carrier variants of it. This is a combinatoric-explosion hazard for code size and instruction cache; if the extra carriers are not needed, constrain some parameters to a concrete carrier (plain / SHARED).");
+    print("\x1B[36m[Note]\x1B[0m '${node.name}' has ${count.toString()} MONOMORPHIC parameters, so Zig may stencil up to ${variants.toString()} (3^${count.toString()}) carrier variants of it. This is a combinatoric-explosion hazard for code size and instruction cache; if the extra carriers are not needed, constrain some parameters to a concrete carrier (plain / SHARED).");
 }
 END
 PRIVATE FN typeAnalysisSession__verify_retained_into_plain_slot_mut(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
@@ -11739,7 +11739,7 @@ PRIVATE FN typeAnalysisSession__with_async_body_fact_frame(self: TypeAnalysisSes
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE summary = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(rtoc_self_view) -> {
+    MUTABLE summary: !BodyScanSummary = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(rtoc_self_view) -> {
     TRY (typeAnalysisSession__with_body_fact_scopes_cleared(rtoc_self_view, %() -> block()));
     rubyToClearVoid__type_analysis_session()
     });
@@ -12424,7 +12424,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF TRY (type__accepts?(expected, actual)) THEN
       RETURN;
     END
-    TRY (typeAnalysisSession__error_mut(rtoc_self_view, argument, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MAP_METHOD_ARGUMENT }, [], CAST({:name: node.name, :position: (index_value + 1), :expected: TRY (type__surface_name(castTypeToTypeTypeInput__type_analysis_session(expected))), :actual: TRY (type__surface_name( TypeTypeInput{ Type: COPY actual }))} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(argument), TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MAP_METHOD_ARGUMENT }, [], CAST({:name: node.name, :position: (index_value + 1), :expected: TRY (type__surface_name(castTypeToTypeTypeInput__type_analysis_session(expected))), :actual: TRY (type__surface_name( TypeTypeInput{ Type: COPY actual }))} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN typeAnalysisSession__resolve_inherent_method_call_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall) RETURNS !Bool
