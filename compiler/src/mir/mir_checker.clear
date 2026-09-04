@@ -2234,7 +2234,7 @@ PUB FN mIRChecker__check_fsm_destroy_cleanup_action_mut(action: FsmDestroyCleanu
   IF !(finalize_cleanups.contains?(action.name)) THEN
     RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-DESTROY-FINALIZE-LIST", "destroy cleanup '${action.name}' is not listed in finalize_cleanups.", source);
   END
-  MUTABLE entry = COPY COPY action.cleanup_entry;
+  MUTABLE entry = COPY action.cleanup_entry;
   IF !(cleanupEntry__needs_cleanup?(entry)) THEN
     RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-DESTROY-CLEANUP-ENTRY", "destroy cleanup '${action.name}' has a no-cleanup entry.", source);
   END

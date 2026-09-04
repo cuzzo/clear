@@ -1118,7 +1118,7 @@ PRIVATE FN capabilityAuditSession__emit_unexpected_mutable_argument_error_mut(se
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token: ?Token@multiowned = COPY COPY facts.mutable_marker_token;
+    MUTABLE token: ?Token@multiowned = COPY facts.mutable_marker_token;
     IF token EXISTS AS token_value THEN
       MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_ARGUMENT_MARKER, CAST({:param: DiagnosticKwValue{ StringValue: COPY facts.param.name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, token_value.line, token_value.column, 1), "")], :auto));
       TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY token_value }, :mutability, [fix], NIL, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, :error, FALSE, CAST({:index: (facts.index + 1), :param: facts.param.name} AS {String@symbol}Any)));
@@ -1706,7 +1706,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF ((decl != NIL) AND aST__node__token( castSymbolEntryRegInputToLocatable(decl))) THEN
         tok = aST__node__token(decl);
       ELSE_IF (symbolEntry__is_param(info_value) AND (COPY info_value.param_decl_token != NIL)) THEN
-        tok = COPY COPY info_value.param_decl_token;
+        tok = COPY info_value.param_decl_token;
       END
       IF !(tok) THEN
         RETURN NIL;
@@ -2076,7 +2076,7 @@ PRIVATE FN capabilityAuditSession__auto_token_for(self: CapabilityAuditSession, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN CAST(COPY COPY slot.auto_token AS ?Token);
+    RETURN CAST(COPY slot.auto_token AS ?Token);
 }
 END
 PRIVATE FN capabilityAuditSession__build_auto_ambiguity_message(self: CapabilityAuditSession, label: String, observed_strs: []String, slot: Slot) RETURNS !String
@@ -2742,7 +2742,7 @@ PRIVATE FN capabilityAuditSession__fallible_call_site_fact?(self: CapabilityAudi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE node = COPY COPY fact.node;
+    MUTABLE node = COPY fact.node;
     IF (aST__node_error_union_type(node) OR_ELSE FALSE) THEN
       RETURN TRUE;
     END
@@ -4024,7 +4024,7 @@ PRIVATE FN capabilityAuditSession__verify_handler_reachability_mut(self: Capabil
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE possible: [Set]String@symbol = Set[];
-    MUTABLE node = COPY COPY site.node;
+    MUTABLE node = COPY site.node;
     MUTABLE clause = node.lock_error_clause;
     IF !(clause) THEN
       RETURN;
@@ -4110,7 +4110,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE anchor: ?Token@multiowned = NIL;
     IF sample != NIL THEN
-      anchor = COPY COPY sample.site_token;
+      anchor = COPY sample.site_token;
     END
     RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, (anchor OR_ELSE capabilityAuditSession__semantic_program(rtoc_self_view)), CapabilityAuditCodeOrMessage{ SymbolValue: :LOCK_CYCLE_DETECTED }, [], CAST({:kind: kind, :types: types_str, :sites: site_lines} AS {String@symbol}Any)));
 }

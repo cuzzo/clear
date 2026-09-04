@@ -13945,7 +13945,7 @@ PUB STRUCT RuntimeCallSpec {
 }
 
 PUB FN runtimeCallSpec__call(self: RuntimeCallSpec, args: []Emittable) RETURNS Call ->
-  RETURN Call{ callee: COPY self.callee, args: COPY args, try_wrap: self.try_wrap, owned_return: self.owned_return, callable_contract: COPY COPY self.callable_contract, lowered_node_id: NIL, never_success: FALSE, ownership_consumption: NIL, result_type: NIL };
+  RETURN Call{ callee: COPY self.callee, args: COPY args, try_wrap: self.try_wrap, owned_return: self.owned_return, callable_contract: COPY self.callable_contract, lowered_node_id: NIL, never_success: FALSE, ownership_consumption: NIL, result_type: NIL };
 END
 # Ruby module MIR::RuntimeCalls
 PUB FN runtimeCalls__eql_spec() RETURNS !RuntimeCallSpec ->
@@ -14197,7 +14197,7 @@ FN registryCall__child_exprs(self: RegistryCall) RETURNS ![]Emittable EFFECTS RE
   RETURN TRY (registryCall__compact_child_exprs(self, children));
 END
 PUB FN registryCall__has_alloc_metadata?(self: RegistryCall) RETURNS Bool ->
-  MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY COPY self.allocs;
+  MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY self.allocs;
   RETURN ((metadata != NIL) AND !(inlineAllocMetadata__empty?(metadata)));
 END
 PUB FN registryCall__mutating_receiver_allocator_op?(self: RegistryCall) RETURNS !Bool ->
@@ -14219,7 +14219,7 @@ FN registryCall__ownership_effect(self: RegistryCall) RETURNS !OwnershipEffect E
   ELSE
     NIL
   END) END);
-  MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY COPY self.allocs;
+  MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY self.allocs;
   MUTABLE alloc: ?String@symbol =   IF result_alloc THEN
     result_alloc
   ELSE_IF (metadata != NIL) THEN

@@ -948,7 +948,7 @@ PRIVATE FN emit__build_segment_descriptor(seg: Segment, ctx: FsmEmitContext, low
   MUTABLE bg_rt = COPY ctx.bg_rt;
   MUTABLE pointer_captures = COPY ctx.pointer_captures;
   MUTABLE result = mIRLowering__with_bg_fiber_body_context(lowering_api, pointer_captures, %() USE(bg_rt, capture_map, ctx, lowering_api, seg, sp_idx) -> {
-  rtoc_lambda_result_48 = mIRLowering__with_fiber_capture_map(lowering_api, capture_map, {:rt_override: bg_rt}, "__rt", %() USE(ctx, lowering_api, seg, sp_idx) -> {
+  rtoc_lambda_result_48 = mIRLowering__with_fiber_capture_map(&lowering_api, capture_map, {:rt_override: bg_rt}, "__rt", %() USE(ctx, lowering_api, seg, sp_idx) -> {
   MUTABLE eff_sp = (sp_idx OR_ELSE ((seg.index + 1)));
   TRY (suspendResolvers__resolve(seg, ctx, lowering_api, eff_sp))
   });

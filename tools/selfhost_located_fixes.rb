@@ -212,12 +212,29 @@ by.each do |f, rs|
       next if expr.start_with?('&')
 
       edits << [sp[0], sp[1], " UNWRAP (#{expr})", :unwrap_arg]
+    elsif (m = e.match(/argument \d+ expects \?(\w+), got (\w+)\z/)) && VARIANT_OF[m[1]]&.key?(m[2])
+      # An optional destination takes the wrapped value directly; CLEAR
+      # coerces T into ?T.
+      sp = locate_arg(text, offsets, r['line'], argno, nil, m[1]) or next
+      expr = text[sp[0]...sp[1]].strip
+      next if expr.empty? || expr.include?("#{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}:")
+
+      # The argument may already carry its own COPY; the wrapper supplies one.
+      edits << [sp[0], sp[1], " #{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}: COPY #{expr.delete_prefix('COPY ')} }", :wrap_variant_opt]
+    elsif (m = e.match(/argument \d+ expects \?(\w+), got \?(\w+)\z/)) &&
+          CASTS.include?("castOptional#{m[2]}ToOptional#{m[1]}")
+      sp = locate_arg(text, offsets, r['line'], argno, nil, m[1]) or next
+      expr = text[sp[0]...sp[1]].strip
+      next if expr.empty? || expr.include?("castOptional#{m[2]}ToOptional#{m[1]}(")
+      next if view_aliases.include?(expr) || expr.start_with?('&')
+
+      edits << [sp[0], sp[1], " castOptional#{m[2]}ToOptional#{m[1]}(#{expr})", :cast_arg_opt]
     elsif (m = e.match(/argument \d+ expects (\w+), got (\w+)\z/)) && VARIANT_OF[m[1]]&.key?(m[2])
       sp = locate_arg(text, offsets, r['line'], argno, nil, m[1]) or next
       expr = text[sp[0]...sp[1]].strip
       next if expr.empty? || expr.include?("#{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}:")
 
-      edits << [sp[0], sp[1], " #{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}: COPY #{expr} }", :wrap_variant]
+      edits << [sp[0], sp[1], " #{m[1]}{ #{VARIANT_OF[m[1]][m[2]]}: COPY #{expr.delete_prefix('COPY ')} }", :wrap_variant]
     elsif (m = e.match(/argument \d+ expects (\w+), got (\w+)\z/)) && CASTS.include?("cast#{m[2]}To#{m[1]}")
       sp = locate_arg(text, offsets, r['line'], argno, nil, m[1]) or next
       expr = text[sp[0]...sp[1]].strip
