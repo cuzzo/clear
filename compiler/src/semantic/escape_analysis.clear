@@ -1890,7 +1890,7 @@ PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}
   END
 END
 PUB FN escapeAnalysis__call_result_is_heap_for_callee?(call: EscapeAnalysisCall, callee: FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, facts: ?FunctionFacts = NIL) RETURNS !Bool ->
-  MUTABLE dep = TRY (escapeAnalysis__heap_return_from_args?(UNWRAP (escapeAnalysisCall__args(call)), callee.params, callee.heap_carry_return_vars, castOptionalTypeToOptionalTypeTypeInput(callee.return_type), schema_lookup));
+  MUTABLE dep: ?Bool = TRY (escapeAnalysis__heap_return_from_args?(UNWRAP (escapeAnalysisCall__args(call)), callee.params, callee.heap_carry_return_vars, castOptionalTypeToOptionalTypeTypeInput(callee.return_type), schema_lookup));
   IF !((dep == NIL)) THEN
     RETURN dep;
   END
