@@ -9229,7 +9229,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       FOR _ IN match_statement.cases DO
       mIRLowering__walk_catch_body_for_reassigns(rtoc_self_view, TRY (matchCase__body(_)), &reassigns);
       END
-      mIRLowering__walk_catch_body_for_reassigns(rtoc_self_view, match_statement.default_case, &reassigns);
+      mIRLowering__walk_catch_body_for_reassigns(rtoc_self_view, UNWRAP (match_statement.default_case), &reassigns);
     END
     END
 }

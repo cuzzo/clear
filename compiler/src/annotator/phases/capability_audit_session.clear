@@ -4283,7 +4283,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(signature) THEN
         CONTINUE;
     END
-    TRY (functionSignature__sync_from_function_def_mut(&signature, rtoc_mutable_block_param_46));
+    TRY ( UNWRAP (functionSignature__sync_from_function_def_mut(&signature, rtoc_mutable_block_param_46)));
     END
 }
 END

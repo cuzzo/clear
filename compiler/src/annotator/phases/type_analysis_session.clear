@@ -20092,7 +20092,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < _.params.length() DO
       IF ((UNWRAP (UNWRAP (_.params[rtoc_idx]).symbol)).binding_id == sym.binding_id) THEN
-          RETURN COPY CAST(_.params[rtoc_idx].name AS String);
+          RETURN COPY CAST(UNWRAP (_.params[rtoc_idx]).name AS String);
       END
       rtoc_idx = rtoc_idx + 1;
     END
