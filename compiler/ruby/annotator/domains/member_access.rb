@@ -237,7 +237,11 @@ module Annotator
           # the move into a value copy and leaks the box. String/scalar and
           # union/enum pointees still need the read-deref (Zig won't coerce
           # `*T` -> `T` for those consumers).
-          psch = lookup_type_schema(field_type.resolved)
+          # `?T@boxed` is still a pointer to T -- resolve the pointee through
+          # the optional wrapper, or the layout is stripped from a value that
+          # is a pointer at runtime and consumers box it a second time.
+          pointee = field_type.optional? ? (field_type.wrapped_type || field_type) : field_type
+          psch = lookup_type_schema(pointee.resolved)
           struct_pointee = Schemas.struct?(psch)
           node.indirect_field = true unless struct_pointee
           # For non-struct pointees, the read-deref produces a value of the

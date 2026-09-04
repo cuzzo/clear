@@ -1,0 +1,22 @@
+# RETURN COPY of a boxed optional field hoists two temps: the copy, and the
+# heap box built from it. The box owns what it boxes, so the copy's ownership
+# transfers into it -- without that the copy carries an ErrCleanup whose
+# success-path owner is invisible to the checker.
+
+STRUCT Inner { tag: Int64 }
+STRUCT Holder { value: ?Inner@boxed }
+
+FN get(h: Holder) RETURNS ?Inner@boxed ->
+  RETURN COPY h.value;
+END
+
+FN main() RETURNS Void ->
+  empty = Holder{ value: NIL };
+  IF get(empty) == NIL THEN
+    print("empty");
+  END
+  full = Holder{ value: Inner{ tag: 4 } };
+  IF get(full) EXISTS AS got THEN
+    print("tag $got.tag");
+  END
+END
