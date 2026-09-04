@@ -108,7 +108,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_self_view.pos = (rtoc_self_view.pos + 1);
       RETURN tok;
     ELSE
-      TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :EXPECTED_NUMBER }, [], {:value: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}"}));
+      TRY (clearParser__error_mut(&rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :EXPECTED_NUMBER }, [], {:value: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}"}));
       RETURN clearParser__current(rtoc_self_view);
     END
 }
@@ -125,26 +125,26 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       # TokenPayloadError for every token whose payload is not a String.
       IF (COPY token.value) EXISTS AS payload THEN
         IF payload IS_A String THEN
-          matches_value = (TRY (token__text_mut(token)) == expected_value);
+          matches_value = (TRY (token__text_mut(&token)) == expected_value);
         END
       END
     END
     IF (((token.type == type)) OR matches_value) THEN
       IF ((value != NIL) AND !(matches_value)) THEN
-        TRY (clearParser__emit_consume_error_with_fix(rtoc_self_view, token, type, value));
+        TRY (clearParser__emit_consume_error_with_fix(&rtoc_self_view, token, type, value));
       END
       rtoc_self_view.pos = (rtoc_self_view.pos + 1);
       RETURN token;
     ELSE
-      TRY (clearParser__emit_consume_error_with_fix(rtoc_self_view, token, type, value));
+      TRY (clearParser__emit_consume_error_with_fix(&rtoc_self_view, token, type, value));
       RETURN token;
     END
 }
 END
-PRIVATE FN clearParser__emit_consume_error_with_fix(self: ClearParser, token: Token, expected_type: String@symbol, expected_value: ?String) RETURNS !Void
+PRIVATE FN clearParser__emit_consume_error_with_fix(MUTABLE self: ClearParser, token: Token, expected_type: String@symbol, expected_value: ?String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE prev_tok: ?Token = NIL;
     IF (rtoc_self_view.pos > 0) THEN
       prev_tok = COPY rtoc_self_view.tokens[(rtoc_self_view.pos - 1)];
@@ -153,26 +153,26 @@ WITH POLYMORPHIC self AS rtoc_self_view {
      IF prev_tok EXISTS AS prev_tok_value THEN
       IF syntax_tokens_at_statement_end.contains?(expected_text) THEN
        IF (prev_tok_value.line < token.line) THEN
-        RETURN TRY (clearParser__emit_syntax_insert_end_of_line_mut(rtoc_self_view, prev_tok_value, token, expected_text));
+        RETURN TRY (clearParser__emit_syntax_insert_end_of_line_mut(&rtoc_self_view, prev_tok_value, token, expected_text));
        END
        IF ((["THEN", "DO", "->"]).contains?(expected_text) AND (prev_tok_value.line == token.line)) THEN
-        RETURN TRY (clearParser__emit_syntax_insert_before_token_mut(rtoc_self_view, token, expected_text));
+        RETURN TRY (clearParser__emit_syntax_insert_before_token_mut(&rtoc_self_view, token, expected_text));
        END
       END
      END
     END
     IF prev_tok EXISTS AS prev_suffix_tok THEN
-     IF ((((token.type == :CHAR) AND (TRY (token__text_mut(token)) == "!")) AND ([:VAR_ID, :TYPE_ID]).contains?(prev_suffix_tok.type)) AND (prev_suffix_tok.end_offset == token.start_offset)) THEN
-      TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :LEGACY_MUTATION_NAME_SUFFIX }));
+     IF ((((token.type == :CHAR) AND (TRY (token__text_mut(&token)) == "!")) AND ([:VAR_ID, :TYPE_ID]).contains?(prev_suffix_tok.type)) AND (prev_suffix_tok.end_offset == token.start_offset)) THEN
+      TRY (clearParser__error_mut(&rtoc_self_view, token, CodeOrMessage{ SymbolValue: :LEGACY_MUTATION_NAME_SUFFIX }));
      END
     END
-    TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "${(expected_value OR_ELSE expected_type)}", :got: "${token__display_value(token)}", :type: "${token.type}", :line: token.line.toString()}));
+    TRY (clearParser__error_mut(&rtoc_self_view, token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "${(expected_value OR_ELSE expected_type)}", :got: "${token__display_value(token)}", :type: "${token.type}", :line: token.line.toString()}));
 }
 END
-PRIVATE FN clearParser__emit_syntax_insert_end_of_line_mut(self: ClearParser, prev_tok: Token, next_tok: Token, expected_value: String) RETURNS !Void
+PRIVATE FN clearParser__emit_syntax_insert_end_of_line_mut(MUTABLE self: ClearParser, prev_tok: Token, next_tok: Token, expected_value: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     # split() builds a temporary list; the element is a borrow INTO it, so the
     # binding needs its own copy or both free the same bytes.
     MUTABLE line_text = COPY (rtoc_self_view.source_code.split("\n")[(prev_tok.line - 1)] OR_ELSE "");
@@ -184,45 +184,45 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       leader = " ";
     END
     MUTABLE fix = TRY (fix__new(TRY (clearParser__fix_description(rtoc_self_view, :INSERT_EXPECTED_AT_END_OF_LINE, {:expected: "${expected_value}", :line: prev_tok.line.toString()})), [edit__new(span__new(NIL, prev_tok.line, insert_col, 0), "${leader}${expected_value}")], :auto));
-    RETURN TRY (clearParser__fixable_mut(rtoc_self_view, next_tok, :type, [fix], NIL, :PARSER_EXPECTED_AT_END_OF_LINE, :error, TRUE, {:expected: "${expected_value}", :expected_line: prev_tok.line.toString(), :got: "${token__display_value(next_tok)}", :got_line: next_tok.line.toString()}));
+    RETURN TRY (clearParser__fixable_mut(&rtoc_self_view, next_tok, :type, [fix], NIL, :PARSER_EXPECTED_AT_END_OF_LINE, :error, TRUE, {:expected: "${expected_value}", :expected_line: prev_tok.line.toString(), :got: "${token__display_value(next_tok)}", :got_line: next_tok.line.toString()}));
 }
 END
-PRIVATE FN clearParser__emit_syntax_insert_before_token_mut(self: ClearParser, token: Token, expected_value: String) RETURNS !Void
+PRIVATE FN clearParser__emit_syntax_insert_before_token_mut(MUTABLE self: ClearParser, token: Token, expected_value: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fix = TRY (fix__new(TRY (clearParser__fix_description(rtoc_self_view, :INSERT_EXPECTED_BEFORE_TOKEN, {:expected: "${expected_value}", :got: "${token__display_value(token)}", :line: token.line.toString()})), [edit__new(span__new(NIL, token.line, token.column, 0), "${expected_value} ")], :auto));
-    RETURN TRY (clearParser__fixable_mut(rtoc_self_view, token, :type, [fix], NIL, :PARSER_EXPECTED_BEFORE_TOKEN, :error, TRUE, {:expected: "${expected_value}", :got: "${token__display_value(token)}", :line: token.line.toString()}));
+    RETURN TRY (clearParser__fixable_mut(&rtoc_self_view, token, :type, [fix], NIL, :PARSER_EXPECTED_BEFORE_TOKEN, :error, TRUE, {:expected: "${expected_value}", :got: "${token__display_value(token)}", :line: token.line.toString()}));
 }
 END
-PUB FN clearParser__match?(self: ClearParser, type: String@symbol, val: ?String = NIL) RETURNS !Bool
+PUB FN clearParser__match?(MUTABLE self: ClearParser, type: String@symbol, val: ?String = NIL) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE token = clearParser__current(rtoc_self_view);
     IF !((token.type == type)) THEN
       RETURN FALSE;
     END
     IF val EXISTS AS val_value THEN
       MUTABLE expected_value = COPY val_value;
-      RETURN (TRY (token__text_mut(token)) == expected_value);
+      RETURN (TRY (token__text_mut(&token)) == expected_value);
     ELSE
       RETURN TRUE;
     END
 }
 END
-PUB FN clearParser__generic_close?(self: ClearParser) RETURNS !Bool
+PUB FN clearParser__generic_close?(MUTABLE self: ClearParser) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (clearParser__match?(rtoc_self_view, :CHAR, ">")) OR TRY (clearParser__match?(rtoc_self_view, :CHAR, ">>")));
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN (TRY (clearParser__match?(&rtoc_self_view, :CHAR, ">")) OR TRY (clearParser__match?(&rtoc_self_view, :CHAR, ">>")));
 }
 END
 PUB FN clearParser__consume_generic_close(MUTABLE self: ClearParser) RETURNS !Token
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !(TRY (clearParser__match?(rtoc_self_view, :CHAR, ">>"))) THEN
+    IF !(TRY (clearParser__match?(&rtoc_self_view, :CHAR, ">>"))) THEN
       RETURN TRY (clearParser__consume(&rtoc_self_view, :CHAR, ">"));
     END
     MUTABLE combined = clearParser__current(rtoc_self_view);
@@ -254,7 +254,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       IF val EXISTS AS val_value THEN
         MUTABLE expected_value = COPY val_value;
-        RETURN (TRY (token__text_mut(tok_value_mutable)) == expected_value);
+        RETURN (TRY (token__text_mut(&tok_value_mutable)) == expected_value);
       ELSE
         RETURN TRUE;
       END
@@ -273,10 +273,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF ((nxt_value_mutable.type == :ARROW) OR (nxt_value_mutable.type == :EOF)) THEN
         RETURN FALSE;
       END
-      IF ((nxt_value_mutable.type == :KEYWORD) AND (["AS", "WHEN", "DEFAULT", "END"]).contains?(TRY (token__text_mut(nxt_value_mutable)))) THEN
+      IF ((nxt_value_mutable.type == :KEYWORD) AND (["AS", "WHEN", "DEFAULT", "END"]).contains?(TRY (token__text_mut(&nxt_value_mutable)))) THEN
         RETURN FALSE;
       END
-      IF ((nxt_value_mutable.type == :CHAR) AND (TRY (token__text_mut(nxt_value_mutable)) == "{")) THEN
+      IF ((nxt_value_mutable.type == :CHAR) AND (TRY (token__text_mut(&nxt_value_mutable)) == "{")) THEN
         RETURN FALSE;
       END
       RETURN TRUE;
@@ -289,7 +289,7 @@ PUB FN clearParser__match_mut(MUTABLE self: ClearParser, type: String@symbol, va
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF TRY (clearParser__match?(rtoc_self_view, type, value)) THEN
+    IF TRY (clearParser__match?(&rtoc_self_view, type, value)) THEN
       MUTABLE matched: Token@multiowned = COPY TRY (clearParser__consume(&rtoc_self_view, type));
       RETURN ClearParserReturnValue{ TokenMultiowned: matched };
     ELSE
@@ -297,10 +297,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN clearParser__stamp_source_range_mut(self: ClearParser, MUTABLE node: Locatable, first: Token, last: Token) RETURNS Locatable
+PUB FN clearParser__stamp_source_range_mut(MUTABLE self: ClearParser, MUTABLE node: Locatable, first: Token, last: Token) RETURNS Locatable
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE start_offset = (first.start_offset OR_ELSE 0);
     MUTABLE end_offset = (last.end_offset OR_ELSE ((start_offset + token__display_value(last).bytes())));
     MATCH node START
@@ -1102,10 +1102,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 
 }
 END
-PUB FN clearParser__error_mut(self: ClearParser, node_or_token: ?Token, code_or_message: CodeOrMessage, args: Any[] = [], kwargs: {String@symbol}String = {}) RETURNS !Void
+PUB FN clearParser__error_mut(MUTABLE self: ClearParser, node_or_token: ?Token, code_or_message: CodeOrMessage, args: Any[] = [], kwargs: {String@symbol}String = {}) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE token: ?Token = clearParser__diagnostic_token(rtoc_self_view, node_or_token);
     MUTABLE message: String = "";
     IF code_or_message IS_A String@symbol AS string_symbol THEN
@@ -1118,7 +1118,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF code_or_message IS_A String@symbol AS string_symbol THEN
       diagnostic_code = COPY (string_symbol);
     END
-    RETURN TRY (clearParser__raise_source_error_mut(rtoc_self_view, source_token, message, diagnostic_code));
+    RETURN TRY (clearParser__raise_source_error_mut(&rtoc_self_view, source_token, message, diagnostic_code));
 }
 END
 FN clearParser__format_diagnostic_template(self: ClearParser, template: String, args: Any[], kwargs: {String@symbol}String) RETURNS String
@@ -1155,10 +1155,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
 }
 END
-PUB FN clearParser__note_mut(self: ClearParser, node_or_token: ?Token, message: String) RETURNS Void
+PUB FN clearParser__note_mut(MUTABLE self: ClearParser, node_or_token: ?Token, message: String) RETURNS Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE token: ?Token = clearParser__source_error_token(rtoc_self_view, clearParser__diagnostic_token(rtoc_self_view, node_or_token));
     MUTABLE loc: String = "";
     IF token EXISTS AS token_value THEN
@@ -1170,10 +1170,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PUB FN clearParser__warning_mut(self: ClearParser, node_or_token: ?Token, message: String) RETURNS Void
+PUB FN clearParser__warning_mut(MUTABLE self: ClearParser, node_or_token: ?Token, message: String) RETURNS Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE token: ?Token = clearParser__source_error_token(rtoc_self_view, clearParser__diagnostic_token(rtoc_self_view, node_or_token));
     MUTABLE loc: String = "";
     IF token EXISTS AS token_value THEN
@@ -1185,10 +1185,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PUB FN clearParser__fixable_mut(self: ClearParser, node_or_token: ?Token, category: String@symbol, fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}String = {}) RETURNS !Void
+PUB FN clearParser__fixable_mut(MUTABLE self: ClearParser, node_or_token: ?Token, category: String@symbol, fixes: []Fix, message: ?String = NIL, code: ?String@symbol = NIL, level: String@symbol = :warning, raise_in_collector: Bool = FALSE, kwargs: {String@symbol}String = {}) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rendered_message = (message OR_ELSE TRY (clearParser__diagnostic_message(rtoc_self_view, code?, [], kwargs)));
     MUTABLE token: ?Token = clearParser__diagnostic_token(rtoc_self_view, node_or_token);
     MUTABLE source_token: ?Token = clearParser__source_error_token(rtoc_self_view, token);
@@ -1198,7 +1198,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(raise_in_collector) THEN
         RETURN;
       END
-      TRY (clearParser__raise_source_error_mut(rtoc_self_view, source_token, rendered_message));
+      TRY (clearParser__raise_source_error_mut(&rtoc_self_view, source_token, rendered_message));
     END
     IF (level == :hint) OR (level == :info) OR (level == :warning) THEN
       MUTABLE loc: String = "";
@@ -1215,7 +1215,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN clearParser__diagnostic_output(rtoc_self_view, "${tag} ${rendered_message}${loc}");
     ELSE_IF (level == :error) THEN
-      RETURN TRY (clearParser__raise_source_error_mut(rtoc_self_view, source_token, rendered_message));
+      RETURN TRY (clearParser__raise_source_error_mut(&rtoc_self_view, source_token, rendered_message));
     ELSE
       RETURN;
     END
@@ -1228,10 +1228,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY rtoc_self_view.source_code;
 }
 END
-PUB FN clearParser__raise_source_error_mut(self: ClearParser, token: ?Token, message: String, code: ?String@symbol = NIL) RETURNS !Void
+PUB FN clearParser__raise_source_error_mut(MUTABLE self: ClearParser, token: ?Token, message: String, code: ?String@symbol = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF clearParser__parser_error_host?(rtoc_self_view) THEN
       RAISE Input, ParserError, message;
     END

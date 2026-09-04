@@ -186,7 +186,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE syntax = TRY (clearParser__parse_type_annotation_syntax(&rtoc_self_view));
     MUTABLE current_token = clearParser__current(rtoc_self_view);
     IF !((current_token.type == :EOF)) THEN
-      TRY (clearParser__error_mut(rtoc_self_view, current_token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "end of type", :got: "${token__display_value(current_token)}", :type: "${current_token.type}", :line: current_token.line.toString()}));
+      TRY (clearParser__error_mut(&rtoc_self_view, current_token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "end of type", :got: "${token__display_value(current_token)}", :type: "${current_token.type}", :line: current_token.line.toString()}));
     END
     RETURN syntax;
 }
@@ -239,7 +239,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     end_tok = clearParser__current(rtoc_self_view);
     MUTABLE program = Program{ token: COPY end_tok, statements: COPY stmts, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, sync_policy: NIL, mir_pass_state: NIL, language_mode: :default };
     MUTABLE first = (rtoc_self_view.tokens.first() OR_ELSE COPY end_tok);
-    clearParser__stamp_source_range_mut(rtoc_self_view, Locatable{ Program: COPY program }, first, COPY end_tok);
+    clearParser__stamp_source_range_mut(&rtoc_self_view, Locatable{ Program: COPY program }, first, COPY end_tok);
     program.language_mode = IF rtoc_self_view.gradual THEN
       :easy
     ELSE
@@ -274,10 +274,10 @@ PRIVATE FN clearParser__typo_anchor(token: ?Token) RETURNS AnchorToken ->
   END
   RETURN AnchorToken{ line: 0, column: 0 };
 END
-PUB FN clearParser__emit_typo_suggestion_mut(self: ClearParser, token: ?Token, name: String, candidates: []String, message: String, fix_label: String, category: String@symbol = :registry, cascade: Bool = TRUE) RETURNS !Void
+PUB FN clearParser__emit_typo_suggestion_mut(MUTABLE self: ClearParser, token: ?Token, name: String, candidates: []String, message: String, fix_label: String, category: String@symbol = :registry, cascade: Bool = TRUE) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE anchor: AnchorToken = clearParser__typo_anchor(token);
     MUTABLE token_line: Int64 = anchor.line;
     MUTABLE token_column: Int64 = anchor.column;
@@ -288,9 +288,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &fixes.append(TRY (fix__new(TRY (diagnosticRegistry__fix_description(:REPLACE_IDENTIFIER_WITH_CANDIDATE, {:name: "${COPY name}", :best: "${best_value}", :label: "${fix_label}"})), [edit__new(span__new(NIL, token_line, token_column, name.codepointCount()), best_value)], :auto)));
     END
     IF (fixes.length() == 0) THEN
-      TRY (clearParser__error_mut(rtoc_self_view, token, CodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], {:detail: "${message}"}));
+      TRY (clearParser__error_mut(&rtoc_self_view, token, CodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], {:detail: "${message}"}));
     END
-    TRY (clearParser__fixable_mut(rtoc_self_view, token, category, fixes, NIL, :TYPO_SUGGESTION_REJECTED, :error, cascade, {:detail: "${message}"}));
+    TRY (clearParser__fixable_mut(&rtoc_self_view, token, category, fixes, NIL, :TYPO_SUGGESTION_REJECTED, :error, cascade, {:detail: "${message}"}));
 }
 END
 PRIVATE FN clearParser__suggestion_levenshtein(self: ClearParser, left: String, right: String) RETURNS Int64

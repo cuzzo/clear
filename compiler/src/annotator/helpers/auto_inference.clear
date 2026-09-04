@@ -515,10 +515,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.type_of = (type_of OR_ELSE autoUnifier__default_type_of);
 }
 END
-PUB FN autoUnifier__resolve_mut(self: AutoUnifier) RETURNS !Result
+PUB FN autoUnifier__resolve_mut(MUTABLE self: AutoUnifier) RETURNS !Result
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE resolved: {AutoSlotId@multiowned}Resolution = {};
     MUTABLE ambiguous: {AutoSlotId@multiowned}Ambiguity = {};
     MUTABLE progress: Bool = TRUE;
@@ -532,7 +532,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE observed = TRY (autoUnifier__collect_observed_types(rtoc_self_view, slot));
     IF (observed.length() == 1) THEN
           MUTABLE type = COPY UNWRAP (observed.first());
-          TRY (autoUnifier__stamp_slot_mut(rtoc_self_view, &slot, type));
+          TRY (autoUnifier__stamp_slot_mut(&rtoc_self_view, &slot, type));
           resolved[rtoc_each_4] = Resolution{ slot: COPY slot, type: COPY type, sources: COPY slot.sources };
           progress = TRUE;
     ELSE_IF (observed.length() == 0) THEN
@@ -621,10 +621,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN autoUnifier__stamp_slot_mut(self: AutoUnifier, MUTABLE slot: Slot, type: AutoConstraintCollectorObservedType) RETURNS !Void
+PRIVATE FN autoUnifier__stamp_slot_mut(MUTABLE self: AutoUnifier, MUTABLE slot: Slot, type: AutoConstraintCollectorObservedType) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE resolved_branch: ?Type = NIL;
     IF type IS_A Type AS observed_type_value THEN
       resolved_branch = COPY observed_type_value;
@@ -677,10 +677,10 @@ PUB FN slotDeclIdentity(decl_node: AutoConstraintCollectorSlotDeclNode) RETURNS 
   END
   RETURN 0;
 END
-PUB FN autoUnifier__stamp_map_pairs_mut(self: AutoUnifier, resolved_slots: {AutoSlotId}Resolution) RETURNS !Void
+PUB FN autoUnifier__stamp_map_pairs_mut(MUTABLE self: AutoUnifier, resolved_slots: {AutoSlotId}Resolution) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE by_decl: {Int64}MapPairResolution@multiowned = {};
     FOR _ IN resolved_slots.values() DO
     IF !(((_.slot.shape == :map_key) OR (_.slot.shape == :map_value))) THEN
@@ -732,10 +732,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.fn_nodes = COPY fn_nodes;
 }
 END
-PUB FN shapeEvidenceCollector__collect_mut(self: ShapeEvidenceCollector) RETURNS !{AutoSlotId@multiowned}Slot@multiowned
+PUB FN shapeEvidenceCollector__collect_mut(MUTABLE self: ShapeEvidenceCollector) RETURNS !{AutoSlotId@multiowned}Slot@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN rtoc_self_view.fn_nodes.values() DO
     TRY (shapeEvidenceCollector__collect_in_function(rtoc_self_view, _));
     END
@@ -926,10 +926,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.evidence = {};
 }
 END
-PUB FN operatorEvidenceCollector__collect_mut(self: OperatorEvidenceCollector) RETURNS !{AutoSlotId@multiowned}[Set]String@symbol
+PUB FN operatorEvidenceCollector__collect_mut(MUTABLE self: OperatorEvidenceCollector) RETURNS !{AutoSlotId@multiowned}[Set]String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN rtoc_self_view.fn_nodes.values() DO
     TRY (operatorEvidenceCollector__collect_in_function(rtoc_self_view, _));
     END

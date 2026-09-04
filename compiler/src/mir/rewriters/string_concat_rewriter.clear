@@ -4,24 +4,24 @@ PUB STRUCT StringConcatRewriter {
 
 }
 
-PUB FN stringConcatRewriter__rewrite_mut(self: StringConcatRewriter, MUTABLE ast: Program) RETURNS ![]Locatable
+PUB FN stringConcatRewriter__rewrite_mut(MUTABLE self: StringConcatRewriter, MUTABLE ast: Program) RETURNS ![]Locatable
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body = COPY ast.statements;
-    TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &body));
+    TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &body));
     ast.statements = body;
     RETURN body;
 }
 END
-PRIVATE FN stringConcatRewriter__rewrite_in_node_mut(self: StringConcatRewriter, MUTABLE node: ?Locatable) RETURNS !?Locatable
+PRIVATE FN stringConcatRewriter__rewrite_in_node_mut(MUTABLE self: StringConcatRewriter, MUTABLE node: ?Locatable) RETURNS !?Locatable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node EXISTS AS node_value THEN
       MUTABLE node_value_mutable = COPY node_value;
-      TRY (stringConcatRewriter__rewrite_children_mut(rtoc_self_view, &node_value_mutable));
+      TRY (stringConcatRewriter__rewrite_children_mut(&rtoc_self_view, &node_value_mutable));
       MUTABLE parts = TRY (stringConcatRewriter__collect_parts(rtoc_self_view, node_value_mutable));
       IF (parts.length() > 2) THEN
         IF node_value_mutable IS_A BinaryOp AS binary_op THEN
@@ -49,96 +49,96 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN stringConcatRewriter__rewrite_required_node_mut(self: StringConcatRewriter, node: Locatable) RETURNS !Locatable
+PRIVATE FN stringConcatRewriter__rewrite_required_node_mut(MUTABLE self: StringConcatRewriter, node: Locatable) RETURNS !Locatable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE node_mutable = COPY node;
-    RETURN UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, &node_mutable)));
+    RETURN UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, &node_mutable)));
 }
 END
-PRIVATE FN stringConcatRewriter__rewrite_body_mut(self: StringConcatRewriter, MUTABLE body: []Locatable) RETURNS !Void
+PRIVATE FN stringConcatRewriter__rewrite_body_mut(MUTABLE self: StringConcatRewriter, MUTABLE body: []Locatable) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE index = 0;
     WHILE (index < body.length()) DO
-      body[index] = TRY (stringConcatRewriter__rewrite_required_node_mut(rtoc_self_view, UNWRAP (body[index])));
+      body[index] = TRY (stringConcatRewriter__rewrite_required_node_mut(&rtoc_self_view, UNWRAP (body[index])));
       index = (index + 1);
     END
 }
 END
-PRIVATE FN stringConcatRewriter__rewrite_children_mut(self: StringConcatRewriter, MUTABLE node: Locatable) RETURNS !Void
+PRIVATE FN stringConcatRewriter__rewrite_children_mut(MUTABLE self: StringConcatRewriter, MUTABLE node: Locatable) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A FunctionDef AS function_def THEN
       MUTABLE function_def_mutable = COPY function_def;
       MUTABLE function_def = COPY function_def_mutable;
       MUTABLE body = COPY function_def.body;
-      TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &body));
+      TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &body));
       function_def.body = body;
     ELSE_IF node IS_A VarDecl AS var_decl THEN
       MUTABLE var_decl_mutable = COPY var_decl;
-      var_decl_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, var_decl_mutable.value));
+      var_decl_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, var_decl_mutable.value));
     ELSE_IF node IS_A BindExpr AS bind_expr THEN
       MUTABLE bind_expr_mutable = COPY bind_expr;
-      bind_expr_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, bind_expr_mutable.value));
+      bind_expr_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, bind_expr_mutable.value));
     ELSE_IF node IS_A Assignment AS assignment THEN
       MUTABLE assignment_mutable = COPY assignment;
-      assignment_mutable.value = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, assignment_mutable.value)));
+      assignment_mutable.value = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, assignment_mutable.value)));
     ELSE_IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
       MUTABLE destructuring_assignment_mutable = COPY destructuring_assignment;
-      destructuring_assignment_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, destructuring_assignment_mutable.value));
+      destructuring_assignment_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, destructuring_assignment_mutable.value));
     ELSE_IF node IS_A ReturnNode AS return_node THEN
       MUTABLE return_node_mutable = COPY return_node;
-      return_node_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, return_node_mutable.value));
+      return_node_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, return_node_mutable.value));
     ELSE_IF node IS_A IfStatement AS if_statement THEN
       MUTABLE if_statement_mutable = COPY if_statement;
       MUTABLE then_branch = COPY if_statement_mutable.then_branch;
       MUTABLE else_branch: ?[]Locatable = COPY if_statement_mutable.else_branch;
       IF then_branch THEN
-        TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &then_branch));
+        TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &then_branch));
       END
       IF else_branch EXISTS AS else_branch_value THEN
         MUTABLE else_branch_value_mutable = COPY else_branch_value;
-        TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &else_branch_value_mutable));
+        TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &else_branch_value_mutable));
       END
     ELSE_IF node IS_A MatchStatement AS match_statement THEN
       MUTABLE match_statement_mutable = COPY match_statement;
       FOR _ IN match_statement_mutable.cases DO
-      TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, TRY (matchCase__body(_))));
+      TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, TRY (matchCase__body(_))));
       END
       MUTABLE default_body: ?[]Locatable = COPY match_statement_mutable.default_case;
       IF default_body EXISTS AS default_body_value THEN
         MUTABLE default_body_value_mutable = COPY default_body_value;
-        TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &default_body_value_mutable));
+        TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &default_body_value_mutable));
       END
     ELSE_IF node IS_A WhileLoop AS while_loop THEN
       MUTABLE while_loop_mutable = COPY while_loop;
       MUTABLE body = COPY while_loop_mutable.do_branch;
       IF body IS_A []Any THEN
-        TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &body));
+        TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &body));
       END
     ELSE_IF node IS_A ForRange AS for_range THEN
       MUTABLE for_range_mutable = COPY for_range;
-      TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &for_range_mutable.body));
+      TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &for_range_mutable.body));
     ELSE_IF node IS_A ForEach AS for_each THEN
       MUTABLE for_each_mutable = COPY for_each;
-      TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &for_each_mutable.body));
+      TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &for_each_mutable.body));
     ELSE_IF node IS_A BinaryOp AS binary_op THEN
       MUTABLE binary_op_mutable = COPY binary_op;
-      binary_op_mutable.left = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, binary_op_mutable.left)));
-      binary_op_mutable.right = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(rtoc_self_view, binary_op_mutable.right)));
+      binary_op_mutable.left = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, binary_op_mutable.left)));
+      binary_op_mutable.right = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, binary_op_mutable.right)));
     ELSE_IF node IS_A FuncCall AS func_call THEN
       MUTABLE func_call_mutable = COPY func_call;
-      TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &func_call_mutable.args));
+      TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &func_call_mutable.args));
     ELSE_IF node IS_A MethodCall AS method_call THEN
       MUTABLE method_call_mutable = COPY method_call;
-      TRY (stringConcatRewriter__rewrite_body_mut(rtoc_self_view, &method_call_mutable.args));
+      TRY (stringConcatRewriter__rewrite_body_mut(&rtoc_self_view, &method_call_mutable.args));
     ELSE_IF node IS_A StructLit AS struct_lit THEN
       MUTABLE fields = COPY struct_lit.fields;
       MUTABLE keys = fields.keys();
@@ -146,16 +146,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       WHILE (index < keys.length()) DO
         MUTABLE key = UNWRAP (keys[index]);
         MUTABLE value = UNWRAP (fields[key]);
-        fields[key] = TRY (stringConcatRewriter__rewrite_required_node_mut(rtoc_self_view, UNWRAP (value)));
+        fields[key] = TRY (stringConcatRewriter__rewrite_required_node_mut(&rtoc_self_view, UNWRAP (value)));
         index = (index + 1);
       END
     END
 }
 END
-PRIVATE FN stringConcatRewriter__string_concat?(self: StringConcatRewriter, node: ?Locatable) RETURNS ?Bool
+PRIVATE FN stringConcatRewriter__string_concat?(MUTABLE self: StringConcatRewriter, node: ?Locatable) RETURNS ?Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node? IS_A StringConcat AS string_concat THEN
       RETURN TRUE;
     END
@@ -174,7 +174,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A StringConcat AS string_concat THEN
       RETURN COPY string_concat.parts;
     ELSE_IF node IS_A BinaryOp AS binary_op THEN
-      IF stringConcatRewriter__string_concat?(rtoc_self_view, Locatable{ BinaryOp: COPY binary_op }) THEN
+      IF stringConcatRewriter__string_concat?(&rtoc_self_view, Locatable{ BinaryOp: COPY binary_op }) THEN
         RETURN (TRY (stringConcatRewriter__collect_parts(rtoc_self_view, binary_op.left)) + TRY (stringConcatRewriter__collect_parts(rtoc_self_view, binary_op.right)));
       ELSE
         RETURN CAST([Locatable{ BinaryOp: COPY binary_op }] AS []Locatable);

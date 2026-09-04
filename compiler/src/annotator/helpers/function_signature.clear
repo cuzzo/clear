@@ -683,10 +683,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN functionSignature__adopt_param_symbols_mut(self: FunctionSignature, fn_value: FunctionDef) RETURNS Void
+PUB FN functionSignature__adopt_param_symbols_mut(MUTABLE self: FunctionSignature, fn_value: FunctionDef) RETURNS Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_self_view.contract.params.length() DO
       MUTABLE src: ?Param = COPY fn_value.params[rtoc_idx];

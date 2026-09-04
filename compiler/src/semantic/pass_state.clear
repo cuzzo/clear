@@ -25,7 +25,7 @@ PUB FN mIRPassState__mark_mut(MUTABLE self: MIRPassState, stage: String@symbol) 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE spec = TRY (mIRPassState__stage_spec_mut(rtoc_self_view, stage));
+    MUTABLE spec = TRY (mIRPassState__stage_spec_mut(&rtoc_self_view, stage));
     IF rtoc_self_view.completed.contains?(stage) THEN
       RAISE Input, MIRPassOrderError, "{} attempted to mark {} twice";
     END
@@ -36,12 +36,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &rtoc_self_view.completed.insert(COPY stage);
 }
 END
-PUB FN mIRPassState__require_mut(self: MIRPassState, stage: String@symbol, consumer: String) RETURNS !Void
+PUB FN mIRPassState__require_mut(MUTABLE self: MIRPassState, stage: String@symbol, consumer: String) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (mIRPassState__stage_spec_mut(rtoc_self_view, stage));
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    TRY (mIRPassState__stage_spec_mut(&rtoc_self_view, stage));
     IF rtoc_self_view.completed.contains?(stage) THEN
       RETURN;
     END
@@ -93,17 +93,17 @@ PUB FN mIRPassState__class_require_mut(program: PassStateProgram, stage: String@
     IF program_node.mir_pass_state EXISTS AS carried THEN
       IF carried IS_A MIRPassState AS state THEN
         MUTABLE state_mutable = COPY state;
-        TRY (mIRPassState__require_mut(state_mutable, stage, consumer));
+        TRY (mIRPassState__require_mut(&state_mutable, stage, consumer));
         RETURN;
       END
     END
   END
   RAISE Input, MIRPassOrderError, "{} requires pass state; program was not produced by the MIR pipeline";
 END
-PUB FN mIRPassState__validate_stage_mut(self: MIRPassState, stage: String@symbol) RETURNS !Void
+PUB FN mIRPassState__validate_stage_mut(MUTABLE self: MIRPassState, stage: String@symbol) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR spec IN passStages() DO
       IF (spec.name == stage) THEN
         RETURN;
@@ -112,10 +112,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RAISE Input, MIRPassOrderError, "unknown MIR pass stage {}";
 }
 END
-PRIVATE FN mIRPassState__stage_spec_mut(self: MIRPassState, stage: String@symbol) RETURNS !StageSpec
+PRIVATE FN mIRPassState__stage_spec_mut(MUTABLE self: MIRPassState, stage: String@symbol) RETURNS !StageSpec
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR spec IN passStages() DO
       IF (spec.name == stage) THEN
         RETURN COPY spec;

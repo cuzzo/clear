@@ -14200,11 +14200,11 @@ PUB FN registryCall__has_alloc_metadata?(self: RegistryCall) RETURNS Bool ->
   MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY self.allocs;
   RETURN ((metadata != NIL) AND !(inlineAllocMetadata__empty?(metadata)));
 END
-PUB FN registryCall__mutating_receiver_allocator_op?(self: RegistryCall) RETURNS !Bool ->
+PUB FN registryCall__mutating_receiver_allocator_op?(MUTABLE self: RegistryCall) RETURNS !Bool ->
   RETURN (registryCall__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_212 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_212)) });
 END
-FN registryCall__assignable_allocating_result?(self: RegistryCall) RETURNS !Bool ->
+FN registryCall__assignable_allocating_result?(MUTABLE self: RegistryCall) RETURNS !Bool ->
   RETURN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_213 = (COPY self.entry);
   TRY (functionSignature__emits_allocating?(&rtoc_mutable_receiver_213)) } AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_214 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_214)) }));
@@ -14212,7 +14212,7 @@ END
 FN registryCall__explicit_ownership_contract(self: RegistryCall) RETURNS OwnershipContract@multiowned EFFECTS REENTRANT ->
   RETURN COPY self.ownership_contract;
 END
-FN registryCall__ownership_effect(self: RegistryCall) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+FN registryCall__ownership_effect(MUTABLE self: RegistryCall) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE result_alloc: ?String@symbol = (IF self.owned_result_alloc != NIL THEN self.owned_result_alloc ELSE (IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_215 = (COPY self.entry);
   TRY (functionSignature__heap_return_alloc?(&rtoc_mutable_receiver_215)) } THEN
     :heap
@@ -14311,14 +14311,14 @@ FN indexedStore__has_alloc_metadata?(self: IndexedStore) RETURNS Bool ->
   RETURN !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_222 = (COPY self.allocs);
   inlineAllocMetadata__empty?(rtoc_local_receiver_222) });
 END
-PUB FN indexedStore__mutating_receiver_allocator_op?(self: IndexedStore) RETURNS !Bool ->
+PUB FN indexedStore__mutating_receiver_allocator_op?(MUTABLE self: IndexedStore) RETURNS !Bool ->
   RETURN (indexedStore__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_223 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(&rtoc_mutable_receiver_223)) });
 END
 FN indexedStore__explicit_ownership_contract(self: IndexedStore) RETURNS OwnershipContract@multiowned EFFECTS REENTRANT ->
   RETURN COPY self.ownership_contract;
 END
-FN indexedStore__ownership_effect(self: IndexedStore) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+FN indexedStore__ownership_effect(MUTABLE self: IndexedStore) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE heap_return = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_224 = (COPY self.entry);
   TRY (functionSignature__heap_return_alloc?(&rtoc_mutable_receiver_224)) } == TRUE);
   MUTABLE fixed_void = !(!((((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_225 = (COPY self.entry);
@@ -14478,7 +14478,7 @@ FN externTrampoline__child_exprs(self: ExternTrampoline) RETURNS ![]Emittable EF
   END
   RETURN TRY (externTrampoline__compact_child_exprs(self, children));
 END
-FN externTrampoline__ownership_effect(self: ExternTrampoline) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
+FN externTrampoline__ownership_effect(MUTABLE self: ExternTrampoline) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   MUTABLE heap_return = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_234 = (COPY self.stdlib_def);
   TRY (functionSignature__heap_return_alloc?(&rtoc_mutable_receiver_234)) } == TRUE);
   MUTABLE actual_return = TRY (type__success_type(self.return_type));
@@ -16081,16 +16081,16 @@ PUB FN emittable__ownership_effect(value: Emittable) RETURNS !OwnershipEffect EF
     RETURN TRY (pipeline__ownership_effect(payload));
   END
   IF value IS_A RegistryCall AS payload THEN
-    RETURN TRY (registryCall__ownership_effect(payload));
+    RETURN TRY (registryCall__ownership_effect(&payload));
   END
   IF value IS_A IndexedStore AS payload THEN
-    RETURN TRY (indexedStore__ownership_effect(payload));
+    RETURN TRY (indexedStore__ownership_effect(&payload));
   END
   IF value IS_A CFunctionAdapter AS payload THEN
     RETURN cFunctionAdapter__ownership_effect(payload);
   END
   IF value IS_A ExternTrampoline AS payload THEN
-    RETURN TRY (externTrampoline__ownership_effect(payload));
+    RETURN TRY (externTrampoline__ownership_effect(&payload));
   END
   IF value IS_A ObservableConsumerSpawn AS payload THEN
     RETURN observableConsumerSpawn__ownership_effect(payload);

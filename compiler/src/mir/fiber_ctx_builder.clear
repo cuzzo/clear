@@ -282,7 +282,7 @@ PUB FN fiberCtxBuilder__rc_payload_zig_type(ti: Type) RETURNS !String ->
   MUTABLE payload = TRY (type__new(castTypeToTypeConstructionInput__fiber_ctx_builder(ti)));
   TRY (type__apply_reference_ownership_mut(&payload, :affine));
   type__mark_stack_value_mut(&payload);
-  type__clear_zig_type_cache_mut(payload);
+  type__clear_zig_type_cache_mut(&payload);
   IF (type__any_sync?(payload) AND !(((type__map?(payload) AND type__striped?(payload))))) THEN
     MUTABLE inner = TRY (type__zig_type((TRY (type__bare_data_type(payload)))));
     IF type__locked?(payload) THEN

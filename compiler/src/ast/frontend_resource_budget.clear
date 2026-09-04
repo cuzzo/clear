@@ -33,10 +33,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.nesting = 0;
 }
 END
-FN frontendResourceBudget__check_source_mut(self: FrontendResourceBudget, source: String) RETURNS !Void
+FN frontendResourceBudget__check_source_mut(MUTABLE self: FrontendResourceBudget, source: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE violation: ?Exceeded@multiowned = frontendResourceBudget__source_violation(rtoc_self_view, source);
     IF violation EXISTS AS violation_value THEN
       panic("Ruby exception raised");
@@ -53,10 +53,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-FN frontendResourceBudget__check_tokens_mut(self: FrontendResourceBudget, count_value: Int64) RETURNS !Void
+FN frontendResourceBudget__check_tokens_mut(MUTABLE self: FrontendResourceBudget, count_value: Int64) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE violation: ?Exceeded@multiowned = frontendResourceBudget__tokens_violation(rtoc_self_view, count_value);
     IF violation EXISTS AS violation_value THEN
       panic("Ruby exception raised");

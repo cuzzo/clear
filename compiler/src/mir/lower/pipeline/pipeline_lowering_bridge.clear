@@ -69,11 +69,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__mir_schema_lookup(rtoc_self_view.lowering);
 }
 END
-PUB FN pipelineLoweringBridge__next_pipeline_observable_id(self: PipelineLoweringBridge) RETURNS Int64
+PUB FN pipelineLoweringBridge__next_pipeline_observable_id(MUTABLE self: PipelineLoweringBridge) RETURNS Int64
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__next_pipeline_observable_id(rtoc_self_view.lowering);
 }
 END
@@ -114,10 +114,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRLowering__lower_body(&rtoc_self_view.lowering, castLocatableListToMIRLoweringLowerableStmtList(nodes)));
 }
 END
-PUB FN pipelineLoweringBridge__emit_mir(self: PipelineLoweringBridge, node: Emittable) RETURNS !?String
+PUB FN pipelineLoweringBridge__emit_mir(MUTABLE self: PipelineLoweringBridge, node: Emittable) RETURNS !?String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_3 = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_2 = mIRLowering__runtime_state(rtoc_self_view.lowering);
     mIRLoweringRuntimeState__emitter_mut(&rtoc_mutable_receiver_2) });
     TRY (mIREmitter__emit(&rtoc_mutable_receiver_3, node)) };
@@ -141,19 +141,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN PipelineLowerHeadResult{ value: COPY CAST(value AS Emittable), pending: COPY typed_pending };
 }
 END
-PUB FN pipelineLoweringBridge__append_ownership_transfers_for_mir_body(self: PipelineLoweringBridge, body: []Emittable) RETURNS ![]Emittable
+PUB FN pipelineLoweringBridge__append_ownership_transfers_for_mir_body(MUTABLE self: PipelineLoweringBridge, body: []Emittable) RETURNS ![]Emittable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRLowering__append_ownership_transfers_for_mir_body(rtoc_self_view.lowering, body));
 }
 END
-PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(self: PipelineLoweringBridge, MUTABLE value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS !?PipelineBridgeAllocationFact
+PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(MUTABLE self: PipelineLoweringBridge, MUTABLE value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS !?PipelineBridgeAllocationFact
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fact: ?PipelineAllocMarkFact = TRY (mIRLowering__pipeline_alloc_mark_fact(rtoc_self_view.lowering, &value, name, fallback_alloc, type_info, ast_node, context, known_allocating, accept_owned_call, include_cleanup));
     IF fact EXISTS AS fact_value THEN
       RETURN PipelineBridgeAllocationFact{ alloc: COPY fact_value.alloc, mark: COPY fact_value.mark, cleanup_entry: KEEP fact_value.cleanup_entry };
@@ -170,11 +170,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIRLowering__pipeline_owned_cleanup_entry(rtoc_self_view.lowering, value, ast_node));
 }
 END
-PUB FN pipelineLoweringBridge__pipeline_iteration_loop_marks(self: PipelineLoweringBridge) RETURNS ![]Emittable
+PUB FN pipelineLoweringBridge__pipeline_iteration_loop_marks(MUTABLE self: PipelineLoweringBridge) RETURNS ![]Emittable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRLowering__pipeline_iteration_loop_marks(rtoc_self_view.lowering));
 }
 END
@@ -185,7 +185,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__pipeline_with_decl_alloc( &rtoc_self_view.lowering, alloc, blk);
 }
 END
-PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(self: PipelineLoweringBridge, MUTABLE insert: IndexInsert, value: Emittable, value_owns: Bool, target_alloc: String@symbol) RETURNS !IndexInsert
+PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(MUTABLE self: PipelineLoweringBridge, MUTABLE insert: IndexInsert, value: Emittable, value_owns: Bool, target_alloc: String@symbol) RETURNS !IndexInsert
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -209,10 +209,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__with_fiber_capture_map( &rtoc_self_view.lowering, new_entries, capture_symbols, rt_override, blk);
 }
 END
-PUB FN pipelineLoweringBridge__execution_boundary_fact(self: PipelineLoweringBridge, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS !ExecutionBoundaryFact
+PUB FN pipelineLoweringBridge__execution_boundary_fact(MUTABLE self: PipelineLoweringBridge, kind: String@symbol, dispatch: String@symbol, analysis: ?CaptureAnalysis) RETURNS !ExecutionBoundaryFact
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRLowering__pipeline_execution_boundary_fact(rtoc_self_view.lowering, kind, dispatch, analysis));
 }
 END

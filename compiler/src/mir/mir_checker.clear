@@ -404,7 +404,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
     ELSE_IF _ IS_A ExprStmt AS expr_stmt THEN
         MUTABLE expr_stmt_mutable = COPY expr_stmt;
-        TRY (mIRChecker__scan_expr_for_hpt_leak_mut(rtoc_self_view, exprStmt__expr(expr_stmt_mutable), &hpt_leaks));
+        TRY (mIRChecker__scan_expr_for_hpt_leak_mut(&rtoc_self_view, exprStmt__expr(expr_stmt_mutable), &hpt_leaks));
     ELSE_IF _ IS_A LambdaExpr AS lambda_expr THEN
         MUTABLE lambda_expr_mutable = COPY lambda_expr;
         IF lambda_expr_mutable.fn_def THEN
@@ -1113,7 +1113,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE first = COPY UNWRAP (live_states.first());
-    mIRChecker__normalize_guarded_conditional_releases_mut(rtoc_self_view, live_states);
+    mIRChecker__normalize_guarded_conditional_releases_mut(&rtoc_self_view, live_states);
     MUTABLE rtoc_each_items_23 = (live_states |> SKIP 1);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_23.length() DO
@@ -1125,14 +1125,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_UNVERIFIED_PATH, Name{ StringValue: COPY label }, "control-flow branches rejoin with different ownership state: ${TRY (linearOwnershipState__summary(first))} vs ${TRY (linearOwnershipState__summary(rtoc_state))}")));
     rtoc_idx = rtoc_idx + 1;
     END
-    mIRChecker__copy_linear_state_mut(rtoc_self_view, first, &into);
+    mIRChecker__copy_linear_state_mut(&rtoc_self_view, first, &into);
     NIL;
 }
 END
-PUB FN mIRChecker__normalize_guarded_conditional_releases_mut(self: MIRChecker, states: []LinearOwnershipState@multiowned) RETURNS Void
+PUB FN mIRChecker__normalize_guarded_conditional_releases_mut(MUTABLE self: MIRChecker, states: []LinearOwnershipState@multiowned) RETURNS Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (states.length() == 0) THEN
       RETURN;
     END
@@ -1167,7 +1167,7 @@ PUB FN mIRChecker__linear_require_same_state_mut(MUTABLE self: MIRChecker, expec
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    mIRChecker__normalize_guarded_conditional_releases_mut(rtoc_self_view, [expected, actual]);
+    mIRChecker__normalize_guarded_conditional_releases_mut(&rtoc_self_view, [expected, actual]);
     IF TRY (linearOwnershipState__same_state?(expected, actual)) THEN
       RETURN;
     END
@@ -1181,7 +1181,7 @@ PUB FN mIRChecker__linear_exit_scope_mut(MUTABLE self: MIRChecker, MUTABLE outer
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE projected = linearOwnershipState__copy(inner);
     TRY (mIRChecker__prune_scope_locals_mut(&rtoc_self_view, outer, &projected, label));
-    mIRChecker__copy_linear_state_mut(rtoc_self_view, projected, &outer);
+    mIRChecker__copy_linear_state_mut(&rtoc_self_view, projected, &outer);
     NIL;
 }
 END
@@ -1208,10 +1208,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__copy_linear_state_mut(self: MIRChecker, source: LinearOwnershipState, MUTABLE target: LinearOwnershipState) RETURNS Void
+PUB FN mIRChecker__copy_linear_state_mut(MUTABLE self: MIRChecker, source: LinearOwnershipState, MUTABLE target: LinearOwnershipState) RETURNS Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &target.owned.clear();
     &target.owned.merge(source.owned);
     &target.released.clear();
@@ -2598,10 +2598,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN mIRChecker__scan_expr_for_hpt_leak_mut(self: MIRChecker, node: ?Emittable, MUTABLE leaks: []String) RETURNS !Void
+PRIVATE FN mIRChecker__scan_expr_for_hpt_leak_mut(MUTABLE self: MIRChecker, node: ?Emittable, MUTABLE leaks: []String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node EXISTS AS node_value THEN
       mIR__each_surface_node(NodeRoot{ Emittable: COPY node_value }, %(expr: Emittable) USE(MUTABLE leaks, rtoc_self_view) -> {
     MUTABLE effect = TRY (ownershipEffect__of(expr));
@@ -3875,8 +3875,8 @@ END
 # answers too.
 PUB FN mIRCheckerRegistryOwnershipNode__mutating_receiver_allocator_op?(value: MIRCheckerRegistryOwnershipNode) RETURNS !?Bool ->
   PARTIAL MATCH value START
-    MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN TRY (registryCall__mutating_receiver_allocator_op?(item));,
-    MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN TRY (indexedStore__mutating_receiver_allocator_op?(item));,
+    MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN TRY (registryCall__mutating_receiver_allocator_op?(&item));,
+    MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN TRY (indexedStore__mutating_receiver_allocator_op?(&item));,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;

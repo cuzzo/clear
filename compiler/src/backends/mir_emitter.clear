@@ -1496,7 +1496,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE overrides = TRY (mIREmitter__polymorphic_capture_overrides(rtoc_self_view, captures));
     MUTABLE guard_captures = TRY (mIREmitter__polymorphic_move_guard_captures(rtoc_self_view, node.body, [node.alias_name]));
-    MUTABLE guard_overrides = TRY (mIREmitter__polymorphic_move_guard_overrides(rtoc_self_view, guard_captures, captures.length()));
+    MUTABLE guard_overrides = TRY (mIREmitter__polymorphic_move_guard_overrides(&rtoc_self_view, guard_captures, captures.length()));
     MUTABLE body_zig = mIREmitter__with_move_guard_overrides(&rtoc_self_view, guard_overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_15 = mIREmitter__with_ident_overrides(&rtoc_self_view, overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_14 = mIREmitter__with_runtime_name(&rtoc_self_view, UNWRAP (overrides[CAST(node.rt AS String)]), %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -1545,7 +1545,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE overrides = TRY (mIREmitter__polymorphic_capture_overrides(rtoc_self_view, captures));
     MUTABLE all_bodies = ((node.body) + ((node.guard_fail_body OR_ELSE List[])));
     MUTABLE guard_captures = TRY (mIREmitter__polymorphic_move_guard_captures(rtoc_self_view, all_bodies, [node.alias_name, "__flow"]));
-    MUTABLE guard_overrides = TRY (mIREmitter__polymorphic_move_guard_overrides(rtoc_self_view, guard_captures, captures.length()));
+    MUTABLE guard_overrides = TRY (mIREmitter__polymorphic_move_guard_overrides(&rtoc_self_view, guard_captures, captures.length()));
     MUTABLE body_zig = mIREmitter__with_move_guard_overrides(&rtoc_self_view, guard_overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_18 = mIREmitter__with_ident_overrides(&rtoc_self_view, overrides, %() USE(node, overrides, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_17 = mIREmitter__with_runtime_name(&rtoc_self_view, UNWRAP (overrides[CAST(node.rt AS String)]), %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -1673,10 +1673,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN moved;
 }
 END
-PRIVATE FN mIREmitter__polymorphic_move_guard_overrides(self: MIREmitter, captures_value: []String, offset: Int64) RETURNS !{String}String
+PRIVATE FN mIREmitter__polymorphic_move_guard_overrides(MUTABLE self: MIREmitter, captures_value: []String, offset: Int64) RETURNS !{String}String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE rtoc_indexed_items_30: []String = captures_value;

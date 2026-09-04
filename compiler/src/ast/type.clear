@@ -1452,7 +1452,7 @@ PUB FN type__apply_capabilities_mut(MUTABLE self: Type, ownership: ?TypeCapabili
   self.shape = TRY (typeShape__with_expression(self.shape, typeExpressionTree__with_root_capabilities(self.shape.expression, self.capabilities)));
   RETURN COPY self.capabilities;
 END
-PUB FN type__clear_zig_type_cache_mut(self: Type) RETURNS Void ->
+PUB FN type__clear_zig_type_cache_mut(MUTABLE self: Type) RETURNS Void ->
   RETURN;
 END
 PUB FN type__apply_placement_mut(MUTABLE self: Type, provenance: ?TypePlacementMaybeSymbol = TypePlacementMaybeSymbol{ TypePlacementUnset: COPY TypePlacementUnset{} }) RETURNS TypePlacement ->
@@ -2317,7 +2317,7 @@ PUB FN type__bare_data_type(self: Type) RETURNS !Type ->
   MUTABLE bare = TRY (type__copy_type(self));
   TRY (type__strip_runtime_capabilities_mut(&bare));
   type__reset_to_bare_data_placement_mut(&bare);
-  type__clear_zig_type_cache_mut(bare);
+  type__clear_zig_type_cache_mut(&bare);
   RETURN bare;
 END
 PUB FN type__any_rc?(self: Type) RETURNS !Bool ->

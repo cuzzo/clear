@@ -49,7 +49,7 @@ PUB FN compilerFrontend__compile(cheat_code_input: String, importer: ModuleImpor
   MUTABLE rtoc_mutable_receiver_4 = mIRPassState__for_mut( &ast);
   TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_4, :pipeline_rewritten));
   MUTABLE rtoc_local_receiver_5 = stringConcatRewriter__new();
-  TRY (stringConcatRewriter__rewrite_mut(rtoc_local_receiver_5, &ast));
+  TRY (stringConcatRewriter__rewrite_mut(&rtoc_local_receiver_5, &ast));
   MUTABLE rtoc_mutable_receiver_6 = mIRPassState__for_mut( &ast);
   TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_6, :string_concat_rewritten));
   MUTABLE schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult = %(name: String@symbol) USE(annotator) -> {

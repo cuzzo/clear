@@ -265,10 +265,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN KEEP scopeBindings__get_index(rtoc_self_view.bindings, name);
 }
 END
-PUB FN scope__local_entry_mut(self: Scope, name: String) RETURNS SymbolEntry@multiowned
+PUB FN scope__local_entry_mut(MUTABLE self: Scope, name: String) RETURNS SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN UNWRAP (scope__local_entry(rtoc_self_view, name));
 }
 END
@@ -292,24 +292,24 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-FN scope__resolve_entry_mut(self: Scope, name: String) RETURNS SymbolEntry@multiowned
+FN scope__resolve_entry_mut(MUTABLE self: Scope, name: String) RETURNS SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN UNWRAP (scope__resolve_entry(rtoc_self_view, name));
 }
 END
-FN scope__local_entry?(self: Scope, name: String) RETURNS Bool
+FN scope__local_entry?(MUTABLE self: Scope, name: String) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN scopeBindings__key?(rtoc_self_view.bindings, name);
 }
 END
-PUB FN scope__entry?(self: Scope, name: String) RETURNS Bool
+PUB FN scope__entry?(MUTABLE self: Scope, name: String) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN !((scope__resolve_entry(rtoc_self_view, name) == NIL));
 }
 END
@@ -367,17 +367,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN scopeBindings__length(rtoc_self_view.bindings);
 }
 END
-FN scope__visible_entry_count(self: Scope) RETURNS !Int64
+FN scope__visible_entry_count(MUTABLE self: Scope) RETURNS !Int64
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (scope__count_visible_entries_mut(rtoc_self_view, Set[]));
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN TRY (scope__count_visible_entries_mut(&rtoc_self_view, Set[]));
 }
 END
-FN scope__count_visible_entries_mut(self: Scope, MUTABLE seen: [Set]String) RETURNS !Int64
+FN scope__count_visible_entries_mut(MUTABLE self: Scope, MUTABLE seen: [Set]String) RETURNS !Int64
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE count: Int64 = 0;
     MUTABLE cursor: ?Scope@multiowned = rtoc_self_view;
     WHILE !((cursor == NIL)) DO
@@ -413,20 +413,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN visible;
 }
 END
-PUB FN scope__visible_names(self: Scope) RETURNS ![]String
+PUB FN scope__visible_names(MUTABLE self: Scope) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_4: []String = List[]; rtoc_empty_list_4 } );
     MUTABLE seen: [Set]String = Set[];
-    TRY (scope__append_visible_names_mut(rtoc_self_view, &names, &seen));
+    TRY (scope__append_visible_names_mut(&rtoc_self_view, &names, &seen));
     RETURN names;
 }
 END
-FN scope__append_visible_names_mut(self: Scope, MUTABLE names: []String, MUTABLE seen: [Set]String) RETURNS !Void
+FN scope__append_visible_names_mut(MUTABLE self: Scope, MUTABLE names: []String, MUTABLE seen: [Set]String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN (TRY (scope__visible_entries(rtoc_self_view))).keys() DO
     IF seen.contains?(_) THEN
       CONTINUE;
@@ -567,10 +567,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN reversed;
 }
 END
-PUB FN scope__check_validity_mut(self: Scope, name: String) RETURNS !Void
+PUB FN scope__check_validity_mut(MUTABLE self: Scope, name: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE entry: ?SymbolEntry@multiowned = scope__resolve_entry(rtoc_self_view, name);
     IF entry EXISTS AS entry_value THEN
       IF (symbolEntry__valid(entry_value) == FALSE) THEN
