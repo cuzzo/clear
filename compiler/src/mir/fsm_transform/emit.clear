@@ -204,7 +204,7 @@ PRIVATE FN emit__fsm_segment_fact_roots(spec: FsmSegmentSpec) RETURNS ![]Emittab
   RETURN roots;
 END
 PUB FN emit__fsm_body_mir_nodes(stmts: []FsmBodyItem) RETURNS ![]Emittable ->
-  RETURN stmts |> SELECT:? fsmBodyItem__fact_node(_) |> WHERE _ != NIL;
+  RETURN stmts |> SELECT:? fsmBodyItem__fact_node(_) |> WHERE _ != NIL |> SELECT UNWRAP (_);
 END
 PUB FN emit__fsm_body_mir_item(node: Emittable) RETURNS FsmBodyItem ->
   RETURN fsmBodyItem__mir(node);

@@ -5167,7 +5167,7 @@ PRIVATE FN mIRLowering__imported_bc_helper_fns(self: MIRLowering, mod_value: Com
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN items |> SELECT:? (IF !(_ IS_A FnDef) THEN NIL ELSE _ END) |> WHERE _ != NIL;
+    RETURN items |> SELECT:? (IF !(_ IS_A FnDef) THEN NIL ELSE _ END) |> WHERE _ != NIL |> SELECT UNWRAP (_);
 }
 END
 PUB FN mIRLowering__task_config_variant(self: MIRLowering, stack_size: ?String@symbol, computed_tier: ?String@symbol) RETURNS String
@@ -12550,7 +12550,7 @@ PRIVATE FN mIRLowering__capture_moved_guard_fields(self: MIRLowering, specs: []C
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN specs |> SELECT:? (IF !(captureSpec__needs_moved_guard?(_)) THEN NIL ELSE ContextFieldDecl{ name: "${_.name}_moved", type_zig: "bool", default_value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } } } END) |> WHERE _ != NIL;
+    RETURN specs |> SELECT:? (IF !(captureSpec__needs_moved_guard?(_)) THEN NIL ELSE ContextFieldDecl{ name: "${_.name}_moved", type_zig: "bool", default_value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } } } END) |> WHERE _ != NIL |> SELECT UNWRAP (_);
 }
 END
 PRIVATE FN mIRLowering__context_field_decl(self: MIRLowering, name: String, type_zig: String) RETURNS ContextFieldDecl
@@ -12578,7 +12578,7 @@ PRIVATE FN mIRLowering__capture_cleanup_stmts(self: MIRLowering, specs: []Captur
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN specs |> SELECT:? TRY (captureSpec__cleanup_mir_for(_, receiver)) |> WHERE _ != NIL;
+    RETURN specs |> SELECT:? TRY (captureSpec__cleanup_mir_for(_, receiver)) |> WHERE _ != NIL |> SELECT UNWRAP (_);
 }
 END
 PRIVATE FN mIRLowering__fiber_capture_source_overrides(self: MIRLowering, analysis: ?CaptureAnalysis, base: {String}String = {}) RETURNS !{String}String
