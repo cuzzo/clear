@@ -16044,7 +16044,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__struct_lit_fields_with_callsite_defaults(self: MIRLowering, node: StructLit) RETURNS !{String}Locatable
+PRIVATE FN mIRLowering__struct_lit_fields_with_callsite_defaults(self: MIRLowering, MUTABLE node: StructLit) RETURNS !{String}Locatable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -16067,7 +16067,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__lower_union_variant_lit(MUTABLE self: MIRLowering, node: UnionVariantLit) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_union_variant_lit(MUTABLE self: MIRLowering, MUTABLE node: UnionVariantLit) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16171,7 +16171,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY label, body: TRY (mIRLowering__append_ownership_transfers_for_mir_body(rtoc_self_view, hoisted, inherited_alloc_names, inherited_guarded_names)), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
 }
 END
-PRIVATE FN mIRLowering__union_variant_lit_field_types(self: MIRLowering, node: UnionVariantLit) RETURNS !{String}TypeTypeInput
+PRIVATE FN mIRLowering__union_variant_lit_field_types(self: MIRLowering, MUTABLE node: UnionVariantLit) RETURNS !{String}TypeTypeInput
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -16331,7 +16331,7 @@ PRIVATE FN mIRLowering__lower_assert(MUTABLE self: MIRLowering, MUTABLE node: As
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE eq_lowering: ?Call = TRY (mIRLowering__try_lower_equality_assert(&rtoc_self_view, node));
+    MUTABLE eq_lowering: ?Call = TRY (mIRLowering__try_lower_equality_assert(&rtoc_self_view, &node));
     IF (!(mIRLowering__bc_target?(rtoc_self_view)) AND (eq_lowering)) THEN
       RETURN MIRLoweringReturnValue{ Call: COPY UNWRAP (eq_lowering) };
     END
@@ -18575,7 +18575,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN DestructureSet{ targets: targets, value: COPY value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
-PRIVATE FN mIRLowering__destructure_source_transfer(self: MIRLowering, node: DestructuringAssignment, value: Emittable) RETURNS ![]Emittable
+PRIVATE FN mIRLowering__destructure_source_transfer(self: MIRLowering, MUTABLE node: DestructuringAssignment, value: Emittable) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -18725,7 +18725,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__lower_atomic_assignment(MUTABLE self: MIRLowering, node: BindExpr) RETURNS !ExprStmt
+PRIVATE FN mIRLowering__lower_atomic_assignment(MUTABLE self: MIRLowering, MUTABLE node: BindExpr) RETURNS !ExprStmt
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -18748,7 +18748,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ExprStmt{ expr: Emittable{ MIRMethodCall: COPY method_call }, discard: discard, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
-PRIVATE FN mIRLowering__kept_assignment_field_value(MUTABLE self: MIRLowering, node: Assignment) RETURNS !?Emittable
+PRIVATE FN mIRLowering__kept_assignment_field_value(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !?Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -18769,7 +18769,7 @@ PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, MUTABLE node
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE special_result: ?Stmt = TRY (mIRLowering__special_assignment_result(&rtoc_self_view, node));
+    MUTABLE special_result: ?Stmt = TRY (mIRLowering__special_assignment_result(&rtoc_self_view, &node));
     IF special_result EXISTS AS special_result_value THEN
       RETURN castStmtToEmittable( UNWRAP (castStmtToEmittable(special_result_value)));
     END

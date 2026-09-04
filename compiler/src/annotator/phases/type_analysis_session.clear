@@ -4977,7 +4977,7 @@ END
 PRIVATE FN typeAnalysisSession__find_matching_intrinsic(self: TypeAnalysisSession, definitions: []FunctionSignature, args: []Locatable) RETURNS !?FunctionSignature@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE matched: ?FunctionSignature@multiowned = NIL;
     MUTABLE matched_score: Int64 = -1;
     MUTABLE varargs_fallback: ?FunctionSignature@multiowned = NIL;
@@ -5044,7 +5044,7 @@ END
 PRIVATE FN typeAnalysisSession__intrinsic_arg_matches?(self: TypeAnalysisSession, spec: IntrinsicArgSpec, MUTABLE arg: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF intrinsicArgSpec__unconstrained_any?(spec) THEN
       RETURN TRUE;
     END
@@ -5085,7 +5085,7 @@ END
 PRIVATE FN typeAnalysisSession__any_array_intrinsic_arg?(self: TypeAnalysisSession, spec: String@symbol, MUTABLE arg: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((spec == symbol("Any[]"))) THEN
       RETURN FALSE;
     END
@@ -5144,7 +5144,7 @@ END
 PRIVATE FN typeAnalysisSession__select_element_forces_heap_result?(self: TypeAnalysisSession, expr: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE found: Bool = FALSE;
     aST__each_locatable_list(expr, FALSE, %(node: Locatable) -> {
     IF node IS_A BinaryOp AS binary_op THEN
@@ -5165,14 +5165,14 @@ END
 PRIVATE FN typeAnalysisSession__pipe_complex_op?(self: TypeAnalysisSession, node: ?Locatable) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ((aST__pipeline_complex_op?( UNWRAP (node)) OR ((node != NIL) AND (node IS_A RecoverOp))) OR ((node != NIL) AND (node IS_A CollectOp)));
 }
 END
 PRIVATE FN typeAnalysisSession__concurrent_parallel_enabled?(self: TypeAnalysisSession, options: {String}Locatable) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE value: ?Locatable = COPY options["parallel"];
     RETURN !(!(((IF value? IS_A Identifier AS identifier THEN (["true", "TRUE"]).contains?(identifier__name(identifier)) ELSE FALSE END))));
 }
@@ -16987,7 +16987,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE clause: ?ErrorClause = COPY node.lock_error_clause;
     MUTABLE is_snapshot_txn = (node.snapshot_mode == :transaction);
     IF ((node.arms != NIL) AND is_snapshot_txn) THEN
-      TRY (typeAnalysisSession__validate_snapshot_match_arms_mut(&rtoc_self_view, node));
+      TRY (typeAnalysisSession__validate_snapshot_match_arms_mut(&rtoc_self_view, &node));
       RETURN;
     END
     MUTABLE capability_plan = TRY (capabilityPlan__require_for(node));
@@ -17068,7 +17068,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY "<field>";
 }
 END
-PRIVATE FN typeAnalysisSession__validate_no_multi_object_atomic_mut(self: TypeAnalysisSession, node: WithBlock) RETURNS !Void
+PRIVATE FN typeAnalysisSession__validate_no_multi_object_atomic_mut(self: TypeAnalysisSession, MUTABLE node: WithBlock) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
