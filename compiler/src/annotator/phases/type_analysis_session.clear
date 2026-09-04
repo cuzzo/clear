@@ -132,6 +132,11 @@ UNION SourceNode { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolReq
 UNION SourceType { SymbolValue: String@symbol, StringValue: String, Type: Type }
 UNION TypeAnalysisSessionReturnValue { StringValue: String, SymbolValue: String@symbol, Type: Type, Int64Value: Int64 }
 UNION TypeAnalysisSessionReturnValueItem { StringValue: String, SymbolValue: String@symbol }
+PUB STRUCT WithCapCandidate {
+  sigil: String,
+  description_code: String@symbol,
+  description_params: {String@symbol}DiagnosticKwValue
+}
 PUB STRUCT TypeAnalysisSession {
   audit_inputs: CapabilityAuditInputs,
   config: AnnotatorPhasesTypeAnalysisSessionConfig,
@@ -2442,8 +2447,12 @@ PRIVATE FN typeAnalysisSession__emit_with_cannot_infer_cap_mut(self: TypeAnalysi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE candidates = [{:sigil: "@multiowned", :description_code: :WITH_ADD_MULTIOWNED, :description_params: {:suffix: ""}}, {:sigil: "@shared", :description_code: :WITH_ADD_SHARED, :description_params: {:suffix: "across fibers"}}, {:sigil: "@locked", :description_code: :WITH_ADD_LOCKED, :description_params: {}}, {:sigil: "@writeLocked", :description_code: :WITH_ADD_WRITE_LOCKED, :description_params: {:reader: "via WITH READ"}}];
-    MUTABLE fixes = candidates |> SELECT:? TRY (typeAnalysisSession__build_decl_cap_insert_fix(rtoc_self_view, name, _[:sigil], _[:description_code], _[:description_params], :interactive)) |> WHERE _ != NIL;
+    MUTABLE candidates: []WithCapCandidate = [
+      WithCapCandidate{ sigil: "@multiowned", description_code: :WITH_ADD_MULTIOWNED, description_params: {:suffix: DiagnosticKwValue{ StringValue: "" }} },
+      WithCapCandidate{ sigil: "@shared", description_code: :WITH_ADD_SHARED, description_params: {:suffix: DiagnosticKwValue{ StringValue: "across fibers" }} },
+      WithCapCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} },
+      WithCapCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: {:reader: DiagnosticKwValue{ StringValue: "via WITH READ" }} }];
+    MUTABLE fixes = candidates |> SELECT:? TRY (typeAnalysisSession__build_decl_cap_insert_fix(rtoc_self_view, name, _.sigil, _.description_code, _.description_params, :interactive)) |> WHERE _ != NIL |> SELECT UNWRAP (_);
     IF (fixes.length() == 0) THEN
       RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_CANNOT_INFER_CAP }, [], CAST({:name: name} AS {String@symbol}Any)));
     END
@@ -5464,7 +5473,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE cardinality =   IF (pipelineSourceFact__stream?(source) AND source_type.shape.expression.kind IS_A StreamTypeExpression) THEN
       (CAST(source_type.shape.expression.kind AS StreamTypeExpression)).cardinality
     ELSE
-      :FINITE
+      TypeExpressionDimension{ SymbolValue: :FINITE }
     END;
     RETURN CAST(TRY (tenseSelectorPlan__stream_result_type(effect.plan, cardinality)) AS Type);
 }

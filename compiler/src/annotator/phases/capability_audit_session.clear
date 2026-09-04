@@ -1424,8 +1424,12 @@ PRIVATE FN capabilityAuditSession__emit_with_cannot_infer_cap_mut(self: Capabili
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE candidates = [{:sigil: "@multiowned", :description_code: :WITH_ADD_MULTIOWNED, :description_params: {:suffix: ""}}, {:sigil: "@shared", :description_code: :WITH_ADD_SHARED, :description_params: {:suffix: "across fibers"}}, {:sigil: "@locked", :description_code: :WITH_ADD_LOCKED, :description_params: {}}, {:sigil: "@writeLocked", :description_code: :WITH_ADD_WRITE_LOCKED, :description_params: {:reader: "via WITH READ"}}];
-    MUTABLE fixes = candidates |> SELECT:? TRY (capabilityAuditSession__build_decl_cap_insert_fix(rtoc_self_view, name, _[:sigil], _[:description_code], _[:description_params], :interactive)) |> WHERE _ != NIL;
+    MUTABLE candidates: []WithCapCandidate = [
+      WithCapCandidate{ sigil: "@multiowned", description_code: :WITH_ADD_MULTIOWNED, description_params: {:suffix: DiagnosticKwValue{ StringValue: "" }} },
+      WithCapCandidate{ sigil: "@shared", description_code: :WITH_ADD_SHARED, description_params: {:suffix: DiagnosticKwValue{ StringValue: "across fibers" }} },
+      WithCapCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} },
+      WithCapCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: {:reader: DiagnosticKwValue{ StringValue: "via WITH READ" }} }];
+    MUTABLE fixes = candidates |> SELECT:? TRY (capabilityAuditSession__build_decl_cap_insert_fix(rtoc_self_view, name, _.sigil, _.description_code, _.description_params, :interactive)) |> WHERE _ != NIL |> SELECT UNWRAP (_);
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_CANNOT_INFER_CAP }, [], CAST({:name: name} AS {String@symbol}Any)));
     END
