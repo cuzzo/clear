@@ -3967,7 +3967,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE arg_node = COPY facts.arg_node;
     MUTABLE root: ?Identifier = aST__root_identifier(arg_node);
     IF root EXISTS AS root_value THEN
-      MUTABLE interior_mutable = symbolEntry__always_mutable_sync?((TRY (aST__full_type_mut(arg_node))).sync());
+      MUTABLE interior_mutable = symbolEntry__always_mutable_sync?(type__sync((TRY (aST__full_type_mut(arg_node)))));
       IF interior_mutable THEN
         TRY (typeAnalysisSession__mark_var_mutated_via_call(rtoc_self_view, root_value.name));
         RETURN;
@@ -5566,7 +5566,7 @@ PRIVATE FN typeAnalysisSession__analyze_window_op(MUTABLE self: TypeAnalysisSess
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "WINDOW"));
-    MUTABLE item_type = (TRY (aST__full_type_mut(node.left))).element_type().resolved();
+    MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.size()));
     MUTABLE size_type = node.right.size().resolved_type;
     IF !(([:Int64, :Float64]).contains?(size_type)) THEN
@@ -5693,7 +5693,7 @@ PRIVATE FN typeAnalysisSession__analyze_join_op(MUTABLE self: TypeAnalysisSessio
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "JOIN"));
-    MUTABLE left_type = (TRY (aST__full_type_mut(node.left))).element_type().resolved();
+    MUTABLE left_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.right_source));
     MUTABLE rhs_type_info = node.right.right_source.full_type_mut({:context: "pipeline right source"});
     IF !(((node.right.right_source.metatype == :array) OR (IF rhs_type_info != NIL THEN
@@ -5839,7 +5839,7 @@ PRIVATE FN typeAnalysisSession__analyze_unnest_op(MUTABLE self: TypeAnalysisSess
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "UNNEST"));
-    MUTABLE item_type = (TRY (aST__full_type_mut(node.left))).element_type().resolved();
+    MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     MUTABLE inner_bind_name = NIL;
     MUTABLE expr = node.right.expression();
     IF (expr IS_A BinaryOp AND (expr.op() == :BIND_VAR)) THEN

@@ -10242,7 +10242,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       receiver = Emittable{ AddressOf: COPY AddressOf{ expr: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     MUTABLE sink_alloc = TRY (mIRLowering__placement_for_node(rtoc_self_view, receiver_node));
-    MUTABLE sink_type = typeExpression__of(TypeProjectionExpression{ owner: COPY (TRY (aST__full_type_mut(receiver_node))).resolved(), member: :MIRLoweringValue, protocol: NIL });
+    MUTABLE sink_type = typeExpression__of(TypeProjectionExpression{ owner: COPY type__resolved((TRY (aST__full_type_mut(receiver_node)))), member: :MIRLoweringValue, protocol: NIL });
     MUTABLE value = mIRLowering__with_sink_type(rtoc_self_view, TRY (type__new(TypeConstructionInput{ TypeExpression: COPY sink_type })), %() USE(sink_alloc, value_node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_380 = mIRLowering__with_decl_alloc(rtoc_self_view, sink_alloc, %() USE(value_node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_379 = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(value_node))) AS Emittable);
