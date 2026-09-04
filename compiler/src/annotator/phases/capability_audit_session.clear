@@ -3595,7 +3595,7 @@ PRIVATE FN capabilityAuditSession__compute_reachable(self: CapabilityAuditSessio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE seen = Set[];
+    MUTABLE seen: [Set]String = Set[];
     MUTABLE queue = (((graph[start_value] OR_ELSE Set[])) |> SELECT COPY _);
     WHILE !(queue.empty?()) DO
       MUTABLE n = COPY CAST((&queue.shift()) AS String);
@@ -3603,7 +3603,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         CONTINUE;
       END
       &seen.insert(n);
-      &queue.concat((((graph[n] OR_ELSE Set[])) |> SELECT COPY _));
+      queue = (queue + (((graph[n] OR_ELSE Set[])) |> SELECT COPY _));
     END
     RETURN seen;
 }
@@ -3623,7 +3623,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (callee == start_value) THEN
         RETURN TRUE;
       END
-      &queue.concat(((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[callee] OR_ELSE Set[])) |> SELECT COPY _));
+      queue = (queue + ((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[callee] OR_ELSE Set[])) |> SELECT COPY _));
     END
     RETURN FALSE;
 }

@@ -10814,7 +10814,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE operands = TRY (mIRLowering__ownership_operands_for_lowered_takes_arg(rtoc_self_view, materialized_args[rtoc_idx]?, stdlibCallFacts__ast_arg(stdlib_facts, rtoc_idx), "stdlib argument ${rtoc_idx.toString()}", sink_alloc, stdlib_facts.args[rtoc_idx]?.sink_type));
-      &consumed_operands.concat(operands);
+      consumed_operands = (consumed_operands + operands);
       FOR _ IN operands DO
       IF ((_.kind == :owned_binding) AND (_.name != NIL)) THEN
             &consumed_names.append(COPY (_.name)?);
@@ -17015,7 +17015,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_lambda_result_627 = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (rtoc_indexed_items_625[rtoc_indexed_i_626]))));
       rtoc_lambda_result_627
     });
-    &body.concat(pending);
+    body = (body + pending);
     MUTABLE item_name = "__stream${s_id}_item${rtoc_indexed_i_626.toString()}";
     &body.append(Let{ name: COPY item_name, init: COPY item_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL });
     Ident{ name: COPY item_name, lowered_node_id: NIL, ownership_consumption: NIL }

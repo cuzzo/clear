@@ -11976,7 +11976,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END)
       } |> WHERE _ != NIL;
       MUTABLE extras = ((resolutions[rtoc_idx]?.members).keys() - (((resolutions[rtoc_idx]?.protocol).requirements) |> SELECT _.name));
-      &failures.concat(extras |> SELECT "${_}: not declared by ${(resolutions[rtoc_idx]?.protocol).name}");
+      failures = (failures + extras |> SELECT "${_}: not declared by ${(resolutions[rtoc_idx]?.protocol).name}");
       IF (failures.length() == 0) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;

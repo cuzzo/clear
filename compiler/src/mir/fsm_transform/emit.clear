@@ -840,8 +840,8 @@ PRIVATE FN emit__register_owned_suspend_result_cleanups_mut(segment_specs: []Fsm
 END
 PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [][]Emittable, segments: []Segment, liveness: LivenessResult, captured: {String}Type@multiowned, conservative_promoted: []String) RETURNS !Void ->
   MUTABLE forbidden = COPY liveness.cross_segment_vars.keys();
-  &forbidden.concat((captured).keys());
-  &forbidden.concat(conservative_promoted);
+  forbidden = (forbidden + (captured).keys());
+  forbidden = (forbidden + conservative_promoted);
   MUTABLE forbidden_set = ((forbidden |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _) |> DISTINCT _;
   IF forbidden_set.empty?() THEN
     RETURN;
