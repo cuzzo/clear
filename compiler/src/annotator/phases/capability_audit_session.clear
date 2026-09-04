@@ -637,7 +637,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE best: ?String =   IF ((fix_label == "closest in-scope variable") AND compilerRegexMatch(name, compilerRegexCompile("\\A[A-Z]"))) THEN
       NIL
     ELSE
-      TRY (capabilityAuditSession__closest_name(rtoc_self_view, NameCandidate{ StringValue: COPY name }, candidates))
+      TRY (capabilityAuditSession__closest_name(rtoc_self_view, NameCandidate{ StringValue: COPY name }, castStringListToNameCandidateList(candidates)))
     END;
     MUTABLE fixes = List[];
     IF best EXISTS AS best_value THEN

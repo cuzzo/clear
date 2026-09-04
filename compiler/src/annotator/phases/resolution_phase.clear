@@ -1123,7 +1123,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN schema.variants DO
     &variants.append(COPY CAST(_ AS String));
     END
-    RETURN TRY ( castStringListToSchemasEnumSchemaVariantInputItemList(enumSchema__new(variants, schema.visibility)));
+    RETURN TRY (enumSchema__new(castStringListToSchemasEnumSchemaVariantInputItemList(variants), schema.visibility));
 }
 END
 PRIVATE FN resolutionSession__clone_struct_schema(self: ResolutionSession, schema: StructSchema) RETURNS !StructSchema@multiowned
@@ -1394,7 +1394,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (args.length() == 0) THEN
       receiver_value.type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(resolution.owner.name) }));
     ELSE
-      receiver_value.type = TRY (type__generic_instance_of(symbol(resolution.owner.name), args));
+      receiver_value.type = TRY (type__generic_instance_of(symbol(resolution.owner.name), castTypeListToTypeTypeInputList(args)));
     END
 }
 END

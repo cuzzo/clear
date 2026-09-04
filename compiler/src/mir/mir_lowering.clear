@@ -2189,7 +2189,7 @@ FN mIRLowering__emitted_guarded_cleanup_for_name?(self: MIRLowering, nodes: []Em
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN nodes |> ANY (IF !((_ IS_A Cleanup OR _ IS_A ErrCleanup)) THEN FALSE ELSE ((emittable__name(_) == name) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_37: ?CleanupEntry@multiowned = emittable__cleanup_entry(_);
-    cleanupEntry__has_moved_guard?( UNWRAP (rtoc_local_receiver_37)) }) END);
+    cleanupEntry__has_moved_guard?( UNWRAP (UNWRAP (rtoc_local_receiver_37))) }) END);
 }
 END
 FN mIRLowering__dedupe_transfer_marks(self: MIRLowering, marks: []Emittable) RETURNS ![]Emittable
@@ -5888,7 +5888,7 @@ PRIVATE FN mIRLowering__rc_retain_needed?(self: MIRLowering, value_node: Locatab
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF value_node IS_A Identifier AS identifier THEN
-      MUTABLE ti = TRY ( Locatable{ Identifier: COPY type__from_node_mut(identifier, "rc retain") });
+      MUTABLE ti = TRY ( Locatable{ Identifier: COPY type__from_node_mut(Locatable{ Identifier: COPY identifier }, "rc retain") });
       MUTABLE declared: ?Type@multiowned = NIL;
       IF identifier.symbol != NIL THEN
         declared = COPY symbolEntry__type(((identifier.symbol)?));
@@ -6371,7 +6371,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY mir;
     END
     MUTABLE expr_type = TRY (aST__full_type_mut(step.expr));
-    MUTABLE is_void_step = TRY (mIRLowering__ast_void_type?(rtoc_self_view, expr_type));
+    MUTABLE is_void_step = TRY (mIRLowering__ast_void_type?(rtoc_self_view, TypeTypeInput{ Type: COPY expr_type }));
     RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY mir, discard: !(is_void_step), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
 }
 END
@@ -16207,7 +16207,7 @@ PRIVATE FN mIRLowering__aggregate_field_sink_alloc(self: MIRLowering, ignored_fi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF value IS_A Identifier AS identifier THEN
-      MUTABLE ti = TRY ( Locatable{ Identifier: COPY type__from_node_mut(identifier, "aggregate field sink") });
+      MUTABLE ti = TRY ( Locatable{ Identifier: COPY type__from_node_mut(Locatable{ Identifier: COPY identifier }, "aggregate field sink") });
       IF (TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, UNWRAP (ti))) AND ((aST__moved?(Locatable{ Identifier: COPY identifier }) OR (IF identifier.symbol != NIL THEN
         symbolEntry__heap_storage?(identifier.symbol)
       ELSE
@@ -20292,7 +20292,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expr_label EXISTS AS expr_label_value THEN
       RETURN TRY (mIRLowering__lower_body_with_break(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(stmts), expr_label_value));
     ELSE
-      RETURN TRY (mIRLowering__lower_body(&rtoc_self_view, stmts));
+      RETURN TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(stmts)));
     END
 }
 END
@@ -20637,7 +20637,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY value;
     END
     MUTABLE ret_type: ?Type = TRY (type__from_node_mut(node.value, "heap carry recursive return"));
-    ret_type = TRY ( UNWRAP (type__success_type(ret_type)));
+    ret_type = TRY ( UNWRAP (type__success_type(UNWRAP (ret_type))));
     IF TRY (type__recursive_cleanup_shape?(ret_type, mIRLowering__mir_schema_lookup(rtoc_self_view))) THEN
       RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: UNWRAP (COPY value), zig_type: COPY TRY (type__zig_type(ret_type)), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(ret_type))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE
