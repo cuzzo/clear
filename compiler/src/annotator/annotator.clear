@@ -55,7 +55,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.semantic_index = NIL;
     MUTABLE pipeline = annotationPipeline__new(KEEP rtoc_self_view.config.importer, rtoc_self_view.config.source_dir, rtoc_self_view.config.source_code, rtoc_self_view.config.strict_test);
     DEFER rtoc_self_view.annotation_products = KEEP pipeline.products;
-    TRY (annotationPipeline__run(&pipeline, program));
+    TRY (annotationPipeline__run(&pipeline, &program));
     IF !(annotationProducts__complete?(rtoc_self_view.annotation_products)) THEN
       panic("annotation pipeline did not publish complete products");
     END
