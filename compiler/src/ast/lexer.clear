@@ -426,7 +426,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         BREAK;
       ELSE_IF (rtoc_self_view.s.peek(2) == ("$" $+ "{")) THEN
         IF (rtoc_self_view.interpolation_depth >= 64) THEN
-          RAISE Input, Error, "Lexer Error: string interpolation nesting exceeds {} levels";
+          RAISE Input, Error, "Lexer Error: string interpolation nesting exceeds {} fixableError__levels()";
         END
         MUTABLE interpolation_line = rtoc_self_view.line;
         MUTABLE interpolation_col = rtoc_self_view.column;

@@ -10,8 +10,12 @@ REQUIRE "pkg:rtoc_73656d616e7469632f74656e73655f6f7065726174696f6e5f706c616e2e63
 # Ruby module Annotator
 # Ruby module Annotator::Domains
 # Ruby module Annotator::Domains::Errors
-sync_policy_required_errors = [:LockTimeout, :MvccConflict, :AtomicConflict];
-sync_policy_inline_only_errors = [:Deadlock, :LockCycle];
+PUB FN errors__sync_policy_required_errors() RETURNS Any EFFECTS REENTRANT ->
+  RETURN [:LockTimeout, :MvccConflict, :AtomicConflict];
+END
+PUB FN errors__sync_policy_inline_only_errors() RETURNS Any EFFECTS REENTRANT ->
+  RETURN [:Deadlock, :LockCycle];
+END
 # End Ruby module Annotator::Domains::Errors
 # End Ruby module Annotator::Domains
 # End Ruby module Annotator

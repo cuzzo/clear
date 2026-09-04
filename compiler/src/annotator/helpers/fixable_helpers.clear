@@ -23,8 +23,12 @@ EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String E
 
 UNION FixableReg { VarDecl: VarDecl, DestructureTarget: DestructureTarget }
 # Ruby module FixableHelper
-signed_order = [:Int8, :Int16, :Int32, :Int64];
-unsigned_order = [:Byte, :UInt16, :UInt32, :UInt64];
+PUB FN fixableHelpers__signed_order() RETURNS Any EFFECTS REENTRANT ->
+  RETURN [:Int8, :Int16, :Int32, :Int64];
+END
+PUB FN fixableHelpers__unsigned_order() RETURNS Any EFFECTS REENTRANT ->
+  RETURN [:Byte, :UInt16, :UInt32, :UInt64];
+END
 STRUCT CapabilityFixCandidate {
   sigil: String,
   description_code: String@symbol,

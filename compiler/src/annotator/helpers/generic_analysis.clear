@@ -5,7 +5,9 @@ REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172" AS lexer
 REQUIRE "pkg:rtoc_6173742f66756e6374696f6e5f7369676e61747572655f666f72776172642e636c656172" AS function_signature_forward
 REQUIRE "pkg:rtoc_6173742f747970655f65787072657373696f6e2e636c656172" AS type_expression
 # Ruby module GenericAnalysis
-builtin_types = [:Number, :Bool, :Byte, :Int8, :Int16, :Int32, :Int64, :UInt8, :UInt16, :UInt32, :UInt64, :Float32, :Float64, :TargetInt, :TargetUInt, :TargetLong, :TargetULong, :TargetLongLong, :TargetULongLong, :String, :Any, :Void, :Range, :Map];
+PUB FN genericAnalysis__builtin_types() RETURNS Any EFFECTS REENTRANT ->
+  RETURN [:Number, :Bool, :Byte, :Int8, :Int16, :Int32, :Int64, :UInt8, :UInt16, :UInt32, :UInt64, :Float32, :Float64, :TargetInt, :TargetUInt, :TargetLong, :TargetULong, :TargetLongLong, :TargetULongLong, :String, :Any, :Void, :Range, :Map];
+END
 PUB UNION DeclarationNode { VarDecl: VarDecl, BindExpr: BindExpr }
 PUB UNION AnnotationTypeShape { TypeMultiowned: Type@multiowned, SymbolValue: String@symbol, StringValue: String, Type: Type }
 PUB UNION GenericCallNode { FuncCall: FuncCall, MethodCall: MethodCall }

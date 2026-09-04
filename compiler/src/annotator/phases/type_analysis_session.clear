@@ -89,7 +89,7 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f72657475
 REQUIRE "pkg:rtoc_6173742f6572726f725f72656769737472792e636c656172" AS error_registry
 
 # Ruby: source_dir ? File.expand_path(source_dir) : Dir.pwd
-# path's expand leaves a relative path alone without a base, so the working
+# path's expand preMirTypeCheck__leaves() a relative path alone without a base, so the working
 # directory is the base, which is what File.expand_path resolves against.
 PRIVATE FN rtocResolveSourceDir(source_dir: ?String) RETURNS !String ->
   MUTABLE here: String = TRY (pwd());
@@ -1930,9 +1930,9 @@ PRIVATE FN typeAnalysisSession__smallest_fitting_int_type(self: TypeAnalysisSess
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE order = IF (val >= 0) THEN
-      unsigned_order
+      fixableHelpers__unsigned_order()
     ELSE
-      signed_order
+      fixableHelpers__signed_order()
     END;
     MUTABLE selected: ?String@symbol = NIL;
     MUTABLE rtoc_idx = 0;
@@ -7545,7 +7545,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF seen[param_sym] THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castGenericDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_DUP_TYPE_PARAM_KIND }, [], CAST({:param: _, :kind: kind, :name: aST__node_name(UNWRAP (castGenericDeclarationNodeToLocatable(node)))} AS {String@symbol}Any)));
     END
-    IF builtin_types.contains?(param_sym) THEN
+    IF genericAnalysis__builtin_types().contains?(param_sym) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castGenericDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS }, [], CAST({:param: _} AS {String@symbol}Any)));
     END
     seen[param_sym] = TRUE;
@@ -7834,7 +7834,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN;
     END
-    IF builtin_types.contains?(type__resolved(arg)) THEN
+    IF genericAnalysis__builtin_types().contains?(type__resolved(arg)) THEN
       RETURN;
     END
     IF facts.fn_type_params.contains?(type__resolved(arg)) THEN
@@ -17123,11 +17123,11 @@ PRIVATE FN typeAnalysisSession__resolve_error_selectors_mut(self: TypeAnalysisSe
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE possible = Set[];
     IF is_snapshot_txn THEN
-      &possible.merge(snapshot_possible_types);
+      &possible.merge(executionBoundaries__snapshot_possible_types());
     END
     MUTABLE capability_plan = TRY (capabilityPlan__require_for(node));
     IF ((TRY (withCapabilityPlan__locks(capability_plan))).length() > 0) THEN
-      &possible.merge(lock_possible_types);
+      &possible.merge(executionBoundaries__lock_possible_types());
     END
     IF !(((TRY (withCapabilityPlan__guarded(capability_plan))).length() == 0)) THEN
       &possible.insert(:GuardFail);
@@ -17602,15 +17602,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       CONTINUE;
         END
         MUTABLE name = UNWRAP (rtoc_each_items_429[rtoc_idx]).name();
-        IF sync_policy_inline_only_errors.contains?(name) THEN
+        IF errors__sync_policy_inline_only_errors().contains?(name) THEN
             TRY (typeAnalysisSession__error_mut(rtoc_self_view, (UNWRAP (rtoc_each_items_429[rtoc_idx]).token() OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INLINE_ONLY }, [], CAST({:name: name, :escape: (IF (name == :Deadlock) THEN
               "DEADLOCK"
             ELSE
               "LOCK_CYCLE"
             END)} AS {String@symbol}Any)));
         END
-        IF !(sync_policy_required_errors.contains?(name)) THEN
-            TRY (typeAnalysisSession__error_mut(rtoc_self_view, (UNWRAP (rtoc_each_items_429[rtoc_idx]).token() OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INVALID_ERROR }, [], CAST({:name: name, :required: sync_policy_required_errors.join(", ")} AS {String@symbol}Any)));
+        IF !(errors__sync_policy_required_errors().contains?(name)) THEN
+            TRY (typeAnalysisSession__error_mut(rtoc_self_view, (UNWRAP (rtoc_each_items_429[rtoc_idx]).token() OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INVALID_ERROR }, [], CAST({:name: name, :required: errors__sync_policy_required_errors().join(", ")} AS {String@symbol}Any)));
         END
         &seen.append(name);
       rtoc_idx = rtoc_idx + 1;
@@ -17627,9 +17627,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     END
     MUTABLE seen_set = seen |> DISTINCT _;
-    MUTABLE missing = sync_policy_required_errors |> WHERE !(seen_set.contains?(_));
+    MUTABLE missing = errors__sync_policy_required_errors() |> WHERE !(seen_set.contains?(_));
     IF !(missing.empty?()) THEN
-      TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ SyncPolicyDecl: COPY decl } }, TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INCOMPLETE }, [], CAST({:required: sync_policy_required_errors.join(", "), :missing: missing.join(", ")} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ SyncPolicyDecl: COPY decl } }, TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INCOMPLETE }, [], CAST({:required: errors__sync_policy_required_errors().join(", "), :missing: missing.join(", ")} AS {String@symbol}Any)));
     END
 }
 END

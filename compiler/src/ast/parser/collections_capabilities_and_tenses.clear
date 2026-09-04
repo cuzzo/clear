@@ -32,7 +32,7 @@ PUB FN regexReplaceFirst__collections_capabilities_and_tenses(subject: String, p
 END
 
 PUB FN clearParser__capability_token?(name: String) RETURNS Bool ->
-  RETURN capability_tokens.contains?(name);
+  RETURN clearParser__capability_tokens().contains?(name);
 END
 PUB FN clearParser__cap_sigil_attrs() RETURNS {String}SigilAttrs ->
   RETURN {"@multiowned": clearParser__sigil_attrs(:ownership, :multiowned), "@shared": clearParser__sigil_attrs(:ownership, :shared), "@node": clearParser__sigil_attrs(:ownership, :node), "@locked": clearParser__sigil_attrs(:sync, :locked), "@writeLocked": clearParser__sigil_attrs(:sync, :write_locked), "@local": clearParser__sigil_attrs(:sync, :local), "@versioned": clearParser__sigil_attrs(:sync, :versioned), "@atomic": clearParser__sigil_attrs(:sync, :atomic), "@boxed": clearParser__sigil_attrs(:layout, :indirect), "@indirect": clearParser__sigil_attrs(:layout, :indirect), "@alwaysMutable": clearParser__sigil_attrs(:sync, :always_mutable)};
@@ -44,7 +44,7 @@ PUB FN clearParser__parse_capabilities(MUTABLE self: ClearParser) RETURNS !Capab
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE result = CapabilityParseResult{ ownership: NIL, sync: NIL, collection: NIL, is_soa: FALSE, is_indirect: FALSE, shard_count: NIL, observable: FALSE, observable_token: NIL };
     rtoc_cur_0 = clearParser__current(rtoc_self_view);
-    IF !((TRY (clearParser__match?(rtoc_self_view, :VAR_ID)) AND capability_tokens.contains?(token__display_value(rtoc_cur_0)))) THEN
+    IF !((TRY (clearParser__match?(rtoc_self_view, :VAR_ID)) AND clearParser__capability_tokens().contains?(token__display_value(rtoc_cur_0)))) THEN
       RETURN result;
     END
     MUTABLE capability_token = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
@@ -61,7 +61,7 @@ PUB FN clearParser__parse_constructor_capabilities(MUTABLE self: ClearParser, ty
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE result = CapabilityParseResult{ ownership: NIL, sync: NIL, collection: NIL, is_soa: FALSE, is_indirect: FALSE, shard_count: NIL, observable: FALSE, observable_token: NIL };
     rtoc_cur_1 = clearParser__current(rtoc_self_view);
-    IF !((((TRY (clearParser__match?(rtoc_self_view, :VAR_ID)) AND capability_tokens.contains?(token__display_value(rtoc_cur_1)))) OR TRY (clearParser__match?(rtoc_self_view, :CHAR, ":")))) THEN
+    IF !((((TRY (clearParser__match?(rtoc_self_view, :VAR_ID)) AND clearParser__capability_tokens().contains?(token__display_value(rtoc_cur_1)))) OR TRY (clearParser__match?(rtoc_self_view, :CHAR, ":")))) THEN
       RETURN result;
     END
     MUTABLE allowed = ["@soa", "@sharded"];
@@ -120,7 +120,7 @@ PUB FN clearParser__parse_element_capability(MUTABLE self: ClearParser) RETURNS 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE result = ElementCapability{ ownership: NIL, sync: NIL, layout: NIL };
     rtoc_cur_3 = clearParser__current(rtoc_self_view);
-    IF !((TRY (clearParser__match?(rtoc_self_view, :VAR_ID)) AND element_capability_tokens.contains?(token__display_value(rtoc_cur_3)))) THEN
+    IF !((TRY (clearParser__match?(rtoc_self_view, :VAR_ID)) AND clearParser__element_capability_tokens().contains?(token__display_value(rtoc_cur_3)))) THEN
       RETURN result;
     END
     IF !(TRY (clearParser__element_capability_suffix?(rtoc_self_view))) THEN
@@ -154,7 +154,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE joined = TRY (token__text_mut(UNWRAP (sync_tok)));
-    RETURN (element_sync_tokens.contains?(joined) OR (["node", "@node", "shared", "@shared"]).contains?(joined));
+    RETURN (clearParser__element_sync_tokens().contains?(joined) OR (["node", "@node", "shared", "@shared"]).contains?(joined));
 }
 END
 PRIVATE FN clearParser__apply_element_capability_mut(self: ClearParser, MUTABLE result: ElementCapability, value: String) RETURNS Void
@@ -281,7 +281,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       result.observable = TRUE;
       result.observable_token = COPY token;
     ELSE
-      TRY (clearParser__emit_typo_suggestion_mut(rtoc_self_view, token, value, capability_tokens, "Unknown capability modifier '${value}'", "closest capability", :capability, TRUE));
+      TRY (clearParser__emit_typo_suggestion_mut(rtoc_self_view, token, value, clearParser__capability_tokens(), "Unknown capability modifier '${value}'", "closest capability", :capability, TRUE));
     END
 }
 END

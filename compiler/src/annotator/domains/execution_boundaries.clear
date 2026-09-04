@@ -8,8 +8,12 @@ REQUIRE "pkg:rtoc_73656d616e7469632f74656e73655f6f7065726174696f6e5f706c616e2e63
 # Ruby module Annotator
 # Ruby module Annotator::Domains
 # Ruby module Annotator::Domains::ExecutionBoundaries
-lock_possible_types = [:LockTimeout, :LockCycle, :Deadlock];
-snapshot_possible_types = [:MvccConflict, :AtomicConflict];
+PUB FN executionBoundaries__lock_possible_types() RETURNS Any EFFECTS REENTRANT ->
+  RETURN [:LockTimeout, :LockCycle, :Deadlock];
+END
+PUB FN executionBoundaries__snapshot_possible_types() RETURNS Any EFFECTS REENTRANT ->
+  RETURN [:MvccConflict, :AtomicConflict];
+END
 # End Ruby module Annotator::Domains::ExecutionBoundaries
 # End Ruby module Annotator::Domains
 # End Ruby module Annotator

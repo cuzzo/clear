@@ -17731,7 +17731,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     symbolEntry__poly_borrow_target(rtoc_local_receiver_658) } == TRUE)));
     MUTABLE keyword_mutable = (is_mutable AND (((actually_mutated OR forced_var) OR by_ref_borrow)));
     MUTABLE zig_type = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ Type: COPY TRY (aST__full_type_mut(Locatable{ VarDecl: COPY node })) }));
-    MUTABLE needs_annotation = ((((zig_primitives.contains?(zig_type) OR type__fn_type?(ft)) OR type__error_union?(ft)) OR ((node.value IS_A Literal AND (node.value.type() == symbol("NIL"))))) OR ((TRY (type__string?(ft)) AND is_heap)));
+    MUTABLE needs_annotation = ((((zigTypeMapper__zig_primitives().contains?(zig_type) OR type__fn_type?(ft)) OR type__error_union?(ft)) OR ((node.value IS_A Literal AND (node.value.type() == symbol("NIL"))))) OR ((TRY (type__string?(ft)) AND is_heap)));
     MUTABLE annotation_branch_value: ?Type = NIL;
     IF needs_annotation THEN
       annotation_branch_value = ft;

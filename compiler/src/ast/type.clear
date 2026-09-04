@@ -425,7 +425,9 @@ shift_ops = [:SHL, :SHR];
 number_result_ops = [:SUB, :MUL, :DIV, :POW, symbol("MOD"), :WRAP_SUB, :WRAP_MUL, :CHECK_SUB, :CHECK_MUL];
 signed_int_types = [:Int8, :Int16, :Int32, :Int64, :TargetInt, :TargetLong, :TargetLongLong];
 unsigned_int_types = [:UInt8, :Byte, :UInt16, :UInt32, :UInt64, :TargetUInt, :TargetULong, :TargetULongLong];
-float_types = [:Float32, :Float64];
+PUB FN type__float_types() RETURNS Any EFFECTS REENTRANT ->
+  RETURN [:Float32, :Float64];
+END
 PUB UNION TypeEnumVariantsItem { StringValue: String, SymbolValue: String@symbol }
 PUB UNION TypeSchemaLookupResult { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, ArrayValue: []TypeEnumVariantsItem }
 PUB FN type__indirect_type?(value: Type) RETURNS Bool ->

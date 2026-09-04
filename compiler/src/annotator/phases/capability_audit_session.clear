@@ -919,9 +919,9 @@ PRIVATE FN capabilityAuditSession__smallest_fitting_int_type(self: CapabilityAud
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE order = IF (val >= 0) THEN
-      unsigned_order
+      fixableHelpers__unsigned_order()
     ELSE
-      signed_order
+      fixableHelpers__signed_order()
     END;
     MUTABLE selected: ?String@symbol = NIL;
     MUTABLE rtoc_idx = 0;
@@ -3785,7 +3785,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         print("\x1B[36m[Note]\x1B[0m Variable '${_.var}' is @${sync} but never mutated via WITH EXCLUSIVE. You are paying for lock acquire/release on every access. Consider @local or removing the lock.${loc}");
     END
     IF ((own == :shared) AND !(_.captured_parallel)) THEN
-        print("\x1B[36m[Note]\x1B[0m Variable '${_.var}' is @shared (Arc) but never leaves the local scheduler. You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.${loc}");
+        print("\x1B[36m[Note]\x1B[0m Variable '${_.var}' is @shared (Arc) but never preMirTypeCheck__leaves() the local scheduler. You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.${loc}");
     END
     IF (symbolEntry__local_sync?(sync) AND !(_.captured_bg)) THEN
         TRY (capabilityAuditSession__emit_local_never_shared_finding_mut(rtoc_self_view, _));
