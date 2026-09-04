@@ -6738,7 +6738,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF identifier.symbol != NIL THEN
         decl = COPY ((identifier.symbol)?).reg;
       END
-      MUTABLE renamed = (((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[decl.object_id()] != NIL))) OR (TRY (functionState__rename_map(mIRLowering__function_state(rtoc_self_view))))[name]) OR name);
+      MUTABLE renamed = (((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(UNWRAP (decl)))] != NIL))) OR (TRY (functionState__rename_map(mIRLowering__function_state(rtoc_self_view))))[name]) OR name);
       RETURN CAST([renamed] AS []String);
     ELSE
       RETURN CAST(( { MUTABLE rtoc_empty_list_234: []String = List[]; rtoc_empty_list_234 } ) AS []String);
@@ -11354,7 +11354,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE decl: ?SymbolEntryRegInput = decl_branch_value;
       MUTABLE mapped: ?String = NIL;
       IF decl EXISTS THEN
-        mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[decl.object_id()];
+        mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(UNWRAP (decl)))];
       END
       RETURN (((IF mIRLowering__capture_state(rtoc_self_view).do_capture_map != NIL THEN
         (mIRLowering__capture_state(rtoc_self_view).do_capture_map)[var_name]
@@ -12587,7 +12587,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
     MUTABLE mapped: ?String = NIL;
         IF decl EXISTS THEN
-          mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[decl.object_id()];
+          mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(UNWRAP (decl)))];
         END
     IF mapped EXISTS AS mapped_value THEN
           out[rtoc_key] = (out[rtoc_key] OR_ELSE mapped_value);
@@ -15861,7 +15861,7 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, node: Struct
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE hoisted: []Emittable = ( { MUTABLE rtoc_empty_list_574: []Emittable = List[]; rtoc_empty_list_574 } );
     MUTABLE field_types = TRY (mIRLowering__struct_lit_field_types(rtoc_self_view, node));
-    MUTABLE coerced_destination: ?Type = node.coerced_type_info();
+    MUTABLE coerced_destination: ?Type = locatable__coerced_type_info(Locatable{ StructLit: COPY node });
     MUTABLE struct_alloc = IF (IF coerced_destination != NIL THEN
       TRY (type__node_reference?(coerced_destination))
     ELSE
@@ -16975,7 +16975,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inner = NIL;
     rtoc_self_view.state.function_state.current_expected_type = COPY mIRLowering__function_state(rtoc_self_view).current_expected_type;
     rtoc_self_view.state.function_state.current_decl_alloc = COPY mIRLowering__function_state(rtoc_self_view).current_decl_alloc;
-    MUTABLE tuple_type = TRY (type__new(TypeConstructionInput{ Type: COPY (node.coerced_type_info() OR_ELSE TRY (aST__full_type_mut(Locatable{ ListLit: COPY node }))) }));
+    MUTABLE tuple_type = TRY (type__new(TypeConstructionInput{ Type: COPY (locatable__coerced_type_info(Locatable{ ListLit: COPY node }) OR_ELSE TRY (aST__full_type_mut(Locatable{ ListLit: COPY node }))) }));
     IF type__tuple?(tuple_type) THEN
       RETURN Emittable{ TupleLiteral: COPY TRY (mIRLowering__lower_tuple_items(&rtoc_self_view, node.items, tuple_type)) };
     END
@@ -17095,7 +17095,7 @@ PRIVATE FN mIRLowering__lower_tuple_lit(MUTABLE self: MIRLowering, MUTABLE node:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE tuple_type = TRY (type__new(TypeConstructionInput{ Type: COPY (node.coerced_type_info() OR_ELSE TRY (aST__full_type_mut(Locatable{ TupleLit: COPY node }))) }));
+    MUTABLE tuple_type = TRY (type__new(TypeConstructionInput{ Type: COPY (locatable__coerced_type_info(Locatable{ TupleLit: COPY node }) OR_ELSE TRY (aST__full_type_mut(Locatable{ TupleLit: COPY node }))) }));
     RETURN TRY (mIRLowering__lower_tuple_items(&rtoc_self_view, node.items, tuple_type));
 }
 END
@@ -17382,7 +17382,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE ti =   IF expected_owned_list THEN
       expected_ti
     ELSE
-      (node.coerced_type_info() OR_ELSE TRY (aST__full_type_mut(Locatable{ ListLit: COPY node })))
+      (locatable__coerced_type_info(Locatable{ ListLit: COPY node }) OR_ELSE TRY (aST__full_type_mut(Locatable{ ListLit: COPY node })))
     END;
     MUTABLE type_info = TRY (type__new(ti));
     MUTABLE elem_type: ?Type = TRY (type__element_type(type_info));
@@ -17422,7 +17422,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END) THEN
       expected_ti
     ELSE
-      TRY (type__new(TypeConstructionInput{ Type: COPY (node.coerced_type_info() OR_ELSE TRY (aST__full_type_mut(Locatable{ HashLit: COPY node }))) }))
+      TRY (type__new(TypeConstructionInput{ Type: COPY (locatable__coerced_type_info(Locatable{ HashLit: COPY node }) OR_ELSE TRY (aST__full_type_mut(Locatable{ HashLit: COPY node }))) }))
     END;
     MUTABLE map_alloc = (mIRLowering__function_state(rtoc_self_view).current_decl_alloc OR_ELSE TRY (mIRLowering__alloc_for_node(rtoc_self_view, Locatable{ HashLit: COPY node })));
     RETURN HashLiteralPlan{ type_info: COPY ti, alloc: COPY map_alloc, zig_type: COPY TRY (mIRLowering__transpile_type(rtoc_self_view, ti)), arc_wrapped: type__shared?(ti), rc_wrapped: type__multiowned?(ti) };
@@ -18609,7 +18609,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE safe_name = mIRLowering__zig_safe_name(rtoc_self_view, target.name);
     IF declared THEN
       MUTABLE rtoc_index_receiver_684 = TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view)));
-      rtoc_index_receiver_684[target.object_id()] = safe_name;
+      rtoc_index_receiver_684[aST__node_identity(Locatable{ DestructureTarget: COPY target })] = safe_name;
       IF symbol?.reg EXISTS AS reg_value THEN
         MUTABLE rtoc_index_receiver_685 = TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view)));
         rtoc_index_receiver_685[symbol.reg.object_id()] = safe_name;
@@ -20956,7 +20956,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF identifier.symbol != NIL THEN
           decl = COPY ((identifier.symbol)?).reg;
         END
-        MUTABLE name = ((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[decl.object_id()] != NIL))) OR mIRLowering__zig_safe_name(rtoc_self_view, identifier__name(identifier)));
+        MUTABLE name = ((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view))))[aST__node_identity(castSymbolEntryRegInputToLocatable(UNWRAP (decl)))] != NIL))) OR mIRLowering__zig_safe_name(rtoc_self_view, identifier__name(identifier)));
         IF name THEN
           &names.insert(name);
         END

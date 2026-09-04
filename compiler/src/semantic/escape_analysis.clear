@@ -531,7 +531,7 @@ PUB FN keptEdgeLiveness__last_use?(self: KeptEdgeLiveness, arg: Identifier) RETU
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE occ: ?Occurrence = COPY rtoc_self_view.by_object[arg.object_id()];
+    MUTABLE occ: ?Occurrence = COPY rtoc_self_view.by_object[aST__node_identity(Locatable{ Identifier: COPY arg })];
     IF occ EXISTS AS occ_value THEN
       IF occ_value.loop_depth.positive?() THEN
         RETURN FALSE;
@@ -552,7 +552,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF node IS_A Identifier AS identifier THEN
       rtoc_self_view.counter = (rtoc_self_view.counter + 1);
-      rtoc_self_view.by_object[identifier.object_id()] = Occurrence{ position: rtoc_self_view.counter, loop_depth: COPY loop_depth };
+      rtoc_self_view.by_object[aST__node_identity(Locatable{ Identifier: COPY identifier })] = Occurrence{ position: rtoc_self_view.counter, loop_depth: COPY loop_depth };
       IF (rtoc_self_view.counter > (rtoc_self_view.last_position[identifier__name(identifier)] OR_ELSE -1)) THEN
         rtoc_self_view.last_position[identifier__name(identifier)] = COPY rtoc_self_view.counter;
       END
@@ -1587,7 +1587,7 @@ PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg
   END
   MUTABLE identifiers: ?[]Identifier = NIL;
   IF facts?.lambda_body_identifier_refs != NIL THEN
-    identifiers = COPY ((facts?.lambda_body_identifier_refs)?[node.object_id()]);
+    identifiers = COPY ((facts?.lambda_body_identifier_refs)?[aST__node_identity(Locatable{ LambdaLit: COPY node })]);
   END
   identifiers = (identifiers OR_ELSE TRY (escapeAnalysis__collect_lambda_body_identifiers(node)));
   MUTABLE rtoc_idx = 0;
@@ -1606,7 +1606,7 @@ PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{In
   IF !(node IS_A LambdaLit) THEN
       RETURN;
   END
-  refs[node.object_id()] = TRY (escapeAnalysis__collect_lambda_body_identifiers( castLocatableToLambdaLit(node)));
+  refs[aST__node_identity(node)] = TRY (escapeAnalysis__collect_lambda_body_identifiers( castLocatableToLambdaLit(node)));
   rubyToClearVoid__escape_analysis()
   });
   RETURN refs;

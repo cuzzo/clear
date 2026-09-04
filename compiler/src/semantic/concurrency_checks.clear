@@ -154,7 +154,7 @@ PRIVATE FN concurrencyChecks__check_reentrant_mut(fn_value: FunctionDef, with_bl
 END
 FN concurrencyChecks__each_with_scope(with_blocks: []WithBlock, with_scope_nodes: {Int64}[]Locatable, blk: FN(WithBlock, Locatable[]) -> Void) RETURNS Void ->
   FOR _ IN with_blocks DO
-  blk(_, with_scope_nodes[_.object_id()]?);
+  blk(_, with_scope_nodes[aST__node_identity(Locatable{ WithBlock: COPY _ })]?);
   END
 END
 PRIVATE FN concurrencyChecks__collect_held_params(with_block: WithBlock, fn_value: FunctionDef) RETURNS ![Set]String ->

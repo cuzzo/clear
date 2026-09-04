@@ -1555,7 +1555,7 @@ PUB FN symbolEntryRegInput__token(value: SymbolEntryRegInput) RETURNS ?Token ->
   RETURN NIL;
 END
 
-FN castSymbolEntryRegInputToLocatable(value: SymbolEntryRegInput) RETURNS Locatable ->
+PUB FN castSymbolEntryRegInputToLocatable(value: SymbolEntryRegInput) RETURNS Locatable ->
   PARTIAL MATCH value START
     SymbolEntryRegInput.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
     SymbolEntryRegInput.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,

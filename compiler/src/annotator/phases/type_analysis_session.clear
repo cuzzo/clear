@@ -16182,7 +16182,7 @@ PRIVATE FN typeAnalysisSession__visit_HashLit(MUTABLE self: TypeAnalysisSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE expected_map: ?Type@multiowned = node.coerced_type_info();
+    MUTABLE expected_map: ?Type@multiowned = locatable__coerced_type_info(Locatable{ HashLit: COPY node });
     IF expected_map EXISTS AS expected_map_value THEN
       IF type__map?(expected_map_value) THEN
       MUTABLE expected_key = TRY (type__key_type(expected_map));
@@ -16418,7 +16418,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN node.items DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
-    MUTABLE expected_tuple: ?Type@multiowned = node.coerced_type_info();
+    MUTABLE expected_tuple: ?Type@multiowned = locatable__coerced_type_info(Locatable{ ListLit: COPY node });
     IF expected_tuple EXISTS AS expected_tuple_value THEN
       IF type__tuple?(expected_tuple_value) THEN
       MUTABLE tuple_types = TRY (type__generic_args(expected_tuple));
