@@ -5029,7 +5029,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF intrinsicArgSpec__unconstrained_any?(spec) THEN
       RETURN TRUE;
     END
-    IF (ruby_union_scalar_equal_Type_String_symbol(spec.type, symbol("Any[]")) AND TRY (typeAnalysisSession__any_array_intrinsic_arg?(rtoc_self_view, castTypeToStringSymbol(spec.type), &arg))) THEN
+    IF ((spec.type == symbol("Any[]")) AND TRY (typeAnalysisSession__any_array_intrinsic_arg?(rtoc_self_view, castTypeToStringSymbol(spec.type), &arg))) THEN
       RETURN TRUE;
     END
     MUTABLE cast_source: Any = arg.resolved_type;
@@ -5039,7 +5039,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         cast_source = COPY full;
       END
     END
-    IF !((ruby_union_scalar_equal_Type_String_symbol(spec.type, :Any) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, cast_source, castTypeToTypeTypeInput__type_analysis_session(spec.type))))) THEN
+    IF !(((spec.type == :Any) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, cast_source, castTypeToTypeTypeInput__type_analysis_session(spec.type))))) THEN
       RETURN FALSE;
     END
     IF !(intrinsicArgSpec__capability_constrained?(spec)) THEN
@@ -5812,7 +5812,7 @@ PRIVATE FN typeAnalysisSession__observable_reducible_scalar?(self: TypeAnalysisS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN observable_reducible_numeric.contains?(acc_type);
+    RETURN ([:Int8, :Int16, :Int32, :Int64, :UInt8, :Byte, :UInt16, :UInt32, :UInt64, :Float32, :Float64]).contains?(acc_type);
 }
 END
 PRIVATE FN typeAnalysisSession__analyze_limit_op(MUTABLE self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !?String@symbol
@@ -6803,7 +6803,7 @@ PRIVATE FN typeAnalysisSession__concurrent_bool_option?(self: TypeAnalysisSessio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN !(!(((((IF value IS_A Literal AS literal THEN ruby_union_scalar_equal_Type_String_symbol(literal.type, :BOOLEAN) ELSE FALSE END)) OR ((IF value IS_A Identifier AS identifier THEN (["true", "false", "TRUE", "FALSE"]).contains?(identifier__name(identifier)) ELSE FALSE END))))));
+    RETURN !(!(((((IF value IS_A Literal AS literal THEN (literal.type == :BOOLEAN) ELSE FALSE END)) OR ((IF value IS_A Identifier AS identifier THEN (["true", "false", "TRUE", "FALSE"]).contains?(identifier__name(identifier)) ELSE FALSE END))))));
 }
 END
 PRIVATE FN typeAnalysisSession__validate_concurrent_size_option_mut(self: TypeAnalysisSession, options: {String}Locatable) RETURNS !Void
@@ -7460,7 +7460,7 @@ PRIVATE FN typeAnalysisSession__integer_literal_range_value(self: TypeAnalysisSe
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF node IS_A Literal AS literal THEN
-      IF (ruby_union_scalar_equal_Type_String_symbol(literal.type, :PREFIXED_INT) OR ruby_union_scalar_equal_Type_String_symbol(literal.type, :INT64)) THEN
+      IF ((literal.type == :PREFIXED_INT) OR (literal.type == :INT64)) THEN
         RETURN literal.value;
       END
     END
@@ -16230,7 +16230,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END;
     ELSE
       MUTABLE value_type = values.first().resolved_type;
-      MUTABLE symbol_key_map = node.pairs.keys() |> ALL (IF _ IS_A Literal AS literal THEN ruby_union_scalar_equal_Type_String_symbol(literal.type, :SYMBOL) ELSE FALSE END);
+      MUTABLE symbol_key_map = node.pairs.keys() |> ALL (IF _ IS_A Literal AS literal THEN (literal.type == :SYMBOL) ELSE FALSE END);
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < values.length() DO
     IF (values[rtoc_idx]?.resolved_type != value_type) THEN
@@ -16371,7 +16371,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE val_node = owned_value;
     END
     MUTABLE actual_type = TRY (aST__full_type_mut(val_node));
-    MUTABLE nil_value = (IF val_node? IS_A Literal AS literal THEN ruby_union_scalar_equal_Type_String_symbol(literal.type, symbol("NIL")) ELSE FALSE END);
+    MUTABLE nil_value = (IF val_node? IS_A Literal AS literal THEN (literal.type == symbol("NIL")) ELSE FALSE END);
     MUTABLE expected_layout_value_branch_value: ?Type = NIL;
       IF type__optional?(expected_type) THEN
         expected_layout_value_branch_value = UNWRAP (TRY (type__wrapped_type(expected_type)));
@@ -17861,7 +17861,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE actual_is_auto = type__auto?(actual_full);
     MUTABLE expected_is_auto = type__auto?(expected);
-    MUTABLE return_checkable = (((!(actual_is_auto) AND !(expected_is_auto)) AND !(ruby_union_scalar_equal_Type_String_symbol(expected, :Void))) AND !(ruby_union_scalar_equal_Type_String_symbol(expected, :Any)));
+    MUTABLE return_checkable = (((!(actual_is_auto) AND !(expected_is_auto)) AND !((type__resolved(expected) == :Void))) AND !((type__resolved(expected) == :Any)));
     IF (return_checkable AND !(TRY (typeAnalysisSession__return_type_compatible?(rtoc_self_view, CAST(actual_full AS Type), expected)))) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ReturnNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_MISMATCH }, [], {:expected: TRY (typeAnalysisSession__type_display(rtoc_self_view, expected)), :got: TRY (typeAnalysisSession__type_display(rtoc_self_view, CAST(actual_full AS Type)))}));
     ELSE_IF (return_checkable AND (actual != expected)) THEN
@@ -17969,7 +17969,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
     MUTABLE t_right_type = TRY (aST__full_type_mut(node.right));
-    MUTABLE bare_nil = (node.left IS_A Literal AND ruby_union_scalar_equal_Type_String_symbol(node.left.type(), symbol("NIL")));
+    MUTABLE bare_nil = (node.left IS_A Literal AND (node.left.type() == symbol("NIL")));
     MUTABLE t_left_type =   IF (bare_nil AND (t_right_type.resolved() != :NoReturn)) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
@@ -18469,7 +18469,7 @@ PRIVATE FN typeAnalysisSession__nil_literal?(self: TypeAnalysisSession, node: Lo
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (IF node IS_A Literal AS literal THEN ruby_union_scalar_equal_Type_String_symbol(literal.type, symbol("NIL")) ELSE FALSE END);
+    RETURN (IF node IS_A Literal AS literal THEN (literal.type == symbol("NIL")) ELSE FALSE END);
 }
 END
 PRIVATE FN typeAnalysisSession__identifier_non_nil_refinement(self: TypeAnalysisSession, node: Locatable) RETURNS !{Int64}Type
@@ -18972,7 +18972,7 @@ PRIVATE FN typeAnalysisSession__ensure_owned_value_mut(self: TypeAnalysisSession
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (IF val_node IS_A Literal AS literal THEN ruby_union_scalar_equal_Type_String_symbol(literal.type, symbol("NIL")) ELSE FALSE END) THEN
+    IF (IF val_node IS_A Literal AS literal THEN (literal.type == symbol("NIL")) ELSE FALSE END) THEN
       RETURN NIL;
     END
     IF val_node IS_A CopyNode AS copy_node THEN
@@ -22399,12 +22399,6 @@ FN ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol__type_a
   FALSE;
 END
 FN ruby_union_scalar_equal_TypeTypeInput_String_symbol__type_analysis_session(value: TypeTypeInput, expected: String@symbol) RETURNS Bool ->
-  IF value IS_A String@symbol AS equality_payload THEN
-    RETURN equality_payload == expected;
-  END
-  FALSE;
-END
-FN ruby_union_scalar_equal_Type_String_symbol(value: Type, expected: String@symbol) RETURNS Bool ->
   IF value IS_A String@symbol AS equality_payload THEN
     RETURN equality_payload == expected;
   END

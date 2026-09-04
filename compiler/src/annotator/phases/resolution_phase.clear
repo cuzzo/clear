@@ -36,7 +36,7 @@ EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "
 EXTERN FN compilerCountOccurrences(text: String, needle: String) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerLastIndex(text: String, needle: String) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 UNION ResolutionCodeOrMessage { StringValue: String, SymbolValue: String@symbol }
-PUB UNION DiagnosticKwValue { StringValue: String, SymbolValue: String@symbol, AnyMultiowned: Any@multiowned }
+PUB UNION DiagnosticKwValue { StringValue: String, SymbolValue: String@symbol, Int64Value: Int64, AnyMultiowned: Any@multiowned }
 
 # Ruby interpolates kwargs with `%`, which renders each value with to_s.
 PUB FN diagnosticKwValue__to_s(value: ?DiagnosticKwValue) RETURNS String ->
