@@ -13011,7 +13011,7 @@ PRIVATE FN typeAnalysisSession__with_if_is_a_condition(MUTABLE self: TypeAnalysi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-  MUTABLE previous: ?Locatable = rtoc_self_view.current_if_is_a_condition;
+  MUTABLE previous: ?Locatable = COPY rtoc_self_view.current_if_is_a_condition;
   DEFER rtoc_self_view.current_if_is_a_condition = previous;
   rtoc_self_view.current_if_is_a_condition = COPY condition;
   blk();
@@ -20222,11 +20222,12 @@ PRIVATE FN typeAnalysisSession__bg_sources_for_block(self: TypeAnalysisSession, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE analysis = aST__node_capture_analysis(expr);
-    IF !((TRUE AND respondsTo?(analysis, "capture_symbols"))) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_513: []SymbolEntry@multiowned = List[]; rtoc_empty_list_513 } ) AS []SymbolEntry@multiowned);
+    IF expr EXISTS AS expr_value THEN
+      IF aST__node_capture_analysis(UNWRAP (castBgSourceWalkValueToLocatable(expr_value))) EXISTS AS analysis THEN
+        RETURN TRY (typeAnalysisSession__bg_lifetime_sources(rtoc_self_view, analysis));
+      END
     END
-    RETURN TRY (typeAnalysisSession__bg_lifetime_sources(rtoc_self_view, UNWRAP (analysis)));
+    RETURN CAST(( { MUTABLE rtoc_empty_list_513: []SymbolEntry@multiowned = List[]; rtoc_empty_list_513 } ) AS []SymbolEntry@multiowned);
 }
 END
 PRIVATE FN typeAnalysisSession__bg_lifetime_sources(self: TypeAnalysisSession, analysis: CaptureAnalysis) RETURNS ![]SymbolEntry@multiowned

@@ -10,7 +10,7 @@ PUB UNION BgSourceWalkValue { MIRProgram: MIRProgram, RequireNode: RequireNode, 
 # End Ruby module Annotator::Domains::Lifetimes
 # End Ruby module Annotator::Domains
 # End Ruby module Annotator
-FN castBgSourceWalkValueToLocatable(value: BgSourceWalkValue) RETURNS ?Locatable ->
+PUB FN castBgSourceWalkValueToLocatable(value: BgSourceWalkValue) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     BgSourceWalkValue.RequireNode AS item -> RETURN Locatable{ RequireNode: COPY item };,
     BgSourceWalkValue.ProtocolRequirement AS item -> RETURN Locatable{ ProtocolRequirement: COPY item };,
