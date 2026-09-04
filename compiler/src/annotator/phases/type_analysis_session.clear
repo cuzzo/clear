@@ -13028,14 +13028,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE subst = TRY (typeAnalysisSession__match_union_substitution(rtoc_self_view, subject_type, MatchSchema{ UnionSchemaMultiowned: COPY union_schema }, TRUE));
     MUTABLE variant_name = TRY (typeAnalysisSession__resolve_runtime_is_a_variant_mut(rtoc_self_view, node, union_schema, type_name, subst));
     node.runtime_variant_name = variant_name;
-    TRY (typeAnalysisSession__stamp_runtime_is_a_target_mut(&rtoc_self_view, &node.right, type_name));
+    TRY (typeAnalysisSession__stamp_runtime_is_a_target_mut(&rtoc_self_view, castIsARightToNodeOrType(node.right), type_name));
     MUTABLE binding: ?String = COPY node.binding;
     IF !(binding) THEN
       RETURN;
     END
     MUTABLE raw_payload: ?MatchPayload = typeAnalysisSession__runtime_union_payload(rtoc_self_view, union_schema, variant_name);
     IF raw_payload EXISTS AS raw_payload_value THEN
-      MUTABLE match_case = MatchCase{ kind: :eq, value: COPY node.right, binding: COPY binding, body: COPY List[], destructure: NIL, extra_values: List[], indirect_payload_as: FALSE };
+      MUTABLE match_case = MatchCase{ kind: :eq, value: COPY castIsARightToLocatable(node.right), binding: COPY binding, body: COPY List[], destructure: NIL, extra_values: List[], indirect_payload_as: FALSE };
       node.runtime_payload_type = TRY (typeAnalysisSession__match_payload_binding_type(rtoc_self_view, MatchSubjectPlan{ expr_type: COPY subject_type, type_name: COPY type_name, schema: MatchSchema{ UnionSchemaMultiowned: COPY union_schema }, enum_subject: FALSE, union_subject: TRUE, union_subst: COPY subst }, variant_name, raw_payload_value, &match_case));
       node.runtime_indirect_payload_as = match_case.indirect_payload_as;
     ELSE
@@ -13135,7 +13135,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__stamp_runtime_is_a_target_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: Node, type_name: String@symbol) RETURNS !Void
+PRIVATE FN typeAnalysisSession__stamp_runtime_is_a_target_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: NodeOrType, type_name: String@symbol) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -13154,26 +13154,29 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__annotate_is_a_operand_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: Node, side: String) RETURNS !Void
+PRIVATE FN typeAnalysisSession__annotate_is_a_operand_mut(MUTABLE self: TypeAnalysisSession, MUTABLE operand: IsARight, side: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF node IS_A Type AS type THEN
+    IF operand IS_A Type AS type THEN
       RETURN;
     END
+    # Past the Type arm the operand is an AST node; the helpers below take
+    # Ruby's T.any(AST::Node, Type), which is NodeOrType.
+    MUTABLE node: NodeOrType = castLocatableToNodeOrType(castIsARightToLocatable(operand));
     IF TRY (typeAnalysisSession__static_type_expr?(rtoc_self_view, node)) THEN
-      TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, castNodeToLocatable__type_analysis_session(node), :Type));
+      TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, castNodeToLocatable__type_analysis_session( castNodeOrTypeToNode(node)), :Type));
     ELSE
-      TRY (typeAnalysisSession__visit(&rtoc_self_view, castNodeToOptionalLocatable__type_analysis_session(node)));
+      TRY (typeAnalysisSession__visit(&rtoc_self_view, castNodeToOptionalLocatable__type_analysis_session(castNodeOrTypeToNode(node))));
     END
-    MUTABLE type_info = TRY (aST__full_type_mut(node));
-    IF (type_info.resolved() == :Type) THEN
+    MUTABLE type_info = TRY (aST__full_type_mut(castNodeToLocatable__type_analysis_session(castNodeOrTypeToNode(node))));
+    IF (type__resolved(type_info) == :Type) THEN
       RETURN;
     END
-    TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_OPERAND_NEEDS_TYPE }, [], {:side: side, :got: CAST(type_info AS String)}));
+    TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(castNodeOrTypeToNode(node))), TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_OPERAND_NEEDS_TYPE }, [], {:side: side, :got: CAST(type_info AS String)}));
 }
 END
-PRIVATE FN typeAnalysisSession__static_type_expr?(self: TypeAnalysisSession, node: Node) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__static_type_expr?(self: TypeAnalysisSession, node: NodeOrType) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13239,7 +13242,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__static_is_a_target_type(self: TypeAnalysisSession, node: Node) RETURNS !?Type
+PRIVATE FN typeAnalysisSession__static_is_a_target_type(self: TypeAnalysisSession, node: NodeOrType) RETURNS !?Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -22704,4 +22707,13 @@ PUB FN typeAnalysisSchema__type_params(value: TypeAnalysisSchema) RETURNS ?[]Str
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
+END
+
+FN castTypeAnalysisSessionReturnValueItemToFunctionSignatureLifetimeSource(value: TypeAnalysisSessionReturnValueItem) RETURNS FunctionSignatureLifetimeSource ->
+  PARTIAL MATCH value START
+    TypeAnalysisSessionReturnValueItem.StringValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: COPY cast_payload };,
+    TypeAnalysisSessionReturnValueItem.SymbolValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to FunctionSignatureLifetimeSource");
+  END
+  panic("Invalid cast to FunctionSignatureLifetimeSource");
 END
