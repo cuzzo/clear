@@ -15,7 +15,14 @@ PUB STRUCT CompiledModule {
   # scope; readers check it before walking its statements.
   ast: ?Program,
   global_scope: Scope@multiowned,
-  source_dir: String
+  source_dir: String,
+  # Ruby's Struct carries the schemas and MIR items a REQUIRE inlines; the
+  # types are the ones schema_registry declares for the same data.
+  struct_schemas: {String@symbol}StructSchema@multiowned,
+  union_schemas: {String@symbol}UnionSchema@multiowned,
+  enum_schemas: {String@symbol}[]TypeEnumVariantsItem,
+  mir_items: ?[]Emittable,
+  type_items: ?[]Emittable
 }
 
 PUB STRUCT ModuleImporter {
