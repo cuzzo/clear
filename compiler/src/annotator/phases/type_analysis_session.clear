@@ -17647,7 +17647,7 @@ PRIVATE FN typeAnalysisSession__collapse_errors_for_call(self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE collapsed = Set[];
+    MUTABLE collapsed: [Set]String@symbol = Set[];
     MUTABLE param_indices = {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE rtoc_indexed_items_431: []Param = TRY (functionSignature__params(sig));
@@ -17660,9 +17660,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     rtoc_indexed_output_433
     };
-    (TRY (functionSignature__requires(sig))).keys() |> EACH {
-    MUTABLE ignored_families: [Set]String@symbol = ((TRY (functionSignature__requires(sig)))[_] OR_ELSE CAST(panic("missing hash key") AS [Set]String@symbol));
-    MUTABLE idx = param_indices[_];
+    FOR param_name IN (TRY (functionSignature__requires(sig))).keys() DO
+    MUTABLE ignored_families: [Set]String@symbol = ((TRY (functionSignature__requires(sig)))[param_name] OR_ELSE CAST(panic("missing hash key") AS [Set]String@symbol));
+    MUTABLE idx: ?Int64 = param_indices[param_name];
     IF !(idx) THEN
         CONTINUE;
     END
@@ -17682,7 +17682,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       END
     END
-    };
+    END
     RETURN collapsed;
 }
 END
