@@ -103,8 +103,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resolutionSession__register_type_declarations(&rtoc_self_view, declarations));
     MUTABLE conformance_resolutions = TRY (resolutionSession__resolve_conformance_declarations_mut(rtoc_self_view, declarations));
     MUTABLE implementation_resolutions = TRY (resolutionSession__resolve_implementation_declarations_mut(rtoc_self_view, declarations));
-    TRY (resolutionSession__prepare_conformance_members_mut(rtoc_self_view, declarations, conformance_resolutions, program));
-    TRY (resolutionSession__prepare_implementation_members_mut(rtoc_self_view, declarations, implementation_resolutions, program));
+    TRY (resolutionSession__prepare_conformance_members_mut(rtoc_self_view, &declarations, conformance_resolutions, &program));
+    TRY (resolutionSession__prepare_implementation_members_mut(rtoc_self_view, &declarations, implementation_resolutions, &program));
     TRY (resolutionSession__register_program_signatures(&rtoc_self_view, declarations));
     RETURN resolutionFacts__new(program, declarations, rtoc_self_view.root_scope, rtoc_self_view.function_registry, rtoc_self_view.root_scope.types.keys(), TRY (resolutionSession__resolved_function_names(rtoc_self_view)), implementation_resolutions, conformance_resolutions, rtoc_self_view.protocols);
 }
@@ -719,32 +719,36 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     } };
 }
 END
-PRIVATE FN resolutionSession__prepare_conformance_members_mut(self: ResolutionSession, declarations: DeclarationIndex, resolutions: []ConformanceResolution, program: Program) RETURNS !Void
+PRIVATE FN resolutionSession__prepare_conformance_members_mut(self: ResolutionSession, MUTABLE declarations: DeclarationIndex, resolutions: []ConformanceResolution, MUTABLE program: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR _ IN resolutions DO
-    FOR _ IN _.members.values() DO
-    MUTABLE source_name = _.name;
-    MUTABLE inherited_names = (_.declaration.binders |> SELECT _.name) |> DISTINCT _;
-    FOR _ IN _.generic_params DO
-    IF inherited_names.contains?(_.name) THEN
-        TRY (resolutionSession__error_mut(rtoc_self_view, (COPY _.token OR _), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_MEMBER_SHADOWS_OWNER }, [], CAST({:owner: _.owner_name, :name: _.name, :member: source_name} AS {String@symbol}Any)));
+    FOR resolution IN resolutions DO
+    FOR MUTABLE member IN resolution.members.values() DO
+    MUTABLE source_name = COPY member.name;
+    MUTABLE inherited_names = (resolution.declaration.binders |> SELECT _.name) |> DISTINCT _;
+    FOR parameter IN member.generic_params DO
+    IF inherited_names.contains?(parameter.name) THEN
+        MUTABLE anchor: ?DiagnosticAnchor = DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY member } };
+        IF parameter.token EXISTS AS parameter_token THEN
+          anchor = DiagnosticAnchor{ TokenValue: COPY parameter_token };
+        END
+        TRY (resolutionSession__error_mut(rtoc_self_view, anchor, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_MEMBER_SHADOWS_OWNER }, [], CAST({:owner: resolution.owner_name, :name: parameter.name, :member: source_name} AS {String@symbol}Any)));
     END
     END
-    _.generic_params = (_.declaration.binders + _.generic_params);
-    _.type_params = _.generic_params |> SELECT _.name();
-    _.implementation_owner = COPY _.owner_name;
-    _.conformance_protocol = _.protocol.name;
-    _.source_name = source_name;
-    _[:name] = resolutionSession__conformance_function_name(rtoc_self_view, _.protocol.name, _.owner_name, source_name);
-    IF _.is_method THEN
-        TRY (resolutionSession__prepare_conformance_receiver_mut(rtoc_self_view, _, _));
+    member.generic_params = (resolution.declaration.binders + member.generic_params);
+    member.type_params = member.generic_params |> SELECT _.name;
+    member.implementation_owner = COPY resolution.owner_name;
+    member.conformance_protocol = COPY resolution.protocol.name;
+    member.source_name = source_name;
+    member.name = resolutionSession__conformance_function_name(rtoc_self_view, resolution.protocol.name, resolution.owner_name, source_name);
+    IF member.is_method THEN
+        TRY (resolutionSession__prepare_conformance_receiver_mut(rtoc_self_view, member, resolution));
     END
-    TRY (resolutionSession__validate_member_type_parameter_references_mut(rtoc_self_view, _));
-    &declarations.function_declarations.append(KEEP _);
-    &declarations.body_statements.append(COPY _);
-    &program.statements.append(COPY _);
+    TRY (resolutionSession__validate_member_type_parameter_references_mut(rtoc_self_view, member));
+    &declarations.function_declarations.append(COPY member);
+    &declarations.body_statements.append(COPY member);
+    &program.statements.append(COPY member);
     END
     END
 }
@@ -1139,21 +1143,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN resolutionSession__prepare_implementation_members_mut(self: ResolutionSession, declarations: DeclarationIndex, resolutions: []ImplementationResolution, program: Program) RETURNS !Void
+PRIVATE FN resolutionSession__prepare_implementation_members_mut(self: ResolutionSession, MUTABLE declarations: DeclarationIndex, resolutions: []ImplementationResolution, MUTABLE program: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR _ IN resolutions DO
+    FOR resolution IN resolutions DO
     MUTABLE member_names: [Set]String = Set[];
-    FOR _ IN _.declaration.members DO
-      MUTABLE rtoc_mutable_block_param_29 = COPY _;
-      MUTABLE source_name = rtoc_mutable_block_param_29.name;
+    FOR MUTABLE rtoc_mutable_block_param_29 IN resolution.declaration.members DO
+      MUTABLE source_name = COPY rtoc_mutable_block_param_29.name;
       IF member_names.contains?(source_name) THEN
-          TRY (resolutionSession__error_mut(rtoc_self_view, rtoc_mutable_block_param_29, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], CAST({:owner: rtoc_mutable_block_param_29.owner.name, :name: source_name} AS {String@symbol}Any)));
+          TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY rtoc_mutable_block_param_29 } }, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], CAST({:owner: resolution.owner.name, :name: source_name} AS {String@symbol}Any)));
       END
-      &member_names.insert(source_name);
-      TRY (resolutionSession__prepare_implementation_member_mut(rtoc_self_view, &rtoc_mutable_block_param_29, rtoc_mutable_block_param_29, source_name));
-      &declarations.function_declarations.append(rtoc_mutable_block_param_29);
+      &member_names.insert(COPY source_name);
+      TRY (resolutionSession__prepare_implementation_member_mut(rtoc_self_view, &rtoc_mutable_block_param_29, resolution, source_name));
+      &declarations.function_declarations.append(COPY rtoc_mutable_block_param_29);
       &declarations.body_statements.append(Locatable{ FunctionDef: COPY rtoc_mutable_block_param_29 });
       &program.statements.append(Locatable{ FunctionDef: COPY rtoc_mutable_block_param_29 });
     END
@@ -1875,8 +1878,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (resolutionSession__validate_type_param_list_mut(rtoc_self_view, Node{ StructDef: COPY node }, node.type_params, "struct"));
     END
     TRY (resolutionSession__validate_generic_bounds_mut(rtoc_self_view, node.generic_params));
-    FOR _ IN node.field_decls.values() DO
-    MUTABLE rtoc_mutable_block_param_57 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_57 IN node.field_decls.values() DO
     TRY (resolutionSession__resolve_declaration_projections_mut(rtoc_self_view, Locatable{ StructDef: COPY node }, &rtoc_mutable_block_param_57.type, node.generic_params));
     END
     FOR _ IN node.field_decls.values() DO

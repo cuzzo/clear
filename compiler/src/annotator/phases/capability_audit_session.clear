@@ -3844,11 +3844,12 @@ PRIVATE FN capabilityAuditSession__resolve_held_calls_mut(self: CapabilityAuditS
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE state = COPY capabilityAuditSession__phase_audit_inputs(rtoc_self_view).lock_analysis;
     state.held_calls.keys() |> EACH {
-    MUTABLE sites: []LockHeldCallSite = (state.held_calls[_] OR_ELSE CAST(panic("missing hash key") AS []LockHeldCallSite));
-    FOR _ IN sites DO
-    FOR _ IN ((transitive_acquires[_.callee] OR_ELSE Set[])) DO
-    IF state.direct_edges[_] EXISTS AS rtoc_map_slot_28 THEN
-      &rtoc_map_slot_28.append(LockEdge{ held: COPY _.held, acquired: COPY _, site_token: COPY _.site_token, fn_name: COPY _, opted_out: _.opted_out });
+    MUTABLE fn = COPY _;
+    MUTABLE sites: []LockHeldCallSite = (state.held_calls[fn] OR_ELSE CAST(panic("missing hash key") AS []LockHeldCallSite));
+    FOR site IN sites DO
+    FOR t IN ((transitive_acquires[site.callee] OR_ELSE Set[])) DO
+    IF state.direct_edges[fn] EXISTS AS rtoc_map_slot_28 THEN
+      &rtoc_map_slot_28.append(LockEdge{ held: COPY site.held, acquired: COPY t, site_token: COPY site.site_token, fn_name: COPY fn, opted_out: site.opted_out });
     ELSE
       panic("T.must: map slot is NIL");
     END
@@ -4302,8 +4303,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       NIL
     END);
     MUTABLE policy_handlers: ?Any = COPY capabilityAuditSession__whole_program_node(rtoc_self_view)?.sync_policy;
-    FOR _ IN fn_nodes.values() DO
-    MUTABLE rtoc_mutable_block_param_48 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_48 IN fn_nodes.values() DO
     TRY (withMatchCheck__check_function_mut(&rtoc_mutable_block_param_48, body_summaries[rtoc_mutable_block_param_48.name]?.with_blocks, error_handler, warning_handler, policy_handlers));
     END
     TRY (capabilityAuditSession__restamp_requires_on_signatures_mut(rtoc_self_view));

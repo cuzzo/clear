@@ -1791,8 +1791,7 @@ PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, 
   END
 END
 PUB FN escapeAnalysis__mark_heap_return_facts_mut(facts: FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
-  FOR _ IN facts.return_values DO
-  MUTABLE rtoc_mutable_block_param_33 = COPY _;
+  FOR MUTABLE rtoc_mutable_block_param_33 IN facts.return_values DO
   IF TRY (escapeAnalysis__owning_return_needs_heap_placement?(facts.fn, &rtoc_mutable_block_param_33, schema_lookup)) THEN
     TRY (escapeAnalysis__mark_heap_return_mut(facts, rtoc_mutable_block_param_33));
   END

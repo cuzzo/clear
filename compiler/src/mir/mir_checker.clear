@@ -1154,8 +1154,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      FOR _ IN states DO
-        MUTABLE rtoc_mutable_block_param_24 = COPY _;
+      FOR MUTABLE rtoc_mutable_block_param_24 IN states DO
         &rtoc_mutable_block_param_24.released.remove(names[rtoc_idx]);
         &rtoc_mutable_block_param_24.maybe_released.insert(COPY UNWRAP (names[rtoc_idx]));
       END
@@ -3583,8 +3582,7 @@ PRIVATE FN mIRChecker__check_stmts_for_unhoisted(MUTABLE self: MIRChecker, stmts
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR _ IN stmts DO
-    MUTABLE rtoc_mutable_block_param_57 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_57 IN stmts DO
     TRY (mIRChecker__check_stmt_for_unhoisted(&rtoc_self_view, &rtoc_mutable_block_param_57));
     END
 }

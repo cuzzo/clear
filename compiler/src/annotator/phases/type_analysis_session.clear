@@ -1326,8 +1326,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE ancestors = (rtoc_self_view.traversal_state.annotation_ancestors.substr(0, ((rtoc_self_view.traversal_state.annotation_ancestors.length() - 1) - 0)) OR_ELSE List[]);
       IF node IS_A Identifier AS identifier THEN
         MUTABLE identifier_mutable = COPY identifier;
-        FOR _ IN fact_frames DO
-    MUTABLE rtoc_mutable_block_param_22 = COPY _;
+        FOR MUTABLE rtoc_mutable_block_param_22 IN fact_frames DO
         ownershipTransportFacts__record_read(&rtoc_mutable_block_param_22, identifier_mutable, ancestors);
         END
         RETURN;
@@ -1346,8 +1345,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         MUTABLE root: ?Identifier = root_branch_value;
         IF (root != NIL) THEN
-          FOR _ IN fact_frames DO
-    MUTABLE rtoc_mutable_block_param_23 = COPY _;
+          FOR MUTABLE rtoc_mutable_block_param_23 IN fact_frames DO
           ownershipTransportFacts__record_mutation(&rtoc_mutable_block_param_23, Locatable{ Assignment: COPY assignment_mutable }, root, ancestors);
           END
         END
@@ -1360,8 +1358,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         scope__resolve_entry(rtoc_local_receiver_24, CAST(locatable__name(node) AS String)) };
         IF entry EXISTS AS entry_value THEN
           MUTABLE entry_value_mutable = COPY entry_value;
-          FOR _ IN fact_frames DO
-    MUTABLE rtoc_mutable_block_param_25 = COPY _;
+          FOR MUTABLE rtoc_mutable_block_param_25 IN fact_frames DO
           ownershipTransportFacts__record_mutation_id(&rtoc_mutable_block_param_25, node, entry_value_mutable.ownership_binding_id, ancestors);
           END
         END
@@ -1381,8 +1378,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (UNWRAP (rtoc_each_items_26[rtoc_idx]).mutable() AND argument) THEN
                 MUTABLE root: ?Identifier = aST__root_identifier(argument);
                 IF (root != NIL) THEN
-                  FOR _ IN fact_frames DO
-        MUTABLE rtoc_mutable_block_param_27 = COPY _;
+                  FOR MUTABLE rtoc_mutable_block_param_27 IN fact_frames DO
                   ownershipTransportFacts__record_mutation(&rtoc_mutable_block_param_27, node, root, ancestors);
                   END
                 END
@@ -6850,8 +6846,7 @@ PRIVATE FN typeAnalysisSession__stamp_concurrent_option_values_mut(MUTABLE self:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR _ IN options.values() DO
-    MUTABLE rtoc_mutable_block_param_156 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_156 IN options.values() DO
     IF rtoc_mutable_block_param_156 IS_A Identifier THEN
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &rtoc_mutable_block_param_156, TRY (type__new(TypeConstructionInput{ SymbolValue: :Type }))));
     ELSE
@@ -11591,8 +11586,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE snapshot_value: Any = (rtoc_defer_pairs_2[_] OR_ELSE panic("missing hash key"));
     bodyFactFrame__restore_context(&_, snapshot_value);
     };
-    FOR _ IN frames DO
-    MUTABLE rtoc_mutable_block_param_271 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_271 IN frames DO
     &rtoc_mutable_block_param_271.lambda_body_stack.append(COPY node);
     END
     RETURN block();
@@ -11681,8 +11675,7 @@ PRIVATE FN typeAnalysisSession__record_body_fact_pipe_input_type_mut(self: TypeA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR _ IN TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view)) DO
-    MUTABLE rtoc_mutable_block_param_278 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_278 IN TRY (typeAnalysisSession__body_fact_frames(rtoc_self_view)) DO
     &rtoc_mutable_block_param_278.summary.pipe_input_types.insert(COPY type_name);
     END
 }
@@ -11915,8 +11908,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN declarations.body_statements DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
-    FOR _ IN (TRY (typeAnalysisSession__synthetic_function_definitions(rtoc_self_view))) DO
-    MUTABLE rtoc_mutable_block_param_283 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_283 IN (TRY (typeAnalysisSession__synthetic_function_definitions(rtoc_self_view))) DO
     TRY (typeAnalysisSession__visit_FunctionDef(&rtoc_self_view, &rtoc_mutable_block_param_283));
     &program.statements.append(COPY rtoc_mutable_block_param_283);
     END
@@ -13304,8 +13296,7 @@ PRIVATE FN typeAnalysisSession__visit_IfBind(MUTABLE self: TypeAnalysisSession, 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE branch_logic = [proc(%() USE(node, MUTABLE rtoc_self_view) -> {
-    FOR _ IN node.bindings DO
-      MUTABLE rtoc_mutable_block_param_327 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_327 IN node.bindings DO
       IF (rtoc_mutable_block_param_327.predicate == :is_ok) THEN
           typeAnalysisSession__with_body_fact_failure_absorbed(rtoc_self_view, TRUE, %() USE(rtoc_mutable_block_param_327, MUTABLE rtoc_self_view) -> {
         rtoc_lambda_result_321 = TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_mutable_block_param_327.expr));
@@ -16613,8 +16604,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__phase_traversal_state(rtoc_self_view).with_block_depth=((typeAnalysisSession__phase_traversal_state(rtoc_self_view).with_block_depth + 1));
     DEFER typeAnalysisSession__phase_traversal_state(rtoc_self_view).with_block_depth=((typeAnalysisSession__phase_traversal_state(rtoc_self_view).with_block_depth - 1));
     MUTABLE capability_expansion = WithCapabilityPlan{ all: List[] };
-    FOR _ IN node.capabilities DO
-    MUTABLE rtoc_mutable_block_param_411 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_411 IN node.capabilities DO
     TRY (typeAnalysisSession__acquire_capability_mut(&rtoc_self_view, &node, &rtoc_mutable_block_param_411, &capability_expansion));
     END
     node.capability_plan = capability_expansion;
@@ -17136,8 +17126,7 @@ PRIVATE FN typeAnalysisSession__visit_DoBlock(MUTABLE self: TypeAnalysisSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR _ IN node.branches DO
-    MUTABLE rtoc_mutable_block_param_419 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_419 IN node.branches DO
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
     typeAnalysisSession__with_async_body_fact_frame(rtoc_self_view, rtoc_mutable_block_param_419, AsyncValidationNode{ DoBlock: COPY node }, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
       full_analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, rtoc_mutable_block_param_419.parallel, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
@@ -17300,8 +17289,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
     typeAnalysisSession__with_async_body_fact_frame(rtoc_self_view, AsyncBodyNode{ BgBlock: COPY node }, AsyncValidationNode{ BgBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view) -> {
     full_analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, &node.parallel, TRUE, %() USE(node, MUTABLE rtoc_self_view) -> {
-      FOR _ IN node.body DO
-        MUTABLE rtoc_mutable_block_param_424 = COPY _;
+      FOR MUTABLE rtoc_mutable_block_param_424 IN node.body DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_mutable_block_param_424));
         last_type = (typeAnalysisSession__recoverable_result_type(rtoc_self_view, &rtoc_mutable_block_param_424, "BG body expression") OR_ELSE (CAST(rtoc_mutable_block_param_424 AS Locatable)).full_type_mut("BG body expression"));
       END
@@ -17502,8 +17490,7 @@ PRIVATE FN typeAnalysisSession__resolve_catch_clauses_from_declarations_mut(MUTA
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN declarations.function_declarations DO
-    FOR _ IN _.catch_clauses DO
-    MUTABLE rtoc_mutable_block_param_428 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_428 IN _.catch_clauses DO
     TRY (typeAnalysisSession__resolve_catch_clause_mut(&rtoc_self_view, &rtoc_mutable_block_param_428));
     END
     END

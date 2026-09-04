@@ -91,8 +91,7 @@ PRIVATE FN hoist__hoist_body_mut(MUTABLE body: []Locatable, MUTABLE counter: Hoi
     END
     generated = ruby_array_concat_VarDecl(generated, hoists);
     i = (i + hoists.length());
-    FOR _ IN (TRY (hoist__child_bodies(stmt))) DO
-  MUTABLE rtoc_mutable_block_param_4 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_4 IN (TRY (hoist__child_bodies(stmt))) DO
     TRY (hoist__hoist_body_mut(&rtoc_mutable_block_param_4, &counter, schema_lookup, &generated, return_type));
     END
     i = (i + 1);

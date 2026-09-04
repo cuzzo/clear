@@ -1983,8 +1983,7 @@ FN mIRLowering__lowered_body_id(self: MIRLowering, body: []Emittable) RETURNS Lo
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node_ids: []LoweredNodeId = ( { MUTABLE rtoc_empty_list_34: []LoweredNodeId = List[]; rtoc_empty_list_34 } );
-    FOR _ IN body DO
-    MUTABLE rtoc_mutable_block_param_35 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_35 IN body DO
     &node_ids.append(mIRLowering__ensure_lowered_node_id(rtoc_self_view, &rtoc_mutable_block_param_35));
     END
     RETURN LoweredBodyId{ node_ids: COPY node_ids };
@@ -3032,8 +3031,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN emittable__child_exprs(node) DO
     TRY (mIRLowering__finalize_nested_mir_expr_bodies_mut(rtoc_self_view, _, inherited_alloc_names, inherited_guarded_names, parent_state));
     END
-    FOR _ IN emittable__body_slots(node) DO
-    MUTABLE rtoc_mutable_block_param_64 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_64 IN emittable__body_slots(node) DO
     &rtoc_mutable_block_param_64.clear();
     &rtoc_mutable_block_param_64.merge(TRY (mIRLowering__append_nested_ownership_transfers_for_mir_body(rtoc_self_view, rtoc_mutable_block_param_64.body(), inherited_alloc_names, inherited_guarded_names, parent_state)));
     END
@@ -3049,8 +3047,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(emittable__expr?(expr_value)) THEN
         RETURN;
       END
-      FOR _ IN emittable__body_slots(expr_value) DO
-    MUTABLE rtoc_mutable_block_param_65 = COPY _;
+      FOR MUTABLE rtoc_mutable_block_param_65 IN emittable__body_slots(expr_value) DO
       &rtoc_mutable_block_param_65.clear();
       &rtoc_mutable_block_param_65.merge(TRY (mIRLowering__append_nested_ownership_transfers_for_mir_body(rtoc_self_view, rtoc_mutable_block_param_65.body(), inherited_alloc_names, inherited_guarded_names, parent_state)));
       END
@@ -6265,8 +6262,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     ELSE_IF node IS_A StructLit AS struct_lit THEN
       IF struct_lit.fields != NIL THEN
-            FOR _ IN struct_lit.fields.values() DO
-          MUTABLE rtoc_mutable_block_param_201 = COPY _;
+            FOR MUTABLE rtoc_mutable_block_param_201 IN struct_lit.fields.values() DO
           IF rtoc_mutable_block_param_201 IS_A CopyNode THEN
             CONTINUE;
           END
@@ -6281,8 +6277,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     ELSE_IF node IS_A UnionVariantLit AS union_variant_lit THEN
       IF union_variant_lit.fields != NIL THEN
-            FOR _ IN union_variant_lit.fields.values() DO
-          MUTABLE rtoc_mutable_block_param_202 = COPY _;
+            FOR MUTABLE rtoc_mutable_block_param_202 IN union_variant_lit.fields.values() DO
           IF rtoc_mutable_block_param_202 IS_A CopyNode THEN
             CONTINUE;
           END
@@ -7397,8 +7392,7 @@ PRIVATE FN mIRLowering__normalize_allocating_mir_body(self: MIRLowering, body: [
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_262: []Emittable = List[]; rtoc_empty_list_262 } );
-    FOR _ IN body DO
-    MUTABLE rtoc_mutable_block_param_263 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_263 IN body DO
     MUTABLE prefix = TRY (mIRLowering__normalize_allocating_mir_stmt_mut(rtoc_self_view, &rtoc_mutable_block_param_263));
     ruby_array_concat_Emittable__mir_lowering(out, prefix);
     &out.append(COPY rtoc_mutable_block_param_263);
@@ -7667,8 +7661,7 @@ PRIVATE FN mIRLowering__normalize_nested_mir_bodies_mut(self: MIRLowering, node:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR _ IN emittable__body_slots(node) DO
-    MUTABLE rtoc_mutable_block_param_278 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_278 IN emittable__body_slots(node) DO
     &rtoc_mutable_block_param_278.clear();
     &rtoc_mutable_block_param_278.merge(TRY (mIRLowering__normalize_allocating_mir_body(rtoc_self_view, rtoc_mutable_block_param_278.body())));
     END
@@ -7969,8 +7962,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (((alloc != NIL) AND (TRY (ownershipEffect__of(expr))).produces_owned) AND (aST__node_alloc(expr) EXISTS)) THEN
         expr.alloc = COPY alloc;
       END
-      FOR _ IN (TRY (emittable__ownership_source_exprs(expr)) OR_ELSE List[]) DO
-    MUTABLE rtoc_mutable_block_param_285 = COPY _;
+      FOR MUTABLE rtoc_mutable_block_param_285 IN (TRY (emittable__ownership_source_exprs(expr)) OR_ELSE List[]) DO
     MUTABLE has_alloc_metadata = (respondsTo?(rtoc_mutable_block_param_285, "has_alloc_metadata?") AND rtoc_mutable_block_param_285.has_alloc_metadata?());
     IF (has_alloc_metadata OR TRY (mIRLowering__mir_allocates?(rtoc_self_view, rtoc_mutable_block_param_285))) THEN
           mIRLowering__stamp_allocating_result_target_mut(rtoc_self_view, &rtoc_mutable_block_param_285, name, alloc);

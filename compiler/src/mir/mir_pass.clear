@@ -184,8 +184,7 @@ PRIVATE FN mIRPass__transform_body(self: MIRPass, stmts: []Locatable, ctx: WalkC
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE result = List[];
     MUTABLE cleanup_facts = COPY ctx.cleanup_facts;
-    FOR _ IN stmts DO
-    MUTABLE rtoc_mutable_block_param_2 = COPY _;
+    FOR MUTABLE rtoc_mutable_block_param_2 IN stmts DO
     TRY (mIRPass__recurse_branches_mut(rtoc_self_view, &rtoc_mutable_block_param_2, ctx));
     IF rtoc_mutable_block_param_2 IS_A ReturnNode AS return_node THEN
         mIRPass__insert_return_mut(rtoc_self_view, result, return_node, cleanup_facts, rtoc_self_view.current_transform_fn);
@@ -251,8 +250,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE return_node_mutable = COPY return_node;
       TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &return_node_mutable.value, ctx));
     ELSE_IF (stmt IS_A MethodCall) OR (stmt IS_A FuncCall) THEN
-      FOR _ IN locatable__args(stmt) DO
-    MUTABLE rtoc_mutable_block_param_5 = COPY _;
+      FOR MUTABLE rtoc_mutable_block_param_5 IN locatable__args(stmt) DO
       TRY (mIRPass__recurse_expr_body_mut(rtoc_self_view, &rtoc_mutable_block_param_5, ctx));
       END
     END
@@ -354,8 +352,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         TRY (mIRPass__walk_consumed(rtoc_self_view, capability_wrap_mutable.value, &names, facts));
       ELSE_IF node_value_mutable IS_A StructLit AS struct_lit THEN
         MUTABLE struct_lit_mutable = COPY struct_lit;
-        FOR _ IN struct_lit_mutable.fields.values() DO
-    MUTABLE rtoc_mutable_block_param_6 = COPY _;
+        FOR MUTABLE rtoc_mutable_block_param_6 IN struct_lit_mutable.fields.values() DO
         IF rtoc_mutable_block_param_6 IS_A Identifier THEN
           TRY (mIRPass__add_if_consumed(rtoc_self_view, &rtoc_mutable_block_param_6, &names, facts, FALSE));
         ELSE
