@@ -1274,7 +1274,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       Locatable.Literal AS literal -> TRY (typeAnalysisSession__visit_Literal(rtoc_self_view, &literal)),
       Locatable.DefaultLit AS default_lit -> TRY (typeAnalysisSession__visit_DefaultLit(rtoc_self_view, &default_lit)),
       Locatable.BinaryOp AS binary_op -> TRY (typeAnalysisSession__visit_BinaryOp(&rtoc_self_view, &binary_op)),
-      Locatable.Placeholder AS placeholder -> TRY (typeAnalysisSession__visit_Placeholder(rtoc_self_view, placeholder)),
+      Locatable.Placeholder AS placeholder -> TRY (typeAnalysisSession__visit_Placeholder(&rtoc_self_view, placeholder)),
       Locatable.CapabilityWrap AS capability_wrap -> TRY (typeAnalysisSession__visit_CapabilityWrap(&rtoc_self_view, &capability_wrap)),
       AST.OptionalUnwrap -> TRY (typeAnalysisSession__visit_OptionalUnwrap(&rtoc_self_view, &node)),
       Locatable.TenseNavigation AS tense_navigation -> TRY (typeAnalysisSession__visit_TenseNavigation(&rtoc_self_view, &tense_navigation)),
@@ -11744,10 +11744,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN fact;
 }
 END
-PRIVATE FN typeAnalysisSession__with_async_body_fact_frame(self: TypeAnalysisSession, node: AsyncBodyNode, validation_node: AsyncValidationNode, block: FN() -> Void) RETURNS !BodyScanSummary
+PRIVATE FN typeAnalysisSession__with_async_body_fact_frame(MUTABLE self: TypeAnalysisSession, node: AsyncBodyNode, validation_node: AsyncValidationNode, block: FN() -> Void) RETURNS !BodyScanSummary
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE summary: !BodyScanSummary = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(rtoc_self_view) -> {
     TRY (typeAnalysisSession__with_body_fact_scopes_cleared(rtoc_self_view, %() -> block()));
     rubyToClearVoid__type_analysis_session()
@@ -17202,7 +17202,7 @@ PRIVATE FN typeAnalysisSession__visit_DoBlock(MUTABLE self: TypeAnalysisSession,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR MUTABLE rtoc_mutable_block_param_419 IN node.branches DO
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
-    typeAnalysisSession__with_async_body_fact_frame(rtoc_self_view, rtoc_mutable_block_param_419, AsyncValidationNode{ DoBlock: COPY node }, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, rtoc_mutable_block_param_419, AsyncValidationNode{ DoBlock: COPY node }, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
       full_analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, rtoc_mutable_block_param_419.parallel, FALSE, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
         TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, rtoc_mutable_block_param_419.body));
         rubyToClearVoid__type_analysis_session()
@@ -17244,7 +17244,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("LOOP_UNBOUND")));
     MUTABLE stream_analysis: ?CaptureAnalysis = NIL;
     MUTABLE yield_types: []Type@multiowned = TRY (typeAnalysisSession__with_stream_yield_frame(rtoc_self_view, node, %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_420 = typeAnalysisSession__with_async_body_fact_frame(rtoc_self_view, AsyncBodyNode{ BgStreamBlock: COPY node }, AsyncValidationNode{ BgStreamBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view) -> {
+    rtoc_lambda_result_420 = typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, AsyncBodyNode{ BgStreamBlock: COPY node }, AsyncValidationNode{ BgStreamBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view) -> {
     stream_analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, FALSE, FALSE, %() USE(node, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, node.body));
       rubyToClearVoid__type_analysis_session()
@@ -17364,7 +17364,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     DEFER rtoc_self_view.traversal_state.current_bg_pinned = prev_bg_pinned;
     MUTABLE last_type: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
-    typeAnalysisSession__with_async_body_fact_frame(rtoc_self_view, AsyncBodyNode{ BgBlock: COPY node }, AsyncValidationNode{ BgBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, AsyncBodyNode{ BgBlock: COPY node }, AsyncValidationNode{ BgBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view) -> {
     full_analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, &node.parallel, TRUE, %() USE(node, MUTABLE rtoc_self_view) -> {
       FOR MUTABLE rtoc_mutable_block_param_424 IN node.body DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_mutable_block_param_424));
@@ -18615,10 +18615,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY operand }, :type, fixes, NIL, :AMBIGUOUS_OPTIONAL_BOOL_LOGIC, :error, FALSE, CAST({:op: op} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__visit_Placeholder(self: TypeAnalysisSession, node: Placeholder) RETURNS !?SymbolEntry@multiowned
+PRIVATE FN typeAnalysisSession__visit_Placeholder(MUTABLE self: TypeAnalysisSession, node: Placeholder) RETURNS !?SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE result: ?SymbolEntry@multiowned = TRY (typeAnalysisSession__visit_Identifier(&rtoc_self_view, Identifier{ token: COPY node.token, name: "_", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL }));
     IF (result != NIL) THEN
       RETURN result;
