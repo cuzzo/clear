@@ -5180,7 +5180,7 @@ END
 PRIVATE FN typeAnalysisSession__stamp_observable_terminal_mut(self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !?Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node.left IS_A RangeLit THEN
       RETURN NIL;
     END
@@ -5200,7 +5200,7 @@ END
 PRIVATE FN typeAnalysisSession__lift_to_observable_if_terminal_mut(self: TypeAnalysisSession, MUTABLE node: BinaryOp, terminal: String@symbol, raw: String@symbol, collection: ?String@symbol = NIL) RETURNS !?Type
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(node.observable_terminal) THEN
       RETURN NIL;
     END
@@ -5210,7 +5210,7 @@ END
 PRIVATE FN typeAnalysisSession__mark_observable_terminal_mut(self: TypeAnalysisSession, MUTABLE node: BinaryOp, terminal: String@symbol, raw: String@symbol, collection: ?String@symbol = NIL) RETURNS !?Type
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_observable_terminal_mut(rtoc_self_view, &node));
     RETURN CAST(TRY (typeAnalysisSession__lift_to_observable_if_terminal_mut(rtoc_self_view, &node, terminal, raw, collection)) AS ?Type);
 }
@@ -5218,14 +5218,14 @@ END
 PRIVATE FN typeAnalysisSession__bounded_stream_source?(self: TypeAnalysisSession, MUTABLE node: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (type__bounded_stream?((TRY (aST__full_type_mut(node)))));
 }
 END
 PRIVATE FN typeAnalysisSession__pipeline_source_fact(self: TypeAnalysisSession, source: Locatable, source_type: Type, include_inf_stream: Bool = FALSE) RETURNS !PipelineSourceFact
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (include_inf_stream AND TRY (type__inf_stream?(source_type))) THEN
       MUTABLE item = (IF TRY (type__canonical_stream_item_type(source_type)) != NIL THEN TRY (type__canonical_stream_item_type(source_type)) ELSE UNWRAP (TRY (type__inf_stream_element_type(source_type))) END);
       RETURN PipelineSourceFact{ kind: :inf_stream, item_type: COPY item };
@@ -5255,7 +5255,7 @@ END
 PRIVATE FN typeAnalysisSession__has_catch_blocks?(self: TypeAnalysisSession) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_name: ?String = COPY typeAnalysisSession__current_fn_ctx(rtoc_self_view)?.name;
     MUTABLE fn_nodes = TRY (typeAnalysisSession__function_node_map(rtoc_self_view));
     MUTABLE fn_branch_value: ?FunctionDef@multiowned = NIL;
@@ -17111,7 +17111,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__validate_snapshot_match_arms_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock) RETURNS !Void
+PRIVATE FN typeAnalysisSession__validate_snapshot_match_arms_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

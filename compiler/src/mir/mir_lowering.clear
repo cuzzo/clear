@@ -16222,7 +16222,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN aggregate_alloc;
 }
 END
-PRIVATE FN mIRLowering__lower_string_concat(MUTABLE self: MIRLowering, node: StringConcat) RETURNS !ConcatStr
+PRIVATE FN mIRLowering__lower_string_concat(MUTABLE self: MIRLowering, MUTABLE node: StringConcat) RETURNS !ConcatStr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16231,7 +16231,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ConcatStr{ parts: COPY parts, alloc: COPY alloc, rt_expr: COPY mIRLowering__runtime_binding_name(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL };
 }
 END
-PRIVATE FN mIRLowering__lower_block_expr(MUTABLE self: MIRLowering, node: BlockExpr) RETURNS !MIRLoweringReturnValue
+PRIVATE FN mIRLowering__lower_block_expr(MUTABLE self: MIRLowering, MUTABLE node: BlockExpr) RETURNS !MIRLoweringReturnValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16347,7 +16347,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN MIRLoweringReturnValue{ AssertStmt: COPY AssertStmt{ cond: COPY cond, message: "\"${msg}\"", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
 }
 END
-PRIVATE FN mIRLowering__try_lower_equality_assert(MUTABLE self: MIRLowering, node: Assert) RETURNS !?Call
+PRIVATE FN mIRLowering__try_lower_equality_assert(MUTABLE self: MIRLowering, MUTABLE node: Assert) RETURNS !?Call
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16399,7 +16399,7 @@ PRIVATE FN mIRLowering__pick_equality_helper(self: MIRLowering, left: Locatable,
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE lt: ?Type = TRY (mIRLowering__type_info_for(rtoc_self_view, left));
     MUTABLE rt: ?Type = TRY (mIRLowering__type_info_for(rtoc_self_view, right));
-    IF (TRY (type__string_comparable_with?(UNWRAP (lt), CAST(rt AS ?Type))) OR TRY (type__string_comparable_with?(rt, CAST(lt AS ?Type)))) THEN
+    IF (TRY (type__string_comparable_with?(UNWRAP (lt), CAST(rt AS ?Type))) OR TRY (type__string_comparable_with?(UNWRAP (rt), CAST(lt AS ?Type)))) THEN
       RETURN CAST(Tuple{"expectEqualStrings", List[]} AS Tuple<String, []String>);
     END
     MUTABLE slice_elem: ?String = (IF TRY (mIRLowering__slice_element_zig_type(rtoc_self_view, CAST(lt AS Type))) != NIL THEN TRY (mIRLowering__slice_element_zig_type(rtoc_self_view, CAST(lt AS Type))) ELSE TRY (mIRLowering__slice_element_zig_type(rtoc_self_view, CAST(rt AS Type))) END);
@@ -18765,7 +18765,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, node: Assignment) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -18824,13 +18824,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN Emittable{ Set: COPY result };
 }
 END
-PRIVATE FN mIRLowering__special_assignment_result(MUTABLE self: MIRLowering, node: Assignment) RETURNS !?Stmt
+PRIVATE FN mIRLowering__special_assignment_result(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !?Stmt
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE name = COPY node.name;
     IF mIRLowering__conditional_field_assignment?(rtoc_self_view, castAssignmentNameToName(name)) THEN
-      RETURN CAST(TRY (mIRLowering__lower_conditional_field_assignment(&rtoc_self_view, node)) AS Emittable);
+      RETURN CAST(TRY (mIRLowering__lower_conditional_field_assignment(&rtoc_self_view, &node)) AS Emittable);
     END
     IF name IS_A GetIndex AS get_index THEN
       MUTABLE get_index_mutable = COPY get_index;
@@ -19251,7 +19251,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (functionSignature__intrinsic_alloc(&op, alloc_key));
 }
 END
-PRIVATE FN mIRLowering__lower_field_assignment_with_cleanup(MUTABLE self: MIRLowering, node: Assignment) RETURNS !ScopeBlock
+PRIVATE FN mIRLowering__lower_field_assignment_with_cleanup(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !ScopeBlock
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

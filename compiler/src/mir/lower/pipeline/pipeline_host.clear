@@ -290,7 +290,7 @@ END
 PRIVATE FN pipelineHost__current_context(self: PipelineHost) RETURNS PipelineContextState
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY rtoc_self_view.pipeline_context;
 }
 END
@@ -336,7 +336,7 @@ END
 PRIVATE FN pipelineHost__agg_min_sentinel_mir(self: PipelineHost, zig_t: String) RETURNS TypeSentinel
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TypeSentinel{ extreme: :max, zig_type: COPY zig_t, lowered_node_id: NIL, ownership_consumption: NIL };
 }
 END
@@ -817,7 +817,7 @@ PRIVATE FN pipelineHost__borrowed_pipeline_value(self: PipelineHost, value: Emit
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (pipelineMaterializer__borrowed_pipeline_value(rtoc_self_view.materializer, value, type_info, alloc));
 }
 END
