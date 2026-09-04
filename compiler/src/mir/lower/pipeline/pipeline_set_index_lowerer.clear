@@ -199,7 +199,7 @@ END
 PRIVATE FN pipelineSetIndexLowerer__bc_index_iter(self: PipelineSetIndexLowerer, range_source: Locatable) RETURNS ?Emittable ->
   IF range_source IS_A RangeLit THEN
     MUTABLE start_mir = pipelineSetIndexLowerer__visit_mir_call(self, UNWRAP (locatable__start(range_source)));
-    MUTABLE end_mir = pipelineSetIndexLowerer__visit_mir_call(self, UNWRAP (locatable__finish(range_source)));
+    MUTABLE end_mir = pipelineSetIndexLowerer__visit_mir_call(self, UNWRAP (UNWRAP (locatable__finish(range_source))));
     MUTABLE end_expr_branch_value: ?BinOp = NIL;
     IF range_source.inclusive THEN
       end_expr_branch_value = MIRBinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };

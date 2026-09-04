@@ -586,7 +586,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
   END
   IF (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == name) ELSE FALSE END) THEN
     MUTABLE sym: ?SymbolEntry@multiowned = locatable__symbol(node);
-    IF (!(sym IS_A SymbolEntry@multiowned) OR ((UNWRAP (sym)).binding_id == entry.binding_id)) THEN
+    IF (!(UNWRAP (sym) IS_A SymbolEntry@multiowned) OR ((UNWRAP (sym)).binding_id == entry.binding_id)) THEN
       MUTABLE stamp = (node.full_type());
       IF ((stamp IS_A Type) AND !(TRY (type__any_rc?(stamp)))) THEN
         TRY (type__set_ownership(&stamp, :multiowned));
@@ -1655,7 +1655,7 @@ PUB FN escapeAnalysis__params_for_call(call: FuncCall, fn_nodes: {String}Functio
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(COPY call.matched_signature));
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(KEEP call.matched_signature));
   ELSE
     sig_branch_value = NIL;
   END
@@ -1669,7 +1669,7 @@ END
 PUB FN escapeAnalysis__params_for_method_call(call: MethodCall) RETURNS ![]Param ->
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(COPY call.matched_signature));
+    sig_branch_value = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__escape_analysis(KEEP call.matched_signature));
   ELSE
     sig_branch_value = NIL;
   END

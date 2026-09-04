@@ -986,7 +986,7 @@ PUB FN typeAnalysisSession__scan_kept_fn_value_use_mut(self: TypeAnalysisSession
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (IF node IS_A Identifier AS identifier THEN kept_fns.contains?(identifier__name(identifier)) ELSE FALSE END) THEN
       MUTABLE sym: ?SymbolEntry@multiowned = aST__node__symbol(node);
-      MUTABLE shadowed = (((sym IS_A SymbolEntry@multiowned AND ((functionSignature__unwrap(sym.type())) == NIL)) AND !((sym.type() == NIL))) AND (sym.type().resolved() != :Any));
+      MUTABLE shadowed = (((UNWRAP (sym) IS_A SymbolEntry@multiowned AND ((functionSignature__unwrap(sym.type())) == NIL)) AND !((sym.type() == NIL))) AND (sym.type().resolved() != :Any));
       IF !(shadowed) THEN
         MUTABLE param = COPY UNWRAP (kept_fns[locatable__name(node)]);
         MUTABLE contract = UNWRAP ((IF param.symbol != NIL THEN
@@ -1753,7 +1753,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE replacement_length = name.codepointCount();
         IF src EXISTS AS src_value THEN
           MUTABLE move_text = COPY (src_value.split("\n")[(move_line_value - 1)] OR_ELSE "");
-          MUTABLE prefix = COPY (move_text.substr(0, (move_col - 1)));
+          MUTABLE prefix = COPY (move_text.substr(0, (UNWRAP (move_col) - 1)));
           MUTABLE give_prefix: ?CompilerRegexScanner = compilerRegexMatchData(prefix, compilerRegexCompile("GIVE\\s+\\z"));
           IF give_prefix EXISTS AS give_prefix_value THEN
             replacement_col = (give_prefix_value.begin(0) + 1);
@@ -2021,7 +2021,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE best: ?String@symbol = typeAnalysisSession__smallest_fitting_int_type(rtoc_self_view, val);
     IF best EXISTS AS best_value THEN
-      MUTABLE line_text = (src.split("\n")[(tok.line - 1)] OR_ELSE "");
+      MUTABLE line_text = (UNWRAP (src).split("\n")[(tok.line - 1)] OR_ELSE "");
       MUTABLE snippet = line_text.substr(((tok.column - 1)), (line_text.length() - ((tok.column - 1))));
       MUTABLE m: ?CompilerRegexScanner = compilerRegexMatchData(snippet, compilerRegexCompile("\\A(\\d[\\d_]*)_([a-z]\\d+)"));
       IF m EXISTS AS m_value THEN
@@ -2308,7 +2308,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fixes = List[];
     IF src EXISTS AS src_value THEN
       MUTABLE line_num = node.source_range?.start_line;
-      MUTABLE line_text = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
+      MUTABLE line_text = (src_value.split("\n")[(UNWRAP (line_num) - 1)] OR_ELSE "");
       MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.trimStart();
@@ -2769,7 +2769,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF !(line_num) THEN
             RETURN NIL;
           END
-          MUTABLE src_line = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
+          MUTABLE src_line = (src_value.split("\n")[(UNWRAP (line_num) - 1)] OR_ELSE "");
           MUTABLE search_offset = (symbolEntryRegInput__token(reg_value).column - 1);
           MUTABLE match: ?CompilerRegexScanner = NIL;
           IF src_line.substr(search_offset, (src_line.length() - search_offset)) != NIL THEN
@@ -5811,7 +5811,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "REDUCE", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__initial_value(node.right)));
-    MUTABLE acc_type = locatable__resolved_type(node.right.initial_value);
+    MUTABLE acc_type = locatable__resolved_type(locatable__initial_value(node.right));
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(acc_type, item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_130 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_130, "acc", NIL, acc_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
@@ -5865,7 +5865,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     MUTABLE inner_bind_name = NIL;
     MUTABLE expr: ?Locatable@boxed = locatable__expression(node.right);
-    IF (expr IS_A BinaryOp AND (expr.op() == :BIND_VAR)) THEN
+    IF (UNWRAP (expr) IS_A BinaryOp AND (expr.op() == :BIND_VAR)) THEN
       inner_bind_name = expr.right().name();
     END
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(item_type, node, rtoc_self_view) -> {
@@ -15157,7 +15157,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     MUTABLE src: ?SymbolEntry@multiowned = locatable__symbol(UNWRAP (rhs));
-    IF !((src IS_A SymbolEntry@multiowned AND symbolEntry__carrier_polymorphic(src))) THEN
+    IF !((UNWRAP (src) IS_A SymbolEntry@multiowned AND symbolEntry__carrier_polymorphic(src))) THEN
       RETURN;
     END
     MUTABLE dest: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_379 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
@@ -18374,7 +18374,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       :STRING ->
       IF (node.storage == :stack) THEN
         node.storage = :rodata;
-        literal_type_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("Byte[${node.value.length()}]") }, NIL, NIL, NIL, :rodata));
+        literal_type_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("Byte[${UNWRAP (node.value).length()}]") }, NIL, NIL, NIL, :rodata));
       ELSE
         node.storage = :rodata;
         literal_type_branch_value = TRY (type__new(string_type, NIL, NIL, NIL, :rodata));
@@ -19144,7 +19144,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE copy_root = COPY node.value;
     IF (copy_root IS_A Identifier AND !(node.own)) THEN
       MUTABLE copy_entry: ?SymbolEntry@multiowned = locatable__symbol(copy_root);
-      IF (copy_entry IS_A SymbolEntry@multiowned AND symbolEntry__carrier_polymorphic(copy_entry)) THEN
+      IF (UNWRAP (copy_entry) IS_A SymbolEntry@multiowned AND symbolEntry__carrier_polymorphic(copy_entry)) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ CopyNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :COPY_ON_POLYMORPHIC_PARAM }, [], CAST({:name: copy_root.name()} AS {String@symbol}Any)));
       END
     END

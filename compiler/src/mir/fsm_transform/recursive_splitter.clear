@@ -239,7 +239,7 @@ PRIVATE FN fsmRecursiveSplitter__stmt_introduces_split?(stmt: ?SegmentStmt) RETU
 END
 PRIVATE FN fsmRecursiveSplitter__contains_suspend_anywhere?(stmts: ?Stmts) RETURNS !Bool EFFECTS REENTRANT ->
   MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < stmts.length() DO
+  WHILE rtoc_idx < UNWRAP (stmts).length() DO
     IF (stmts[rtoc_idx] IS_A Locatable AND segments__classify_suspend(stmts[rtoc_idx])) THEN
         RETURN TRUE;
     END

@@ -730,7 +730,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE replacement_length = name.codepointCount();
         IF src EXISTS AS src_value THEN
           MUTABLE move_text = COPY (src_value.split("\n")[(move_line_value - 1)] OR_ELSE "");
-          MUTABLE prefix = COPY (move_text.substr(0, (move_col - 1)));
+          MUTABLE prefix = COPY (move_text.substr(0, (UNWRAP (move_col) - 1)));
           MUTABLE give_prefix: ?CompilerRegexScanner = compilerRegexMatchData(prefix, compilerRegexCompile("GIVE\\s+\\z"));
           IF give_prefix EXISTS AS give_prefix_value THEN
             replacement_col = (give_prefix_value.begin(0) + 1);
@@ -998,7 +998,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE best: ?String@symbol = capabilityAuditSession__smallest_fitting_int_type(rtoc_self_view, val);
     IF best EXISTS AS best_value THEN
-      MUTABLE line_text = (src.split("\n")[(tok.line - 1)] OR_ELSE "");
+      MUTABLE line_text = (UNWRAP (src).split("\n")[(tok.line - 1)] OR_ELSE "");
       MUTABLE snippet = line_text.substr(((tok.column - 1)), (line_text.length() - ((tok.column - 1))));
       MUTABLE m: ?CompilerRegexScanner = compilerRegexMatchData(snippet, compilerRegexCompile("\\A(\\d[\\d_]*)_([a-z]\\d+)"));
       IF m EXISTS AS m_value THEN
@@ -1285,7 +1285,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fixes = List[];
     IF src EXISTS AS src_value THEN
       MUTABLE line_num = node.source_range?.start_line;
-      MUTABLE line_text = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
+      MUTABLE line_text = (src_value.split("\n")[(UNWRAP (line_num) - 1)] OR_ELSE "");
       MUTABLE body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.trimStart();
@@ -1746,7 +1746,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF !(line_num) THEN
             RETURN NIL;
           END
-          MUTABLE src_line = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
+          MUTABLE src_line = (src_value.split("\n")[(UNWRAP (line_num) - 1)] OR_ELSE "");
           MUTABLE search_offset = (symbolEntryRegInput__token(reg_value).column - 1);
           MUTABLE match: ?CompilerRegexScanner = NIL;
           IF src_line.substr(search_offset, (src_line.length() - search_offset)) != NIL THEN
