@@ -2770,7 +2770,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             RETURN NIL;
           END
           MUTABLE src_line = (src_value.split("\n")[(UNWRAP (line_num) - 1)] OR_ELSE "");
-          MUTABLE search_offset = (symbolEntryRegInput__token(reg_value).column - 1);
+          MUTABLE search_offset = (UNWRAP (symbolEntryRegInput__token(reg_value)).column - 1);
           MUTABLE match: ?CompilerRegexScanner = NIL;
           IF src_line.substr(search_offset, (src_line.length() - search_offset)) != NIL THEN
             match = COPY compilerRegexMatchData(((src_line.substr(search_offset, (src_line.length() - search_offset)))?), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));
@@ -5718,7 +5718,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "JOIN"));
     MUTABLE left_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__right_source(node.right)));
-    MUTABLE rhs_type_info = locatable__right_source(node.right).full_type_mut({:context: "pipeline right source"});
+    MUTABLE rhs_type_info = UNWRAP (locatable__right_source(node.right)).full_type_mut({:context: "pipeline right source"});
     IF !(((node.right.right_source.metatype == :array) OR (IF rhs_type_info != NIL THEN
       type__collection?(rhs_type_info)
     ELSE
@@ -5811,7 +5811,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "REDUCE", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__initial_value(node.right)));
-    MUTABLE acc_type = locatable__resolved_type(locatable__initial_value(node.right));
+    MUTABLE acc_type = locatable__resolved_type(UNWRAP (locatable__initial_value(node.right)));
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(acc_type, item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_130 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_130, "acc", NIL, acc_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
@@ -5865,7 +5865,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     MUTABLE inner_bind_name = NIL;
     MUTABLE expr: ?Locatable@boxed = locatable__expression(node.right);
-    IF (UNWRAP (expr) IS_A BinaryOp AND (expr.op() == :BIND_VAR)) THEN
+    IF (UNWRAP (expr) IS_A BinaryOp AND (UNWRAP (expr).op() == :BIND_VAR)) THEN
       inner_bind_name = expr.right().name();
     END
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(item_type, node, rtoc_self_view) -> {
@@ -19393,7 +19393,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((IF root IS_A Identifier AS identifier THEN (identifier.symbol != NIL) ELSE FALSE END) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_474: ?SymbolEntry@multiowned = locatable__symbol(root);
     symbolEntry__carrier_polymorphic( UNWRAP (rtoc_local_receiver_474)) }) THEN
       node.carrier_op = IF ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_475: ?SymbolEntry@multiowned = locatable__symbol(root);
-      symbolEntry__carrier_contract(rtoc_local_receiver_475) } == :monomorphic) THEN
+      symbolEntry__carrier_contract(UNWRAP (rtoc_local_receiver_475)) } == :monomorphic) THEN
         :monomorphic_keep
       ELSE
         :deferred_specialization

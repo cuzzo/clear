@@ -1747,7 +1747,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             RETURN NIL;
           END
           MUTABLE src_line = (src_value.split("\n")[(UNWRAP (line_num) - 1)] OR_ELSE "");
-          MUTABLE search_offset = (symbolEntryRegInput__token(reg_value).column - 1);
+          MUTABLE search_offset = (UNWRAP (symbolEntryRegInput__token(reg_value)).column - 1);
           MUTABLE match: ?CompilerRegexScanner = NIL;
           IF src_line.substr(search_offset, (src_line.length() - search_offset)) != NIL THEN
             match = COPY compilerRegexMatchData(((src_line.substr(search_offset, (src_line.length() - search_offset)))?), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));
