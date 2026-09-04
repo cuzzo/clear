@@ -1,0 +1,35 @@
+# A DEFER body may own a value: `list.pop()` moves an existing handle out of
+# the list and releases it with an infallible cleanup, which Zig runs happily
+# inside a defer. Only *fallible* work is rejected, because a defer has no
+# error channel. This is Ruby's `ensure stack.pop` shape.
+STRUCT Scope { depth: Int64 }
+STRUCT Session { scopes: []Scope@multiowned }
+
+FN with_new_scope(MUTABLE s: Session) RETURNS Int64 ->
+    DEFER &s.scopes.pop();
+    &s.scopes.append(Scope{ depth: s.scopes.length() } @multiowned);
+    RETURN s.scopes.length();
+END
+
+FN nested(MUTABLE s: Session) RETURNS Int64 ->
+    inner = with_new_scope(&s);
+    outer = with_new_scope(&s);
+    RETURN inner + outer;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE s = Session{ scopes: [] };
+    ASSERT with_new_scope(&s) == 1, "pushed inside the scope";
+    ASSERT s.scopes.length() == 0, "popped at scope exit";
+
+    # Every entry must be released, not just the last: two sequential scopes
+    # each push and pop their own Rc handle.
+    ASSERT nested(&s) == 2, "each nested scope sees depth 0";
+    ASSERT s.scopes.length() == 0, "both popped";
+
+    &s.scopes.append(Scope{ depth: 7_i64 } @multiowned);
+    ASSERT with_new_scope(&s) == 2, "depth counts the existing entry";
+    ASSERT s.scopes.length() == 1, "only the deferred entry was popped";
+    ASSERT (s.scopes[0]?.depth OR_ELSE -1_i64) == 7_i64, "survivor intact";
+    RETURN;
+END

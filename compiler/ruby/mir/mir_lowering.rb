@@ -5133,20 +5133,37 @@ class MIRLowering
   sig { params(node: AST::DeferStmt, body: T::Array[MIR::Emittable]).void }
   def reject_fallible_defer_body!(node, body)
     MIR.each_node(body) do |mir_node|
-      fallible = mir_node.respond_to?(:try_wrap) && T.unsafe(mir_node).try_wrap
-      next unless fallible || mir_allocates?(mir_node)
+      # Fallibility is the whole hazard: a defer has no error channel, so the
+      # emitted body may not contain `try`. Owning a value is a different
+      # question -- `list.pop()` moves an existing handle out and releases it
+      # with an infallible cleanup, which Zig runs happily inside a defer, and
+      # which is the only translation of Ruby's `ensure stack.pop`.
+      next unless defer_body_fallible?(mir_node)
 
       offender = mir_node.class.name.to_s.split('::').last
       offender += " '#{T.unsafe(mir_node).name}'" if mir_node.respond_to?(:name)
       offender += " to '#{T.unsafe(mir_node).callee}'" if mir_node.respond_to?(:callee)
-      reason = fallible ? 'is fallible' : 'allocates'
       where = node.token.respond_to?(:line) ? " (DEFER at line #{node.token.line})" : ''
       Kernel.raise CompilerError.new(node.token,
-        "DEFER body must be infallible and non-allocating: #{offender} #{reason}#{where}. Deferred code runs " \
-        "during scope teardown, which has no error channel (Zig defer). Precompute allocating values " \
+        "DEFER body must be infallible: #{offender} is fallible#{where}. Deferred code runs " \
+        "during scope teardown, which has no error channel (Zig defer). Precompute fallible values " \
         "before the DEFER and keep only plain assignments/infallible calls inside it.",
         nil)
     end
+  end
+
+  # A node emits `try` when it is an explicit TRY, carries the try_wrap stamp,
+  # or calls something whose declared return type is an error union.
+  sig { params(mir_node: MIR::Node).returns(T::Boolean) }
+  def defer_body_fallible?(mir_node)
+    return true if mir_node.is_a?(MIR::TryExpr)
+    return true if mir_node.respond_to?(:try_wrap) && T.unsafe(mir_node).try_wrap
+
+    raw = mir_node.respond_to?(:result_type) ? T.unsafe(mir_node).result_type : nil
+    raw ||= mir_node.respond_to?(:callable_contract) ? T.unsafe(mir_node).callable_contract&.signature&.return_type : nil
+    return false unless raw
+
+    Type.new(raw).error_union?
   end
 
   sig { returns(T::Array[MIR::Emittable]) }
