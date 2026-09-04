@@ -534,10 +534,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN pipelineHost__concurrent_async_stream_select?(self: PipelineHost, MUTABLE node: BinaryOp) RETURNS !Bool
+PUB FN pipelineHost__concurrent_async_stream_select?(MUTABLE self: PipelineHost, MUTABLE node: BinaryOp) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE concurrent = COPY node.right;
     IF concurrent IS_A ConcurrentOp AS concurrent_op THEN
       MUTABLE select = concurrent_op.op;

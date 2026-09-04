@@ -14925,7 +14925,7 @@ PRIVATE FN mIRLowering__lower_get_field(MUTABLE self: MIRLowering, MUTABLE node:
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE shared: Bool = FALSE;
     MUTABLE zig_type: String = "";
-    MUTABLE constructor: ?StructInit = TRY (mIRLowering__unit_variant_constructor(rtoc_self_view, node));
+    MUTABLE constructor: ?StructInit = TRY (mIRLowering__unit_variant_constructor(rtoc_self_view, &node));
     IF constructor EXISTS AS constructor_value THEN
       RETURN Emittable{ StructInit: COPY constructor_value };
     END
@@ -15039,7 +15039,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN Emittable{ DirectTenseMap: COPY outer };
 }
 END
-PRIVATE FN mIRLowering__lower_future_tense_map(self: MIRLowering, node: Locatable, operation: TenseOperationPlan, source: Emittable, inner_layers: []TenseLayer, id: Int64, mapper: FN(String) -> Emittable) RETURNS !MIRBgBlock
+PRIVATE FN mIRLowering__lower_future_tense_map(self: MIRLowering, MUTABLE node: Locatable, operation: TenseOperationPlan, source: Emittable, inner_layers: []TenseLayer, id: Int64, mapper: FN(String) -> Emittable) RETURNS !MIRBgBlock
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17582,7 +17582,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF mIRLowering__const_init_error_fallible?(rtoc_self_view, node) THEN
       RAISE Input, CompilerError, "{}error channel. Make the initializer infallible, or compute the value inside a function.";
     END
-    MUTABLE safe_name = TRY (mIRLowering__var_decl_safe_name(rtoc_self_view, node, FALSE));
+    MUTABLE safe_name = TRY (mIRLowering__var_decl_safe_name(rtoc_self_view, &node, FALSE));
     MUTABLE rtoc_index_receiver_650 = TRY (functionState__binding_types(mIRLowering__function_state(rtoc_self_view)));
     rtoc_index_receiver_650[safe_name] = COPY facts.ft;
     MUTABLE heap_value, const_pending = mIRLowering__lower_head(rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -17608,7 +17608,7 @@ PRIVATE FN mIRLowering__lower_module_global(MUTABLE self: MIRLowering, MUTABLE n
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE safe_name = TRY (mIRLowering__var_decl_safe_name(rtoc_self_view, node, FALSE));
+    MUTABLE safe_name = TRY (mIRLowering__var_decl_safe_name(rtoc_self_view, &node, FALSE));
     MUTABLE rtoc_index_receiver_653 = TRY (functionState__binding_types(mIRLowering__function_state(rtoc_self_view)));
     rtoc_index_receiver_653[safe_name] = COPY facts.ft;
     MUTABLE heap_value, pending = mIRLowering__lower_head(rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -17625,7 +17625,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY safe_name, init: COPY heap_value, mutable: TRUE, annotation: COPY facts.annotation, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
 }
 END
-PRIVATE FN mIRLowering__lower_runtime_init_const(self: MIRLowering, node: VarDecl, facts: VarDeclFacts, safe_name: String, value: Emittable, prelude: []Emittable) RETURNS !NodeRoot
+PRIVATE FN mIRLowering__lower_runtime_init_const(self: MIRLowering, MUTABLE node: VarDecl, facts: VarDeclFacts, safe_name: String, value: Emittable, prelude: []Emittable) RETURNS !NodeRoot
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17640,7 +17640,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NodeRoot{ Emittable: COPY CAST(ModuleVar{ name: COPY safe_name, zig_type: COPY zig_type, visibility: COPY node.const_visibility, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
 }
 END
-PRIVATE FN mIRLowering__const_init_error_fallible?(self: MIRLowering, node: VarDecl) RETURNS Bool
+PRIVATE FN mIRLowering__const_init_error_fallible?(self: MIRLowering, MUTABLE node: VarDecl) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17790,7 +17790,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE node: Locatable = COPY value;
     WHILE node IS_A Cast DO
-      node = aST__node_value(node);
+      MUTABLE node = aST__node_value(node);
     END
     IF (IF node IS_A Literal AS literal THEN (literal.type == symbol("NIL")) ELSE FALSE END) THEN
       RETURN TRUE;
@@ -18299,7 +18299,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE inner: Locatable = node;
     WHILE (inner IS_A CopyNode OR inner IS_A KeepNode) DO
-      inner = aST__node_value( UNWRAP (inner));
+      inner = aST__node_value( inner);
     END
     MUTABLE source_type = TRY (type__from_node_mut(inner, "capability source type"));
     IF !((type__ownership( UNWRAP (source_type)) == type__ownership(target_type))) THEN
