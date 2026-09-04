@@ -14,6 +14,9 @@ EXTERN FN compilerRegexScannerClose(scanner: CompilerRegexScanner) RETURNS Void 
 EXTERN FN compilerRegexScan(scanner: CompilerRegexScanner, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatched(scanner: CompilerRegexScanner) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexCapture(scanner: CompilerRegexScanner, index: Int64) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
+# Offset just past the match, which is Ruby's `match.end(0)` on a match-data
+# scanner and the scan position on a scanning one.
+EXTERN FN compilerRegexPosition(scanner: CompilerRegexScanner) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexPeek(scanner: CompilerRegexScanner, count: Int64) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexGetch(scanner: CompilerRegexScanner) RETURNS scanner:?String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexEos(scanner: CompilerRegexScanner) RETURNS Bool EFFECTS :safe FROM "compiler_regex";

@@ -1721,15 +1721,15 @@ PRIVATE FN resolutionSession__recursive_field_suffix_span(self: ResolutionSessio
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE pattern = compilerRegexCompile("\\b${compilerRegexEscape(edge.field_name)}\\s*:\\s*\\??${compilerRegexEscape(CAST(edge.target AS String))}\\b");
-    MUTABLE match = pattern.match(source);
+    MUTABLE match: ?CompilerRegexScanner = compilerRegexMatchData(source, pattern);
     IF !(match) THEN
       RETURN NIL;
     END
-    MUTABLE insert_offset = match.end(0);
+    insert_offset: Int64 = compilerRegexPosition(UNWRAP (match));
     MUTABLE prefix = source.substr(0, (insert_offset - 0));
     MUTABLE line = (compilerCountOccurrences(prefix, "\n") + 1);
     MUTABLE last_newline = compilerLastIndex(prefix, "\n");
-    MUTABLE col = (insert_offset - ((last_newline OR -1)));
+    MUTABLE col = (insert_offset - last_newline);
     RETURN span__new(NIL, line, col, 0);
 }
 END
