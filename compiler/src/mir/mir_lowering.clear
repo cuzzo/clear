@@ -15187,7 +15187,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN rtoc_tuple_return_566;
 }
 END
-PRIVATE FN mIRLowering__unit_variant_constructor(self: MIRLowering, node: GetField) RETURNS !?StructInit
+PRIVATE FN mIRLowering__unit_variant_constructor(self: MIRLowering, MUTABLE node: GetField) RETURNS !?StructInit
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -15367,7 +15367,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_ternary_value_570? }), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
-PRIVATE FN mIRLowering__binary_int_arithmetic_facts(self: MIRLowering, node: BinaryOp) RETURNS !BinaryIntArithmeticFacts
+PRIVATE FN mIRLowering__binary_int_arithmetic_facts(self: MIRLowering, MUTABLE node: BinaryOp) RETURNS !BinaryIntArithmeticFacts
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -15376,7 +15376,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN BinaryIntArithmeticFacts{ both_int: (((left_ti != NIL) AND (type__integer?(left_ti) == TRUE)) AND ((right_ti != NIL) AND (type__integer?(right_ti) == TRUE))), has_comptime_number_literal: (mIRLowering__comptime_number_literal?(rtoc_self_view, node.left, left_ti) OR mIRLowering__comptime_number_literal?(rtoc_self_view, node.right, right_ti)), has_float_coercion: (mIRLowering__float_coercion?(rtoc_self_view, node.left) OR mIRLowering__float_coercion?(rtoc_self_view, node.right)) };
 }
 END
-PRIVATE FN mIRLowering__comptime_number_literal?(self: MIRLowering, node: Locatable, ti: ?Type) RETURNS Bool
+PRIVATE FN mIRLowering__comptime_number_literal?(self: MIRLowering, MUTABLE node: Locatable, ti: ?Type) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -15412,7 +15412,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       RETURN Emittable{ ProtocolCall: COPY ProtocolCall{ protocol: :Map, operation: :get, receiver: COPY receiver, args: [CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.index))) AS Emittable)], lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    MUTABLE plan = TRY (mIRLowering__index_access_plan(&rtoc_self_view, node));
+    MUTABLE plan = TRY (mIRLowering__index_access_plan(&rtoc_self_view, &node));
     MUTABLE value = TRY (mIRLowering__index_access_value(rtoc_self_view, plan));
     IF indexAccessPlan__optional?(plan) THEN
       MUTABLE result_type = TRY (aST__full_type_mut(Locatable{ GetIndex: COPY node }));
@@ -15871,7 +15871,7 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE hoisted: []Emittable = ( { MUTABLE rtoc_empty_list_574: []Emittable = List[]; rtoc_empty_list_574 } );
-    MUTABLE field_types = TRY (mIRLowering__struct_lit_field_types(rtoc_self_view, node));
+    MUTABLE field_types = TRY (mIRLowering__struct_lit_field_types(rtoc_self_view, &node));
     MUTABLE coerced_destination: ?Type = locatable__coerced_type_info(Locatable{ StructLit: COPY node });
     MUTABLE struct_alloc = IF (IF coerced_destination != NIL THEN
       TRY (type__node_reference?(coerced_destination))
@@ -17831,7 +17831,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN cleanupEntry__alloc(entry);
 }
 END
-PRIVATE FN mIRLowering__var_decl_source_transfer_required?(self: MIRLowering, node: VarDecl, facts: VarDeclFacts, init_effect: OwnershipEffect) RETURNS !Bool
+PRIVATE FN mIRLowering__var_decl_source_transfer_required?(self: MIRLowering, MUTABLE node: VarDecl, facts: VarDeclFacts, init_effect: OwnershipEffect) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17851,7 +17851,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, facts.ft));
 }
 END
-PRIVATE FN mIRLowering__var_decl_source_borrowed?(self: MIRLowering, node: VarDecl) RETURNS Bool
+PRIVATE FN mIRLowering__var_decl_source_borrowed?(self: MIRLowering, MUTABLE node: VarDecl) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17862,7 +17862,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     symbolEntry__borrow_provenance?(rtoc_local_receiver_661) } == TRUE));
 }
 END
-PRIVATE FN mIRLowering__var_decl_safe_name(self: MIRLowering, node: VarDecl, has_mir_drop: Bool) RETURNS !String
+PRIVATE FN mIRLowering__var_decl_safe_name(self: MIRLowering, MUTABLE node: VarDecl, has_mir_drop: Bool) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -18292,7 +18292,7 @@ PRIVATE FN mIRLowering__source_already_has_declared_capability?(self: MIRLowerin
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node: Locatable = COPY source_node;
     WHILE node IS_A Cast DO
-      MUTABLE node = aST__node_value( node);
+      MUTABLE node: ?Locatable = aST__node_value( node);
     END
     IF node IS_A CapabilityWrap AS capability_wrap THEN
       RETURN FALSE;

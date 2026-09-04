@@ -3145,7 +3145,7 @@ PRIVATE FN typeAnalysisSession__analyze_routine(MUTABLE self: TypeAnalysisSessio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (typeAnalysisSession__verify_captures_mut(rtoc_self_view, node));
+    TRY (typeAnalysisSession__verify_captures_mut(&rtoc_self_view, node));
     MUTABLE found_returns = typeAnalysisSession__collect_routine_returns(rtoc_self_view, %() USE(body, node, MUTABLE rtoc_self_view) -> {
     typeAnalysisSession__with_routine_analysis_scope(&rtoc_self_view, node, %() USE(body, node, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__declare_and_verify_params(&rtoc_self_view, node));
@@ -4372,20 +4372,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN aST__borrowed_ownership_view?(node);
 }
 END
-PRIVATE FN typeAnalysisSession__any_element_collection_param?(self: TypeAnalysisSession, expected_type: Type, actual_type: Type) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__any_element_collection_param?(MUTABLE self: TypeAnalysisSession, expected_type: Type, actual_type: Type) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE expected_elem: ?Type = TRY (type__element_type(expected_type));
     MUTABLE expected_accepts_any_element = (((TRY (type__collection_value?(expected_type)) OR type__dynamic?(expected_type))) AND ((expected_elem != NIL) AND type__any?(expected_elem)));
     MUTABLE actual_is_collection_like = (TRY (type__collection_value?(actual_type)) OR TRY (type__runtime_stream?(actual_type)));
     RETURN !(!(((expected_accepts_any_element AND actual_is_collection_like))));
 }
 END
-PRIVATE FN typeAnalysisSession__atomic_cell_to_bare_value_param?(self: TypeAnalysisSession, arg_node: Locatable, expected_type_obj: Type, param: Param) RETURNS Bool
+PRIVATE FN typeAnalysisSession__atomic_cell_to_bare_value_param?(MUTABLE self: TypeAnalysisSession, arg_node: Locatable, expected_type_obj: Type, param: Param) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF arg_node IS_A Identifier AS identifier THEN
       MUTABLE sym: ?SymbolEntry = identifier.symbol;
       IF !((IF sym != NIL THEN
@@ -4418,10 +4418,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__atomic_cell_to_atomic_param?(self: TypeAnalysisSession, arg_node: Locatable, param: Param, signature: FunctionSignature) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__atomic_cell_to_atomic_param?(MUTABLE self: TypeAnalysisSession, arg_node: Locatable, param: Param, signature: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF arg_node IS_A Identifier AS identifier THEN
       MUTABLE sym: ?SymbolEntry = identifier.symbol;
       IF !((IF sym != NIL THEN
@@ -4449,26 +4449,26 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__atomic_cell_arg?(self: TypeAnalysisSession, arg_node: Identifier) RETURNS Bool
+PRIVATE FN typeAnalysisSession__atomic_cell_arg?(MUTABLE self: TypeAnalysisSession, arg_node: Identifier) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE sym: ?SymbolEntry = COPY arg_node.symbol;
     RETURN !(!(((((sym != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_80 = sym;
     symbolEntry__atomic?(rtoc_local_receiver_80) }) AND !(symbolEntry__indirect?(sym))))));
 }
 END
-PRIVATE FN typeAnalysisSession__explicit_primitive_atomic_param?(self: TypeAnalysisSession, type: Type) RETURNS ?Bool
+PRIVATE FN typeAnalysisSession__explicit_primitive_atomic_param?(MUTABLE self: TypeAnalysisSession, type: Type) RETURNS ?Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (type__atomic?(type) AND type__primitive?(type));
 }
 END
-PRIVATE FN typeAnalysisSession__warn_multi_atomic_bare_value_call_mut(self: TypeAnalysisSession, node: FunctionCallNode, atomic_args: []Locatable) RETURNS Void
+PRIVATE FN typeAnalysisSession__warn_multi_atomic_bare_value_call_mut(MUTABLE self: TypeAnalysisSession, node: FunctionCallNode, atomic_args: []Locatable) RETURNS Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE unique_args = atomic_args |> WHERE TRUE;
     IF ((unique_args).length() < 2) THEN
       RETURN;
@@ -16948,7 +16948,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN typeAnalysisSession__retryable_with_universal_poly_candidate?(self: TypeAnalysisSession, node: WithBlock) RETURNS !?Bool
+PRIVATE FN typeAnalysisSession__retryable_with_universal_poly_candidate?(self: TypeAnalysisSession, MUTABLE node: WithBlock) RETURNS !?Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
