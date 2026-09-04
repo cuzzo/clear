@@ -3632,7 +3632,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) OR type__id_handle?(ti)) THEN
       RETURN FALSE;
     END
-    RETURN lifecyclePlan__needs_drop?((TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(rtoc_self_view), ti))));
+    MUTABLE rtoc_recv_3634 = mIRLowering__lifecycle_registry(rtoc_self_view);
+    RETURN lifecyclePlan__needs_drop?((TRY (lifecycleRegistry__fetch(rtoc_recv_3634, ti))));
 }
 END
 FN mIRLowering__walk_ast_for_moved_args(self: MIRLowering, node: Locatable, blk: FN(Locatable) -> Void) RETURNS !Void
@@ -4447,7 +4448,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_122 = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_121 = mIRLowering__lifecycle_registry(rtoc_self_view);
     TRY (lifecycleRegistry__fetch_binding(rtoc_local_receiver_121, Locatable{ VarDecl: COPY source_node }, ti)) };
     ELSE
-      rtoc_ternary_value_122 = TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(rtoc_self_view), ti));
+      MUTABLE rtoc_recv_4450 = mIRLowering__lifecycle_registry(rtoc_self_view);
+      rtoc_ternary_value_122 = TRY (lifecycleRegistry__fetch(rtoc_recv_4450, ti));
     END
     rtoc_ternary_value_122? }));
     IF !(lifecyclePlan__needs_drop?(plan)) THEN
@@ -4591,13 +4593,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       CONTINUE;
     END
     MUTABLE field_type = structField__type(field);
-    MUTABLE plan = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(rtoc_self_view), field_type));
+    MUTABLE rtoc_recv_4595 = mIRLowering__lifecycle_registry(rtoc_self_view);
+    MUTABLE plan = COPY TRY (lifecycleRegistry__fetch(rtoc_recv_4595, field_type));
     MUTABLE field_ref = FieldGet{ object: Emittable{ Ident: COPY self_ref }, field: COPY rtoc_key, lowered_node_id: NIL, ownership_consumption: NIL };
     IF (plan.drop_strategy == :resource_close) THEN
         &drop_statements.append(CAST(ResourceClose{ target: Emittable{ FieldGet: COPY field_ref }, close_plan: UNWRAP (plan.resource_close_plan), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
     ELSE_IF type__optional?(field_type) THEN
         MUTABLE wrapped = UNWRAP (TRY (type__wrapped_type(field_type)));
-        MUTABLE wrapped_plan = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(rtoc_self_view), wrapped));
+        MUTABLE rtoc_recv_4602 = mIRLowering__lifecycle_registry(rtoc_self_view);
+        MUTABLE wrapped_plan = COPY TRY (lifecycleRegistry__fetch(rtoc_recv_4602, wrapped));
         IF (wrapped_plan.drop_strategy == :resource_close) THEN
           MUTABLE capture = "__close_${mIRLowering__zig_safe_name(rtoc_self_view, rtoc_key)}";
           &drop_statements.append(CAST(IfBindStmt{ bindings: COPY [{:expr: field_ref, :capture: capture, :pointer_capture: TRUE}], then_body: [Emittable{ ResourceClose: COPY ResourceClose{ target: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, close_plan: UNWRAP (wrapped_plan.resource_close_plan), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
@@ -4763,7 +4767,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           MUTABLE inline: InlineStructVariant@multiowned = castOptionalMIRLoweringUnionVariantPayloadToInlineStructVariantMultiowned(data);
           MUTABLE drop_payload: Bool = (inline.deinit_entries.length() > 0);
           FOR _ IN inline.fields.values() DO
-        MUTABLE plan = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(rtoc_self_view), TRY (type__from_input(_))));
+        MUTABLE rtoc_recv_4769 = mIRLowering__lifecycle_registry(rtoc_self_view);
+        MUTABLE plan = COPY TRY (lifecycleRegistry__fetch(rtoc_recv_4769, TRY (type__from_input(_))));
         copy_forbidden = (copy_forbidden OR (plan.copy_strategy == :forbidden));
         IF (plan.copy_strategy != :bit_copy) THEN
               copy_strategy = :deep_clone;
@@ -4775,7 +4780,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
       ELSE
           MUTABLE variant_type = TRY (type__from_variant_input(castOptionalMIRLoweringUnionVariantPayloadToOptionalSchemasUnionSchemaVariantValue(data)));
-          MUTABLE plan = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(rtoc_self_view), variant_type));
+          MUTABLE rtoc_recv_4782 = mIRLowering__lifecycle_registry(rtoc_self_view);
+          MUTABLE plan = COPY TRY (lifecycleRegistry__fetch(rtoc_recv_4782, variant_type));
           copy_forbidden = (copy_forbidden OR (plan.copy_strategy == :forbidden));
           copy_strategy = COPY plan.copy_strategy;
           IF (plan.drop_strategy == :resource_close) THEN
@@ -5647,7 +5653,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       ti
     END;
-    MUTABLE lifecycle = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(rtoc_self_view), ti));
+    MUTABLE rtoc_recv_5655 = mIRLowering__lifecycle_registry(rtoc_self_view);
+    MUTABLE lifecycle = COPY TRY (lifecycleRegistry__fetch(rtoc_recv_5655, ti));
     MUTABLE keep = OwnedSinkPlan{ action: :keep, target_alloc: COPY sink_alloc, zig_type: NIL, copy_mode: NIL, rc_func: NIL, source_slice_view: FALSE };
     IF TRY (type__node_reference?(ti)) THEN
       RETURN keep;
@@ -5802,7 +5809,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF ast_node IS_A CopyNode AS copy_node THEN
       MUTABLE copy_type = TRY (mIRLowering__copy_source_type_info(rtoc_self_view, &copy_node.value));
-      RETURN ((TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(rtoc_self_view), copy_type))).copy_strategy != :bit_copy);
+      MUTABLE rtoc_recv_5811 = mIRLowering__lifecycle_registry(rtoc_self_view);
+      RETURN ((TRY (lifecycleRegistry__fetch(rtoc_recv_5811, copy_type))).copy_strategy != :bit_copy);
     END
     IF TRY (mIRLowering__mir_allocates?(rtoc_self_view, value)) THEN
       RETURN TRUE;
