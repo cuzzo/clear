@@ -617,6 +617,13 @@ PUB FN structSchema__new(fields: {String@symbol}SchemasStructSchemaFieldInput, t
   RETURN self @multiowned;
 END
 PUB UNION SchemaValue { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
+PUB FN schemaValue__fields(self: SchemaValue) RETURNS {String@symbol}StructField ->
+  PARTIAL MATCH self START
+    SchemaValue.StructSchemaMultiowned AS item -> RETURN COPY item.fields;,
+    SchemaValue.ResourceSchemaMultiowned AS item -> RETURN COPY item.fields;
+  END
+  RETURN {};
+END
 PUB FN schemaValue__type_params(self: SchemaValue) RETURNS []String@symbol ->
   PARTIAL MATCH self START
     SchemaValue.EnumSchemaMultiowned AS item -> RETURN COPY item.type_params;,

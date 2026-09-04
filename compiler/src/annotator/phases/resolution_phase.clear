@@ -219,7 +219,7 @@ PUB FN resolutionSession__generic_param_token(self: ResolutionSession, node: Nod
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE param = node__generic_params(node) |> FIND (_.name() == name);
+    MUTABLE param = node__generic_params(node) |> FIND (_.name == name);
     RETURN ((IF param != NIL THEN
       param.token()
     ELSE
