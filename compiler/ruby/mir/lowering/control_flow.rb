@@ -265,8 +265,11 @@ module MIRLoweringControlFlow
     # branch. Field access auto-derefs, but `switch` and std.meta.activeTag do
     # not -- record the names so union matching on them derefs first.
     pointer_binds = mir_bindings.select { |b| b[:pointer_shaped] }.map { |b| b[:capture].to_s }
+    expr_label = node.expr_mode ? "__ifbind_#{lowering_counters.next_block_expr_id}" : nil
     lowered_then = with_pointer_shaped_binds(pointer_binds) do
-      with_if_bind_alias_maps(node) { lower_body(node.then_branch) }
+      with_if_bind_alias_maps(node) do
+        expr_label ? lower_body_with_break(node.then_branch, expr_label) : lower_body(node.then_branch)
+      end
     end
     # CleanupClassifier/MIRPass stamps production IF-bind bodies with the
     # capture AllocMark + Drop pair. Keep the fallback for directly-constructed
@@ -279,6 +282,13 @@ module MIRLoweringControlFlow
       stmt.respond_to?(:name) && existing_capture_names.include?(T.unsafe(stmt).name.to_s)
     end
     then_body = capture_markers + lowered_then
+
+    if expr_label
+      else_body = lower_body_with_break(node.else_branch || [], expr_label)
+      return with_expression_result_type(
+        MIR::BlockExpr.new(expr_label, [MIR::IfBindStmt.new(mir_bindings, then_body, else_body)]), node
+      )
+    end
 
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     MIR::IfBindStmt.new(mir_bindings, then_body, else_body)

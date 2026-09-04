@@ -119,7 +119,7 @@ module Annotator
         with_new_scope(current_scope) do
           node.body.each { |stmt| visit(stmt) }
           visit(node.result)
-          promote_to_expr_if!(node, node.result) if node.result.is_a?(AST::IfStatement)
+          promote_to_expr_if!(node, node.result) if node.result.is_a?(AST::IfStatement) || node.result.is_a?(AST::IfBind)
           stamp_type!(node, node.result.full_type!(context: "catch branch result"))
           node.storage   = node.result.storage
         end
@@ -593,6 +593,11 @@ module Annotator
         ]
 
         analyze_control_flow_branches(branch_logic)
+
+        # Store branch result types so use sites can promote to expression mode.
+        node.then_result_type = expr_result_type(node.then_branch)
+        node.else_result_type = expr_result_type(node.else_branch)
+
         stamp_type!(node, :Void)
       end
 

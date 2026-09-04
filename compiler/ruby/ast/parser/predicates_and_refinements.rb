@@ -237,6 +237,8 @@ class ClearParser
 
   sig { params(if_token: Lexer::Token).returns(AST::IfStatement) }
   def parse_if_chain_expr(if_token)
+    return parse_refined_if_chain_expr(if_token) if conditional_capture_ahead?
+
     condition = parse_expression
     consume(:KEYWORD, 'THEN')
     then_branch = [parse_expression]
@@ -253,6 +255,38 @@ class ClearParser
     end
 
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
+  end
+
+  # Expression-position IF with a refinement capture. Same steps grammar as the
+  # statement form; only the branches differ (one expression, no semicolons).
+  sig { params(if_token: Lexer::Token).returns(T.any(AST::IfStatement, AST::IfBind)) }
+  def parse_refined_if_chain_expr(if_token)
+    steps = T.let([], T::Array[T.any(AST::Node, AST::Binding)])
+    loop do
+      atom = parse_expression(5)
+      if conditional_binding_predicate?
+        steps << parse_conditional_binding(atom)
+      else
+        steps.concat(refinement_steps(atom, if_token))
+      end
+
+      break unless match?(:KEYWORD, 'AND') || match?(:KEYWORD, 'OR')
+      operator = consume(:KEYWORD)
+      error!(operator, :CONDITIONAL_BINDING_UNDER_OR) if operator.text_is?('OR')
+    end
+
+    consume(:KEYWORD, 'THEN')
+    then_branch = T.let([parse_expression], AST::RawBody)
+    else_branch = T.let([], AST::RawBody)
+    if match!(:KEYWORD, 'ELSE_IF')
+      else_branch = [parse_if_chain_expr(previous)]
+    elsif match!(:KEYWORD, 'ELSE')
+      else_branch = [parse_expression]
+      consume(:KEYWORD, 'END')
+    else
+      consume(:KEYWORD, 'END')
+    end
+    build_refined_if_tree(if_token, steps, then_branch, else_branch, false)
   end
 
   # Expression-position MATCH: each arm body is a single expression (no semicolons).

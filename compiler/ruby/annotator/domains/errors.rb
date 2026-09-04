@@ -438,7 +438,7 @@ module Annotator
             end
           end
         end
-        promote_to_expr_if!(node, value) if value.is_a?(AST::IfStatement)
+        promote_to_expr_if!(node, value) if value.is_a?(AST::IfStatement) || value.is_a?(AST::IfBind)
         promote_to_expr_match!(node, value) if value.is_a?(AST::MatchStatement)
 
         verify_return(value)

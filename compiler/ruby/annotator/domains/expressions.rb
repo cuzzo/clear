@@ -212,9 +212,9 @@ module Annotator
         else
           visit(node.right)
         end
-        promote_to_expr_if!(node, node.left) if node.left.is_a?(AST::IfStatement)
+        promote_to_expr_if!(node, node.left) if node.left.is_a?(AST::IfStatement) || node.left.is_a?(AST::IfBind)
         promote_to_expr_match!(node, node.left) if node.left.is_a?(AST::MatchStatement)
-        promote_to_expr_if!(node, node.right) if node.right.is_a?(AST::IfStatement)
+        promote_to_expr_if!(node, node.right) if node.right.is_a?(AST::IfStatement) || node.right.is_a?(AST::IfBind)
         promote_to_expr_match!(node, node.right) if node.right.is_a?(AST::MatchStatement)
         # Delegate type resolution to Type class
         left_type = node.left.full_type!(context: "binary left")
@@ -629,12 +629,13 @@ module Annotator
       # Promotes an AST::IfStatement that is used in expression position
       # (value of a VarDecl, BindExpr, ReturnNode, or FuncCall arg).
       # Sets expr_mode = true and full_type = result_type if valid; errors otherwise.
-      sig { params(parent_node: AST::Node, if_node: AST::IfStatement).returns(T.nilable(Type)) }
+      sig { params(parent_node: AST::Node, if_node: T.any(AST::IfStatement, AST::IfBind)).returns(T.nilable(Type)) }
       def promote_to_expr_if!(parent_node, if_node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         # Recursively promote ELSE_IF chains first
-        if if_node.else_branch&.length == 1 && (nested = if_node.else_branch.first).is_a?(AST::IfStatement)
+        if if_node.else_branch&.length == 1 &&
+           ((nested = if_node.else_branch.first).is_a?(AST::IfStatement) || nested.is_a?(AST::IfBind))
           promote_to_expr_if!(if_node, nested)
           else_result = nested.full_type!(context: "nested expression if result")
         else

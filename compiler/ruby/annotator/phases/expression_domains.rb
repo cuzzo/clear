@@ -589,7 +589,7 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         arg.is_a?(AST::StructLit) ? with_struct_literal_call_argument { visit(arg) } : visit(arg)
-        promote_to_expr_if!(parent, arg) if arg.is_a?(AST::IfStatement)
+        promote_to_expr_if!(parent, arg) if arg.is_a?(AST::IfStatement) || arg.is_a?(AST::IfBind)
         promote_to_expr_match!(parent, arg) if arg.is_a?(AST::MatchStatement)
       end
       private :annotate_call_argument!

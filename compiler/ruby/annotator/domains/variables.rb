@@ -740,7 +740,7 @@ module Annotator
       def promote_declaration_value!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
+        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement) || node.value.is_a?(AST::IfBind)
         promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
       end
 
@@ -1087,7 +1087,7 @@ module Annotator
         ensure
           phase_traversal_state.auto_locked_assign_name = previous_auto_lock
         end
-        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
+        promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement) || node.value.is_a?(AST::IfBind)
         promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
 
         verify_unrestricted!(node)

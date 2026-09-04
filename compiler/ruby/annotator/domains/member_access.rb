@@ -510,7 +510,7 @@ module Annotator
         # Iterate Fields (Validation)
         node.fields.each do |field_name, val_node|
           visit(val_node) # Resolve value type
-          promote_to_expr_if!(node, val_node) if val_node.is_a?(AST::IfStatement)
+          promote_to_expr_if!(node, val_node) if val_node.is_a?(AST::IfStatement) || val_node.is_a?(AST::IfBind)
           promote_to_expr_match!(node, val_node) if val_node.is_a?(AST::MatchStatement)
 
           raw_expected = T.let(schema.fields[field_name]&.type, T.nilable(T.any(Type, Symbol)))

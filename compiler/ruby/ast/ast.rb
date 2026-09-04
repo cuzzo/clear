@@ -2712,6 +2712,10 @@ module AST
     def bindings=(val)
       self[:bindings] = val
     end
+
+    attr_accessor :expr_mode           # true when used as an expression (x = IF ... EXISTS AS ...)
+    attr_accessor :then_result_type    # Type of last value expression in then_branch
+    attr_accessor :else_result_type    # Type of last value expression in else_branch
   end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops, :tight) do
     # ruby-to-clear: field-type condition=Locatable

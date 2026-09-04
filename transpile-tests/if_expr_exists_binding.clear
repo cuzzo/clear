@@ -1,0 +1,25 @@
+# Expression-position IF must accept an EXISTS binding, the same way the
+# statement form does: IF x EXISTS AS y THEN ... ELSE ... END as a value.
+
+UNION Payload { Nothing, Number: Int64 }
+
+FN wrap(v: ?Int64) RETURNS ?Payload ->
+  RETURN (IF v EXISTS AS inner THEN Payload{ Number: COPY inner } ELSE NIL END);
+END
+
+FN describe(p: ?Payload) RETURNS String ->
+  IF p EXISTS AS found THEN
+    PARTIAL MATCH found START
+      Payload.Number AS n -> RETURN "number $n";,
+      DEFAULT -> RETURN "nothing";
+    END
+  END
+  RETURN "none";
+END
+
+FN main() RETURNS Void ->
+  seven: ?Int64 = CAST(7 AS ?Int64);
+  nothing: ?Int64 = NIL;
+  print(describe(wrap(seven)));
+  print(describe(wrap(nothing)));
+END

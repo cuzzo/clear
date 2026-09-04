@@ -366,7 +366,7 @@ module PipeAnalysis
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
     visit(expression)
-    promote_to_expr_if!(parent, expression) if expression.is_a?(AST::IfStatement)
+    promote_to_expr_if!(parent, expression) if expression.is_a?(AST::IfStatement) || expression.is_a?(AST::IfBind)
     promote_to_expr_match!(parent, expression) if expression.is_a?(AST::MatchStatement)
   end
 
