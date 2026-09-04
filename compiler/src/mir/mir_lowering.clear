@@ -12252,7 +12252,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__mutable_snapshot_plan(self: MIRLowering, node: WithBlock, with_label: ?String) RETURNS !MutableSnapshotPlan
+PRIVATE FN mIRLowering__mutable_snapshot_plan(self: MIRLowering, MUTABLE node: WithBlock, with_label: ?String) RETURNS !MutableSnapshotPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12304,7 +12304,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN SnapshotMultiTxn{ cells: COPY plan.capabilities |> SELECT _.source, rt: COPY plan.rt_name, alloc: COPY plan.alloc, aliases: plan.capabilities |> SELECT mIRLowering__safe_with_capability_alias(rtoc_self_view, _.alias_name), body: plan.body_mir, conflict_action: Emittable{ FailureAction: COPY conflict_action }, retries: plan.retries, with_label: COPY plan.with_label, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
-PRIVATE FN mIRLowering__emit_snapshot_mutable_call(MUTABLE self: MIRLowering, node: WithBlock, with_label: ?String) RETURNS !MIRLoweringReturnValue
+PRIVATE FN mIRLowering__emit_snapshot_mutable_call(MUTABLE self: MIRLowering, MUTABLE node: WithBlock, with_label: ?String) RETURNS !MIRLoweringReturnValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -12623,7 +12623,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN TRY (mIRLowering__append_ownership_transfers_for_mir_body(rtoc_self_view, body));
 }
 END
-PRIVATE FN mIRLowering__capture_ownership_mirror_node?(self: MIRLowering, node: Emittable, receiver: String) RETURNS Bool
+PRIVATE FN mIRLowering__capture_ownership_mirror_node?(self: MIRLowering, MUTABLE node: Emittable, receiver: String) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -12846,7 +12846,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END))))));
 }
 END
-PRIVATE FN mIRLowering__lower_do_block(MUTABLE self: MIRLowering, node: DoBlock) RETURNS !MIRDoBlock
+PRIVATE FN mIRLowering__lower_do_block(MUTABLE self: MIRLowering, MUTABLE node: DoBlock) RETURNS !MIRDoBlock
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -12973,7 +12973,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rt_name = mIRLowering__runtime_binding_name(rtoc_self_view);
     TRY (mIRLowering__enforce_bg_capture_strategies_mut(rtoc_self_view, Node{ BgBlock: COPY node }, captured));
     MUTABLE capture = TRY (mIRLowering__bg_capture_materialization(rtoc_self_view, names, analysis, captured, capture_close_plans, pointer_captures));
-    MUTABLE body = TRY (mIRLowering__bg_body_materialization(&rtoc_self_view, node, capture.caps, analysis, pointer_captures, names.bg_rt, id, types.is_void, types.inner_type, capture_close_plans));
+    MUTABLE body = TRY (mIRLowering__bg_body_materialization(&rtoc_self_view, &node, capture.caps, analysis, pointer_captures, names.bg_rt, id, types.is_void, types.inner_type, capture_close_plans));
     MUTABLE scheduler = mIRLowering__bg_scheduler_plan(rtoc_self_view, node, names, rt_name);
     IF mIRLowering__bg_uses_fsm_transform?(rtoc_self_view, node) THEN
       MUTABLE ctx = BgFsmTransformContext{ node: COPY node, names: COPY names, types: COPY types, capture: capture, body: COPY body, scheduler: COPY scheduler, captured: COPY captured, capture_close_plans: COPY capture_close_plans, pointer_captures: COPY pointer_captures, rt_name: COPY rt_name };
@@ -13113,7 +13113,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END;
 }
 END
-PRIVATE FN mIRLowering__bg_scheduler_plan(self: MIRLowering, node: BgBlock, names: BgLoweringNames, rt_name: String) RETURNS BgSchedulerPlan
+PRIVATE FN mIRLowering__bg_scheduler_plan(self: MIRLowering, MUTABLE node: BgBlock, names: BgLoweringNames, rt_name: String) RETURNS BgSchedulerPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13147,7 +13147,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_ternary_value_505? }) };
 }
 END
-PRIVATE FN mIRLowering__bg_uses_fsm_transform?(self: MIRLowering, node: BgBlock) RETURNS Bool
+PRIVATE FN mIRLowering__bg_uses_fsm_transform?(self: MIRLowering, MUTABLE node: BgBlock) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13191,7 +13191,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE run_body: []Emittable = ( { MUTABLE rtoc_empty_list_509: []Emittable = List[]; rtoc_empty_list_509 } );
     MUTABLE emit_body: []Emittable = ( { MUTABLE rtoc_empty_list_510: []Emittable = List[]; rtoc_empty_list_510 } );
     mIRLowering__with_bg_fiber_body_context(rtoc_self_view, pointer_captures, %() USE(analysis, bg_rt, caps, capture_close_plans, id, inner_t, is_void, node, MUTABLE run_body, MUTABLE rtoc_self_view) -> mIRLowering__with_fiber_capture_map(rtoc_self_view, caps.capture_map, caps.capture_symbols, bg_rt, %() USE(analysis, caps, capture_close_plans, id, inner_t, is_void, node, MUTABLE run_body, MUTABLE rtoc_self_view) -> {
-    MUTABLE lowered = TRY (mIRLowering__lower_bg_body_steps(&rtoc_self_view, node, id, is_void, inner_t));
+    MUTABLE lowered = TRY (mIRLowering__lower_bg_body_steps(&rtoc_self_view, &node, id, is_void, inner_t));
     run_body = TRY (mIRLowering__finalized_boundary_body_for_emit(rtoc_self_view, ((TRY (mIRLowering__capture_ownership_mirror_nodes(rtoc_self_view, caps, analysis, "__ctx_${id}", capture_close_plans)) + TRY (mIRLowering__capture_cleanup_stmts(rtoc_self_view, caps.specs, "__ctx_${id}"))) + lowered.run_body)));
     emit_body = run_body |> WHERE !(mIRLowering__capture_ownership_mirror_node?(rtoc_self_view, _, "__ctx_${id}"));
     NIL

@@ -2941,7 +2941,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE label: ?String = TRY (typeAnalysisSession__auto_slot_label(rtoc_self_view, slot));
     MUTABLE observed = COPY ambiguity.observed_types;
     MUTABLE observed_strs = observed |> SELECT typeAnalysisSession__auto_type_source_form(rtoc_self_view, _);
-    MUTABLE message = TRY (typeAnalysisSession__build_auto_ambiguity_message(rtoc_self_view, label?, observed_strs, slot));
+    MUTABLE message = TRY (typeAnalysisSession__build_auto_ambiguity_message(&rtoc_self_view, label?, observed_strs, slot));
     MUTABLE slot_id: ?AutoSlotId = typeAnalysisSession__slot_id_for(rtoc_self_view, slot);
     MUTABLE ops: [Set]Any = Set[];
     IF slot_id EXISTS AS slot_id_value THEN
@@ -3021,10 +3021,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__auto_type_source_form(self: TypeAnalysisSession, type: AutoConstraintCollectorObservedType) RETURNS String
+PRIVATE FN typeAnalysisSession__auto_type_source_form(MUTABLE self: TypeAnalysisSession, type: AutoConstraintCollectorObservedType) RETURNS String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF type IS_A Type AS type_as_type THEN
       MUTABLE sym = type__resolved(type_as_type);
       RETURN COPY CAST(sym AS String);
@@ -3033,10 +3033,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__auto_slot_label(self: TypeAnalysisSession, slot: Slot) RETURNS !?String
+PRIVATE FN typeAnalysisSession__auto_slot_label(MUTABLE self: TypeAnalysisSession, slot: Slot) RETURNS !?String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRUE AND (slot.shape != NIL)) THEN
       RETURN typeAnalysisSession__auto_shape_slot_label(rtoc_self_view, slot);
     END
@@ -3051,10 +3051,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__auto_shape_slot_label(self: TypeAnalysisSession, slot: Slot) RETURNS ?String
+PRIVATE FN typeAnalysisSession__auto_shape_slot_label(MUTABLE self: TypeAnalysisSession, slot: Slot) RETURNS ?String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE name: Any = NIL;
     MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__type_analysis_session(slot.decl_node) START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
@@ -3073,19 +3073,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__auto_param_slot_label(self: TypeAnalysisSession, slot: Slot) RETURNS String
+PRIVATE FN typeAnalysisSession__auto_param_slot_label(MUTABLE self: TypeAnalysisSession, slot: Slot) RETURNS String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn: FunctionDef = COPY CAST(slot.decl_node AS FunctionDef);
     MUTABLE param = COPY UNWRAP (fn.params[UNWRAP (slot.index)]);
     RETURN "parameter '${param.name}' of `${(slot.fn_name OR_ELSE "")}`";
 }
 END
-PRIVATE FN typeAnalysisSession__auto_local_slot_label(self: TypeAnalysisSession, slot: Slot) RETURNS String
+PRIVATE FN typeAnalysisSession__auto_local_slot_label(MUTABLE self: TypeAnalysisSession, slot: Slot) RETURNS String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE name: Any = NIL;
     MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__type_analysis_session(slot.decl_node) START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
@@ -3096,10 +3096,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN "local '${name.toString()}'";
 }
 END
-PRIVATE FN typeAnalysisSession__auto_token_for(self: TypeAnalysisSession, slot: Slot) RETURNS ?Token
+PRIVATE FN typeAnalysisSession__auto_token_for(MUTABLE self: TypeAnalysisSession, slot: Slot) RETURNS ?Token
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN CAST(COPY slot.auto_token AS ?Token);
 }
 END
@@ -3721,7 +3721,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     args = (args OR_ELSE UNWRAP (functionCallNode__args(node)));
     MUTABLE site = typeAnalysisSession__call_signature_site(&rtoc_self_view, node, args);
     callSignatureSite__assign_signature_mut(&site, signature);
-    MUTABLE plan = TRY (typeAnalysisSession__call_arity_plan(rtoc_self_view, site, signature));
+    MUTABLE plan = TRY (typeAnalysisSession__call_arity_plan(&rtoc_self_view, site, signature));
     TRY (typeAnalysisSession__verify_call_arity_mut(rtoc_self_view, plan));
     TRY (typeAnalysisSession__inject_default_arguments_mut(&rtoc_self_view, &plan));
     MUTABLE encountered_args: []EncounteredCallArgument = ( { MUTABLE rtoc_empty_list_73: []EncounteredCallArgument = List[]; rtoc_empty_list_73 } );
@@ -16839,7 +16839,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__with_block_uses_runtime?(self: TypeAnalysisSession, node: WithBlock) RETURNS Bool
+PRIVATE FN typeAnalysisSession__with_block_uses_runtime?(self: TypeAnalysisSession, MUTABLE node: WithBlock) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

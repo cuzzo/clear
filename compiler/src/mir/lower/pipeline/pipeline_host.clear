@@ -464,10 +464,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     pipelineHost__with_pipeline_context(&rtoc_self_view, placeholder, rtoc_mutable_alias_arg_24) };
 }
 END
-PRIVATE FN pipelineHost__ast_stmts_use_placeholder?(self: PipelineHost, stmts: []Locatable) RETURNS Bool
+PRIVATE FN pipelineHost__ast_stmts_use_placeholder?(MUTABLE self: PipelineHost, stmts: []Locatable) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelinePlaceholderUsage__statements_use_placeholder?(stmts);
 }
 END
