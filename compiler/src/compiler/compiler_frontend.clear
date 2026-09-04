@@ -74,11 +74,11 @@ PUB FN compilerFrontend__compile(cheat_code_input: String, importer: ModuleImpor
   MUTABLE union_schemas: {String@symbol}UnionSchema@multiowned = {};
   FOR _ IN ast.statements DO
   IF (_ IS_A StructDef) THEN
-    struct_schemas[type__to_sym(_.name())] = TRY (structSchema__new(_.field_decls, ( { MUTABLE rtoc_empty_list_10: []String@symbol = List[]; rtoc_empty_list_10 } ), ( { MUTABLE rtoc_empty_list_11: []GenericParamDecl = List[]; rtoc_empty_list_11 } ), {}, {}));
+    struct_schemas[symbol(_.name())] = TRY (structSchema__new(_.field_decls, ( { MUTABLE rtoc_empty_list_10: []String@symbol = List[]; rtoc_empty_list_10 } ), ( { MUTABLE rtoc_empty_list_11: []GenericParamDecl = List[]; rtoc_empty_list_11 } ), {}, {}));
   ELSE_IF (_ IS_A EnumDef) THEN
-    enum_schemas[type__to_sym(_.name())] = _.variants();
+    enum_schemas[symbol(_.name())] = _.variants();
   ELSE_IF _ IS_A UnionDef AS union_def THEN
-    union_schemas[type__to_sym(union_def.name)] = TRY (unionSchema__new(union_def.variants, unionDef__type_params(union_def) |> SELECT symbol(_), (functionSignature__visibility(union_def) OR :package)));
+    union_schemas[symbol(union_def.name)] = TRY (unionSchema__new(union_def.variants, unionDef__type_params(union_def) |> SELECT symbol(_), (functionSignature__visibility(union_def) OR :package)));
   END
   END
   MUTABLE fn_sigs = TRY (functionSignature__lowering_signatures(ast, TRY (semanticAnnotator__semantic_root_scope(annotator))));

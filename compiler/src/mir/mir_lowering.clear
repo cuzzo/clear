@@ -4007,7 +4007,7 @@ FN mIRLowering__protocol_requirement_return_type(self: MIRLowering, protocol: Pr
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE replacements: {String@symbol}TypeExpression = {};
     FOR _ IN protocol.associated_types DO
-    replacements[symbol(_.name)] = typeExpression__of(TypeProjectionExpression{ owner: :T, member: COPY symbol(_.name), protocol: COPY type__to_sym(protocol.name) });
+    replacements[symbol(_.name)] = typeExpression__of(TypeProjectionExpression{ owner: :T, member: COPY symbol(_.name), protocol: COPY symbol(protocol.name) });
     END
     replacements[:Self] = typeExpression__of(NamedTypeExpression{ name: :T, arguments: List[] });
     MUTABLE expression = typeExpressionTree__transform(requirement.return_type.shape.expression, %(candidate: TypeExpression) USE(replacements) -> {
@@ -7160,7 +7160,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF mir IS_A MakeList AS make_list THEN
       RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY "${make_list.elem_type}[]" }, NIL, NIL, NIL, alloc, :list));
     ELSE_IF mir IS_A HeapCreate AS heap_create THEN
-      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY type__to_sym(heap_create.zig_type.deletePrefix("*")) }, NIL, NIL, :indirect));
+      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(heap_create.zig_type.deletePrefix("*")) }, NIL, NIL, :indirect));
     ELSE_IF mir IS_A ContainerInit AS container_init THEN
       RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY container_init.zig_type }, NIL, NIL, NIL, alloc));
     ELSE_IF mir IS_A StructInit AS struct_init THEN
@@ -8478,7 +8478,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE final_type = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ Type: COPY ret_type }));
     MUTABLE fn_needs_rt = ((TRY (mIRLowering__finalized_needs_rt_mut(rtoc_self_view, UNWRAP (node))) OR TRY (mIRLowering__function_return_retains_shared_handle?(rtoc_self_view, UNWRAP (node)))) OR TRY (mIRLowering__function_uses_node_store?(rtoc_self_view, UNWRAP (node))));
     IF fn_needs_rt THEN
-      sig = (IF (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(CAST(node.name AS String))] != NIL THEN (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(CAST(node.name AS String))] ELSE (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[type__to_sym(node.name)] END);
+      sig = (IF (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(CAST(node.name AS String))] != NIL THEN (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(CAST(node.name AS String))] ELSE (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(node.name)] END);
       IF sig EXISTS AS sig_value THEN
         MUTABLE sig_value_mutable = COPY sig_value;
         functionSignature__mark_runtime_required_mut(&sig_value_mutable);
@@ -8544,7 +8544,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (!(fn_can_fail) AND TRY (mIRLowering__body_has_faulting_alloc?(rtoc_self_view, body_mir))) THEN
       fn_can_fail = TRUE;
       return_type_str = mIRLowering__faulting_return_type_str(rtoc_self_view, final_type, UNWRAP (node));
-      sig = (IF (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(CAST(node.name AS String))] != NIL THEN (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(CAST(node.name AS String))] ELSE (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[type__to_sym(node.name)] END);
+      sig = (IF (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(CAST(node.name AS String))] != NIL THEN (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(CAST(node.name AS String))] ELSE (TRY (mIRLowering__fn_sigs(rtoc_self_view)))[symbol(node.name)] END);
       IF sig EXISTS AS sig_value THEN
         MUTABLE sig_value_mutable = COPY sig_value;
         functionSignature__mark_faulting_allocation_mut(&sig_value_mutable);
@@ -14448,7 +14448,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(get_field.target IS_A Identifier) THEN
         RETURN NIL;
       END
-      MUTABLE type_name = type__to_sym(aST__node_name(get_field.target));
+      MUTABLE type_name = symbol(aST__node_name(get_field.target));
       MUTABLE schema = (TRY (mIRLowering__union_schemas(rtoc_self_view)))[type_name];
       IF !(schema IS_A UnionSchema@multiowned) THEN
         RETURN NIL;
@@ -15292,14 +15292,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       kind = COPY (ex.kind OR_ELSE "");
       IF explicit_error_name EXISTS AS explicit_error_name_value THEN
         error_name = explicit_error_name;
-        name_id = TRY (aST__id_of_type(type__to_sym(explicit_error_name_value)));
+        name_id = TRY (aST__id_of_type(symbol(explicit_error_name_value)));
       ELSE
         clear_type = TRUE;
       END
-    ELSE_IF (explicit_error_name AND TRY (aST__error_type?(type__to_sym(explicit_error_name)))) THEN
-      kind = COPY CAST((TRY (aST__kind_of_type(type__to_sym(explicit_error_name)))) AS String);
+    ELSE_IF (explicit_error_name AND TRY (aST__error_type?(symbol(explicit_error_name)))) THEN
+      kind = COPY CAST((TRY (aST__kind_of_type(symbol(explicit_error_name)))) AS String);
       error_name = explicit_error_name;
-      name_id = TRY (aST__id_of_type(type__to_sym(explicit_error_name)));
+      name_id = TRY (aST__id_of_type(symbol(explicit_error_name)));
     END
     RETURN OrElseExitFacts{ kind: COPY kind, error_name: COPY error_name, name_id: name_id, clear_type: clear_type, has_message: !((ex.message == NIL)), line: line.toInt() };
 }
@@ -15690,7 +15690,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(rtoc_key) THEN
       CONTINUE;
     END
-    out[type__to_sym(rtoc_key)] = arg;
+    out[symbol(rtoc_key)] = arg;
     END
     RETURN out;
 }
@@ -16164,11 +16164,11 @@ PRIVATE FN mIRLowering__union_variant_lit_field_types(self: MIRLowering, node: U
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE schema: ?UnionSchema@multiowned = COPY (TRY (mIRLowering__union_schemas(rtoc_self_view)))[type__to_sym(node.union_name)];
+    MUTABLE schema: ?UnionSchema@multiowned = COPY (TRY (mIRLowering__union_schemas(rtoc_self_view)))[symbol(node.union_name)];
     IF !((schema != NIL)) THEN
       RETURN {};
     END
-    MUTABLE variant_data: ?SchemasUnionSchemaVariantValue = (IF schema.variants[type__to_sym(node.variant_name)] != NIL THEN schema.variants[type__to_sym(node.variant_name)] ELSE UNWRAP (schema.variants[symbol(CAST(node.variant_name AS String))]) END);
+    MUTABLE variant_data: ?SchemasUnionSchemaVariantValue = (IF schema.variants[symbol(node.variant_name)] != NIL THEN schema.variants[symbol(node.variant_name)] ELSE UNWRAP (schema.variants[symbol(CAST(node.variant_name AS String))]) END);
     IF variant_data EXISTS AS variant_data_value THEN
       IF variant_data_value IS_A InlineStructVariant AS inline_struct_variant THEN
         MUTABLE fields = COPY (CAST(inline_struct_variant AS InlineStructVariant@multiowned)).fields;

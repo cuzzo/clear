@@ -96,7 +96,7 @@ PUB FN resolutionSession__resolve_mut(MUTABLE self: ResolutionSession, program: 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE declarations = TRY (declarationIndexer__index(program));
-    rtoc_self_view.local_type_declaration_names = (declarations.type_declarations |> SELECT type__to_sym(aST__node_name(UNWRAP (castTypeDeclarationToLocatable(_))))) |> DISTINCT _;
+    rtoc_self_view.local_type_declaration_names = (declarations.type_declarations |> SELECT symbol(UNWRAP (aST__node_name(UNWRAP (castTypeDeclarationToLocatable(_)))))) |> DISTINCT _;
     FOR MUTABLE rtoc_for_elem_99 IN declarations.imports DO
     TRY (resolutionSession__visit_RequireNode(rtoc_self_view, &rtoc_for_elem_99));
     END
@@ -1125,7 +1125,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE owner: ?StructDef = COPY local_structs[_.owner_name];
     IF !(owner) THEN
         IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_28 = TRY (resolutionSession__current_scope(rtoc_self_view));
-        TRY (scope__resolve_type_entry(rtoc_local_receiver_28, type__to_sym(_.owner_name))) } THEN
+        TRY (scope__resolve_type_entry(rtoc_local_receiver_28, symbol(_.owner_name))) } THEN
           TRY (resolutionSession__error_mut(rtoc_self_view, _.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_NONLOCAL_OWNER }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
         ELSE
           TRY (resolutionSession__error_mut(rtoc_self_view, _.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_UNKNOWN_OWNER }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
@@ -1630,7 +1630,7 @@ PRIVATE FN resolutionSession__register_protocol_declaration(MUTABLE self: Resolu
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (resolutionSession__protocol_declared?(rtoc_self_view, node.name) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_46 = TRY (resolutionSession__current_scope(rtoc_self_view));
-    TRY (scope__resolve_type_entry(rtoc_local_receiver_46, type__to_sym(node.name))) }) THEN
+    TRY (scope__resolve_type_entry(rtoc_local_receiver_46, symbol(node.name))) }) THEN
       TRY (resolutionSession__error_mut(rtoc_self_view, node.name_token, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], CAST({:label: "protocol", :name: node.name} AS {String@symbol}Any)));
     END
     MUTABLE seen_associated: [Set]String = Set[];
@@ -1861,12 +1861,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (structSchema__new(node.field_decls, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), ( { MUTABLE rtoc_empty_list_55: []GenericParamDecl = List[]; rtoc_empty_list_55 } ), {}, {}, :package, node.from_module, node.as_type))
     END;
     MUTABLE existing: ?ScopeTypeEntry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_56 = TRY (resolutionSession__current_scope(rtoc_self_view));
-    TRY (scope__resolve_type_entry(rtoc_local_receiver_56, type__to_sym(node.name))) };
+    TRY (scope__resolve_type_entry(rtoc_local_receiver_56, symbol(node.name))) };
     IF ((existing != NIL) AND resolutionSession__equivalent_extern_type_schema?(rtoc_self_view, existing.schema, schema)) THEN
       TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ExternStructDecl: COPY node }, :Void));
       RETURN;
     END
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ ExternStructDecl: COPY node }, type__to_sym(node.name), schema));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ ExternStructDecl: COPY node }, symbol(node.name), schema));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ExternStructDecl: COPY node }, :Void));
 }
 END
@@ -1938,7 +1938,7 @@ PRIVATE FN resolutionSession__register_enum_declaration(self: ResolutionSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, type__to_sym(node.name), ScopeScopeTypeSchema{ EnumSchemaMultiowned: COPY TRY (enumSchema__new(node.variants, node.visibility)) }));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), ScopeScopeTypeSchema{ EnumSchemaMultiowned: COPY TRY (enumSchema__new(node.variants, node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
 }
 END
@@ -1953,7 +1953,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ UnionDef: COPY node } }, ResolutionCodeOrMessage{ SymbolValue: :UNION_INLINE_IN_GENERIC }));
     END
     TRY (resolutionSession__register_inline_struct_variants_mut(rtoc_self_view, node));
-    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, type__to_sym(node.name), ScopeScopeTypeSchema{ UnionSchemaMultiowned: COPY TRY (unionSchema__new(node.variants, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.visibility)) }));
+    TRY (resolutionSession__declare_type_schema_mut(rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, symbol(node.name), ScopeScopeTypeSchema{ UnionSchemaMultiowned: COPY TRY (unionSchema__new(node.variants, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ UnionDef: COPY node }, :Void));
 }
 END
