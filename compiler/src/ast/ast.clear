@@ -174,7 +174,7 @@ PUB STRUCT Program {
   stdlib_allocates: ?Bool,
   storage_override: ?String@symbol,
   symbol: ?SymbolEntry@multiowned,
-  sync_policy: ?PassStateValue,
+  sync_policy: ?[]ErrorClause,
   tense_plan: ?TensePlanValue,
   type_object: ?Type,
   var_mutated: ?Bool,
