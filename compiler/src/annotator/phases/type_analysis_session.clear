@@ -1684,7 +1684,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(aST__node__token( UNWRAP (castNodeToLocatable(node)))) THEN
       RETURN NIL;
     END
-    RETURN typeAnalysisSession__anchor_at(rtoc_self_view, aST__node__token(node).line, (aST__node__token( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable( UNWRAP (castNodeToLocatable(node))))))))))))))))))).column - variant_name.codepointCount()));
+    RETURN typeAnalysisSession__anchor_at(rtoc_self_view, aST__node__token(UNWRAP (castNodeToLocatable(node))).line, (aST__node__token(UNWRAP (castNodeToLocatable(node))).column - variant_name.codepointCount()));
 }
 END
 PRIVATE FN typeAnalysisSession__emit_variant_typo_mut(self: TypeAnalysisSession, anchor: AnchorToken, name: String, candidates: []NameCandidate, message: String, fix_label: String, cascade: Bool = FALSE) RETURNS !Void
@@ -17259,7 +17259,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF type__future?(type) THEN
       RETURN TRUE;
     END
-    RETURN (TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(type)))) IS_A UnionSchema;
+    IF TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(type))) EXISTS AS schema THEN
+      RETURN schema IS_A UnionSchema;
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN typeAnalysisSession__emit_missing_stream_yields_contract_mut(self: TypeAnalysisSession, node: BgStreamBlock, contract: Type) RETURNS !Void

@@ -18760,7 +18760,7 @@ PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, node: Assign
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE special_result: ?Stmt = TRY (mIRLowering__special_assignment_result(&rtoc_self_view, node));
     IF special_result EXISTS AS special_result_value THEN
-      RETURN castStmtToEmittable( UNWRAP (castStmtToEmittable( UNWRAP (castStmtToEmittable( UNWRAP (castStmtToEmittable( UNWRAP (castStmtToEmittable( UNWRAP (castStmtToEmittable( UNWRAP (castStmtToEmittable( UNWRAP (castStmtToEmittable( UNWRAP (castStmtToEmittable( UNWRAP (castStmtToEmittable(special_result_value)))))))))))))))))));
+      RETURN castStmtToEmittable( UNWRAP (castStmtToEmittable(special_result_value)));
     END
     MUTABLE plan = TRY (mIRLowering__assignment_target_plan(&rtoc_self_view, node));
     MUTABLE kept_value: ?Emittable = TRY (mIRLowering__kept_assignment_field_value(&rtoc_self_view, node));
