@@ -1901,8 +1901,8 @@ FN mIRLowering__construct_lowered_body(MUTABLE self: MIRLowering, stmts: []MIRLo
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE state = mIRLowering__initial_ownership_finalization_context(rtoc_self_view);
     MUTABLE packets: []LoweredStmtPacket = ( { MUTABLE rtoc_empty_list_31: []LoweredStmtPacket = List[]; rtoc_empty_list_31 } );
-    FOR _ IN stmts DO
-    MUTABLE packet: ?LoweredStmtPacket = TRY (mIRLowering__lowered_stmt_packet(&rtoc_self_view, state, &_));
+    FOR MUTABLE rtoc_for_elem_1903 IN stmts DO
+    MUTABLE packet: ?LoweredStmtPacket = TRY (mIRLowering__lowered_stmt_packet(&rtoc_self_view, state, &rtoc_for_elem_1903));
     IF packet EXISTS AS packet_value THEN
         &packets.append(packet_value);
     END
@@ -1993,8 +1993,8 @@ FN mIRLowering__mark_ownership_finalized_nodes_mut(self: MIRLowering, nodes: []E
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR _ IN nodes DO
-    mIRLowering__mark_ownership_finalized_node_mut(rtoc_self_view, &_);
+    FOR MUTABLE rtoc_for_elem_1995 IN nodes DO
+    mIRLowering__mark_ownership_finalized_node_mut(rtoc_self_view, &rtoc_for_elem_1995);
     END
     NIL;
 }
@@ -2003,8 +2003,8 @@ FN mIRLowering__append_pending_packet_nodes_mut(self: MIRLowering, MUTABLE state
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR _ IN (packet.pending |> WHERE TRUE) DO
-    TRY (mIRLowering__append_ownership_finalized_node_mut(rtoc_self_view, &state, &_, [_], NIL, NIL));
+    FOR MUTABLE rtoc_for_elem_2005 IN (packet.pending |> WHERE TRUE) DO
+    TRY (mIRLowering__append_ownership_finalized_node_mut(rtoc_self_view, &state, &rtoc_for_elem_2005, [rtoc_for_elem_2005], NIL, NIL));
     END
     NIL;
 }
@@ -2829,12 +2829,13 @@ FN mIRLowering__append_ownership_store_facts_for_consumption_mut(self: MIRLoweri
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
-    IF !(fact) THEN
+    MUTABLE fact_optional: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
+    IF !(fact_optional) THEN
       RETURN;
     END
+    MUTABLE fact: OwnershipConsumptionFact = UNWRAP (fact_optional);
     MUTABLE source = mIRLowering__ownership_fact_source(rtoc_self_view, node);
-    FOR _ IN (UNWRAP (fact)).names DO
+    FOR _ IN ownershipConsumptionFact__names(fact) DO
     &facts.append(MIRLoweringOwnershipFact{ OwnedStore: COPY OwnedStore{ name: COPY CAST(_ AS String), target: COPY fact.source, alloc: COPY fact.target_alloc, source: COPY source, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     END
     NIL;
@@ -2844,12 +2845,13 @@ FN mIRLowering__append_ownership_transfer_facts_for_consumption_mut(self: MIRLow
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
-    IF !(fact) THEN
+    MUTABLE fact_optional: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
+    IF !(fact_optional) THEN
       RETURN;
     END
+    MUTABLE fact: OwnershipConsumptionFact = UNWRAP (fact_optional);
     MUTABLE source = mIRLowering__ownership_fact_source(rtoc_self_view, node);
-    FOR _ IN (UNWRAP (fact)).names DO
+    FOR _ IN ownershipConsumptionFact__names(fact) DO
     &facts.append(MIRLoweringOwnershipFact{ OwnedTransfer: COPY OwnedTransfer{ name: COPY CAST(_ AS String), target: fact.target, source: COPY source, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     END
     NIL;
@@ -4451,7 +4453,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(lifecyclePlan__needs_drop?(plan)) THEN
       MUTABLE source: String = "";
       IF source_node EXISTS AS source_node_value THEN
-        source = " binding ${source_node_value.name} at line ${source_node_value.line.toString()}";
+        source = " binding ${source_node_value.name} at line ${source_node_value.token.line.toString()}";
       ELSE
         source = "";
       END
@@ -6562,9 +6564,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN ((when_block.tests OR_ELSE List[])) DO
     &tests.append(TRY (mIRLowering__lower_test_that(&rtoc_self_view, _, env)));
     END
-    FOR _ IN ((when_block.benchmarks OR_ELSE List[])) DO
+    FOR MUTABLE rtoc_for_elem_6566 IN ((when_block.benchmarks OR_ELSE List[])) DO
     MUTABLE name = "${ctx.test_name}: ${when_desc}: benchmark${tag_suffix}";
-    MUTABLE body = (((([testBlockCtx__fresh_preamble(ctx)] + stub_mir) + ctx.setup_mir) + when_setup_mir) + [TRY (mIRLowering__lower(&rtoc_self_view, &_))]);
+    MUTABLE body = (((([testBlockCtx__fresh_preamble(ctx)] + stub_mir) + ctx.setup_mir) + when_setup_mir) + [TRY (mIRLowering__lower(&rtoc_self_view, &rtoc_for_elem_6566))]);
     &tests.append(TestDef{ name: COPY name, body: COPY body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL });
     END
     RETURN TRY (testBlockCtx__emit_all_hooks( &ctx, (when_block.after_all OR_ELSE List[]), "__after_all", "${when_desc}: ", &tests));

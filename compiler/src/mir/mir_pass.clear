@@ -361,8 +361,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
       ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
         MUTABLE list_lit_mutable = COPY list_lit;
-        FOR _ IN list_lit_mutable.items DO
-        TRY (mIRPass__walk_consumed(rtoc_self_view, &_, &names, facts));
+        FOR MUTABLE rtoc_for_elem_363 IN list_lit_mutable.items DO
+        TRY (mIRPass__walk_consumed(rtoc_self_view, &rtoc_for_elem_363, &names, facts));
         END
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
         MUTABLE get_field_mutable = COPY get_field;

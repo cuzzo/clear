@@ -403,7 +403,7 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
     panic("Unsupported segment tail {} in segment {}");
   END
 END
-PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentList, liveness: Result, lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
+PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentList, liveness: LivenessResult, lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
   MUTABLE segment_nodes = COPY segment_list.segments;
   IF (segment_nodes.length() == 0) THEN
     RETURN NIL;
@@ -632,7 +632,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE promoted_field_decls = (promoted_value_decls + promoted_guard_decls);
   RETURN TRY (emit__build_fsm_unified(ctx_with_extras, expanded_specs, promoted_field_decls, lowering));
 END
-PRIVATE FN emit__build_recursive_capture_map(ctx: FsmEmitContext, segments: []Segment, liveness: Result) RETURNS !{String}String ->
+PRIVATE FN emit__build_recursive_capture_map(ctx: FsmEmitContext, segments: []Segment, liveness: LivenessResult) RETURNS !{String}String ->
   MUTABLE id = ctx.id;
   MUTABLE capture_map: {String}String = {};
   FOR _ IN ctx.captured.keys() DO
@@ -838,7 +838,7 @@ PRIVATE FN emit__register_owned_suspend_result_cleanups_mut(segment_specs: []Fsm
   rtoc_idx = rtoc_idx + 1;
   END
 END
-PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [][]Emittable, segments: []Segment, liveness: Result, captured: {String}Type@multiowned, conservative_promoted: []String) RETURNS !Void ->
+PRIVATE FN emit__check_fsm_cleanup_invariant_mut(seg_codes: [][]Emittable, segments: []Segment, liveness: LivenessResult, captured: {String}Type@multiowned, conservative_promoted: []String) RETURNS !Void ->
   MUTABLE forbidden = COPY liveness.cross_segment_vars.keys();
   &forbidden.concat((captured).keys());
   &forbidden.concat(conservative_promoted);

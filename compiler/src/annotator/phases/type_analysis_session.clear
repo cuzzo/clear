@@ -11028,14 +11028,14 @@ PRIVATE FN typeAnalysisSession__visit_TestBlock(MUTABLE self: TypeAnalysisSessio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(MUTABLE node, MUTABLE rtoc_self_view) -> {
     FOR _ IN node.setup DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
     TRY (typeAnalysisSession__visit_test_lets(&rtoc_self_view, TestContainerNode{ TestBlock: COPY node }));
     TRY (typeAnalysisSession__visit_test_hook_bodies(&rtoc_self_view, TestContainerNode{ TestBlock: COPY node }));
-    FOR _ IN node.whens DO
-    TRY (typeAnalysisSession__visit_WhenBlock(&rtoc_self_view, &_));
+    FOR MUTABLE rtoc_for_elem_11036 IN node.whens DO
+    TRY (typeAnalysisSession__visit_WhenBlock(&rtoc_self_view, &rtoc_for_elem_11036));
     END
     NIL
     });
@@ -11052,10 +11052,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit_test_lets(&rtoc_self_view, TestContainerNode{ WhenBlock: COPY node }));
     TRY (typeAnalysisSession__visit_test_hook_bodies(&rtoc_self_view, TestContainerNode{ WhenBlock: COPY node }));
     MUTABLE test_body_summaries: {Int64}BodyScanSummary = {};
-    FOR _ IN node.tests DO
-    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(MUTABLE test_body_summaries, _, MUTABLE rtoc_self_view) -> {
-    test_body_summaries[aST__node_identity(Locatable{ TestThat: COPY _ })] = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(_, MUTABLE rtoc_self_view) -> {
-      TRY (typeAnalysisSession__visit_TestThat(&rtoc_self_view, &_));
+    FOR MUTABLE rtoc_for_elem_11054 IN node.tests DO
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(MUTABLE test_body_summaries, rtoc_for_elem_11054, MUTABLE rtoc_self_view) -> {
+    test_body_summaries[aST__node_identity(Locatable{ TestThat: COPY rtoc_for_elem_11054 })] = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(rtoc_for_elem_11054, MUTABLE rtoc_self_view) -> {
+      TRY (typeAnalysisSession__visit_TestThat(&rtoc_self_view, &rtoc_for_elem_11054));
       rubyToClearVoid__type_analysis_session()
     });
     NIL
@@ -11218,8 +11218,8 @@ PRIVATE FN typeAnalysisSession__apply_auto_resolution_stamps_mut(self: TypeAnaly
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE touched_functions: [Set]FunctionDef@multiowned = TRY (typeAnalysisSession__restamp_auto_resolution_slots_mut(rtoc_self_view, resolved_slots));
-    FOR _ IN touched_functions DO
-    TRY (typeAnalysisSession__restamp_auto_function_signature_mut(rtoc_self_view, &_));
+    FOR MUTABLE rtoc_for_elem_11220 IN touched_functions DO
+    TRY (typeAnalysisSession__restamp_auto_function_signature_mut(rtoc_self_view, &rtoc_for_elem_11220));
     END
     TRY (typeAnalysisSession__restamp_stale_auto_nodes_mut(rtoc_self_view, program));
 }
@@ -12040,8 +12040,8 @@ PRIVATE FN typeAnalysisSession__visit_FuncCall(MUTABLE self: TypeAnalysisSession
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__normalize_explicit_mutable_arguments_mut(rtoc_self_view, Node{ FuncCall: COPY node });
-    FOR _ IN node.args DO
-    TRY (typeAnalysisSession__annotate_call_argument_mut(&rtoc_self_view, node, &_));
+    FOR MUTABLE rtoc_for_elem_12042 IN node.args DO
+    TRY (typeAnalysisSession__annotate_call_argument_mut(&rtoc_self_view, node, &rtoc_for_elem_12042));
     END
     IF (node.name == "native_call") THEN
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ FuncCall: COPY node }, :Any));

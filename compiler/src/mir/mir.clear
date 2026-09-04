@@ -12272,7 +12272,7 @@ PUB STRUCT OwnershipConsumptionFact {
   covers_consuming_params: Bool
 }
 
-FN ownershipConsumptionFact__names(self: OwnershipConsumptionFact) RETURNS ![]String ->
+PUB FN ownershipConsumptionFact__names(self: OwnershipConsumptionFact) RETURNS []String ->
   MUTABLE names: []String = [];
   FOR operand IN self.operands DO
     IF operand.name EXISTS AS operand_name THEN

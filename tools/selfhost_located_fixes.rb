@@ -239,6 +239,14 @@ by.each do |f, rs|
       else
         line_edits << [r['line'], :mutable_arg_line, m[1]]
       end
+    elsif (m = e.match(/Argument \d+ \('(\w+)'\) is not MUTABLE, so it must not be passed with '&'/))
+      # The callee borrows; rtoc marked the argument as mutating anyway.
+      sp = locate_arg(text, offsets, r['line'], argno)
+      if sp && (expr = text[sp[0]...sp[1]].strip).start_with?('&')
+        edits << [sp[0], sp[1], " #{expr[1..]}", :drop_mutable_arg]
+      else
+        line_edits << [r['line'], :drop_mutable_arg_line, nil]
+      end
     elsif (m = e.match(/passed immutable variable '(\w+)'/))
       if view_aliases.include?(m[1])
         # A WITH POLYMORPHIC alias is not a local declaration. It is made
@@ -541,6 +549,16 @@ by.each do |f, rs|
           break
         end
         j -= 1
+      end
+    when :drop_mutable_arg_line
+      # The call spans lines; drop the marker only when this line carries
+      # exactly one `&` in argument position.
+      spots = []
+      lines[i].to_enum(:scan, /(?<=[(,] )&(?=[a-z_])|(?<=\()&(?=[a-z_])/).each { spots << Regexp.last_match.begin(0) }
+      if spots.length == 1
+        at = spots.first
+        lines[i] = lines[i][0...at] + lines[i][(at + 1)..]
+        counts[kind] += 1
       end
     when :mutable_arg_line
       # The call spans lines, so the argument span could not be located; the

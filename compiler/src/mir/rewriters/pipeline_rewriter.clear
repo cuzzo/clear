@@ -117,10 +117,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A MatchStatement AS match_statement THEN
       MUTABLE match_statement_mutable = COPY match_statement;
       match_statement_mutable.expr = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, matchStatement__expr(match_statement_mutable)));
-      FOR _ IN match_statement_mutable.cases DO
-    MUTABLE body = COPY TRY (matchCase__body(_));
+      FOR MUTABLE rtoc_for_elem_119 IN match_statement_mutable.cases DO
+    MUTABLE body = COPY TRY (matchCase__body(rtoc_for_elem_119));
     IF body THEN
-          body = body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
+          body = body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &rtoc_for_elem_119));
     END
       END
       MUTABLE default_case: ?[]Locatable = COPY match_statement_mutable.default_case;

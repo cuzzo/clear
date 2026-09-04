@@ -1204,21 +1204,21 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         &step.consumed.insert(COPY place);
       ELSE_IF node_value_mutable IS_A StructLit AS struct_lit THEN
         IF struct_lit.fields != NIL THEN
-                FOR _ IN struct_lit.fields.values() DO
-                TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, &_, step));
+                FOR MUTABLE rtoc_for_elem_1206 IN struct_lit.fields.values() DO
+                TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, &rtoc_for_elem_1206, step));
                 END
         END
       ELSE_IF (node_value_mutable IS_A MethodCall) THEN
         IF (node_value_mutable.object IS_A Identifier AND ((node_value_mutable.object.token() != NIL) AND (((node_value_mutable.object.token())?).type() == :TYPE_ID))) THEN
-          FOR _ IN node_value_mutable.args() DO
-          TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, &_, step));
+          FOR MUTABLE rtoc_for_elem_1212 IN node_value_mutable.args() DO
+          TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, &rtoc_for_elem_1212, step));
           END
         ELSE
           TRY (ownershipDataflow__collect_explicit_in(rtoc_self_view, node_value_mutable, step));
         END
       ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
-        FOR _ IN list_lit.items DO
-        TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, &_, step));
+        FOR MUTABLE rtoc_for_elem_1219 IN list_lit.items DO
+        TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, &rtoc_for_elem_1219, step));
         END
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
         TRY (ownershipDataflow__collect_field_owner_transfer(rtoc_self_view, &get_field, step));
