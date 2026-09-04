@@ -234,6 +234,9 @@ module SelfhostFnProbe
     end
     stubs = emitted.values
     body = target.text.sub(/\A(PUB |PRIVATE )?FN #{Regexp.escape(target.name)}/, "FN #{safe}")
+    # A recursive call names the target, which the probe has just renamed and
+    # which is deliberately absent from the stub set. Point it at the copy.
+    body = body.gsub(/(?<![\w.])#{Regexp.escape(target.name)}\(/, "#{safe}(")
 
     head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n), "\n", extern_decls(cache),
             "\n# --- stand-ins for what it calls ---\n", stubs.join,

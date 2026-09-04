@@ -8519,7 +8519,7 @@ PRIVATE FN typeAnalysisSession__stream_body_contains_close?(self: TypeAnalysisSe
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN body |> ANY (_ IS_A CloseStream OR ((TRY (aST__child_bodies(_))) |> ANY typeAnalysisSession__stream_body_contains_close?(rtoc_self_view, _)));
+    RETURN body |> ANY (_ IS_A CloseStream OR (aST__child_bodies(_) |> ANY TRY (typeAnalysisSession__stream_body_contains_close?(rtoc_self_view, _))));
 }
 END
 PRIVATE FN typeAnalysisSession__stream_body_may_fall_through?(self: TypeAnalysisSession, body: []Locatable) RETURNS !Bool
@@ -8566,7 +8566,7 @@ PRIVATE FN typeAnalysisSession__stream_body_contains_break?(self: TypeAnalysisSe
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN body |> ANY (IF _ IS_A BreakNode THEN TRUE ELSE (IF (aST__loop_node?(_) OR aST__call_like_boundary?(_)) THEN FALSE ELSE (TRY (aST__child_bodies(_))) |> ANY typeAnalysisSession__stream_body_contains_break?(rtoc_self_view, _) END) END);
+    RETURN body |> ANY (IF _ IS_A BreakNode THEN TRUE ELSE (IF (aST__loop_node?(_) OR aST__call_like_boundary?(_)) THEN FALSE ELSE aST__child_bodies(_) |> ANY TRY (typeAnalysisSession__stream_body_contains_break?(rtoc_self_view, _)) END) END);
 }
 END
 PRIVATE FN typeAnalysisSession__propagate_collection_metadata_mut(self: TypeAnalysisSession, MUTABLE node: DeclarationNode, final_type: AnnotationTypeShape) RETURNS !Void
@@ -14233,7 +14233,16 @@ PRIVATE FN typeAnalysisSession__captured_move_consumed_by_loop?(self: TypeAnalys
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), name) != NIL) AND (((ownershipGraph__get_index(typeAnalysisSession__ownership_graph(rtoc_self_view), name))?).move_action == :capture)) AND (((typeAnalysisSession__current_capture_context(rtoc_self_view)?.analysis)?.captures != NIL) AND (((typeAnalysisSession__current_capture_context(rtoc_self_view)?.analysis)?.captures)?).contains?(name)))) == TRUE);
+    MUTABLE graph = typeAnalysisSession__ownership_graph(rtoc_self_view);
+    IF ownershipGraph__get_index(graph, name) EXISTS AS graph_node THEN
+      IF !((graph_node.move_action == :capture)) THEN
+        RETURN FALSE;
+      END
+      IF typeAnalysisSession__current_capture_context(rtoc_self_view)?.analysis EXISTS AS analysis THEN
+        RETURN analysis.captures.contains?(name);
+      END
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN typeAnalysisSession__loop_value_copyable?(self: TypeAnalysisSession, name: String) RETURNS !Bool
