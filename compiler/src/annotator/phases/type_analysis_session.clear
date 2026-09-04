@@ -13483,7 +13483,7 @@ PRIVATE FN typeAnalysisSession__match_variant_names(self: TypeAnalysisSession, a
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ([arm.value] + (arm.extra_values)) |> SELECT:? typeAnalysisSession__match_variant_name(rtoc_self_view, _) |> WHERE _ != NIL;
+    RETURN ([arm.value] + (arm.extra_values)) |> SELECT:? typeAnalysisSession__match_variant_name(rtoc_self_view, _) |> WHERE _ != NIL |> SELECT UNWRAP (_);
 }
 END
 PRIVATE FN typeAnalysisSession__normalized_match_payload(self: TypeAnalysisSession, payload: ?MatchPayload, union_subst: {String@symbol}String@symbol) RETURNS !?MatchPayload
@@ -19848,7 +19848,7 @@ PRIVATE FN typeAnalysisSession__deferred_drop_for(self: TypeAnalysisSession, nam
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN DeferredDrop{ name: COPY name, type: COPY TRY (type__from_node_mut(symbolEntry__type(info), "deferred drop type")), resource: resource };
+    RETURN DeferredDrop{ name: COPY name, type: COPY symbolEntry__type(info), resource: resource };
 }
 END
 PRIVATE FN typeAnalysisSession__mark_chain_needs_mut_ref_mut(self: TypeAnalysisSession, node: Locatable) RETURNS Void
@@ -20204,7 +20204,13 @@ PRIVATE FN typeAnalysisSession__bg_lifetime_sources(self: TypeAnalysisSession, a
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (analysis.capture_symbols.values() |> WHERE !((_ AND TRY (typeAnalysisSession__bg_capture_independent?(rtoc_self_view, _))))) |> WHERE _ != NIL;
+    MUTABLE sources: []SymbolEntry@multiowned = List[];
+    FOR info IN analysis.capture_symbols.values() DO
+      IF !(TRY (typeAnalysisSession__bg_capture_independent?(rtoc_self_view, info))) THEN
+        &sources.append(KEEP info);
+      END
+    END
+    RETURN sources;
 }
 END
 PRIVATE FN typeAnalysisSession__bg_capture_independent?(self: TypeAnalysisSession, info: SymbolEntry) RETURNS !Bool
@@ -20588,7 +20594,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PUB FN typeAnalysisSession__new(importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !TypeAnalysisSession@multiowned ->
   MUTABLE rtoc_source_dir: String = TRY (rtocResolveSourceDir(source_dir));
-  MUTABLE self = TypeAnalysisSession{ current_if_is_a_condition: NIL, audit_inputs: CapabilityAuditInputs{ held_locks: {}, held_lock_types: List[], current_predicate_context: NIL, deferred_with_validations: List[], deferred_recovery_validations: List[], deferred_give_validations: List[], deferred_copy_retained_validations: List[], predicate_call_sites: List[], async_body_facts: List[], capability_audit: {}, capture_stack: List[], capture_move_suppression_depth: 0, snapshot_txn_frames: List[], effect_state: NIL, lock_analysis: LockAnalysisState{ direct_edges: {}, direct_acquires: {}, held_calls: {}, clause_sites: List[], type_ranks: {} }, ownership_graph: ownershipGraph__new(), ownership_transport_frames: List[] }, config: AnnotatorPhasesTypeAnalysisSessionConfig{ importer: ( { MUTABLE rtoc_optional_or_source_520: ?ModuleImporter@multiowned = COPY importer; MUTABLE rtoc_optional_or_result_521: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_520 != NIL THEN rtoc_optional_or_result_521 = COPY rtoc_optional_or_source_520; ELSE rtoc_optional_or_result_521 = COPY compiler; END rtoc_optional_or_result_521 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code }, resolution: NIL, traversal_state: TraversalState{ scopes: [scope__new()], function_contexts: List[], loop_depth: 0, conditional_depth: 0, smooth_depth: 0, body_fact_frames: List[], stream_yield_frames: List[], with_block_depth: 0, match_pattern_depth: 0, current_bg_pinned: FALSE, pipeline_accessed_fields: NIL, auto_locked_assign_name: NIL, struct_literal_call_argument_depth: 0, annotation_ancestors: List[], comptime_type_param_refinements: {}, value_type_refinements: {}, branch_terminated: FALSE, next_synthetic_body_ordinal: -1, deferred_copy_wrapper_bindings: List[] } };
+  MUTABLE self = TypeAnalysisSession{ current_if_is_a_condition: NIL, audit_inputs: CapabilityAuditInputs{ held_locks: {}, held_lock_types: List[], current_predicate_context: NIL, deferred_with_validations: List[], deferred_recovery_validations: List[], deferred_give_validations: List[], deferred_copy_retained_validations: List[], predicate_call_sites: List[], async_body_facts: List[], capability_audit: {}, capture_stack: List[], capture_move_suppression_depth: 0, snapshot_txn_frames: List[], effect_state: NIL, lock_analysis: LockAnalysisState{ direct_edges: {}, direct_acquires: {}, held_calls: {}, clause_sites: List[], type_ranks: {} }, ownership_graph: ownershipGraph__new(), ownership_transport_frames: List[] }, config: AnnotatorPhasesTypeAnalysisSessionConfig{ importer: ( { MUTABLE rtoc_optional_or_source_520: ?ModuleImporter@multiowned = COPY importer; MUTABLE rtoc_optional_or_result_521: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_520 != NIL THEN rtoc_optional_or_result_521 = COPY rtoc_optional_or_source_520; ELSE rtoc_optional_or_result_521 = COPY compiler; END rtoc_optional_or_result_521 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code }, resolution: TRY (resolutionFacts__empty()), traversal_state: TraversalState{ scopes: [scope__new()], function_contexts: List[], loop_depth: 0, conditional_depth: 0, smooth_depth: 0, body_fact_frames: List[], stream_yield_frames: List[], with_block_depth: 0, match_pattern_depth: 0, current_bg_pinned: FALSE, pipeline_accessed_fields: NIL, auto_locked_assign_name: NIL, struct_literal_call_argument_depth: 0, annotation_ancestors: List[], comptime_type_param_refinements: {}, value_type_refinements: {}, branch_terminated: FALSE, next_synthetic_body_ordinal: -1, deferred_copy_wrapper_bindings: List[] } };
   TRY (typeAnalysisSession__initialize(&self, importer, compiler, source_dir, strict_test, source_code));
   RETURN self @multiowned;
 END
@@ -22480,7 +22486,7 @@ FN ruby_wrap_optional_String_symbol_TypeAnalysisSessionReturnValue(value: ?Strin
 END
 FN ruby_wrap_optional_Type_multiowned_X__type_analysis_session(value: ?Type) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
-    RETURN X{ Type: Type{ Type: COPY optional_payload } };
+    RETURN X{ Type: COPY optional_payload };
   END
   NIL;
 END
