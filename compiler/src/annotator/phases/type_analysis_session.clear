@@ -10097,11 +10097,14 @@ PRIVATE FN typeAnalysisSession__non_escaping_fiber_capture?(self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE rtoc_alias_symbol = UNWRAP (symbol);
-    IF !((((symbol != NIL) AND symbolEntry__borrowed_alias(rtoc_alias_symbol)) AND symbolEntry__non_escaping(symbol))) THEN
+    IF !(symbol) THEN
       RETURN FALSE;
     END
-    RETURN (((!(symbolEntry__locked?(symbol)) AND !(symbolEntry__write_locked?(symbol))) AND !(symbolEntry__local?( UNWRAP (symbol)))) AND !(symbolEntry__atomic?( UNWRAP (symbol))));
+    MUTABLE rtoc_alias_symbol = UNWRAP (symbol);
+    IF !((symbolEntry__borrowed_alias(rtoc_alias_symbol) AND symbolEntry__non_escaping(rtoc_alias_symbol))) THEN
+      RETURN FALSE;
+    END
+    RETURN (((!(symbolEntry__locked?(rtoc_alias_symbol)) AND !(symbolEntry__write_locked?(rtoc_alias_symbol))) AND !(symbolEntry__local?(rtoc_alias_symbol))) AND !(symbolEntry__atomic?(rtoc_alias_symbol)));
 }
 END
 PRIVATE FN typeAnalysisSession__record_capture_info_mut(self: TypeAnalysisSession, ctx: CaptureContext, name: String, info: SymbolEntry, MUTABLE node: Identifier) RETURNS !Void
