@@ -9234,7 +9234,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE sym_storage = IF (aST__node__symbol(expr_value) EXISTS) THEN
         (IF locatable__symbol(expr_value) != NIL THEN
-        (locatable__symbol(expr_value)).storage()
+        symbolEntry__storage(UNWRAP ((locatable__symbol(expr_value))))
       ELSE
         NIL
       END)
@@ -11231,7 +11231,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_lambda_id(&rtoc_mutable_receiver_417)) }}";
     MUTABLE params_list = TRY (functionSignature__params(sig));
     MUTABLE params_mir: []MIRParam = ([Emittable{ MIRParam: COPY MIRParam{ name: "_rt", zig_type: "*Runtime", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } }] + (params_list |> SELECT {
-    MUTABLE p_type = _.type();
+    MUTABLE p_type = _.type;
     MUTABLE type_str: String = "";
       IF p_type IS_A Type THEN
         type_str = TRY (type__zig_type(p_type, {:is_param: TRUE}));

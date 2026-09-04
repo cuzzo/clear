@@ -5200,7 +5200,7 @@ PRIVATE FN typeAnalysisSession__bounded_stream_source?(self: TypeAnalysisSession
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (aST__full_type_mut(node))).bounded_stream?();
+    RETURN TRY (type__bounded_stream?((TRY (aST__full_type_mut(node)))));
 }
 END
 PRIVATE FN typeAnalysisSession__pipeline_source_fact(self: TypeAnalysisSession, source: Locatable, source_type: Type, include_inf_stream: Bool = FALSE) RETURNS !PipelineSourceFact
@@ -5841,7 +5841,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "UNNEST"));
     MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     MUTABLE inner_bind_name = NIL;
-    MUTABLE expr = node.right.expression();
+    MUTABLE expr = locatable__expression(node.right);
     IF (expr IS_A BinaryOp AND (expr.op() == :BIND_VAR)) THEN
       inner_bind_name = expr.right().name();
     END
@@ -15618,7 +15618,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF field_node.target IS_A Identifier THEN
       MUTABLE var_name: ?String = aST__node_name(field_node.target);
       MUTABLE syn = (IF locatable__symbol(field_node.target) != NIL THEN
-        (locatable__symbol(field_node.target)).sync()
+        symbolEntry__sync(UNWRAP ((locatable__symbol(field_node.target))))
       ELSE
         NIL
       END);
@@ -17294,7 +17294,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     full_analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, &node.parallel, TRUE, %() USE(node, MUTABLE rtoc_self_view) -> {
       FOR MUTABLE rtoc_mutable_block_param_424 IN node.body DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_mutable_block_param_424));
-        last_type = (typeAnalysisSession__recoverable_result_type(rtoc_self_view, &rtoc_mutable_block_param_424, "BG body expression") OR_ELSE (CAST(rtoc_mutable_block_param_424 AS Locatable)).full_type_mut("BG body expression"));
+        last_type = (typeAnalysisSession__recoverable_result_type(rtoc_self_view, &rtoc_mutable_block_param_424, "BG body expression") OR_ELSE TRY (aST__full_type_mut((CAST(rtoc_mutable_block_param_424 AS Locatable)))));
       END
       rubyToClearVoid__type_analysis_session()
     });

@@ -28,7 +28,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.products = annotationProducts__new();
 }
 END
-PUB FN annotationPipeline__run(MUTABLE self: AnnotationPipeline, program: Program) RETURNS !AnnotationProducts@multiowned
+PUB FN annotationPipeline__run(MUTABLE self: AnnotationPipeline, MUTABLE program: Program) RETURNS !AnnotationProducts@multiowned
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

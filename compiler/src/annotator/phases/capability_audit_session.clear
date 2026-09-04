@@ -4197,7 +4197,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE fact = COPY rtoc_each_items_45[rtoc_idx]?.fact;
       MUTABLE var_node = COPY fact?.var_node;
       MUTABLE syn = (IF locatable__symbol(UNWRAP (var_node)) != NIL THEN
-          (locatable__symbol(UNWRAP (var_node))).sync()
+          symbolEntry__sync(UNWRAP ((locatable__symbol(UNWRAP (var_node)))))
         ELSE
           NIL
         END);
