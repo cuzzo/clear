@@ -94,7 +94,15 @@ PRIVATE FN semanticAnnotator__semantic_id_index(self: SemanticAnnotator) RETURNS
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE typed_program = COPY UNWRAP (rtoc_self_view.annotation_products.typed_program);
     MUTABLE summaries = COPY typed_program.body_summaries;
-    RETURN SemanticIdIndex{ definitions: COPY ( { MUTABLE rtoc_transform_values_result_4: {String}Any = {}; FOR rtoc_key IN summaries.keys() DO rtoc_transform_values_result_4[rtoc_key] = (summaries[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS FunctionBodySummary)).definition_id; END rtoc_transform_values_result_4 } ), bodies: COPY ( { MUTABLE rtoc_transform_values_result_5: {String}Any = {}; FOR rtoc_key IN summaries.keys() DO rtoc_transform_values_result_5[rtoc_key] = (summaries[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS FunctionBodySummary)).body_id; END rtoc_transform_values_result_5 } ) };
+    MUTABLE definitions: {String}DefId = {};
+    MUTABLE bodies: {String}BodyId = {};
+    FOR rtoc_key IN summaries.keys() DO
+      IF summaries[rtoc_key] EXISTS AS summary THEN
+        definitions[rtoc_key] = COPY summary.definition_id;
+        bodies[rtoc_key] = COPY summary.body_id;
+      END
+    END
+    RETURN SemanticIdIndex{ definitions: COPY definitions, bodies: COPY bodies };
 }
 END
 PUB FN semanticAnnotator__new(importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !SemanticAnnotator@multiowned ->
