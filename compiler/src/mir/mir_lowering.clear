@@ -18417,7 +18417,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN mIRLowering__owned_return_call_init?(rtoc_self_view, cast__expr(mir_cast));
     END
     IF (((init != NIL) AND (init IS_A TryExpr)) OR ((init != NIL) AND (init IS_A TryOptional))) THEN
-      RETURN mIRLowering__owned_return_call_init?( rtoc_self_view, emittable__expr(init));
+      RETURN mIRLowering__owned_return_call_init?( rtoc_self_view, emittable__expr(UNWRAP (init)));
     END
     RETURN !(!(((IF init? IS_A Call AS call THEN call__owned_return?(call) ELSE FALSE END))));
 }
