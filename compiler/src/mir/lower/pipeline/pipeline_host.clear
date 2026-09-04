@@ -503,10 +503,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN TRY (pipelineHost__lower_pipeline_body(&rtoc_self_view, &node));
 }
 END
-PUB FN pipelineHost__pipeline_builder_alloc(self: PipelineHost) RETURNS String@symbol
+PUB FN pipelineHost__pipeline_builder_alloc(MUTABLE self: PipelineHost) RETURNS String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF rtoc_self_view.pipeline_node_alloc != NIL THEN
     RETURN (rtoc_self_view.pipeline_node_alloc)?;
     ELSE

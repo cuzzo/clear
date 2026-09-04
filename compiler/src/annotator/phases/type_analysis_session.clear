@@ -4088,11 +4088,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__verify_owned_takes_argument_mut(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_owned_takes_argument_mut(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(typeAnalysisSession__borrowed_takes_argument?(rtoc_self_view, facts.inner_node)) THEN
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    IF !(typeAnalysisSession__borrowed_takes_argument?(&rtoc_self_view, facts.inner_node)) THEN
       RETURN;
     END
     MUTABLE arg_ti = TRY (aST__full_type_mut(facts.inner_node));
@@ -4106,10 +4106,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__verify_link_argument_mut(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_link_argument_mut(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(type__link?(facts.arg_type)) THEN
       RETURN;
     END
@@ -4119,10 +4119,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :LINK_NEEDS_RESOLVE_FOR_CALL }, [], CAST({:name: typeAnalysisSession__argument_name(rtoc_self_view, facts.arg_node, "Expression"), :param: facts.param.name} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__verify_argument_type_mut(self: TypeAnalysisSession, MUTABLE facts: CallArgumentFacts, signature: FunctionSignature, MUTABLE atomic_bare_value_args: []Locatable) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_argument_type_mut(MUTABLE self: TypeAnalysisSession, MUTABLE facts: CallArgumentFacts, signature: FunctionSignature, MUTABLE atomic_bare_value_args: []Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (type__array?(facts.expected_type) AND type__array?(facts.actual_type)) THEN
       MUTABLE expected_element: ?Type = TRY (type__element_type(facts.expected_type));
       MUTABLE actual_element: ?Type = TRY (type__element_type(facts.actual_type));
@@ -4137,8 +4137,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       locatable__set_coerced_type_object_mut(&facts.arg_node, COPY facts.expected_type);
     END
     MUTABLE match = TRY (typeAnalysisSession__fn_type_argument_match?(rtoc_self_view, facts));
-    TRY (typeAnalysisSession__verify_atomic_argument_mut(rtoc_self_view, facts, signature, &atomic_bare_value_args));
-    IF TRY (typeAnalysisSession__shared_argument_match?(rtoc_self_view, facts, match)) THEN
+    TRY (typeAnalysisSession__verify_atomic_argument_mut(&rtoc_self_view, facts, signature, &atomic_bare_value_args));
+    IF TRY (typeAnalysisSession__shared_argument_match?(&rtoc_self_view, facts, match)) THEN
       match = TRUE;
     END
     IF TRY (typeAnalysisSession__basic_argument_match?(rtoc_self_view, &facts)) THEN
@@ -4150,10 +4150,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.arg_node, TypeAnalysisCodeOrMessage{ SymbolValue: :ARGUMENT_TYPE_ERROR }, [], CAST({:fn: typeAnalysisSession__argument_name(rtoc_self_view, facts.arg_node, "Expression"), :index: (facts.index + 1), :expected: TRY (type__coercion_surface_name(castTypeToTypeTypeInput__type_analysis_session(facts.expected_type))), :got: TRY (type__coercion_surface_name(castTypeToTypeTypeInput__type_analysis_session(facts.actual_type)))} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__collection_layout_display(self: TypeAnalysisSession, type: Type) RETURNS !String
+PRIVATE FN typeAnalysisSession__collection_layout_display(MUTABLE self: TypeAnalysisSession, type: Type) RETURNS !String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE element: ?Type = TRY (type__element_type(type));
     IF element EXISTS AS element_value THEN
       MUTABLE element_name = TRY (type__surface_name_type(element_value));
@@ -4172,10 +4172,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__fn_type_argument_match?(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__fn_type_argument_match?(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(type__fn_type?(facts.expected_type)) THEN
       RETURN FALSE;
     END
@@ -4192,10 +4192,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :REENTRANT_FN_TO_NON_REENTRANT_PARAM }, [], CAST({:name: typeAnalysisSession__argument_name(rtoc_self_view, facts.arg_node, "Expression"), :param: facts.param.name} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__reentrant_fn_argument_allowed_by_callee?(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__reentrant_fn_argument_allowed_by_callee?(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(type__fn_type?(facts.actual_type)) THEN
       RETURN FALSE;
     END
@@ -4220,10 +4220,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__reentrant_fn_argument_rejected?(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__reentrant_fn_argument_rejected?(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(type__fn_type?(facts.actual_type)) THEN
       RETURN FALSE;
     END
@@ -4249,10 +4249,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__verify_atomic_argument_mut(self: TypeAnalysisSession, facts: CallArgumentFacts, signature: FunctionSignature, MUTABLE atomic_bare_value_args: []Locatable) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_atomic_argument_mut(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts, signature: FunctionSignature, MUTABLE atomic_bare_value_args: []Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE arg_node = COPY facts.arg_node;
     IF typeAnalysisSession__explicit_primitive_atomic_param?(&rtoc_self_view, facts.expected_type) THEN
       IF !((IF arg_node IS_A Identifier AS identifier THEN typeAnalysisSession__atomic_cell_arg?(rtoc_self_view, identifier) ELSE FALSE END)) THEN
@@ -16906,7 +16906,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN typeAnalysisSession__retryable_with_fallible_sources(self: TypeAnalysisSession, node: WithBlock) RETURNS ![]String
+PRIVATE FN typeAnalysisSession__retryable_with_fallible_sources(self: TypeAnalysisSession, MUTABLE node: WithBlock) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

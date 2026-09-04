@@ -14561,7 +14561,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__lower_collect_smooth(MUTABLE self: MIRLowering, node: BinaryOp, rhs: CollectOp) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_collect_smooth(MUTABLE self: MIRLowering, MUTABLE node: BinaryOp, rhs: CollectOp) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -14670,7 +14670,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY label, body: COPY (snapshot_stmts + [Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY call_mir, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
 }
 END
-PRIVATE FN mIRLowering__smooth_snapshot_stmts(self: MIRLowering, node: BinaryOp, left: Emittable) RETURNS ![]Emittable
+PRIVATE FN mIRLowering__smooth_snapshot_stmts(self: MIRLowering, MUTABLE node: BinaryOp, left: Emittable) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -14887,7 +14887,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (ast_node IS_A GetField OR ast_node IS_A GetIndex);
 }
 END
-PRIVATE FN mIRLowering__or_else_facts(self: MIRLowering, node: BinaryOp) RETURNS !OrElseFacts
+PRIVATE FN mIRLowering__or_else_facts(self: MIRLowering, MUTABLE node: BinaryOp) RETURNS !OrElseFacts
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -14904,7 +14904,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN OrElseFacts{ left_is_error: left_is_error, left_success_optional: left_success_optional, line: (node.token.line), target: COPY mIRLowering__lowering_target(rtoc_self_view) };
 }
 END
-PRIVATE FN mIRLowering__or_else_pass_fallback(self: MIRLowering, node: Locatable) RETURNS !DefaultValue
+PRIVATE FN mIRLowering__or_else_pass_fallback(self: MIRLowering, MUTABLE node: Locatable) RETURNS !DefaultValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -14991,7 +14991,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRLowering__lower_tense_navigation(&rtoc_self_view, Locatable{ GetField: COPY node }, navigation, %(receiver: String) USE(MUTABLE node, rtoc_self_view) -> fieldAccessPlan__value(TRY (mIRLowering__field_access_plan(rtoc_self_view, &node, Emittable{ Ident: COPY Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL } })))));
 }
 END
-PRIVATE FN mIRLowering__lower_tense_navigation(MUTABLE self: MIRLowering, node: Locatable, navigation: TenseNavigation, mapper: FN(String) -> Emittable) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_tense_navigation(MUTABLE self: MIRLowering, MUTABLE node: Locatable, navigation: TenseNavigation, mapper: FN(String) -> Emittable) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -17579,7 +17579,7 @@ PRIVATE FN mIRLowering__lower_module_const(MUTABLE self: MIRLowering, MUTABLE no
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF mIRLowering__const_init_error_fallible?(rtoc_self_view, node) THEN
+    IF mIRLowering__const_init_error_fallible?(rtoc_self_view, &node) THEN
       RAISE Input, CompilerError, "{}error channel. Make the initializer infallible, or compute the value inside a function.";
     END
     MUTABLE safe_name = TRY (mIRLowering__var_decl_safe_name(rtoc_self_view, &node, FALSE));
@@ -17790,7 +17790,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE node: Locatable = COPY value;
     WHILE node IS_A Cast DO
-      MUTABLE node = aST__node_value(node);
+      MUTABLE node: ?Locatable = aST__node_value(node);
     END
     IF (IF node IS_A Literal AS literal THEN (literal.type == symbol("NIL")) ELSE FALSE END) THEN
       RETURN TRUE;
