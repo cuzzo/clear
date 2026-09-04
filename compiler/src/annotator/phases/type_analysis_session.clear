@@ -9221,8 +9221,8 @@ PRIVATE FN typeAnalysisSession__cap_var_sync(self: TypeAnalysisSession, MUTABLE 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sym_sync = (IF aST__node__symbol(node) != NIL THEN
-      (aST__node__symbol(node)).sync()
+    MUTABLE sym_sync = (IF aST__node__symbol(var_node) != NIL THEN
+      (aST__node__symbol(var_node)).sync()
     ELSE
       NIL
     END);
@@ -9246,8 +9246,8 @@ PRIVATE FN typeAnalysisSession__cap_var_layout(self: TypeAnalysisSession, MUTABL
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE sym_layout = (IF aST__node__symbol(node) != NIL THEN
-      (aST__node__symbol(node)).layout()
+    MUTABLE sym_layout = (IF aST__node__symbol(var_node) != NIL THEN
+      (aST__node__symbol(var_node)).layout()
     ELSE
       NIL
     END);
@@ -20106,7 +20106,7 @@ PRIVATE FN typeAnalysisSession__lifetime_sources_for_value(self: TypeAnalysisSes
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sources: []SymbolEntry@multiowned = ( { MUTABLE rtoc_empty_list_507: []SymbolEntry@multiowned = List[]; rtoc_empty_list_507 } );
     IF TRUE THEN
-      MUTABLE sym = aST__node__symbol(node);
+      MUTABLE sym = aST__node__symbol(val_node);
       IF sym THEN
         sources = ruby_array_concat_SymbolEntry_multiowned(sources, CAST(TRY (symbolEntry__lifetime_sources(sym)) AS []SymbolEntry@multiowned));
       END

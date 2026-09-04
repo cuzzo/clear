@@ -187,7 +187,9 @@ PUB STRUCT ResolutionSession {
   source_dir: String
 }
 
-builtin_type_parameter_names = [:Number, :Bool, :Byte, :Int8, :Int16, :Int32, :Int64, :UInt8, :UInt16, :UInt32, :UInt64, :Float32, :Float64, :TargetInt, :TargetUInt, :TargetLong, :TargetULong, :TargetLongLong, :TargetULongLong, :String, :Any, :Void, :Range, :Map];
+PUB FN resolutionSession__builtin_type_parameter_names() RETURNS []String@symbol EFFECTS REENTRANT ->
+  RETURN [:Number, :Bool, :Byte, :Int8, :Int16, :Int32, :Int64, :UInt8, :UInt16, :UInt32, :UInt64, :Float32, :Float64, :TargetInt, :TargetUInt, :TargetLong, :TargetULong, :TargetLongLong, :TargetULongLong, :String, :Any, :Void, :Range, :Map];
+END
 PUB FN resolutionSession__initialize(MUTABLE self: ResolutionSession, importer: ?ModuleImporter, source_dir: String, source_code: ?String, root_scope: ?Scope = NIL, function_registry: ?FunctionRegistry = NIL, install_builtins: Bool = TRUE) RETURNS !Void
   REQUIRES self: LOCAL
 ->
@@ -318,7 +320,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF seen.contains?(name) THEN
         TRY (resolutionSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_DUP_TYPE_PARAM_KIND }, [], CAST({:param: _, :kind: kind, :name: aST__node_name(UNWRAP (castNodeToLocatable(node)))} AS {String@symbol}Any)));
     END
-    IF builtin_type_parameter_names.contains?(name) THEN
+    IF resolutionSession__builtin_type_parameter_names().contains?(name) THEN
         TRY (resolutionSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS }, [], CAST({:param: _} AS {String@symbol}Any)));
     END
     IF (rtoc_self_view.local_type_declaration_names.contains?(name) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = TRY (resolutionSession__current_scope(rtoc_self_view));
@@ -922,7 +924,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (binders.length() == 0) THEN
       MUTABLE names = ((TRY (type__generic_args(declaration.protocol_type))) |> SELECT:? {
     MUTABLE kind = COPY _.shape.expression.kind;
-    (    IF ((kind IS_A NamedTypeExpression AND typeExpressionKind__arguments(kind).empty?()) AND !(builtin_type_parameter_names.contains?(kind.name()))) THEN
+    (    IF ((kind IS_A NamedTypeExpression AND typeExpressionKind__arguments(kind).empty?()) AND !(resolutionSession__builtin_type_parameter_names().contains?(kind.name()))) THEN
           CAST(kind.name() AS String)
         ELSE
           NIL
@@ -956,7 +958,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF schema? IS_A StructSchema AS struct_schema THEN
       RETURN COPY struct_schema.generic_params;
     END
-    IF builtin_type_parameter_names.contains?(symbol(owner_name)) THEN
+    IF resolutionSession__builtin_type_parameter_names().contains?(symbol(owner_name)) THEN
       RETURN CAST(List[] AS []GenericParamDecl);
     END
     RETURN NIL;
@@ -972,7 +974,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF seen.contains?(name) THEN
         TRY (resolutionSession__error_mut(rtoc_self_view, (COPY _.token OR_ELSE declaration), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_DUP_TYPE_PARAM_KIND }, [], CAST({:param: _.name, :kind: "conformance", :name: resolutionSession__conformance_base_name(rtoc_self_view, declaration.owner_type)} AS {String@symbol}Any)));
     END
-    IF builtin_type_parameter_names.contains?(name) THEN
+    IF resolutionSession__builtin_type_parameter_names().contains?(name) THEN
         TRY (resolutionSession__error_mut(rtoc_self_view, (COPY _.token OR_ELSE declaration), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_TYPE_PARAM_SHADOWS }, [], CAST({:param: _.name} AS {String@symbol}Any)));
     END
     IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_16 = TRY (resolutionSession__current_scope(rtoc_self_view));
@@ -1425,7 +1427,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF seen.contains?(_.name) THEN
         TRY (resolutionSession__error_mut(rtoc_self_view, (COPY _.token OR_ELSE implementation), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_DUPLICATE }, [], CAST({:name: _.name, :owner: owner.name} AS {String@symbol}Any)));
     END
-    IF (builtin_type_parameter_names.contains?(symbol(_.name)) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_32 = TRY (resolutionSession__current_scope(rtoc_self_view));
+    IF (resolutionSession__builtin_type_parameter_names().contains?(symbol(_.name)) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_32 = TRY (resolutionSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type_entry(rtoc_local_receiver_32, symbol(_.name))) }) THEN
         TRY (resolutionSession__error_mut(rtoc_self_view, (COPY _.token OR_ELSE implementation), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_SHADOWS_TYPE }, [], CAST({:name: _.name} AS {String@symbol}Any)));
     END
