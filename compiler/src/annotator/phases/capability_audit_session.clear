@@ -1087,7 +1087,7 @@ PRIVATE FN capabilityAuditSession__emit_immutable_arg_error_mut(self: Capability
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_declare_mutable_fix(rtoc_self_view, arg_node.name, scope));
-    MUTABLE kw = {:index: arg_idx, :param: param_name, :actual: arg_node.name};
+    MUTABLE kw = CAST({:index: arg_idx, :param: param_name, :actual: arg_node.name} AS {String@symbol}Any);
     IF fix EXISTS AS fix_value THEN
       TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY arg_node } }, :ownership, [fix_value], NIL, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, :error, TRUE, kw));
     ELSE
@@ -1511,7 +1511,7 @@ PRIVATE FN capabilityAuditSession__emit_type_mismatch_assign_error_mut(self: Cap
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE kw = {:got: value_type, :expected: target_type};
+    MUTABLE kw = CAST({:got: value_type, :expected: target_type} AS {String@symbol}Any);
     MUTABLE value: ?Locatable = aST__node_value(UNWRAP (castNodeToLocatable(node)));
     MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_cast_wrap_fix(rtoc_self_view, value, target_type));
     IF fix EXISTS AS fix_value THEN
