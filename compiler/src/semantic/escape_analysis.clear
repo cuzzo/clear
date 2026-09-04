@@ -219,7 +219,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE callee_key: String = COPY _.call_site_facts[rtoc_idx].callee_name;
+    MUTABLE callee_key: String = COPY UNWRAP (_.call_site_facts[rtoc_idx]).callee_name;
     MUTABLE callee_facts: []CallSiteFact = COPY (callsites[callee_key] OR_ELSE List[]);
     &callee_facts.append(COPY _.call_site_facts[rtoc_idx]);
     callsites[callee_key] = COPY callee_facts;
@@ -1712,7 +1712,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
   IF !(ti) THEN
     RETURN FALSE;
   END
-  IF ((type__primitive?(ti) OR type__void?(ti)) OR type__any?( UNWRAP (ti))) THEN
+  IF ( UNWRAP ((type__primitive?(ti) OR type__void?(ti)) OR type__any?( UNWRAP (ti)))) THEN
     RETURN FALSE;
   END
   IF (IF expr IS_A Identifier AS identifier THEN escapeAnalysis__symbol_heap?(identifier.symbol) ELSE FALSE END) THEN
@@ -2012,7 +2012,7 @@ PUB FN escapeAnalysis__mark_symbol_heap_mut(sym: ?SymbolEntry, MUTABLE names: ?[
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
+  IF ( UNWRAP (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry)))) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :heap;
@@ -2042,7 +2042,7 @@ PUB FN escapeAnalysis__mark_symbol_borrow_mut(sym: ?SymbolEntry) RETURNS Bool ->
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
+  IF ( UNWRAP (symbolEntry__heap_storage?(sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry)))) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :borrow;

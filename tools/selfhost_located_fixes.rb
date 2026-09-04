@@ -212,6 +212,9 @@ by.each do |f, rs|
       next if expr.start_with?('&')
 
       edits << [sp[0], sp[1], " UNWRAP (#{expr})", :unwrap_arg]
+    elsif (m = e.match(/argument \d+ expects ([\w@\[\]{}]+), got \?([\w@\[\]{}]+)\z/)) && m[1] == m[2]
+      # The call spans lines, so the argument span could not be located.
+      line_edits << [r['line'], :unwrap_arg_line, argno]
     elsif (m = e.match(/argument \d+ expects \?(\w+), got (\w+)\z/)) && VARIANT_OF[m[1]]&.key?(m[2])
       # An optional destination takes the wrapped value directly; CLEAR
       # coerces T into ?T.
@@ -577,6 +580,39 @@ by.each do |f, rs|
         lines[i] = lines[i][0...at] + lines[i][(at + 1)..]
         counts[kind] += 1
       end
+    when :unwrap_arg_line
+      # Wrap the Nth top-level argument on this line, and only when that
+      # position is unambiguous: one argument, not already wrapped, not a
+      # mutating marker.
+      open_at = lines[i].index('(')
+      next unless open_at
+
+      depth = 0
+      args = []
+      start = open_at + 1
+      lines[i][open_at..].each_char.with_index do |c, k|
+        at = open_at + k
+        if '([{'.include?(c)
+          depth += 1
+        elsif ')]}'.include?(c)
+          depth -= 1
+          if depth.zero?
+            args << [start, at]
+            break
+          end
+        elsif c == ',' && depth == 1
+          args << [start, at]
+          start = at + 1
+        end
+      end
+      span = args[name - 1]
+      next unless span
+
+      expr = lines[i][span[0]...span[1]].strip
+      next if expr.empty? || expr.start_with?('&') || expr.include?('UNWRAP')
+
+      lines[i] = lines[i][0...span[0]] + " UNWRAP (#{expr})" + lines[i][span[1]..]
+      counts[kind] += 1
     when :mutable_arg_line
       # The call spans lines, so the argument span could not be located; the
       # name still appears exactly once in argument position on this line.

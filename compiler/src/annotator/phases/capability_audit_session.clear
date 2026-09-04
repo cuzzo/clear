@@ -3880,7 +3880,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF adj[UNWRAP (edges[rtoc_idx].held)] == NIL THEN
+      IF adj[UNWRAP (edges[rtoc_idx]).held] == NIL THEN
           adj[edges[rtoc_idx]?.held] = Set[];
         END
         IF adj[edges[rtoc_idx]?.held] EXISTS AS rtoc_map_slot_30 THEN
@@ -4279,7 +4279,7 @@ PRIVATE FN capabilityAuditSession__restamp_function_metadata_mut(self: Capabilit
 WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (capabilityAuditSession__semantic_function_nodes(rtoc_self_view))).values() DO
     MUTABLE rtoc_mutable_block_param_46 = COPY _;
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (aST__full_type_mut( Locatable{ FunctionDef: COPY rtoc_mutable_block_param_46 })));
+    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap( X{ Type: COPY TRY (aST__full_type_mut( Locatable{ FunctionDef: COPY rtoc_mutable_block_param_46 })) });
     IF !(signature) THEN
         CONTINUE;
     END

@@ -922,7 +922,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF dest_alloc EXISTS AS dest_alloc_value THEN
       MUTABLE dest_alloc_value_mutable = COPY dest_alloc_value;
       MUTABLE ti = TRY (mIRLowering__destination_type( rtoc_self_view, ast_node, dest_type));
-      IF (type__symbol?(ti) OR (((TRUE AND locatable__typed?(ast_node)) AND ((type__symbol?((TRY (type__from_node_mut( ast_node, "placement symbol probe")))) OR_ELSE FALSE))))) THEN
+      IF ( UNWRAP (type__symbol?(ti) OR (((TRUE AND locatable__typed?(ast_node)) AND ((type__symbol?((TRY (type__from_node_mut( ast_node, "placement symbol probe")))) OR_ELSE FALSE)))))) THEN
         RETURN mIRLowering__destination_keep_plan(rtoc_self_view, dest_alloc_value_mutable);
       END
       IF (placement__heap?(dest_alloc_value_mutable) AND TRY (mIRLowering__heap_indirect_destination?(rtoc_self_view, mir, ast_node, CAST(ti AS Type)))) THEN
@@ -2793,7 +2793,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
     IF (emittable__stdlib_def(source_expr) != NIL) THEN
-      sig_branch_value = functionSignature__unwrap(emittable__stdlib_def(source_expr));
+      sig_branch_value = functionSignature__unwrap( X{ FunctionSignature: COPY emittable__stdlib_def(source_expr) });
     ELSE
       sig_branch_value = NIL;
     END
@@ -2902,7 +2902,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(effect.produces_owned) THEN
       MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
       IF (emittable__stdlib_def(source_expr) != NIL) THEN
-        sig_branch_value = functionSignature__unwrap(emittable__stdlib_def(source_expr));
+        sig_branch_value = functionSignature__unwrap( X{ FunctionSignature: COPY emittable__stdlib_def(source_expr) });
       ELSE
         sig_branch_value = NIL;
       END
@@ -5888,7 +5888,7 @@ PRIVATE FN mIRLowering__rc_retain_needed?(self: MIRLowering, value_node: Locatab
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF value_node IS_A Identifier AS identifier THEN
-      MUTABLE ti = TRY (type__from_node_mut(identifier, "rc retain"));
+      MUTABLE ti = TRY ( Locatable{ Identifier: COPY type__from_node_mut(identifier, "rc retain") });
       MUTABLE declared: ?Type@multiowned = NIL;
       IF identifier.symbol != NIL THEN
         declared = COPY symbolEntry__type(((identifier.symbol)?));
@@ -8000,7 +8000,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((TRY (mIRLowering__union_schemas(rtoc_self_view))).contains?(type__resolved( UNWRAP (ti)))) THEN
       RETURN COPY expr;
     END
-    MUTABLE copied = DeepCopy{ source: COPY expr, zig_type: COPY TRY (type__zig_type(ti)), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type( UNWRAP (ti)))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+    MUTABLE copied = DeepCopy{ source: COPY expr, zig_type: COPY TRY ( UNWRAP (type__zig_type(ti))), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type( UNWRAP (ti)))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
     RETURN TRY (mIRLowering__hoist_alloc(rtoc_self_view, Emittable{ DeepCopy: COPY copied }, &ast_node, TRUE));
 }
 END
@@ -8242,7 +8242,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ast_node EXISTS AS ast_node_value THEN
       MUTABLE ti: ?Type = TRY (type__from_node_mut(ast_node_value, "owned result cleanup entry"));
       ti = TRY (type__success_type( UNWRAP (ti)));
-      IF (type__symbol?(ti) OR type__raw?( UNWRAP (ti))) THEN
+      IF ( UNWRAP (type__symbol?(ti) OR type__raw?( UNWRAP (ti)))) THEN
         RETURN NIL;
       END
       IF TRY (type__string?(ti)) THEN
@@ -9224,7 +9224,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     ELSE_IF _ IS_A IfStatement AS if_statement THEN
       mIRLowering__walk_catch_body_for_reassigns(rtoc_self_view, if_statement.then_branch, &reassigns);
-      mIRLowering__walk_catch_body_for_reassigns(rtoc_self_view, if_statement.else_branch, &reassigns);
+      mIRLowering__walk_catch_body_for_reassigns(rtoc_self_view, UNWRAP (if_statement.else_branch), &reassigns);
     ELSE_IF _ IS_A MatchStatement AS match_statement THEN
       FOR _ IN match_statement.cases DO
       mIRLowering__walk_catch_body_for_reassigns(rtoc_self_view, TRY (matchCase__body(_)), &reassigns);
@@ -9580,7 +9580,7 @@ PRIVATE FN mIRLowering__stdlib_call_facts(self: MIRLowering, node: Node) RETURNS
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sig: ?FunctionSignature@multiowned = TRY (mIRLowering__intrinsic_signature_for(rtoc_self_view, node));
     IF (aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
-      sig = (sig OR_ELSE functionSignature__unwrap(aST__node__matched_signature( UNWRAP (castNodeToLocatable(node)))));
+      sig = ( X{ FunctionSignature: COPY sig OR_ELSE functionSignature__unwrap(aST__node__matched_signature( UNWRAP (castNodeToLocatable(node)))) });
     END
     IF sig EXISTS AS sig_value THEN
       MUTABLE ast_args = IF node IS_A MethodCall THEN
@@ -9645,7 +9645,7 @@ PRIVATE FN mIRLowering__intrinsic_signature_for(self: MIRLowering, node: Node) R
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE matched: ?FunctionSignature@multiowned = aST__node_matched_stdlib_def( UNWRAP (castNodeToLocatable(node)));
-    MUTABLE found: ?FunctionSignature@multiowned = functionSignature__unwrap(matched);
+    MUTABLE found: ?FunctionSignature@multiowned = functionSignature__unwrap( X{ FunctionSignature: COPY matched });
     IF found EXISTS AS found_value THEN
       RETURN KEEP found_value;
     END
@@ -10390,7 +10390,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE ti = COPY ti_input;
     ti = TRY (type__success_type( UNWRAP (ti)));
     IF TRY (type__string?( UNWRAP (ti))) THEN
-      IF (type__symbol?(ti) OR type__raw?( UNWRAP (ti))) THEN
+      IF ( UNWRAP (type__symbol?(ti) OR type__raw?( UNWRAP (ti)))) THEN
         RETURN FALSE;
       END
       IF ((sig_obj != NIL) AND (functionSignature__heap_carry_return(sig_obj) == TRUE)) THEN
@@ -16207,7 +16207,7 @@ PRIVATE FN mIRLowering__aggregate_field_sink_alloc(self: MIRLowering, ignored_fi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF value IS_A Identifier AS identifier THEN
-      MUTABLE ti = TRY (type__from_node_mut(identifier, "aggregate field sink"));
+      MUTABLE ti = TRY ( Locatable{ Identifier: COPY type__from_node_mut(identifier, "aggregate field sink") });
       IF (TRY (mIRLowering__ownership_tracked_transfer_type?(rtoc_self_view, UNWRAP (ti))) AND ((aST__moved?(Locatable{ Identifier: COPY identifier }) OR (IF identifier.symbol != NIL THEN
         symbolEntry__heap_storage?(identifier.symbol)
       ELSE
@@ -18281,7 +18281,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     IF ((node IS_A MIRCast OR node IS_A TryExpr) OR node IS_A TryOptional) THEN
-      RETURN mIRLowering__capability_wrapped_mir?(rtoc_self_view, emittable__expr(node));
+      RETURN mIRLowering__capability_wrapped_mir?(rtoc_self_view, UNWRAP (emittable__expr(node)));
     END
     RETURN FALSE;
 }
@@ -18390,7 +18390,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((emittable__stdlib_def(init) != NIL)) THEN
       RETURN FALSE;
     END
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(emittable__stdlib_def(init));
+    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap( X{ FunctionSignature: COPY emittable__stdlib_def(init) });
     IF !((IF sig != NIL THEN
       TRY (functionSignature__emits_allocating?(&sig))
     ELSE
@@ -18417,7 +18417,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN mIRLowering__owned_return_call_init?(rtoc_self_view, cast__expr(mir_cast));
     END
     IF (((init != NIL) AND (init IS_A TryExpr)) OR ((init != NIL) AND (init IS_A TryOptional))) THEN
-      RETURN mIRLowering__owned_return_call_init?(rtoc_self_view, emittable__expr(init));
+      RETURN mIRLowering__owned_return_call_init?( UNWRAP (rtoc_self_view), emittable__expr(init));
     END
     RETURN !(!(((IF init? IS_A Call AS call THEN call__owned_return?(call) ELSE FALSE END))));
 }
@@ -18623,7 +18623,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_index_receiver_684[aST__node_identity(Locatable{ DestructureTarget: COPY target })] = safe_name;
       IF symbol?.reg EXISTS AS reg_value THEN
         MUTABLE rtoc_index_receiver_685 = TRY (functionState__decl_zig_names(mIRLowering__function_state(rtoc_self_view)));
-        rtoc_index_receiver_685[symbol.reg.object_id()] = safe_name;
+        rtoc_index_receiver_685[UNWRAP (symbol).reg.object_id()] = safe_name;
       END
     END
     MUTABLE declaration_kind: ?String@symbol = IF declared THEN
@@ -19993,7 +19993,7 @@ PRIVATE FN mIRLowering__for_each_owned_collection_source?(self: MIRLowering, mir
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((mir IS_A MIRCast OR mir IS_A TryExpr) OR mir IS_A TryOptional) THEN
-      RETURN mIRLowering__for_each_owned_collection_source?(rtoc_self_view, emittable__expr(mir));
+      RETURN mIRLowering__for_each_owned_collection_source?(rtoc_self_view, UNWRAP (emittable__expr(mir)));
     END
     IF (IF mir IS_A Call AS call THEN call__owned_return?(call) ELSE FALSE END) THEN
       RETURN TRUE;
@@ -20007,7 +20007,7 @@ PRIVATE FN mIRLowering__for_each_owned_collection_source_alloc(self: MIRLowering
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((mir IS_A MIRCast OR mir IS_A TryExpr) OR mir IS_A TryOptional) THEN
-      RETURN mIRLowering__for_each_owned_collection_source_alloc(rtoc_self_view, emittable__expr(mir), type_info);
+      RETURN mIRLowering__for_each_owned_collection_source_alloc(rtoc_self_view, UNWRAP (emittable__expr(mir)), type_info);
     END
     IF (IF mir IS_A Call AS call THEN call__owned_return?(call) ELSE FALSE END) THEN
       RETURN :heap;
@@ -20561,7 +20561,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(mIRLowering__current_function_has_rt?(rtoc_self_view)) THEN
       RETURN COPY value;
     END
-    IF mIRLowering__current_function_takes_param_name?(rtoc_self_view, emittable__name( UNWRAP (value))) THEN
+    IF mIRLowering__current_function_takes_param_name?(rtoc_self_view, UNWRAP (emittable__name( UNWRAP (value)))) THEN
       RETURN COPY value;
     END
     MUTABLE ret_type = TRY (type__from_node_mut(node.value, "generic parameter return"));
@@ -20633,7 +20633,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(mIRLowering__current_function_param_name?(rtoc_self_view, UNWRAP (emittable__name( UNWRAP (value))))) THEN
       RETURN COPY value;
     END
-    IF mIRLowering__current_function_takes_param_name?(rtoc_self_view, emittable__name( UNWRAP (value))) THEN
+    IF mIRLowering__current_function_takes_param_name?(rtoc_self_view, UNWRAP (emittable__name( UNWRAP (value)))) THEN
       RETURN COPY value;
     END
     MUTABLE ret_type = TRY (type__from_node_mut(node.value, "heap carry recursive return"));
