@@ -856,7 +856,7 @@ PRIVATE FN pipelineConcurrentLowerer__callback_body(self: PipelineConcurrentLowe
     panic("unknown bounded concurrent callback kind {}");
   END
 END
-PRIVATE FN pipelineConcurrentLowerer__callback_expression(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp) RETURNS !Locatable ->
+PRIVATE FN pipelineConcurrentLowerer__callback_expression(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp) RETURNS !?Locatable ->
   MUTABLE op: ?ClearParserConcurrentPipelineOp@boxed = COPY conc_op.op;
   IF (UNWRAP (op) IS_A AverageOp) OR (UNWRAP (op) IS_A CountOp) OR (UNWRAP (op) IS_A MaxOp) OR (UNWRAP (op) IS_A MinOp) OR (UNWRAP (op) IS_A SelectOp) OR (UNWRAP (op) IS_A SumOp) OR (UNWRAP (op) IS_A WhereOp) THEN
     RETURN clearParserConcurrentPipelineOp__expression(UNWRAP (op));

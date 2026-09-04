@@ -1507,7 +1507,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Call{ callee: "std.meta.activeTag", args: [value], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
 }
 END
-FN mIRLowering__alloc_mark_type_info(self: MIRLowering, expr: Emittable, ast_node: Locatable, context: String) RETURNS !Type
+FN mIRLowering__alloc_mark_type_info(self: MIRLowering, expr: Emittable, ast_node: Locatable, context: String) RETURNS !?Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -4832,7 +4832,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
 }
 END
-PRIVATE FN mIRLowering__lower_cast(MUTABLE self: MIRLowering, MUTABLE node: Cast) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_cast(MUTABLE self: MIRLowering, MUTABLE node: Cast) RETURNS !?Emittable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -8680,7 +8680,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN names;
 }
 END
-PRIVATE FN mIRLowering__finalized_needs_rt_mut(self: MIRLowering, node: FunctionDef) RETURNS !Bool
+PRIVATE FN mIRLowering__finalized_needs_rt_mut(self: MIRLowering, node: FunctionDef) RETURNS !?Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -10997,7 +10997,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN MIRMethodCall{ receiver: COPY obj, method: COPY node.name, args: COPY args, try_wrap: FALSE, callable_contract: COPY TRY (mIRLowering__callable_contract_for(rtoc_self_view, sig, ([node.object] + ast_args))), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
 }
 END
-PRIVATE FN mIRLowering__lower_extern_arg(MUTABLE self: MIRLowering, ast_arg: Locatable) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_extern_arg(MUTABLE self: MIRLowering, ast_arg: Locatable) RETURNS !?Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16409,7 +16409,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST(Tuple{"expectEqualDeep", List[]} AS Tuple<String, []String>);
 }
 END
-PRIVATE FN mIRLowering__type_info_for(self: MIRLowering, ast_node: Locatable) RETURNS !Type
+PRIVATE FN mIRLowering__type_info_for(self: MIRLowering, ast_node: Locatable) RETURNS !?Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -19386,7 +19386,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY label, body: COPY (body + [Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY cond, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
 }
 END
-PRIVATE FN mIRLowering__lower_control_condition(self: MIRLowering, MUTABLE ast_node: Locatable, transfers_to_capture: Bool = FALSE) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_control_condition(self: MIRLowering, MUTABLE ast_node: Locatable, transfers_to_capture: Bool = FALSE) RETURNS !?Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

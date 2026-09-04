@@ -10030,7 +10030,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CaptureAnalysis{ has_local: FALSE, has_rc: FALSE, has_shared: FALSE, has_sharded: FALSE, has_affine_locked: FALSE, has_outer_ref: FALSE, has_non_escaping_capture: FALSE, captures: {}, capture_symbols: {}, close_plans: {}, pointer_captures: Set[], string_captures: Set[], resource_captures: Set[], site_moved: Set[], site_copied: Set[], strategies: {}, move_mark_names: Set[], alloc_mark_entries: {} };
 }
 END
-PRIVATE FN typeAnalysisSession__with_fiber_capture_analysis(self: TypeAnalysisSession, MUTABLE is_parallel: ?Bool = FALSE, mark_moves: Bool = FALSE, blk: FN() -> Void) RETURNS !CaptureAnalysis
+PRIVATE FN typeAnalysisSession__with_fiber_capture_analysis(self: TypeAnalysisSession, MUTABLE is_parallel: ?Bool = FALSE, mark_moves: Bool = FALSE, blk: FN() -> Void) RETURNS !?CaptureAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
