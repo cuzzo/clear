@@ -4481,10 +4481,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     typeAnalysisSession__warning_mut(rtoc_self_view, castFunctionCallNodeToLocatable(node), "Call to '${node.name()}' reads multiple atomic values independently (${names.join(", ")}). This is not a multi-object-consistent snapshot; default mode allows it as ordinary atomic loads. STRICT/STRICT EXTREME will require an explicit @inconsistent call-site annotation.");
 }
 END
-PRIVATE FN typeAnalysisSession__verify_param_lifetime_mut(self: TypeAnalysisSession, arg_node: Locatable, param: Param, signature: FunctionSignature) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__verify_param_lifetime_mut(MUTABLE self: TypeAnalysisSession, arg_node: Locatable, param: Param, signature: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(arg_node IS_A Identifier) THEN
       RETURN TRUE;
     END
@@ -4508,10 +4508,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (typeAnalysisSession__error_mut(rtoc_self_view, DiagnosticAnchor{ Locatable: COPY arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :MUTABLE_PARAM_NEEDS_RESTRICT }, [], CAST({:name: param.name, :arg: locatable__name(arg_node), :callee: "the callee"} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__verify_lifetime_mut(self: TypeAnalysisSession, node: FunctionDef) RETURNS !?Bool
+PRIVATE FN typeAnalysisSession__verify_lifetime_mut(MUTABLE self: TypeAnalysisSession, node: FunctionDef) RETURNS !?Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rl: ?ClearParserReturnLifetime = COPY node.return_lifetime;
     IF (rl == NIL) THEN
       RETURN TRUE;
@@ -4533,10 +4533,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRUE;
 }
 END
-PRIVATE FN typeAnalysisSession__verify_no_mixed_atomic_returned_lifetime_mut(self: TypeAnalysisSession, node: FunctionDef, sources: []FunctionSignatureLifetimeSource) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_no_mixed_atomic_returned_lifetime_mut(MUTABLE self: TypeAnalysisSession, node: FunctionDef, sources: []FunctionSignatureLifetimeSource) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE requires_map: {Any}Any = {};
     IF TRUE THEN
       requires_map = ((node.requires OR_ELSE {}));
@@ -4569,10 +4569,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__verify_lifetime_source_mut(self: TypeAnalysisSession, node: FunctionDef, source_node: SourceNode) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_lifetime_source_mut(MUTABLE self: TypeAnalysisSession, node: FunctionDef, source_node: SourceNode) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(rtoc_self_view, castSourceNodeToNode(source_node)));
     IF (path.length() == 0) THEN
       RETURN;
@@ -4705,10 +4705,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__verify_captures_mut(self: TypeAnalysisSession, node: RoutineNode) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_captures_mut(MUTABLE self: TypeAnalysisSession, node: RoutineNode) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE captures: Any = NIL;
     MATCH node START
       RoutineNode.FunctionDefMultiowned AS item ->
@@ -4750,10 +4750,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__declare_captures(self: TypeAnalysisSession, node: RoutineNode) RETURNS !Void
+PRIVATE FN typeAnalysisSession__declare_captures(MUTABLE self: TypeAnalysisSession, node: RoutineNode) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE captures: Any = NIL;
     MATCH node START
       RoutineNode.FunctionDefMultiowned AS item ->
@@ -16969,7 +16969,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (is_param AND !(has_req));
 }
 END
-PRIVATE FN typeAnalysisSession__retryable_with_fallible_body_error_mut(self: TypeAnalysisSession, node: WithBlock, with_name: String, sources: []String) RETURNS !Void
+PRIVATE FN typeAnalysisSession__retryable_with_fallible_body_error_mut(self: TypeAnalysisSession, MUTABLE node: WithBlock, with_name: String, sources: []String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

@@ -15390,7 +15390,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__float_coercion?(self: MIRLowering, node: Locatable) RETURNS Bool
+PRIVATE FN mIRLowering__float_coercion?(self: MIRLowering, MUTABLE node: Locatable) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -15426,7 +15426,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN value;
 }
 END
-PRIVATE FN mIRLowering__index_access_plan(MUTABLE self: MIRLowering, node: GetIndex) RETURNS !IndexAccessPlan
+PRIVATE FN mIRLowering__index_access_plan(MUTABLE self: MIRLowering, MUTABLE node: GetIndex) RETURNS !IndexAccessPlan
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -15648,7 +15648,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (mIRLowering__emit_builtin(rtoc_self_view, builtin, [target, index_value]));
 }
 END
-PRIVATE FN mIRLowering__struct_lit_field_types(self: MIRLowering, node: StructLit) RETURNS !{String}?StructLitFieldType
+PRIVATE FN mIRLowering__struct_lit_field_types(self: MIRLowering, MUTABLE node: StructLit) RETURNS !{String}?StructLitFieldType
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17886,7 +17886,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN safe_name;
 }
 END
-PRIVATE FN mIRLowering__var_decl_suppression(self: MIRLowering, safe_name: String, node: VarDecl, facts: VarDeclFacts, init: Emittable) RETURNS !?String
+PRIVATE FN mIRLowering__var_decl_suppression(self: MIRLowering, safe_name: String, MUTABLE node: VarDecl, facts: VarDeclFacts, init: Emittable) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -17992,7 +17992,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((!(facts.heap_return_var) AND TRY (mIRLowering__owned_return_transfer_binding?(rtoc_self_view, KEEP facts.binding_entry, init))) AND !(facts.generic_id));
 }
 END
-PRIVATE FN mIRLowering__transfer_only_var_decl_plan(self: MIRLowering, node: VarDecl, facts: VarDeclFacts, safe_name: String, init: Emittable, let_node: Let) RETURNS MaterializationPacket
+PRIVATE FN mIRLowering__transfer_only_var_decl_plan(self: MIRLowering, MUTABLE node: VarDecl, facts: VarDeclFacts, safe_name: String, init: Emittable, let_node: Let) RETURNS MaterializationPacket
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -18272,7 +18272,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY value;
 }
 END
-PRIVATE FN mIRLowering__capability_wrapped_mir?(self: MIRLowering, node: Emittable) RETURNS Bool
+PRIVATE FN mIRLowering__capability_wrapped_mir?(self: MIRLowering, MUTABLE node: Emittable) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
