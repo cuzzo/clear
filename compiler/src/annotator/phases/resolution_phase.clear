@@ -2367,14 +2367,8 @@ END
 FN castTypeToTypeTypeInput__resolution_phase(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
-FN castTypeToTypeTypeInput__resolution_phase(value: Type) RETURNS Value ->
-  PARTIAL MATCH value START
-    Type.StringValue AS cast_payload -> RETURN Value{ StringValue: COPY cast_payload };,
-    Type.SymbolValue AS cast_payload -> RETURN Value{ SymbolValue: COPY cast_payload };,
-    Type.Type AS cast_payload -> RETURN Value{ Type: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to Value");
-  END
-  panic("Invalid cast to Value");
+FN castTypeToTypeTypeInput__resolution_phase(value: Type) RETURNS TypeTypeInput ->
+  RETURN TypeTypeInput{ Type: COPY value };
 END
 FN castTypeTypeInputToTypeConstructionInput__resolution_phase(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
@@ -2390,7 +2384,6 @@ FN castValueToTypeConstructionInput(value: Value) RETURNS TypeConstructionInput 
   PARTIAL MATCH value START
     Value.StringValue AS cast_payload -> RETURN TypeConstructionInput{ StringValue: COPY cast_payload };,
     Value.SymbolValue AS cast_payload -> RETURN TypeConstructionInput{ SymbolValue: COPY cast_payload };,
-    Value.Type AS cast_payload -> RETURN TypeConstructionInput{ Type: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to TypeConstructionInput");
   END
   panic("Invalid cast to TypeConstructionInput");
