@@ -33,7 +33,7 @@ PUB FN annotationPipeline__run(MUTABLE self: AnnotationPipeline, program: Progra
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE resolution = TRY (resolutionPhase__run(program, KEEP rtoc_self_view.config.importer, rtoc_self_view.config.source_dir, rtoc_self_view.config.source_code));
+    MUTABLE resolution = TRY (resolutionPhase__run(&program, KEEP rtoc_self_view.config.importer, rtoc_self_view.config.source_dir, rtoc_self_view.config.source_code));
     rtoc_self_view.products = TRY (annotationProducts__publish_resolution(rtoc_self_view.products, resolution));
     MUTABLE type_session = TRY (typeAnalysisSession__new(KEEP rtoc_self_view.config.importer, NIL, rtoc_self_view.config.source_dir, rtoc_self_view.config.strict_test, rtoc_self_view.config.source_code));
     MUTABLE handoff = TRY (typeAnalysisPhase__run(resolution, &type_session));

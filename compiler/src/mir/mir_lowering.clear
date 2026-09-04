@@ -11229,7 +11229,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE sig: FunctionSignature@multiowned = UNWRAP (type__function_signature(lambda_type));
     MUTABLE fn_name = "_lambda_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_417 = mIRLowering__lowering_counters(rtoc_self_view);
     mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_lambda_id(&rtoc_mutable_receiver_417)) }}";
-    MUTABLE params_list = sig.params();
+    MUTABLE params_list = TRY (functionSignature__params(sig));
     MUTABLE params_mir: []MIRParam = ([Emittable{ MIRParam: COPY MIRParam{ name: "_rt", zig_type: "*Runtime", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } }] + (params_list |> SELECT {
     MUTABLE p_type = _.type();
     MUTABLE type_str: String = "";

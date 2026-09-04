@@ -339,7 +339,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN;
         END
       ELSE
-        TRY (resolutionSession__error_mut(rtoc_self_view, COPY requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_MISSING }, [], CAST({:union: node.name, :method: requirement.name, :fn: requirement.name} AS {String@symbol}Any)));
+        TRY (resolutionSession__error_mut(rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY requirement.token }, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_MISSING }, [], CAST({:union: node.name, :method: requirement.name, :fn: requirement.name} AS {String@symbol}Any)));
         RETURN;
       END
     ELSE
@@ -2082,7 +2082,7 @@ PUB FN resolutionSession__new(importer: ?ModuleImporter, source_dir: String, sou
   TRY (resolutionSession__initialize(&self, importer, source_dir, source_code, root_scope, function_registry, install_builtins));
   RETURN self @multiowned;
 END
-PUB FN resolutionPhase__run(program: Program, importer: ?ModuleImporter, source_dir: String, source_code: ?String) RETURNS !ResolutionFacts@multiowned ->
+PUB FN resolutionPhase__run(MUTABLE program: Program, importer: ?ModuleImporter, source_dir: String, source_code: ?String) RETURNS !ResolutionFacts@multiowned ->
   RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_63 = TRY (resolutionSession__new(importer, source_dir, source_code));
   TRY (resolutionSession__resolve_mut(&rtoc_mutable_receiver_63, &program)) };
 END

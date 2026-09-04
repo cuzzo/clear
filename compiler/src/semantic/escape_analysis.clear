@@ -967,7 +967,7 @@ END
 PUB FN escapeAnalysis__mark_expr_roots_heap_mut(expr: ?Locatable) RETURNS Void ->
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
   MUTABLE root_branch_value: ?Identifier = NIL;
-  IF unwrapped IS_A Locatable THEN
+  IF UNWRAP (unwrapped) IS_A Locatable THEN
     root_branch_value = aST__root_identifier(unwrapped);
   ELSE
     root_branch_value = NIL;
@@ -1161,7 +1161,7 @@ PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Lo
   END
   MUTABLE value: ?Locatable = aST__node_value(node);
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(value));
-  IF (unwrapped IS_A Locatable AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
+  IF (UNWRAP (unwrapped) IS_A Locatable AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
     RETURN TRUE;
   END
   MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(node);
@@ -1230,7 +1230,7 @@ PUB FN escapeAnalysis__heap_owned_transfer_source?(arg: ?Locatable) RETURNS Bool
   END
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(arg));
   MUTABLE root_branch_value: ?Identifier = NIL;
-  IF unwrapped IS_A Locatable THEN
+  IF UNWRAP (unwrapped) IS_A Locatable THEN
     root_branch_value = aST__root_identifier(unwrapped);
   ELSE
     root_branch_value = NIL;
@@ -1365,7 +1365,7 @@ PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes
     RETURN TRUE;
   END
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(value));
-  IF (unwrapped IS_A Locatable AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
+  IF (UNWRAP (unwrapped) IS_A Locatable AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
     RETURN FALSE;
   END
   IF TRY (escapeAnalysis__expr_has_owned_inline_value?(value)) THEN
@@ -1375,7 +1375,7 @@ PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes
 END
 PUB FN escapeAnalysis__ownership_transferring_expr?(expr: ?Locatable, include_allocating_expr: Bool) RETURNS !Bool ->
   MUTABLE value: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
-  IF (value IS_A BinaryOp AND (value.op() == symbol("OR_ELSE"))) THEN
+  IF (UNWRAP (value) IS_A BinaryOp AND (value.op() == symbol("OR_ELSE"))) THEN
     value = escapeAnalysis__unwrap_value(value.left());
   END
   IF (value IS_A CopyNode OR value IS_A KeepNode) THEN
@@ -1420,7 +1420,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
 END
 PUB FN escapeAnalysis__borrow_return_expr?(expr: ?Locatable) RETURNS !Bool ->
   MUTABLE call: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
-  IF !((call IS_A FuncCall OR call IS_A MethodCall)) THEN
+  IF !((UNWRAP (call) IS_A FuncCall OR UNWRAP (call) IS_A MethodCall)) THEN
     RETURN FALSE;
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
@@ -1955,7 +1955,7 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
 END
 PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
   MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
-  IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
+  IF (UNWRAP (node) IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
     node = escapeAnalysis__unwrap_value(node.left());
   END
   IF ((aST__node_storage(node) EXISTS) AND ([:rodata, :borrow]).contains?(node.storage())) THEN
