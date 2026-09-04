@@ -1031,6 +1031,17 @@ pub const CheatLib = struct {
         }
     }
 
+    // Remove and return the FIRST element, or null if empty. Backs CLEAR's
+    // `.shift()` -- Ruby's Array#shift, Rust's VecDeque::pop_front. The tail
+    // slides down, so this is O(n) in the length; a queue that shifts in a
+    // loop is quadratic, exactly as it is in Ruby.
+    pub fn shiftOpt(container: anytype) ?ElementType(@TypeOf(container)) {
+        const p0 = @constCast(container);
+        const list = if (@typeInfo(@TypeOf(p0.*)) == .pointer) p0.* else p0;
+        if (list.items.len == 0) return null;
+        return list.orderedRemove(0);
+    }
+
     // Last element, or null if empty. Backs CLEAR's `.last()` predicate.
     // Computed via the same shape-dispatch as firstOpt — works for both
     // ArrayList (`.items`) and bare slices.

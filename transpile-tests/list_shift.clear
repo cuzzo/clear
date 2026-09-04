@@ -1,0 +1,39 @@
+# `.shift()` removes and returns the FIRST element, or NIL when empty --
+# Ruby's Array#shift, Rust's VecDeque::pop_front, and the mirror of pop().
+# A worklist that shifts in a loop is the shape the compiler's own graph walks
+# use, and CLEAR had no way to spell it.
+STRUCT Item { n: Int64 }
+
+FN drain(MUTABLE q: []String) RETURNS String ->
+    MUTABLE out = "";
+    WHILE (q.length() > 0_i64) DO
+        IF &q.shift() EXISTS AS head THEN
+            out = "${out}${head}";
+        END
+    END
+    RETURN out;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE q: []String = ["a", "b", "c"];
+    ASSERT (&q.shift() OR_ELSE "") == "a", "first out";
+    ASSERT q.length() == 2_i64, "one shorter";
+    ASSERT (q[0] OR_ELSE "") == "b", "the tail slid down";
+    ASSERT (&q.shift() OR_ELSE "") == "b", "then the next";
+    ASSERT (&q.shift() OR_ELSE "") == "c", "then the last";
+    ASSERT (&q.shift() OR_ELSE "empty") == "empty", "nil when empty";
+    ASSERT q.empty?(), "and it stays empty";
+
+    # Through a MUTABLE parameter, which is how a worklist is drained.
+    MUTABLE work: []String = ["x", "y", "z"];
+    ASSERT drain(&work) == "xyz", "drained in order";
+    ASSERT work.empty?(), "the caller's list was consumed";
+
+    # Owned elements come out owned.
+    MUTABLE items: []Item = [Item{ n: 1_i64 }, Item{ n: 2_i64 }];
+    IF &items.shift() EXISTS AS first THEN
+        ASSERT first.n == 1_i64, "owned element shifted out";
+    END
+    ASSERT items.length() == 1_i64, "one left";
+    RETURN;
+END

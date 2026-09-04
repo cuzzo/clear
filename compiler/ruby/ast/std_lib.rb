@@ -137,6 +137,20 @@ STD_LIB = T.let({
     is_method: true,
   },
 
+  # shift() — Ruby's Array#shift: remove and return the FIRST element, or NIL
+  # when empty. The mirror of pop(), and the popped element is owned by the
+  # caller the same way.
+  "shift" => {
+    args: [:"Any[]"],
+    return: :infer_optional_element_type,
+    return_alloc: :receiver_storage,
+    zig: "CheatLib.shiftOpt(&{0})",
+    bc: true,
+    mutates_receiver: true,
+    borrows: :all,
+    is_method: true,
+  },
+
   # first() / last() — non-mutating peek at index 0 / index N-1, or NIL
   # if the collection is empty. Backed by CheatLib.firstOpt / lastOpt
   # so the same registry entry handles ArrayList and bare slices via
