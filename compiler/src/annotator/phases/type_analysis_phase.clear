@@ -42,7 +42,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (rtoc_self_view.violations.length() == 0) THEN
       RETURN;
     END
-    MUTABLE sample = (rtoc_self_view.violations.first(20) |> SELECT "  - ${_.class_name()} @ ${_.location()}: ${_.type_name}").join("\n");
+    MUTABLE sample = (rtoc_self_view.violations[0..<min(20, rtoc_self_view.violations.length())] |> SELECT "  - ${_.class_name()} @ ${_.location()}: ${_.type_name}").join("\n");
     MUTABLE more: String = "";
     IF (rtoc_self_view.violations.length() > 20) THEN
       more = "\n  ... (+${(rtoc_self_view.violations.length() - 20)} more)";

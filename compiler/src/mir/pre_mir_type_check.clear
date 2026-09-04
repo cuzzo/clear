@@ -163,7 +163,7 @@ PUB FN preMirTypeCheck__verify_mut(program: Program) RETURNS !Void ->
     TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_1, :premir_type_checked));
     RETURN;
   END
-  MUTABLE sample = (violations.first(30) |> SELECT "  - ${_[:cls]} @ ${_[:loc]}").join("\n");
+  MUTABLE sample = (violations[0..<min(30, violations.length())] |> SELECT "  - ${_[:cls]} @ ${_[:loc]}").join("\n");
   MUTABLE more: String = "";
   IF (violations.length() > 30) THEN
     more = "\n  ... (+${(violations.length() - 30)} more)";

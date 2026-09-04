@@ -1771,10 +1771,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN UNWRAP (adjacency[node]) DO
     IF !(indices.contains?(_)) THEN
       next_index = resolutionSession__visit_recursive_component(rtoc_self_view, _, adjacency, next_index, &indices, &low, &stack, &on_stack, &result);
-      low[node] = ([UNWRAP (low[node]), UNWRAP (low[_])]).min();
+      low[node] = min(UNWRAP (low[node]), UNWRAP (low[_]));
     ELSE
       IF on_stack.contains?(_) THEN
-        low[node] = ([UNWRAP (low[node]), UNWRAP (indices[_])]).min();
+        low[node] = min(UNWRAP (low[node]), UNWRAP (indices[_]));
       END
     END
     END
