@@ -858,7 +858,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE msg: String = "";
     IF ((og_node != NIL) AND (og_node.move_line != NIL)) THEN
       MUTABLE phrase = capabilityAuditSession__ownership_passive_phrase(rtoc_self_view, (og_node.move_action OR_ELSE :move));
-      msg = "USE AFTER MOVE: You can't use `${path_str}`. Its owner `${root}` ${phrase} on line ${og_node.move_line}.";
+      msg = "USE AFTER MOVE: You can't use `${path_str}`. Its owner `${root}` ${phrase} on line ${(UNWRAP (og_node.move_line)).toString()}.";
     ELSE
       msg = "USE AFTER MOVE: You can't use `${path_str}`. Its owner `${root}` was already consumed elsewhere.";
     END
