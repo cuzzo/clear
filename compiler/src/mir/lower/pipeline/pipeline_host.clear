@@ -603,7 +603,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (execution == PipelineExecutionKind.MaterializedScalar) THEN
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineScalarLowerer__lower(rtoc_self_view.scalar_lowerer, plan.site, CAST(plan.rhs AS PipelineMaterializedScalarOp))) };
     ELSE_IF (execution == PipelineExecutionKind.MaterializedList) THEN
-      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, plan.site, castLocatableToPipelineListTerminalOp(plan.rhs))) };
+      RETURN (IF TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, plan.site, castLocatableToPipelineListTerminalOp(plan.rhs))) EXISTS AS rtoc_wrap_605 THEN PipelineLoweringResult{ MIRBlockExpr: COPY rtoc_wrap_605 } ELSE NIL END);
     ELSE_IF (execution == PipelineExecutionKind.SetDistinct) THEN
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_distinct(rtoc_self_view, plan.site, castLocatableToDistinctOp(plan.rhs))) };
     ELSE_IF (execution == PipelineExecutionKind.BatchWindow) THEN

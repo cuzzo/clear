@@ -225,7 +225,7 @@ PUB FN fiberCtxBuilder__needs_move_capture_cleanup?(type_obj: ?Type, schema_look
   IF TRUE THEN
     ti_branch_value = COPY type_obj;
   ELSE
-    ti_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY type_obj }));
+    ti_branch_value = TRY (type__new((IF type_obj EXISTS AS rtoc_wrap_227 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_227 } ELSE NIL END)));
   END
   MUTABLE ti: Type = ti_branch_value?;
   IF ((((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) OR type__rodata?(ti)) OR type__borrowed_reference?(ti)) THEN
@@ -261,7 +261,7 @@ PUB FN fiberCtxBuilder__needs_capture_value_cleanup?(type_obj: ?Type, schema_loo
   IF TRUE THEN
     ti_branch_value = COPY type_obj;
   ELSE
-    ti_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY type_obj }));
+    ti_branch_value = TRY (type__new((IF type_obj EXISTS AS rtoc_wrap_263 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_263 } ELSE NIL END)));
   END
   MUTABLE ti: Type = ti_branch_value?;
   IF (((type__void?(ti) OR type__any?(ti)) OR type__rodata?(ti)) OR type__borrowed_reference?(ti)) THEN

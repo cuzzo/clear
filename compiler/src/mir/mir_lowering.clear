@@ -981,7 +981,7 @@ FN mIRLowering__destination_type(self: MIRLowering, ast_node: Locatable, dest_ty
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE ti = (dest_type OR_ELSE TypeTypeInput{ Type: COPY TRY (type__from_node_mut(ast_node, "destination placement type")) });
+    MUTABLE ti = (dest_type OR_ELSE (IF TRY (type__from_node_mut(ast_node, "destination placement type")) EXISTS AS rtoc_wrap_983 THEN TypeTypeInput{ Type: COPY rtoc_wrap_983 } ELSE NIL END));
     IF ti IS_A Type AS type THEN
       RETURN type;
     ELSE
@@ -2793,7 +2793,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
     IF (emittable__stdlib_def(source_expr) != NIL) THEN
-      sig_branch_value = functionSignature__unwrap( X{ FunctionSignature: COPY emittable__stdlib_def(source_expr) });
+      sig_branch_value = functionSignature__unwrap( (IF emittable__stdlib_def(source_expr) EXISTS AS rtoc_wrap_2795 THEN X{ FunctionSignature: COPY rtoc_wrap_2795 } ELSE NIL END));
     ELSE
       sig_branch_value = NIL;
     END
@@ -2902,7 +2902,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(effect.produces_owned) THEN
       MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
       IF (emittable__stdlib_def(source_expr) != NIL) THEN
-        sig_branch_value = functionSignature__unwrap( X{ FunctionSignature: COPY emittable__stdlib_def(source_expr) });
+        sig_branch_value = functionSignature__unwrap( (IF emittable__stdlib_def(source_expr) EXISTS AS rtoc_wrap_2904 THEN X{ FunctionSignature: COPY rtoc_wrap_2904 } ELSE NIL END));
       ELSE
         sig_branch_value = NIL;
       END
@@ -3364,7 +3364,7 @@ FN mIRLowering__ownership_operand_type(self: MIRLowering, MUTABLE ast_value: Loc
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE coerced: ?Type = locatable__coerced_type_object(ast_value);
-    RETURN TRY (type__new(TypeConstructionInput{ Type: COPY coerced }));
+    RETURN TRY (type__new((IF coerced EXISTS AS rtoc_wrap_3366 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_3366 } ELSE NIL END)));
 }
 END
 FN mIRLowering__ownership_operands_for_sink_value(self: MIRLowering, value_mir: Emittable, ast_value: Locatable, ti: Type, source: String, target_alloc: ?String@symbol, MUTABLE require_visible_owned: Bool) RETURNS ![]OwnershipOperandFact
@@ -5407,7 +5407,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE stripped = mIRLowering__strip_try(rtoc_self_view, left);
     MUTABLE out = TryCatch{ expr: COPY stripped, catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     IF ((emittable__result_type(stripped) != NIL) AND emittable__result_type(stripped)) THEN
-      out.result_type = TRY (type__new(emittable__result_type(stripped)));
+      out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY emittable__result_type(stripped) }));
     ELSE_IF ((fallback != NIL) AND mIRLoweringFallback__responds_to_full_type?(fallback)) THEN
       out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(fallback)) }));
     END
@@ -5805,7 +5805,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRY (mIRLowering__owned_sink_value?(rtoc_self_view, cast__expr(mir_cast), ast_node));
     END
     IF (value IS_A TryExpr OR value IS_A TryOptional) THEN
-      RETURN TRY (mIRLowering__owned_sink_value?(rtoc_self_view, emittable__expr(value), ast_node));
+      RETURN TRY (mIRLowering__owned_sink_value?(rtoc_self_view, UNWRAP (UNWRAP (UNWRAP (UNWRAP (emittable__expr(value))))), ast_node));
     END
     IF (ast_node IS_A MoveNode OR ast_node IS_A KeepNode) THEN
       RETURN TRUE;
@@ -8230,7 +8230,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY zig_type_value;
     END
     MUTABLE ti: ?Type = TRY (type__from_node_mut(UNWRAP (ast_node), "deep-copy zig type"));
-    MUTABLE bare = TRY (type__new(TypeConstructionInput{ Type: COPY ti }));
+    MUTABLE bare = TRY (type__new((IF ti EXISTS AS rtoc_wrap_8232 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_8232 } ELSE NIL END)));
     type__mark_stack_value_mut(&bare);
     RETURN TRY (type__zig_type(bare));
 }
@@ -9580,7 +9580,7 @@ PRIVATE FN mIRLowering__stdlib_call_facts(self: MIRLowering, node: Node) RETURNS
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sig: ?FunctionSignature@multiowned = TRY (mIRLowering__intrinsic_signature_for(rtoc_self_view, node));
     IF (aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
-      sig = ( X{ FunctionSignature: COPY sig OR_ELSE functionSignature__unwrap(aST__node__matched_signature( UNWRAP (castNodeToLocatable(node)))) });
+      sig = ( X{ FunctionSignature: COPY sig OR_ELSE functionSignature__unwrap((IF aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS AS rtoc_wrap_9582 THEN X{ FunctionSignature: COPY rtoc_wrap_9582 } ELSE NIL END)) });
     END
     IF sig EXISTS AS sig_value THEN
       MUTABLE ast_args = IF node IS_A MethodCall THEN
@@ -9645,7 +9645,7 @@ PRIVATE FN mIRLowering__intrinsic_signature_for(self: MIRLowering, node: Node) R
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE matched: ?FunctionSignature@multiowned = aST__node_matched_stdlib_def( UNWRAP (castNodeToLocatable(node)));
-    MUTABLE found: ?FunctionSignature@multiowned = functionSignature__unwrap( X{ FunctionSignature: COPY matched });
+    MUTABLE found: ?FunctionSignature@multiowned = functionSignature__unwrap( (IF matched EXISTS AS rtoc_wrap_9647 THEN X{ FunctionSignature: COPY rtoc_wrap_9647 } ELSE NIL END));
     IF found EXISTS AS found_value THEN
       RETURN KEEP found_value;
     END
@@ -10276,7 +10276,7 @@ PRIVATE FN mIRLowering__call_owned_return?(self: MIRLowering, node: Node) RETURN
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
     IF (aST__node_name( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
-      sig = TRY (mIRLowering__fn_sig_for(rtoc_self_view, aST__node_name(UNWRAP (castNodeToLocatable(node)))));
+      sig = TRY (mIRLowering__fn_sig_for(rtoc_self_view, MIRLoweringName{ SymbolValue: COPY aST__node_name(UNWRAP (castNodeToLocatable(node))) }));
     END
     IF (aST__node__matched_signature(node) EXISTS) THEN
       sig = (sig OR_ELSE functionSignature__unwrap(node.matched_signature));
@@ -11199,7 +11199,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((((source != NIL) AND (source.abi == :c)) AND (param != NIL))) THEN
       RETURN lowered;
     END
-    MUTABLE type = TRY (type__new(TypeConstructionInput{ Type: COPY param?.type }));
+    MUTABLE type = TRY (type__new((IF param?.type EXISTS AS rtoc_wrap_11201 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_11201 } ELSE NIL END)));
     MUTABLE signature: ?FunctionType = type__function_type(type);
     IF !(((signature != NIL) AND (signature.abi == :c))) THEN
       RETURN lowered;
@@ -15233,7 +15233,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       is_locked_unwrapped = FALSE;
     END
     MUTABLE target_sync =   IF target_node IS_A OptionalUnwrap THEN
-      (IF locatable__symbol(aST__node_target( target_node)) != NIL THEN
+      (IF locatable__symbol(UNWRAP (UNWRAP (UNWRAP (UNWRAP (aST__node_target( target_node)))))) != NIL THEN
       (target_node.target.symbol).sync()
     ELSE
       NIL
@@ -18390,7 +18390,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((emittable__stdlib_def(init) != NIL)) THEN
       RETURN FALSE;
     END
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap( X{ FunctionSignature: COPY emittable__stdlib_def(init) });
+    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap( (IF emittable__stdlib_def(init) EXISTS AS rtoc_wrap_18392 THEN X{ FunctionSignature: COPY rtoc_wrap_18392 } ELSE NIL END));
     IF !((IF sig != NIL THEN
       TRY (functionSignature__emits_allocating?(&sig))
     ELSE
@@ -20617,7 +20617,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE ret_type: ?Type = TRY (type__from_node_mut(node.value, "heap carry return placement"));
     ret_type = TRY (type__success_type( UNWRAP (ret_type)));
     IF (TRY (mIRLowering__escaping_value_alloc(rtoc_self_view, ret_type)) == :heap) THEN
-      RETURN TRY (mIRLowering__place_value_for_destination(rtoc_self_view, UNWRAP (value), node.value, :heap, TypeTypeInput{ Type: COPY ret_type }));
+      RETURN TRY (mIRLowering__place_value_for_destination(rtoc_self_view, UNWRAP (value), node.value, :heap, (IF ret_type EXISTS AS rtoc_wrap_20619 THEN TypeTypeInput{ Type: COPY rtoc_wrap_20619 } ELSE NIL END)));
     ELSE
       RETURN COPY value;
     END

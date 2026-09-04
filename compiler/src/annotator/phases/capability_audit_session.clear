@@ -1067,7 +1067,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       anchor_branch_value = NIL;
     END
     MUTABLE anchor: ?AnchorToken = anchor_branch_value;
-    TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, DiagnosticAnchor{ AnchorTokenValue: COPY anchor }, :lint, fixes, NIL, :LOCAL_NEVER_SHARED, :info, FALSE, CAST({:name: name} AS {String@symbol}Any)));
+    TRY (capabilityAuditSession__fixable_mut(rtoc_self_view, (IF anchor EXISTS AS rtoc_wrap_1069 THEN DiagnosticAnchor{ AnchorTokenValue: COPY rtoc_wrap_1069 } ELSE NIL END), :lint, fixes, NIL, :LOCAL_NEVER_SHARED, :info, FALSE, CAST({:name: name} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_immutable_assignment_error_mut(self: CapabilityAuditSession, node: BindExpr, scope: Scope) RETURNS !Void
