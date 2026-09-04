@@ -229,13 +229,13 @@ class ClearParser
   end
 
   # Expression-position IF: each branch is a single expression (no semicolons).
-  sig { returns(AST::IfStatement) }
+  sig { returns(T.any(AST::IfStatement, AST::IfBind)) }
   def parse_if_expr
     if_token = consume(:KEYWORD, 'IF')
     parse_if_chain_expr(if_token)
   end
 
-  sig { params(if_token: Lexer::Token).returns(AST::IfStatement) }
+  sig { params(if_token: Lexer::Token).returns(T.any(AST::IfStatement, AST::IfBind)) }
   def parse_if_chain_expr(if_token)
     return parse_refined_if_chain_expr(if_token) if conditional_capture_ahead?
 
