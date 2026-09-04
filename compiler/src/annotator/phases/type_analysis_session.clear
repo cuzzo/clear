@@ -8778,14 +8778,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY (typeAnalysisSession__effect_direct_effects(rtoc_self_view)[fn_name] OR_ELSE Set[]);
 }
 END
-PRIVATE FN typeAnalysisSession__effect_call_site_context_for(self: TypeAnalysisSession, caller_name: String, callee_name: String) RETURNS {String@symbol}Bool
+PRIVATE FN typeAnalysisSession__effect_call_site_context_for(MUTABLE self: TypeAnalysisSession, caller_name: String, callee_name: String) RETURNS {String@symbol}Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__set_call_site_context_mut(&rtoc_self_view, caller_name, (typeAnalysisSession__effect_call_site_context(rtoc_self_view)[caller_name] OR_ELSE {}));
     MUTABLE caller_context = COPY UNWRAP (typeAnalysisSession__effect_call_site_context(rtoc_self_view)[caller_name]);
     caller_context[callee_name] = (caller_context[callee_name] OR_ELSE {:loop: FALSE, :cond: FALSE});
-    RETURN caller_context[callee_name];
+    typeAnalysisSession__set_call_site_context_mut(&rtoc_self_view, caller_name, COPY caller_context);
+    RETURN COPY UNWRAP (caller_context[callee_name]);
 }
 END
 PRIVATE FN typeAnalysisSession__effect_call_site_arg_families_for(self: TypeAnalysisSession, caller_name: String, callee_name: String) RETURNS ![][][Set]String@symbol
@@ -8856,7 +8857,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((in_loop OR in_cond)) THEN
       RETURN;
     END
-    MUTABLE existing = typeAnalysisSession__effect_call_site_context_for(rtoc_self_view, UNWRAP (caller_name), callee_name);
+    MUTABLE existing = typeAnalysisSession__effect_call_site_context_for(&rtoc_self_view, UNWRAP (caller_name), callee_name);
     existing[:loop] = (existing[:loop] OR_ELSE in_loop);
     existing[:cond] = (existing[:cond] OR_ELSE in_cond);
     NIL;
@@ -11498,7 +11499,14 @@ PRIVATE FN typeAnalysisSession__function_call_graph(self: TypeAnalysisSession) R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ( { MUTABLE rtoc_transform_values_result_262: {String}Any = {}; FOR rtoc_key IN (TRY (typeAnalysisSession__function_body_summaries(rtoc_self_view))).keys() DO rtoc_transform_values_result_262[rtoc_key] = (TRY (typeAnalysisSession__function_body_summaries(rtoc_self_view))[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS FunctionBodySummary)).callees; END rtoc_transform_values_result_262 } );
+    MUTABLE graph: {String}[Set]String = {};
+    MUTABLE summaries = TRY (typeAnalysisSession__function_body_summaries(rtoc_self_view));
+    FOR rtoc_key IN summaries.keys() DO
+      IF summaries[rtoc_key] EXISTS AS summary THEN
+        graph[rtoc_key] = COPY summary.callees;
+      END
+    END
+    RETURN graph;
 }
 END
 PRIVATE FN typeAnalysisSession__body_fact_frames(self: TypeAnalysisSession) RETURNS ![]BodyFactFrame
