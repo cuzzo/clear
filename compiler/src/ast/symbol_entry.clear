@@ -1007,7 +1007,8 @@ PRIVATE FN symbolEntry__normalize_type_input(value: ?SymbolEntryTypeInput) RETUR
 END
 PRIVATE FN symbolEntry__type_from_function_signature(signature: FunctionSignature) RETURNS !Type ->
   MUTABLE param_types = ( { MUTABLE rtoc_map_results = CAST([] AS []Type); (TRY (functionSignature__params(signature))) |> EACH { &rtoc_map_results.append(COPY param__type(_)); }; rtoc_map_results } );
-  RETURN TRY (type__function_type_from_parts(param_types, CAST(functionSignature__return_type(signature) AS Type), functionSignature__reentrant(signature), NIL));
+  MUTABLE mutable_flags = ( { MUTABLE rtoc_flag_results = CAST([] AS []Bool); (TRY (functionSignature__params(signature))) |> EACH { &rtoc_flag_results.append((_.mutable == TRUE)); }; rtoc_flag_results } );
+  RETURN TRY (type__function_type_from_parts(param_types, CAST(functionSignature__return_type(signature) AS Type), functionSignature__reentrant(signature), NIL, :clear, mutable_flags));
 END
 PRIVATE FN symbolEntry__next_binding_id() RETURNS Int64 ->
   MUTABLE id = COPY next_binding_id_value;

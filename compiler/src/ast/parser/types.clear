@@ -27,7 +27,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "FN"));
     TRY (clearParser__consume(&rtoc_self_view, :CHAR, "("));
     MUTABLE param_types: []Type = List[];
+    MUTABLE param_mutability: []Bool = List[];
     WHILE !(TRY (clearParser__match?(rtoc_self_view, :CHAR, ")"))) DO
+      # A callback parameter the callee may mutate: FN(MUTABLE T) -> R.
+      &param_mutability.append(castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "MUTABLE"))));
       IF ((TRY (clearParser__match?(rtoc_self_view, :VAR_ID)) AND (clearParser__peek(rtoc_self_view).type == :CHAR)) AND (token__text_is?(clearParser__peek(rtoc_self_view), ":"))) THEN
         TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
         TRY (clearParser__consume(&rtoc_self_view, :CHAR, ":"));
@@ -53,7 +56,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRY (clearParser__match?(rtoc_self_view, :VAR_ID)) AND (["@reentrant", "@nonReentrant"]).contains?(token__display_value(rtoc_cur_0))) THEN
       TRY (clearParser__error_mut(rtoc_self_view, clearParser__current(rtoc_self_view), CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "supported function type annotation", :got: "${token__display_value(clearParser__current(rtoc_self_view))}", :type: "${clearParser__current(rtoc_self_view).type}", :line: clearParser__current(rtoc_self_view).line.toString()}));
     END
-    RETURN TRY (type__function_type_from_parts(param_types, return_type, FALSE, NIL, abi));
+    RETURN TRY (type__function_type_from_parts(param_types, return_type, FALSE, NIL, abi, param_mutability));
 }
 END
 PUB FN clearParser__parse_type_annotation(MUTABLE self: ClearParser, migration_root: Bool = TRUE) RETURNS !Type
