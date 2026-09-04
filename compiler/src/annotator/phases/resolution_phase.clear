@@ -623,11 +623,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST((names |> DISTINCT _) AS []Any);
 }
 END
-PRIVATE FN resolutionSession__with_new_scope<RESULT>(self: ResolutionSession, scope: ?Scope = NIL, blk: FN() -> RESULT) RETURNS !RESULT
+PRIVATE FN resolutionSession__with_new_scope<RESULT>(MUTABLE self: ResolutionSession, scope: ?Scope = NIL, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER rtoc_self_view.scope_stack.pop();
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+  DEFER &rtoc_self_view.scope_stack.pop();
   MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_10: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_10 = scope__new();
@@ -635,9 +635,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_10 = COPY scope;
     END
     rtoc_ternary_value_10? };
-  MUTABLE stack: []Scope@multiowned = (resolutionSession__scope_stack_for_helper(rtoc_self_view));
-  new_scope.depth = stack.length();
-  &stack.push(new_scope);
+  new_scope.depth = rtoc_self_view.scope_stack.length();
+  &rtoc_self_view.scope_stack.push(new_scope);
   RETURN blk();
 }
 END

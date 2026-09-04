@@ -129,7 +129,10 @@ PUB STRUCT TypeAnalysisSession {
   audit_inputs: CapabilityAuditInputs,
   config: AnnotatorPhasesTypeAnalysisSessionConfig,
   resolution: ResolutionFacts@multiowned,
-  traversal_state: TraversalState
+  traversal_state: TraversalState,
+  # Ruby's @current_if_is_a_condition: the IS_A condition the current IF body
+  # was narrowed by, saved and restored around each nested IF.
+  current_if_is_a_condition: ?Locatable
 }
 
 PUB STRUCT StreamYieldFrame {
@@ -3131,7 +3134,7 @@ PRIVATE FN typeAnalysisSession__analyze_routine(MUTABLE self: TypeAnalysisSessio
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__verify_captures_mut(rtoc_self_view, node));
     MUTABLE found_returns = typeAnalysisSession__collect_routine_returns(rtoc_self_view, %() USE(body, node, MUTABLE rtoc_self_view) -> {
-    typeAnalysisSession__with_routine_analysis_scope(rtoc_self_view, node, %() USE(body, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_routine_analysis_scope(&rtoc_self_view, node, %() USE(body, node, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__declare_and_verify_params(&rtoc_self_view, node));
       TRY (typeAnalysisSession__declare_captures(rtoc_self_view, node));
       MUTABLE parameter_ids_branch_value: ?Set = NIL;
@@ -3213,11 +3216,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN seeded;
 }
 END
-PRIVATE FN typeAnalysisSession__with_routine_analysis_scope(self: TypeAnalysisSession, node: RoutineNode, blk: FN() -> Void) RETURNS !Void
+PRIVATE FN typeAnalysisSession__with_routine_analysis_scope(MUTABLE self: TypeAnalysisSession, node: RoutineNode, blk: FN() -> Void) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__module_variable_scope(rtoc_self_view), %() USE(blk, node, rtoc_self_view) -> {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__module_variable_scope(rtoc_self_view), %() USE(blk, node, rtoc_self_view) -> {
     typeAnalysisSession__og_push_scope(rtoc_self_view);
     DEFER (typeAnalysisSession__og_pop_scope(rtoc_self_view, TRUE));
     blk();
@@ -3382,7 +3385,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE catch_body_scan = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(all_catch_bodies, candidate_snap_types, MUTABLE rtoc_self_view) -> {
     FOR _ IN (all_catch_bodies |> WHERE _ != NIL) DO
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(candidate_snap_types, _, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(candidate_snap_types, _, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_62 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_62, "__error", NIL, SymbolEntryTypeInput{ SymbolValue: :ErrorContext }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       IF (candidate_snap_types.size == 1) THEN
@@ -5372,7 +5375,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "SELECT", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
     MUTABLE selector_effect: ?SelectorEffectFact = NIL;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, MUTABLE selector_effect, source, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, MUTABLE selector_effect, source, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_112 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_112, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     IF (UNWRAP (aST__node_right( Locatable{ BinaryOp: COPY node })) IS_A SelectOp AND ((pipelineSourceFact__stream?(source) OR node.right.stream_mode))) THEN
@@ -5539,7 +5542,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "TAKE_WHILE", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_116 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_116, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))
@@ -5573,7 +5576,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(([:Int64, :Float64]).contains?(size_type)) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.right.size(), TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
     END
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_118 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_118, "_", NIL, SymbolEntryTypeInput{ SymbolValue: COPY symbol("${item_type}[]") }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))
@@ -5674,7 +5677,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       item_type_branch_value = TRY (typeAnalysisSession__error_mut(rtoc_self_view, node.left, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_NEEDS_COLLECTION_INPUT }));
     END
     MUTABLE item_type: Any@multiowned = item_type_branch_value?;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(bw, item_type, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(bw, item_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_120 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_120, "_", NIL, SymbolEntryTypeInput{ SymbolValue: COPY symbol("${item_type}[]") }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, bw.expression()))
@@ -5713,7 +5716,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE left_name = params[0].name();
       MUTABLE right_name = params[1].name();
-      typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(key_expr, left_name, left_type, right_name, right_type, MUTABLE rtoc_self_view) -> {
+      typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(key_expr, left_name, left_type, right_name, right_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_122 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_122, left_name, NIL, left_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     MUTABLE rtoc_mutable_receiver_123 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
@@ -5733,12 +5736,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &key_expr, TRY (typeAnalysisSession__build_lambda_signature(rtoc_self_view, params, :Bool))));
     ELSE
-      typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(key_expr, left_type, MUTABLE rtoc_self_view) -> {
+      typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(key_expr, left_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_124 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_124, "_", NIL, left_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, key_expr))
       });
-      typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(key_expr, right_type, MUTABLE rtoc_self_view) -> {
+      typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(key_expr, right_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_125 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_125, "_", NIL, SymbolEntryTypeInput{ Type: COPY right_type }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, key_expr))
@@ -5790,7 +5793,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE item_type = COPY source.item_type;
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.initial_value));
     MUTABLE acc_type = node.right.initial_value.resolved_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(acc_type, item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(acc_type, item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_130 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_130, "acc", NIL, acc_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
     MUTABLE rtoc_mutable_receiver_131 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
@@ -5846,7 +5849,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (expr IS_A BinaryOp AND (expr.op() == :BIND_VAR)) THEN
       inner_bind_name = expr.right().name();
     END
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_132 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_132, "_", NIL, item_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))
@@ -5874,7 +5877,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "DISTINCT", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_134 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_134, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))
@@ -6052,7 +6055,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE item_type = COPY iterable.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_138 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_138, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -6102,7 +6105,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE item_type = COPY iterable.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_139 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_139, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     FOR _ IN node.right.body() DO
@@ -6124,7 +6127,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__finite_stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "FIND", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_140 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_140, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))
@@ -6146,7 +6149,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__finite_stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "ANY", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_141 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_141, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))
@@ -6168,7 +6171,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__finite_stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "ALL", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_142 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_142, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))
@@ -6190,7 +6193,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__finite_stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "COUNT", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_143 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_143, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, locatable__expression(node.right)))
@@ -6212,7 +6215,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__finite_stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "SUM", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_144 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_144, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))))
@@ -6235,7 +6238,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__finite_stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "AVERAGE", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_145 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_145, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))))
@@ -6258,7 +6261,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__finite_stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "MIN", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_146 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_146, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))))
@@ -6281,7 +6284,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_stream = pipelineSourceFact__finite_stream?(source);
     TRY (typeAnalysisSession__require_array_input_mut(rtoc_self_view, node, "MAX", is_stream, is_stream));
     MUTABLE item_type = COPY source.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_147 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_147, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))))
@@ -6303,7 +6306,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE each_op: ?ClearParserConcurrentPipelineOp = conc.op;
     MUTABLE ti = TRY (aST__full_type_mut( UNWRAP (shard_node.target_map)));
     MUTABLE key_type = (((type__numeric_map?(ti) AND ((TRY (type__key_type(ti)) != NIL) AND type__resolved(((TRY (type__key_type(ti)))?))))) OR :String);
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(each_op, key_type, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(each_op, key_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_148 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_148, "_", NIL, key_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
     FOR _ IN each_op.body() DO
@@ -6378,7 +6381,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       item_type = castTypeToStringSymbol(COPY iterable.item_type);
     END
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(conc, item_type, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(conc, item_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_151 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_151, "_", NIL, SymbolEntryTypeInput{ SymbolValue: COPY item_type }, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
     FOR _ IN conc.op.body() DO
@@ -6557,7 +6560,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE item_type = COPY iterable.item_type;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, shard_op, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, shard_op, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_155 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_155, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, shard_op.key_expr))
@@ -6889,7 +6892,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE item_type: ?Type = TRY (type__stream_element_type(lhs_type));
     MUTABLE is_parallel = typeAnalysisSession__concurrent_parallel_enabled?(rtoc_self_view, locatable__options(node.right));
     MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, &is_parallel, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_157 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_157, "_", NIL, item_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, UNWRAP (item_type), %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -6919,7 +6922,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE item_type: ?Type = TRY (type__stream_element_type(lhs_type));
     MUTABLE is_parallel = typeAnalysisSession__concurrent_parallel_enabled?(rtoc_self_view, locatable__options(node.right));
     MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, &is_parallel, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
-    typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_160 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_160, "_", NIL, item_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, UNWRAP (item_type), %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -6945,7 +6948,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE item_type = COPY (TRY (typeAnalysisSession__pipeline_source_fact(rtoc_self_view, node.left, lhs_type, TRUE))).item_type;
     MUTABLE is_parallel = typeAnalysisSession__concurrent_parallel_enabled?(rtoc_self_view, locatable__options(node.right));
     MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, &is_parallel, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_161 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_161, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -7006,7 +7009,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE item_type = COPY (TRY (typeAnalysisSession__pipeline_source_fact(rtoc_self_view, node.left, lhs_type, TRUE))).item_type;
     MUTABLE is_parallel = typeAnalysisSession__concurrent_parallel_enabled?(rtoc_self_view, locatable__options(node.right));
     MUTABLE analysis = typeAnalysisSession__with_fiber_capture_analysis(rtoc_self_view, &is_parallel, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
-    typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_164 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_164, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -7200,11 +7203,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST((names |> DISTINCT _) AS []Any);
 }
 END
-PRIVATE FN typeAnalysisSession__with_new_scope<RESULT>(self: TypeAnalysisSession, scope: ?Scope = NIL, blk: FN() -> RESULT) RETURNS !RESULT
+PRIVATE FN typeAnalysisSession__with_new_scope<RESULT>(MUTABLE self: TypeAnalysisSession, scope: ?Scope = NIL, blk: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER rtoc_self_view.scope_stack.pop();
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+  DEFER &rtoc_self_view.traversal_state.scopes.pop();
   MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_172: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_172 = scope__new();
@@ -7212,9 +7215,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_172 = COPY scope;
     END
     rtoc_ternary_value_172? };
-  MUTABLE stack: []Scope@multiowned = (typeAnalysisSession__scope_stack_for_helper(rtoc_self_view));
-  new_scope.depth = stack.length();
-  &stack.push(new_scope);
+  new_scope.depth = rtoc_self_view.traversal_state.scopes.length();
+  &rtoc_self_view.traversal_state.scopes.push(new_scope);
   RETURN blk();
 }
 END
@@ -9575,7 +9577,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       payload_branch_value = rt;
     END
     MUTABLE payload: ?Type = payload_branch_value;
-    typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(fn_node, param_names, payload, post_clauses, rejected, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(fn_node, param_names, payload, post_clauses, rejected, MUTABLE rtoc_self_view) -> {
     IF payload EXISTS AS payload_value THEN
         MUTABLE payload_value_mutable = COPY payload_value;
         MUTABLE rtoc_mutable_receiver_212 = TRY (typeAnalysisSession__current_scope(rtoc_self_view));
@@ -11031,7 +11033,7 @@ PRIVATE FN typeAnalysisSession__visit_TestBlock(MUTABLE self: TypeAnalysisSessio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    typeAnalysisSession__with_new_scope(rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
     FOR _ IN node.setup DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
@@ -11056,7 +11058,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit_test_hook_bodies(&rtoc_self_view, TestContainerNode{ WhenBlock: COPY node }));
     MUTABLE test_body_summaries: {Int64}BodyScanSummary = {};
     FOR _ IN node.tests DO
-    typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(MUTABLE test_body_summaries, _, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(MUTABLE test_body_summaries, _, MUTABLE rtoc_self_view) -> {
     test_body_summaries[aST__node_identity(Locatable{ TestThat: COPY _ })] = typeAnalysisSession__with_body_fact_frame(rtoc_self_view, bodyIdentity__unassigned(), %() USE(_, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit_TestThat(&rtoc_self_view, &_));
       rubyToClearVoid__type_analysis_session()
@@ -12903,7 +12905,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       stream_frame.closed = prev_stream_closed?;
     END
     }
-    RETURN typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(branch_logic, rtoc_self_view) -> {
+    RETURN typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(branch_logic, rtoc_self_view) -> {
     MUTABLE pushed_og_scope: Bool = FALSE;
     typeAnalysisSession__og_push_scope(rtoc_self_view);
     pushed_og_scope = TRUE;
@@ -12919,7 +12921,7 @@ PRIVATE FN typeAnalysisSession__visit_BlockExpr(MUTABLE self: TypeAnalysisSessio
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(MUTABLE node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(MUTABLE node, MUTABLE rtoc_self_view) -> {
     FOR _ IN node.body DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
@@ -13007,7 +13009,7 @@ PRIVATE FN typeAnalysisSession__with_if_is_a_condition(MUTABLE self: TypeAnalysi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-  MUTABLE previous = rtoc_self_view.current_if_is_a_condition;
+  MUTABLE previous: ?Locatable = rtoc_self_view.current_if_is_a_condition;
   DEFER rtoc_self_view.current_if_is_a_condition = previous;
   rtoc_self_view.current_if_is_a_condition = COPY condition;
   blk();
@@ -16638,7 +16640,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_snapshot_txn_body = ((node.snapshot_mode == :transaction));
     MUTABLE with_body = proc(%() USE(expanded_capabilities, is_snapshot_txn_body, node, MUTABLE rtoc_self_view) -> {
     TRY (typeAnalysisSession__record_body_fact_with_block_mut(rtoc_self_view, node));
-    typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(expanded_capabilities, is_snapshot_txn_body, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(expanded_capabilities, is_snapshot_txn_body, node, MUTABLE rtoc_self_view) -> {
       FOR _ IN expanded_capabilities DO
       TRY (typeAnalysisSession__declare_capability_scope_mut(rtoc_self_view, _));
       END
@@ -16679,7 +16681,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         FOR _ IN (TRY (typeAnalysisSession__with_match_family_effects(rtoc_self_view, _.family))) DO
         TRY (typeAnalysisSession__record_effect(rtoc_self_view, _));
         END
-        typeAnalysisSession__with_new_scope(rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(node, _, MUTABLE rtoc_self_view) -> {
+        typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(rtoc_self_view), %() USE(node, _, MUTABLE rtoc_self_view) -> {
           typeAnalysisSession__with_body_fact_scope(rtoc_self_view, node, %() USE(_, MUTABLE rtoc_self_view) -> {
             rtoc_lambda_result_413 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, _.body()));
             rtoc_lambda_result_413
@@ -20596,7 +20598,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PUB FN typeAnalysisSession__new(importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !TypeAnalysisSession@multiowned ->
   MUTABLE rtoc_source_dir: String = TRY (rtocResolveSourceDir(source_dir));
-  MUTABLE self = TypeAnalysisSession{ audit_inputs: CapabilityAuditInputs{ held_locks: {}, held_lock_types: List[], current_predicate_context: NIL, deferred_with_validations: List[], deferred_recovery_validations: List[], deferred_give_validations: List[], deferred_copy_retained_validations: List[], predicate_call_sites: List[], async_body_facts: List[], capability_audit: {}, capture_stack: List[], capture_move_suppression_depth: 0, snapshot_txn_frames: List[], effect_state: NIL, lock_analysis: LockAnalysisState{ direct_edges: {}, direct_acquires: {}, held_calls: {}, clause_sites: List[], type_ranks: {} }, ownership_graph: ownershipGraph__new(), ownership_transport_frames: List[] }, config: AnnotatorPhasesTypeAnalysisSessionConfig{ importer: ( { MUTABLE rtoc_optional_or_source_520: ?ModuleImporter@multiowned = COPY importer; MUTABLE rtoc_optional_or_result_521: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_520 != NIL THEN rtoc_optional_or_result_521 = COPY rtoc_optional_or_source_520; ELSE rtoc_optional_or_result_521 = COPY compiler; END rtoc_optional_or_result_521 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code }, resolution: NIL, traversal_state: TraversalState{ scopes: [scope__new()], function_contexts: List[], loop_depth: 0, conditional_depth: 0, smooth_depth: 0, body_fact_frames: List[], stream_yield_frames: List[], with_block_depth: 0, match_pattern_depth: 0, current_bg_pinned: FALSE, pipeline_accessed_fields: NIL, auto_locked_assign_name: NIL, struct_literal_call_argument_depth: 0, annotation_ancestors: List[], comptime_type_param_refinements: {}, value_type_refinements: {}, branch_terminated: FALSE, next_synthetic_body_ordinal: -1, deferred_copy_wrapper_bindings: List[] } };
+  MUTABLE self = TypeAnalysisSession{ current_if_is_a_condition: NIL, audit_inputs: CapabilityAuditInputs{ held_locks: {}, held_lock_types: List[], current_predicate_context: NIL, deferred_with_validations: List[], deferred_recovery_validations: List[], deferred_give_validations: List[], deferred_copy_retained_validations: List[], predicate_call_sites: List[], async_body_facts: List[], capability_audit: {}, capture_stack: List[], capture_move_suppression_depth: 0, snapshot_txn_frames: List[], effect_state: NIL, lock_analysis: LockAnalysisState{ direct_edges: {}, direct_acquires: {}, held_calls: {}, clause_sites: List[], type_ranks: {} }, ownership_graph: ownershipGraph__new(), ownership_transport_frames: List[] }, config: AnnotatorPhasesTypeAnalysisSessionConfig{ importer: ( { MUTABLE rtoc_optional_or_source_520: ?ModuleImporter@multiowned = COPY importer; MUTABLE rtoc_optional_or_result_521: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_520 != NIL THEN rtoc_optional_or_result_521 = COPY rtoc_optional_or_source_520; ELSE rtoc_optional_or_result_521 = COPY compiler; END rtoc_optional_or_result_521 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code }, resolution: NIL, traversal_state: TraversalState{ scopes: [scope__new()], function_contexts: List[], loop_depth: 0, conditional_depth: 0, smooth_depth: 0, body_fact_frames: List[], stream_yield_frames: List[], with_block_depth: 0, match_pattern_depth: 0, current_bg_pinned: FALSE, pipeline_accessed_fields: NIL, auto_locked_assign_name: NIL, struct_literal_call_argument_depth: 0, annotation_ancestors: List[], comptime_type_param_refinements: {}, value_type_refinements: {}, branch_terminated: FALSE, next_synthetic_body_ordinal: -1, deferred_copy_wrapper_bindings: List[] } };
   TRY (typeAnalysisSession__initialize(&self, importer, compiler, source_dir, strict_test, source_code));
   RETURN self @multiowned;
 END

@@ -70,7 +70,12 @@ UNION MIRLoweringSchema { StructSchemaMultiowned: StructSchema@multiowned, Resou
 UNION MIRLoweringValue { StringValue: String, SymbolValue: String@symbol, Type: Type, Float64Value: Float64, Int64Value: Int64 }
 STRUCT MIRLowering {
   active_lifecycle_registry: ?LifecycleRegistry@multiowned,
-  state: MIRLoweringState
+  state: MIRLoweringState,
+  # Ruby holds the function whose kept-liveness is being computed, its memoized
+  # liveness result, and a stack because kept-edge calls nest.
+  kept_liveness_fn: ?FunctionDef@multiowned,
+  kept_liveness: ?KeptEdgeLiveness@multiowned,
+  kept_edge_temp_stack: []KeptEdgeCallFrame
 }
 
 UNION MIRLoweringOwnershipFact { OwnedCreate: OwnedCreate, OwnedDestroy: OwnedDestroy, OwnedTransfer: OwnedTransfer, OwnedBorrow: OwnedBorrow, OwnedStore: OwnedStore, OwnedReturn: OwnedReturn }
@@ -9786,17 +9791,16 @@ PRIVATE FN mIRLowering__kept_edge_temp_stack(MUTABLE self: MIRLowering) RETURNS 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.kept_edge_temp_stack = (rtoc_self_view.kept_edge_temp_stack OR_ELSE List[]);
-    RETURN rtoc_self_view.kept_edge_temp_stack;
+    RETURN COPY rtoc_self_view.kept_edge_temp_stack;
 }
 END
 PRIVATE FN mIRLowering__with_kept_edge_call_frame(MUTABLE self: MIRLowering, blk: FN() -> ![]Emittable) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    (TRY (mIRLowering__kept_edge_temp_stack(&rtoc_self_view))).append(KeptEdgeCallFrame{ temps: List[], moved_sources: List[] });
+    &rtoc_self_view.kept_edge_temp_stack.append(KeptEdgeCallFrame{ temps: List[], moved_sources: List[] });
     MUTABLE args_mir = TRY (blk());
-    MUTABLE frame = UNWRAP ((TRY (mIRLowering__kept_edge_temp_stack(&rtoc_self_view))).pop());
+    MUTABLE frame = UNWRAP (&rtoc_self_view.kept_edge_temp_stack.pop());
     IF ((frame.temps.length() == 0) AND (frame.moved_sources.length() == 0)) THEN
       RETURN args_mir;
     END
@@ -9819,7 +9823,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       rtoc_ternary_value_350? };
       IF inner IS_A Identifier THEN
-        ((TRY (mIRLowering__kept_edge_temp_stack(&rtoc_self_view))).last()?.moved_sources).push(mIRLowering__zig_safe_name(rtoc_self_view, inner.name()));
+        (&rtoc_self_view.kept_edge_temp_stack.last()?.moved_sources).push(mIRLowering__zig_safe_name(rtoc_self_view, inner.name()));
       END
     END
     IF kept_edge EXISTS AS kept_edge_value THEN
@@ -9831,7 +9835,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       mIRLowering__function_state(rtoc_self_view).lowered_alloc_names.insert(name);
       MUTABLE rtoc_index_receiver_352 = mIRLowering__function_state(rtoc_self_view).guarded_cleanup_names;
       rtoc_index_receiver_352[name] = TRUE;
-      ((TRY (mIRLowering__kept_edge_temp_stack(&rtoc_self_view))).last()?.temps).push(name);
+      (&rtoc_self_view.kept_edge_temp_stack.last()?.temps).push(name);
       RETURN Emittable{ Ident: COPY Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     MUTABLE monomorphic_dest = ((facts.callee_param != NIL) AND (((facts.callee_param)?).carrier_contract == :monomorphic));
@@ -21092,7 +21096,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 FN mIRLowering__new(input: MIRLoweringInput = MIRLoweringInput{ struct_schemas: {}, enum_schemas: {}, union_schemas: {}, schema_lookup: NIL, lifecycle_registry: lifecycleRegistry__empty(), fn_sigs: {}, moved_guard_info: {}, importer: NIL, source_dir: NIL, debug_mode: FALSE, target: :zig, function_counter_seeds: {} }) RETURNS MIRLowering@multiowned ->
-  MUTABLE self = MIRLowering{ active_lifecycle_registry: NIL, state: MIRLoweringState{ input: COPY input, schemas: schemas, counters: mIRLoweringCounters__new(), function_state: COPY FunctionState{ current_function_context: NIL, pending_stmts: List[], current_decl_alloc: NIL, current_expected_type: NIL, current_sink_type: NIL, current_reassignment_target: NIL, current_bindings: {}, current_binding_types: {}, fn_alloc_marked_names: {}, lowered_alloc_names: Set[], lowered_guarded_cleanup_names: Set[], decl_zig_name_map: {}, guarded_cleanup_names: {}, fn_name_rename_map: {}, node_store_types: Set[] }, runtime: COPY MIRLoweringRuntimeState{ rt_name: "rt", emitter: NIL }, program: COPY MIRLoweringProgramState{ fn_sigs: COPY ((COPY input).fn_sigs), importer: COPY (COPY input).importer, source_dir: COPY (COPY input).source_dir, debug_mode: (COPY input).debug_mode, target: COPY (COPY input).target, shard_context: NIL, emitted_extern_modules: Set[], pipeline_host: NIL, emitted_types: Set[], emitted_require_modules: Set[], emitted_import_type_aliases: Set[], used_sharded_map: FALSE, use_debug_allocator: NIL, fn_nodes: {}, function_counter_snapshots: {}, runtime_init_consts: List[], module_const_inits: Set[], module_global_names: Set[] }, capture: MIRLoweringCaptureState{ current_bg_pointer_captures: NIL, current_lambda_pointer_params: Set[], current_fiber_capture_symbols: {}, do_capture_map: NIL, current_stream_is_inf: NIL, current_stream_local: NIL, current_stream_close_label: NIL, current_fsm_inherited_alloc_names: Set[], current_fsm_inherited_guarded_names: Set[], current_fsm_owned_result_guards: {}, last_fsm_result_transfer_facts: List[] }, capabilities: COPY MIRLoweringCapabilityState{ locked_unwrap_map: NIL, rc_unwrap_map: NIL, with_alias_alloc_map: NIL, with_alias_owner_map: NIL, polymorphic_alias_type_map: NIL, if_bind_aliases: Set[], if_bind_pointer_aliases: Set[], atomic_emit_raw: FALSE }, ownership: COPY MIRLoweringOwnershipState{ next_lowered_node_id: 0, finalized_body_ids: Set[], finalized_node_ids: Set[] }, test: COPY MIRLoweringTestState{ active_stubs: {}, stub_label_counter: 0 } } };
+  MUTABLE self = MIRLowering{ active_lifecycle_registry: NIL, kept_liveness_fn: NIL, kept_liveness: NIL, kept_edge_temp_stack: [], state: MIRLoweringState{ input: COPY input, schemas: schemas, counters: mIRLoweringCounters__new(), function_state: COPY FunctionState{ current_function_context: NIL, pending_stmts: List[], current_decl_alloc: NIL, current_expected_type: NIL, current_sink_type: NIL, current_reassignment_target: NIL, current_bindings: {}, current_binding_types: {}, fn_alloc_marked_names: {}, lowered_alloc_names: Set[], lowered_guarded_cleanup_names: Set[], decl_zig_name_map: {}, guarded_cleanup_names: {}, fn_name_rename_map: {}, node_store_types: Set[] }, runtime: COPY MIRLoweringRuntimeState{ rt_name: "rt", emitter: NIL }, program: COPY MIRLoweringProgramState{ fn_sigs: COPY ((COPY input).fn_sigs), importer: COPY (COPY input).importer, source_dir: COPY (COPY input).source_dir, debug_mode: (COPY input).debug_mode, target: COPY (COPY input).target, shard_context: NIL, emitted_extern_modules: Set[], pipeline_host: NIL, emitted_types: Set[], emitted_require_modules: Set[], emitted_import_type_aliases: Set[], used_sharded_map: FALSE, use_debug_allocator: NIL, fn_nodes: {}, function_counter_snapshots: {}, runtime_init_consts: List[], module_const_inits: Set[], module_global_names: Set[] }, capture: MIRLoweringCaptureState{ current_bg_pointer_captures: NIL, current_lambda_pointer_params: Set[], current_fiber_capture_symbols: {}, do_capture_map: NIL, current_stream_is_inf: NIL, current_stream_local: NIL, current_stream_close_label: NIL, current_fsm_inherited_alloc_names: Set[], current_fsm_inherited_guarded_names: Set[], current_fsm_owned_result_guards: {}, last_fsm_result_transfer_facts: List[] }, capabilities: COPY MIRLoweringCapabilityState{ locked_unwrap_map: NIL, rc_unwrap_map: NIL, with_alias_alloc_map: NIL, with_alias_owner_map: NIL, polymorphic_alias_type_map: NIL, if_bind_aliases: Set[], if_bind_pointer_aliases: Set[], atomic_emit_raw: FALSE }, ownership: COPY MIRLoweringOwnershipState{ next_lowered_node_id: 0, finalized_body_ids: Set[], finalized_node_ids: Set[] }, test: COPY MIRLoweringTestState{ active_stubs: {}, stub_label_counter: 0 } } };
   mIRLowering__initialize(&self, input);
   RETURN self @multiowned;
 END

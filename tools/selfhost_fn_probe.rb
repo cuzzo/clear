@@ -330,12 +330,15 @@ module SelfhostFnProbe
 
   def main(argv)
     only_file = nil
+    only_fns = nil
     jobs = [Etc.nprocessors - 4, 1].max
     stage = :clear
     limit = nil
     passing = nil
     OptionParser.new do |p|
       p.on('--file REL') { |v| only_file = v }
+      # Probing one function is the fast edit/measure loop; a full file is minutes.
+      p.on('--fn NAMES') { |v| only_fns = v.split(',').to_set }
       p.on('--all') { only_file = nil }
       p.on('--jobs N', Integer) { |v| jobs = v }
       p.on('--stage S') { |v| stage = v.to_sym }
@@ -355,6 +358,7 @@ module SelfhostFnProbe
                   .map { |r| [r['file'], r['fn']] }.to_set
       targets = targets.select { |t| allow.include?([rel(t.file), t.name]) }
     end
+    targets = targets.select { |t| only_fns.include?(t.name) } if only_fns
     targets = targets.first(limit) if limit
     warn "#{targets.length} functions across #{files.length} file(s); #{jobs} jobs; stage=#{stage}"
 
@@ -409,7 +413,7 @@ module SelfhostFnProbe
             if (done % 20).zero?
               good = results.count { |r| r && r[2] }
               warn "  #{done}/#{targets.length}  compiling: #{good} (#{(100.0 * good / done).round(1)}%)"
-              File.write(File.join(ROOT, only_file ? '.fn_probe_file.json' : '.fn_probe.json'), JSON.pretty_generate(
+              File.write(File.join(ROOT, (only_file || only_fns) ? '.fn_probe_file.json' : '.fn_probe.json'), JSON.pretty_generate(
                            results.compact.map { |f, n, o, m, l| { file: f, fn: n, ok: o, error: m, line: l } }))
             end
           end
@@ -430,7 +434,7 @@ module SelfhostFnProbe
 
       puts format('  %3d/%3d fail  %s', bad, rs.length, f)
     end
-    File.write(File.join(ROOT, only_file ? '.fn_probe_file.json' : '.fn_probe.json'), JSON.pretty_generate(
+    File.write(File.join(ROOT, (only_file || only_fns) ? '.fn_probe_file.json' : '.fn_probe.json'), JSON.pretty_generate(
                  results.compact.map { |f, n, o, m, l| { file: f, fn: n, ok: o, error: m, line: l } }
                ))
     warn "\nwrote .fn_probe.json"

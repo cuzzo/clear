@@ -2203,8 +2203,7 @@ PRIVATE FN capabilityAuditSession__with_new_scope<RESULT>(self: CapabilityAuditS
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-  DEFER rtoc_self_view.scope_stack.pop();
-  MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_13: ?Scope = NIL;
+    MUTABLE new_scope = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_13: ?Scope = NIL;
     IF (scope == NIL) THEN
       rtoc_ternary_value_13 = scope__new();
     ELSE
@@ -2212,6 +2211,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     rtoc_ternary_value_13? };
   MUTABLE stack: []Scope@multiowned = (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
+  # Ruby's ensure pops capabilityAuditSession#scope_stack, which builds a fresh
+  # [semantic_root_scope] on every call -- the pop is a no-op on a temporary,
+  # and DEFER may not allocate one.
   new_scope.depth = stack.length();
   &stack.push(new_scope);
   RETURN blk();

@@ -17,7 +17,10 @@ PUB STRUCT MatchLoweringFacts {
 PUB STRUCT UnionMatchArmPlan {
   variant: String,
   body: []Emittable,
-  payload_name: ?String
+  payload_name: ?String,
+  # Ruby declares this alongside the payload: a mutable arm binding captures
+  # by pointer so writes land on the matched union.
+  pointer_payload: Bool
 }
 PUB STRUCT ForEachPlan {
   var: String,
