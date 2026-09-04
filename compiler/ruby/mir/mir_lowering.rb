@@ -1373,7 +1373,24 @@ class MIRLowering
 
   sig { params(value: MIR::Node).returns(MIR::Call) }
   def active_tag_call(value)
-    MIR::Call.new("std.meta.activeTag", [value], false, false, MIR::CallableContract.no_ownership(1))
+    # Zig auto-derefs field access through a single-item pointer, so a
+    # pointer-captured union reads its payload fine -- but activeTag takes
+    # anytype and sees the pointer type, so this one call needs the deref.
+    tagged = pointer_shaped_ident?(value) ? MIR::Deref.new(value) : value
+    MIR::Call.new("std.meta.activeTag", [tagged], false, false, MIR::CallableContract.no_ownership(1))
+  end
+
+  sig { params(value: MIR::Node).returns(T::Boolean) }
+  def pointer_shaped_ident?(value)
+    value.is_a?(MIR::Ident) && capture_state.current_lambda_pointer_params.include?(value.name.to_s)
+  end
+
+  # Zig's `switch` does not auto-deref, so a pointer-captured union has to be
+  # dereferenced before it can be matched on. Field access through the same
+  # pointer needs nothing.
+  sig { params(value: MIR::Node).returns(MIR::Node) }
+  def deref_if_pointer_shaped(value)
+    pointer_shaped_ident?(value) ? MIR::Deref.new(value) : value
   end
 
   sig { params(expr: MIR::Node, ast_node: AST::Node, context: String).returns(Type) }
@@ -1667,7 +1684,7 @@ class MIRLowering
     variant_name, _payload_type = unique_mir_union_payload_variant(schema, target_type)
     return nil unless variant_name
 
-    MIR::UnionPayloadGet.new(mir, variant_name)
+    MIR::UnionPayloadGet.new(deref_if_pointer_shaped(mir), variant_name)
   end
 
   sig { params(schema: Schemas::UnionSchema, actual_type: Type).returns([T.nilable(String), T.nilable(Type)]) }

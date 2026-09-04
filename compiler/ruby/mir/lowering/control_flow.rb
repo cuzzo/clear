@@ -208,7 +208,7 @@ module MIRLoweringControlFlow
     return [] unless binding
 
     mutable_binding = condition.binding_mutable == true
-    payload = T.let(MIR::UnionPayloadGet.new(subject, variant, mutable_binding), MIR::Emittable)
+    payload = T.let(MIR::UnionPayloadGet.new(deref_if_pointer_shaped(subject), variant, mutable_binding), MIR::Emittable)
     payload = MIR::Deref.new(payload) if condition.runtime_indirect_payload_as
     is_mutable = mutable_binding ||
                  (condition.left.is_a?(AST::Identifier) && condition.left.was_moved == true)
@@ -257,9 +257,17 @@ module MIRLoweringControlFlow
         owns_capture: AST.capture_expr_owns_result?(b.expr),
         predicate: b.predicate,
         pointer_capture: b.mutable == true,
+        pointer_shaped: plain_map_pointer_bind?(b.expr) || mutable_struct_list_bind?(b.expr) ||
+                        union_list_pointer_bind?(b.expr),
       }
     end
-    lowered_then = with_if_bind_alias_maps(node) { lower_body(node.then_branch) }
+    # A capture lowered through getPtrOpt/getPtr IS a Zig pointer inside the
+    # branch. Field access auto-derefs, but `switch` and std.meta.activeTag do
+    # not -- record the names so union matching on them derefs first.
+    pointer_binds = mir_bindings.select { |b| b[:pointer_shaped] }.map { |b| b[:capture].to_s }
+    lowered_then = with_pointer_shaped_binds(pointer_binds) do
+      with_if_bind_alias_maps(node) { lower_body(node.then_branch) }
+    end
     # CleanupClassifier/MIRPass stamps production IF-bind bodies with the
     # capture AllocMark + Drop pair. Keep the fallback for directly-constructed
     # ASTs used by lowering clients, but never emit a second owner for the same
@@ -303,6 +311,36 @@ module MIRLoweringControlFlow
   # Every shape a plain-map parameter can bind to answers `getPtr` (see the
   # getPtr contract note in zig/lib/data-structures.zig); shared-nothing
   # partitioned maps answer with a @compileError naming the fix.
+  # An indexed list slot whose element is a union lowers through getAtPtrOpt so
+  # MATCH can inspect the slot without copying an ownership-bearing payload.
+  sig { params(expr: AST::Node).returns(T::Boolean) }
+  def union_list_pointer_bind?(expr)
+    T.bind(self, MIRLowering) rescue nil
+    return false unless expr.is_a?(AST::GetIndex)
+
+    receiver = expr.target.full_type!(context: "IF list binding receiver")
+    return false unless receiver.list_collection?
+
+    result = expr.full_type!(context: "IF list binding result")
+    inner = result.optional? ? T.must(result.wrapped_type) : result
+    name = inner.generic_instance? ? inner.generic_base : inner.resolved
+    !!(name && union_schemas.key?(name))
+  end
+
+  sig { params(names: T::Array[String], blk: T.proc.returns(T.untyped)).returns(T.untyped) }
+  def with_pointer_shaped_binds(names, &blk)
+    T.bind(self, MIRLowering) rescue nil
+    return blk.call if names.empty?
+
+    previous = capture_state.current_lambda_pointer_params
+    capture_state.current_lambda_pointer_params = previous | names
+    begin
+      blk.call
+    ensure
+      capture_state.current_lambda_pointer_params = previous
+    end
+  end
+
   sig { params(expr: AST::Node).returns(T::Boolean) }
   def plain_map_pointer_bind?(expr)
     T.bind(self, MIRLowering) rescue nil
@@ -563,8 +601,8 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     return blk.call unless node.is_mutable == true
 
-    elem = (Type.new(node.collection.full_type!).element_type rescue nil)
-    return blk.call unless elem&.resolved && struct_schemas.key?(elem.resolved)
+    ct = (Type.new(node.collection.full_type!) rescue nil)
+    return blk.call unless ct && aggregate_for_each_element?(ct)
 
     previous = capture_state.current_lambda_pointer_params
     capture_state.current_lambda_pointer_params = previous | [var]
@@ -573,6 +611,16 @@ module MIRLoweringControlFlow
     ensure
       capture_state.current_lambda_pointer_params = previous
     end
+  end
+
+  sig { params(ct: Type).returns(T::Boolean) }
+  def aggregate_for_each_element?(ct)
+    T.bind(self, MIRLowering) rescue nil
+    elem = ct.element_type
+    sym = elem&.resolved
+    return false unless sym
+
+    !!(struct_schemas.key?(sym) || union_schemas.key?(sym))
   end
 
   sig { params(node: AST::ForEach).returns(ForEachPlan) }
@@ -763,13 +811,12 @@ module MIRLoweringControlFlow
       else
         MIR::AddressOf.new(coll)
       end
-      # Pointer capture (|*var|) is only needed when iterating structs with mutable field
-      # access. For primitive/enum/union element types, value capture (|var|) is correct
-      # because primitives are Copy types and can't be meaningfully mutated in-place.
+      # Pointer capture (|*var|) is what makes FOR MUTABLE write back. It is
+      # needed for every aggregate element -- a union's payload is mutable data
+      # just as a struct's fields are. Primitives and enums stay value-captured
+      # because they are Copy and cannot be mutated in place.
       capture = if plan.mutable
-        elem = ct.element_type
-        elem_sym = elem&.resolved
-        (elem_sym && struct_schemas.key?(elem_sym)) ? "*#{var}" : var
+        aggregate_for_each_element?(ct) ? "*#{var}" : var
       else
         var
       end
@@ -917,7 +964,7 @@ module MIRLoweringControlFlow
 
   sig { params(match_case: AST::MatchCase, subject: MIR::Emittable, variant: String, is_mutable: T::Boolean).returns(MatchBody) }
   def union_if_chain_payload_bindings(match_case, subject, variant, is_mutable)
-    payload = T.let(MIR::UnionPayloadGet.new(subject, variant.to_s), MIR::Emittable)
+    payload = T.let(MIR::UnionPayloadGet.new(deref_if_pointer_shaped(subject), variant.to_s), MIR::Emittable)
     payload = MIR::Deref.new(payload) if match_case.indirect_payload_as
     if match_case.binding
       safe_binding = payload_binding_name(T.must(match_case.binding).to_s, match_case,

@@ -1,0 +1,44 @@
+# A union element is mutable aggregate data, so FOR MUTABLE must capture it by
+# pointer too -- value capture silently dropped the write. Zig auto-derefs
+# field access through the pointer, but `switch` and std.meta.activeTag do not,
+# so union matching on a pointer-shaped binding has to deref first. The same
+# applies to an IF-bind over a list slot, which lowers through getAtPtrOpt.
+STRUCT A { n: Int64 }
+STRUCT B { s: String }
+UNION Node { A: A, B: B }
+
+FN main() RETURNS Void ->
+    MUTABLE xs: []Node = [Node{ A: A{ n: 1_i64 } }, Node{ A: A{ n: 2_i64 } }];
+    FOR MUTABLE x IN xs DO
+        IF x IS_A A AS MUTABLE a THEN
+            a.n = a.n * 10_i64;
+        END
+    END
+
+    # Reading back goes through an IF-bind over a list slot, which is itself
+    # pointer-shaped for a union element.
+    IF xs[0] EXISTS AS first THEN
+        IF first IS_A A AS fa THEN
+            ASSERT fa.n == 10_i64, "first written in place";
+        END
+    END
+    IF xs[1] EXISTS AS second THEN
+        IF second IS_A A AS sa THEN
+            ASSERT sa.n == 20_i64, "second written in place";
+        END
+    END
+
+    # A non-matching variant is left alone.
+    MUTABLE ys: []Node = [Node{ B: B{ s: "keep" } }];
+    FOR MUTABLE y IN ys DO
+        IF y IS_A A AS MUTABLE ya THEN
+            ya.n = 99_i64;
+        END
+    END
+    IF ys[0] EXISTS AS only THEN
+        IF only IS_A B AS ob THEN
+            ASSERT ob.s == "keep", "other variant untouched";
+        END
+    END
+    RETURN;
+END
