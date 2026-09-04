@@ -3808,10 +3808,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CallArgumentFacts{ site: COPY site, index: COPY index_value, param: COPY param, arg_node: COPY arg_node, is_give: is_give, inner_node: COPY inner_node, arg_type: COPY arg_type, expected_type: COPY param.type, actual_type: COPY arg_type, actual: COPY actual, path: COPY TRY (typeAnalysisSession__get_path_to_root(rtoc_self_view, castLocatableToNode__type_analysis_session(arg_node))), explicit_mutable: callSignatureSite__explicit_mutable_argument?(site, index_value), mutable_marker_token: callSignatureSite__explicit_mutable_argument_token(site, index_value) };
 }
 END
-PRIVATE FN typeAnalysisSession__verify_copy_retained_boundary_mut(self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_copy_retained_boundary_mut(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE arg = COPY facts.arg_node;
     IF arg IS_A CopyNode AS copy_node THEN
       MUTABLE copy_node_mutable = COPY copy_node;
@@ -3837,7 +3837,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         name = "the value";
       END
-      (TRY (typeAnalysisSession__deferred_copy_retained_validations(rtoc_self_view))).append(DeferredCopyRetainedValidation{ arg_node: Locatable{ CopyNode: COPY copy_node_mutable }, name: COPY name, carrier: COPY carrier, callee_name: COPY aST__node_name(UNWRAP (castFunctionCallNodeToLocatable(facts.site.node))), param_index: facts.index });
+      &rtoc_self_view.audit_inputs.deferred_copy_retained_validations.append(DeferredCopyRetainedValidation{ arg_node: Locatable{ CopyNode: COPY copy_node_mutable }, name: COPY name, carrier: COPY carrier, callee_name: COPY (aST__node_name(UNWRAP (castFunctionCallNodeToLocatable(facts.site.node))) OR_ELSE ""), param_index: facts.index });
     ELSE
       RETURN;
     END
@@ -9464,13 +9464,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__record_predicate_call_site_mut(self: TypeAnalysisSession, node: Node) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_predicate_call_site_mut(MUTABLE self: TypeAnalysisSession, node: Node) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ctx: ?PredicateContext = typeAnalysisSession__current_predicate_context(rtoc_self_view);
     IF ctx EXISTS AS ctx_value THEN
-      (TRY (typeAnalysisSession__predicate_call_sites(rtoc_self_view))).append(PredicateCallSite{ kind: COPY ctx_value.kind, with_node: KEEP ctx_value.with_node, fn_node: COPY ctx_value.fn_node, pred_expr: COPY ctx_value.pred_expr, call: node, callee: COPY aST__node_name(UNWRAP (castNodeToLocatable(node))) });
+      &rtoc_self_view.audit_inputs.predicate_call_sites.append(PredicateCallSite{ kind: COPY ctx_value.kind, with_node: COPY ctx_value.with_node, fn_node: COPY ctx_value.fn_node, pred_expr: COPY ctx_value.pred_expr, call: COPY castNodeToPredicateCall(node), callee: (COPY aST__node_name(UNWRAP (castNodeToLocatable(node))) OR_ELSE "")});
     ELSE
       RETURN;
     END
@@ -12048,12 +12048,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     IF TRY (typeAnalysisSession__resolve_user_protocol_function_call_mut(&rtoc_self_view, &node)) THEN
-      TRY (typeAnalysisSession__record_predicate_call_site_mut(rtoc_self_view, Node{ FuncCall: COPY node }));
+      TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ FuncCall: COPY node }));
       TRY (typeAnalysisSession__record_named_call_site_mut(rtoc_self_view, &node));
       RETURN;
     END
     TRY (typeAnalysisSession__resolve_call(&rtoc_self_view, FunctionCallNode{ FuncCall: COPY node }, node.args));
-    TRY (typeAnalysisSession__record_predicate_call_site_mut(rtoc_self_view, Node{ FuncCall: COPY node }));
+    TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ FuncCall: COPY node }));
     TRY (typeAnalysisSession__record_named_call_site_mut(rtoc_self_view, &node));
     TRY (typeAnalysisSession__record_held_lock_call_site_mut(rtoc_self_view, node));
     NIL;
@@ -12146,7 +12146,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
       TRY (typeAnalysisSession__reject_mutating_borrowed_receiver_mut(rtoc_self_view, node));
-      TRY (typeAnalysisSession__record_predicate_call_site_mut(rtoc_self_view, Node{ MethodCall: COPY node }));
+      TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ MethodCall: COPY node }));
       TRY (typeAnalysisSession__finalize_tense_navigation_method_mut(rtoc_self_view, &node));
       RETURN;
     END
@@ -12351,7 +12351,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE rtoc_mutable_receiver_295 = (typeAnalysisSession__current_fn_ctx(rtoc_self_view));
         functionContext__mark_runtime_used_mut(&rtoc_mutable_receiver_295);
     END
-    TRY (typeAnalysisSession__record_predicate_call_site_mut(rtoc_self_view, Node{ MethodCall: COPY node }));
+    TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ MethodCall: COPY node }));
     RETURN TRUE;
 }
 END
@@ -12411,7 +12411,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.name = ImplementationRegistration.function_name(CAST(owner AS String), source_name);
     TRY (typeAnalysisSession__resolve_call(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, ([node.object] + node.args)));
     TRY (typeAnalysisSession__reject_mutating_borrowed_receiver_mut(rtoc_self_view, node));
-    TRY (typeAnalysisSession__record_predicate_call_site_mut(rtoc_self_view, Node{ MethodCall: COPY node }));
+    TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ MethodCall: COPY node }));
     typeAnalysisSession__record_call_site(rtoc_self_view, node.name);
     RETURN TRUE;
 }
@@ -12558,7 +12558,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ FuncCall: COPY call }, resolved_return));
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ StaticCall: COPY node }, resolved_return));
     node.inherent_call = call;
-    TRY (typeAnalysisSession__record_predicate_call_site_mut(rtoc_self_view, Node{ FuncCall: COPY call }));
+    TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ FuncCall: COPY call }));
     TRY (typeAnalysisSession__record_named_call_site_mut(rtoc_self_view, &call));
 }
 END
@@ -12732,7 +12732,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &node, functionSignature__return_type(method_sig)));
     TRY (typeAnalysisSession__record_effect(rtoc_self_view, symbol("EXTERN")));
     TRY (typeAnalysisSession__record_extern_method_alloc_mut(rtoc_self_view, method_sig));
-    TRY (typeAnalysisSession__record_predicate_call_site_mut(rtoc_self_view, Node{ MethodCall: COPY node }));
+    TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ MethodCall: COPY node }));
     RETURN TRUE;
 }
 END
@@ -12799,7 +12799,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           locatable__set_coerced_type_object_mut(&value_arg, element_type);
         END
       END
-      TRY (typeAnalysisSession__record_predicate_call_site_mut(rtoc_self_view, Node{ MethodCall: COPY node }));
+      TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ MethodCall: COPY node }));
       RETURN TRUE;
     ELSE
       RETURN FALSE;

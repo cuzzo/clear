@@ -75,6 +75,14 @@ PUB STRUCT PredicateContext {
   fn_name: ?String
 }
 PUB UNION PredicateCall { FuncCall: FuncCall, MethodCall: MethodCall }
+PUB FN castNodeToPredicateCall(value: Node) RETURNS PredicateCall ->
+  PARTIAL MATCH value START
+    Node.FuncCall AS cast_payload -> RETURN PredicateCall{ FuncCall: COPY cast_payload };,
+    Node.MethodCall AS cast_payload -> RETURN PredicateCall{ MethodCall: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to PredicateCall");
+  END
+  panic("Invalid cast to PredicateCall");
+END
 PUB STRUCT PredicateCallSite {
   kind: String@symbol,
   with_node: ?WithBlock,
