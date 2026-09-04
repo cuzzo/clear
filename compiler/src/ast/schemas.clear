@@ -617,6 +617,15 @@ PUB FN structSchema__new(fields: {String@symbol}SchemasStructSchemaFieldInput, t
   RETURN self @multiowned;
 END
 PUB UNION SchemaValue { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned }
+PUB FN schemaValue__type_params(self: SchemaValue) RETURNS []String@symbol ->
+  PARTIAL MATCH self START
+    SchemaValue.EnumSchemaMultiowned AS item -> RETURN COPY item.type_params;,
+    SchemaValue.StructSchemaMultiowned AS item -> RETURN COPY item.type_params;,
+    SchemaValue.UnionSchemaMultiowned AS item -> RETURN COPY item.type_params;,
+    SchemaValue.ResourceSchemaMultiowned AS item -> RETURN COPY item.type_params;
+  END
+  RETURN List[];
+END
 PUB UNION FieldBearingSchema { StructSchemaMultiowned: StructSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, InlineStructVariantMultiowned: InlineStructVariant@multiowned }
 PUB FN struct?(s: ?SchemaValue) RETURNS Bool ->
   IF s EXISTS AS schema_value THEN

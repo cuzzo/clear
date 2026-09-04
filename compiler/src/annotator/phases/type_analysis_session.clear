@@ -7762,7 +7762,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN;
     END
-    MUTABLE schema: ?GenericSchema = TRY (typeAnalysisSession__annotation_schema_for_mut(rtoc_self_view, facts.node, base_name));
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__annotation_schema_for_mut(rtoc_self_view, facts.node, base_name));
     MUTABLE type_params = TRY (typeAnalysisSession__schema_type_params(rtoc_self_view, schema));
     IF (type_params.length() == 0) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castAnnotationNodeToLocatable(facts.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_NOT_GENERIC }, [], CAST({:type: base_name} AS {String@symbol}Any)));
@@ -7814,7 +7814,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         RETURN;
       END
-      MUTABLE nested_schema: ?GenericSchema = CAST(TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__generic_base(arg))) AS ?GenericSchema);
+      MUTABLE nested_schema: ?SchemaValue = CAST(TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__generic_base(arg))) AS ?SchemaValue);
       IF (nested_schema == NIL) THEN
         TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_TYPE_ARG }, [], CAST({:type: type__resolved(arg)} AS {String@symbol}Any)));
       END
@@ -7833,7 +7833,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF facts.fn_type_params.contains?(type__resolved(arg)) THEN
       RETURN;
     END
-    MUTABLE arg_schema: ?GenericSchema = CAST(TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(arg))) AS ?GenericSchema);
+    MUTABLE arg_schema: ?SchemaValue = CAST(TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, type__resolved(arg))) AS ?SchemaValue);
     IF (arg_schema == NIL) THEN
       TRY (typeAnalysisSession__error_mut(rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_TYPE_ARG }, [], CAST({:type: type__resolved(arg)} AS {String@symbol}Any)));
     END
@@ -7853,7 +7853,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF facts.fn_type_params.contains?(base_name) THEN
       RETURN;
     END
-    MUTABLE schema: ?GenericSchema = CAST(TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, base_name)) AS ?GenericSchema);
+    MUTABLE schema: ?SchemaValue = CAST(TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, base_name)) AS ?SchemaValue);
     MUTABLE type_params = TRY (typeAnalysisSession__schema_type_params(rtoc_self_view, schema));
     IF (type_params.length() == 0) THEN
       RETURN;
@@ -7862,11 +7862,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     TRY (typeAnalysisSession__error_mut(rtoc_self_view, diagnosticAnchor__of(castAnnotationNodeToLocatable(facts.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MISSING_TYPE_ARGS }, [], CAST({:type: base_name, :type2: base_name, :hint: params_hint} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__annotation_schema_for_mut(self: TypeAnalysisSession, node: AnnotationNode, base_name: String@symbol) RETURNS !?GenericSchema
+PRIVATE FN typeAnalysisSession__annotation_schema_for_mut(self: TypeAnalysisSession, node: AnnotationNode, base_name: String@symbol) RETURNS !?SchemaValue
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE schema: ?GenericSchema = CAST(TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, base_name)) AS ?GenericSchema);
+    MUTABLE schema: ?SchemaValue = CAST(TRY (typeAnalysisSession__lookup_type_schema(rtoc_self_view, base_name)) AS ?SchemaValue);
     IF schema EXISTS AS schema_value THEN
       RETURN COPY schema_value;
     END
@@ -7886,14 +7886,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST(aST__node__token( UNWRAP (castAnnotationNodeToLocatable(node))) AS ?Token);
 }
 END
-PRIVATE FN typeAnalysisSession__schema_type_params(self: TypeAnalysisSession, schema: ?GenericSchema) RETURNS ![]String@symbol
+PRIVATE FN typeAnalysisSession__schema_type_params(self: TypeAnalysisSession, schema: ?SchemaValue) RETURNS ![]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((aST__node_type_params(schema) EXISTS)) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_176: []String@symbol = List[]; rtoc_empty_list_176 } ) AS []String@symbol);
+    IF schema EXISTS AS schema_value THEN
+      RETURN schemaValue__type_params(schema_value);
     END
-    RETURN CAST(schema.type_params() AS []String@symbol);
+    RETURN CAST(( { MUTABLE rtoc_empty_list_176: []String@symbol = List[]; rtoc_empty_list_176 } ) AS []String@symbol);
 }
 END
 PRIVATE FN typeAnalysisSession__infer_generic_type_args_mut(self: TypeAnalysisSession, node: GenericCallNode, signature: FunctionSignature, actual_args: []Locatable, type_params: []String@symbol) RETURNS !{String@symbol}GenericBinding
