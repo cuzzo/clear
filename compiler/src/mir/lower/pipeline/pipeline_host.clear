@@ -98,7 +98,7 @@ PRIVATE FN pipelineHost__build_scalar_lowerer(MUTABLE self: PipelineHost) RETURN
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN PipelineScalarLowerer{ loop_mark_stmts: %() USE(rtoc_self_view) -> {
-    rtoc_lambda_result_2 = TRY (pipelineLoweringBridge__pipeline_iteration_loop_marks(rtoc_self_view.lowering_bridge));
+    rtoc_lambda_result_2 = TRY (pipelineLoweringBridge__pipeline_iteration_loop_marks(&rtoc_self_view.lowering_bridge));
     rtoc_lambda_result_2
     }, visit_expr: %(ignored_list_node, expr_node, placeholder) USE(MUTABLE rtoc_self_view) -> pipelineHost__with_pipeline_context(&rtoc_self_view, placeholder, NIL, %() USE(expr_node, rtoc_self_view) -> TRY (pipelineHost__visit_mir(&rtoc_self_view, expr_node))), pipeline_block: %(list_node, blk) USE(rtoc_self_view) -> TRY (pipelineHost__pipeline_block(&rtoc_self_view, &list_node, %(items: String, label: String) USE(blk) -> blk(items, label))), transpile_type: %(type_info) USE(rtoc_self_view) -> TRY (pipelineHost__transpile_type( &rtoc_self_view, type_info)) };
 }
@@ -852,10 +852,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelineHost__with_pipeline_context(&rtoc_self_view, placeholder, NIL, %() USE(expr_node, rtoc_self_view) -> TRY (pipelineHost__visit_mir( &rtoc_self_view, expr_node)));
 }
 END
-PRIVATE FN pipelineHost__ast_uses_bare_placeholder?(self: PipelineHost, node: ?Locatable) RETURNS Bool
+PRIVATE FN pipelineHost__ast_uses_bare_placeholder?(MUTABLE self: PipelineHost, node: ?Locatable) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelinePlaceholderUsage__node_uses_bare_placeholder?(node);
 }
 END
@@ -1300,7 +1300,7 @@ PRIVATE FN pipelineHost__lower_concurrent(MUTABLE self: PipelineHost, site: Pipe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (pipelineConcurrentLowerer__lower(rtoc_self_view.concurrent_lowerer, site.options, conc_op));
+    RETURN TRY (pipelineConcurrentLowerer__lower(&rtoc_self_view.concurrent_lowerer, site.options, conc_op));
 }
 END
 PRIVATE FN pipelineHost__transpile_type(self: PipelineHost, type: Type, is_param: Bool = FALSE, is_field: Bool = FALSE) RETURNS !String

@@ -74,7 +74,7 @@ PUB FN pipelineLoweringBridge__next_pipeline_observable_id(MUTABLE self: Pipelin
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN mIRLowering__next_pipeline_observable_id(rtoc_self_view.lowering);
+    RETURN mIRLowering__next_pipeline_observable_id(&rtoc_self_view.lowering);
 }
 END
 PUB FN pipelineLoweringBridge__task_config_variant(self: PipelineLoweringBridge, size_name: ?String@symbol) RETURNS String
@@ -146,7 +146,7 @@ PUB FN pipelineLoweringBridge__append_ownership_transfers_for_mir_body(MUTABLE s
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIRLowering__append_ownership_transfers_for_mir_body(rtoc_self_view.lowering, body));
+    RETURN TRY (mIRLowering__append_ownership_transfers_for_mir_body(&rtoc_self_view.lowering, body));
 }
 END
 PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(MUTABLE self: PipelineLoweringBridge, MUTABLE value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE, accept_owned_call: Bool = FALSE, include_cleanup: Bool = FALSE) RETURNS !?PipelineBridgeAllocationFact
@@ -154,7 +154,7 @@ PUB FN pipelineLoweringBridge__pipeline_alloc_mark_fact(MUTABLE self: PipelineLo
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fact: ?PipelineAllocMarkFact = TRY (mIRLowering__pipeline_alloc_mark_fact(rtoc_self_view.lowering, &value, name, fallback_alloc, type_info, ast_node, context, known_allocating, accept_owned_call, include_cleanup));
+    MUTABLE fact: ?PipelineAllocMarkFact = TRY (mIRLowering__pipeline_alloc_mark_fact(&rtoc_self_view.lowering, &value, name, fallback_alloc, type_info, ast_node, context, known_allocating, accept_owned_call, include_cleanup));
     IF fact EXISTS AS fact_value THEN
       RETURN PipelineBridgeAllocationFact{ alloc: COPY fact_value.alloc, mark: COPY fact_value.mark, cleanup_entry: KEEP fact_value.cleanup_entry };
     ELSE
@@ -167,7 +167,7 @@ PUB FN pipelineLoweringBridge__pipeline_owned_cleanup_entry(self: PipelineLoweri
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIRLowering__pipeline_owned_cleanup_entry(rtoc_self_view.lowering, value, ast_node));
+    RETURN TRY (mIRLowering__pipeline_owned_cleanup_entry(&rtoc_self_view.lowering, value, ast_node));
 }
 END
 PUB FN pipelineLoweringBridge__pipeline_iteration_loop_marks(MUTABLE self: PipelineLoweringBridge) RETURNS ![]Emittable
@@ -175,7 +175,7 @@ PUB FN pipelineLoweringBridge__pipeline_iteration_loop_marks(MUTABLE self: Pipel
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIRLowering__pipeline_iteration_loop_marks(rtoc_self_view.lowering));
+    RETURN TRY (mIRLowering__pipeline_iteration_loop_marks(&rtoc_self_view.lowering));
 }
 END
 PUB FN pipelineLoweringBridge__with_pipeline_decl_alloc<U>(MUTABLE self: PipelineLoweringBridge, alloc: String@symbol, blk: FN() -> U) RETURNS U
@@ -190,7 +190,7 @@ PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(MUTABLE self
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIRLowering__pipeline_index_insert_with_ownership(rtoc_self_view.lowering, &insert, value, value_owns, target_alloc));
+    RETURN TRY (mIRLowering__pipeline_index_insert_with_ownership(&rtoc_self_view.lowering, &insert, value, value_owns, target_alloc));
 }
 END
 PUB FN pipelineLoweringBridge__with_runtime_binding_name<U>(self: PipelineLoweringBridge, rt_name: String, blk: FN() -> U) RETURNS U
@@ -213,7 +213,7 @@ PUB FN pipelineLoweringBridge__execution_boundary_fact(MUTABLE self: PipelineLow
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIRLowering__pipeline_execution_boundary_fact(rtoc_self_view.lowering, kind, dispatch, analysis));
+    RETURN TRY (mIRLowering__pipeline_execution_boundary_fact(&rtoc_self_view.lowering, kind, dispatch, analysis));
 }
 END
 PUB FN pipelineLoweringBridge__with_shard_context<U>(MUTABLE self: PipelineLoweringBridge, context: ?{String@symbol}String, blk: FN() -> U) RETURNS !U

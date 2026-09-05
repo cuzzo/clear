@@ -762,10 +762,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN rtoc_self_view.config.strict_test;
 }
 END
-PUB FN typeAnalysisSession__struct_literal_call_argument_context?(self: TypeAnalysisSession) RETURNS Bool
+PUB FN typeAnalysisSession__struct_literal_call_argument_context?(MUTABLE self: TypeAnalysisSession) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (rtoc_self_view.traversal_state.struct_literal_call_argument_depth > 0);
 }
 END
@@ -1418,10 +1418,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__outer_scope_vars(self: TypeAnalysisSession) RETURNS ![Set]String
+PRIVATE FN typeAnalysisSession__outer_scope_vars(MUTABLE self: TypeAnalysisSession) RETURNS ![Set]String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (rtoc_self_view.traversal_state.scopes |> UNNEST TRY (scope__visible_names(&_))) |> DISTINCT _;
 }
 END
@@ -1937,10 +1937,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__smallest_fitting_int_type(self: TypeAnalysisSession, val: Int64) RETURNS ?String@symbol
+PRIVATE FN typeAnalysisSession__smallest_fitting_int_type(MUTABLE self: TypeAnalysisSession, val: Int64) RETURNS ?String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE order = IF (val >= 0) THEN
       fixableHelpers__unsigned_order()
     ELSE
@@ -1967,10 +1967,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN selected;
 }
 END
-PRIVATE FN typeAnalysisSession__annotation_type_column(self: TypeAnalysisSession, prefix: String, target_name: String) RETURNS ?Int64
+PRIVATE FN typeAnalysisSession__annotation_type_column(MUTABLE self: TypeAnalysisSession, prefix: String, target_name: String) RETURNS ?Int64
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE idx = 0;
     MUTABLE found: ?Int64 = NIL;
     WHILE (idx < prefix.codepointCount()) DO
@@ -1992,17 +1992,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN found;
 }
 END
-PRIVATE FN typeAnalysisSession__whitespace_char?(self: TypeAnalysisSession, ch: ?String) RETURNS Bool
+PRIVATE FN typeAnalysisSession__whitespace_char?(MUTABLE self: TypeAnalysisSession, ch: ?String) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ((ch == " ") OR (ch == "\t"));
 }
 END
-PRIVATE FN typeAnalysisSession__identifier_char_at?(self: TypeAnalysisSession, text: String, idx: Int64) RETURNS Bool
+PRIVATE FN typeAnalysisSession__identifier_char_at?(MUTABLE self: TypeAnalysisSession, text: String, idx: Int64) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (idx >= text.codepointCount()) THEN
       RETURN FALSE;
     END
@@ -2548,10 +2548,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__literal_source_length(self: TypeAnalysisSession, tok: Token) RETURNS Int64
+PRIVATE FN typeAnalysisSession__literal_source_length(MUTABLE self: TypeAnalysisSession, tok: Token) RETURNS Int64
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = typeAnalysisSession__source_code(rtoc_self_view);
     IF src EXISTS AS src_value THEN
       MUTABLE line: ?String = COPY src_value.split("\n")[(tok.line - 1)];
@@ -2596,10 +2596,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__build_cast_wrap_fix(self: TypeAnalysisSession, value: ?Locatable, target_type: TypeTypeInput) RETURNS !?Fix
+PRIVATE FN typeAnalysisSession__build_cast_wrap_fix(MUTABLE self: TypeAnalysisSession, value: ?Locatable, target_type: TypeTypeInput) RETURNS !?Fix
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF value EXISTS AS value_value THEN
       IF !(locatable__token(value_value)) THEN
         RETURN NIL;
@@ -2627,10 +2627,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__build_decl_cap_insert_fix(self: TypeAnalysisSession, name: String, sigil: String, description_code: String@symbol = :ADD_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}DiagnosticKwValue, confidence: String@symbol = :auto) RETURNS !?Fix
+PRIVATE FN typeAnalysisSession__build_decl_cap_insert_fix(MUTABLE self: TypeAnalysisSession, name: String, sigil: String, description_code: String@symbol = :ADD_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}DiagnosticKwValue, confidence: String@symbol = :auto) RETURNS !?Fix
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = typeAnalysisSession__source_code(rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
@@ -2667,10 +2667,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__build_decl_cap_replace_fix(self: TypeAnalysisSession, name: String, old_sigil: String, new_sigil: String, description_code: String@symbol = :CHANGE_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}DiagnosticKwValue, confidence: String@symbol = :auto) RETURNS !?Fix
+PRIVATE FN typeAnalysisSession__build_decl_cap_replace_fix(MUTABLE self: TypeAnalysisSession, name: String, old_sigil: String, new_sigil: String, description_code: String@symbol = :CHANGE_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}DiagnosticKwValue, confidence: String@symbol = :auto) RETURNS !?Fix
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = typeAnalysisSession__source_code(rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
@@ -2722,10 +2722,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__build_declare_mutable_fix(self: TypeAnalysisSession, name: String, scope: Scope) RETURNS !?Fix
+PRIVATE FN typeAnalysisSession__build_declare_mutable_fix(MUTABLE self: TypeAnalysisSession, name: String, scope: Scope) RETURNS !?Fix
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE info: ?SymbolEntry@multiowned = scope__resolve_entry(scope, name);
     IF info EXISTS AS info_value THEN
       MUTABLE tok: ?Token = NIL;
@@ -2747,10 +2747,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__build_atomic_escape_migration_fix(self: TypeAnalysisSession, source_sym: SymbolEntry, source_name: String) RETURNS !?Fix
+PRIVATE FN typeAnalysisSession__build_atomic_escape_migration_fix(MUTABLE self: TypeAnalysisSession, source_sym: SymbolEntry, source_name: String) RETURNS !?Fix
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = typeAnalysisSession__source_code(rtoc_self_view);
     IF !(((TRUE AND TRUE) AND symbolEntry__atomic?(source_sym))) THEN
       RETURN NIL;
@@ -2792,10 +2792,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__auto_rank_candidates(self: TypeAnalysisSession, ops: [Set]String@symbol) RETURNS ![]AutoCandidate
+PRIVATE FN typeAnalysisSession__auto_rank_candidates(MUTABLE self: TypeAnalysisSession, ops: [Set]String@symbol) RETURNS ![]AutoCandidate
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (FALSE OR ops.empty?()) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_36: []AutoCandidate = List[]; rtoc_empty_list_36 } ) AS []AutoCandidate);
     END
@@ -2849,10 +2849,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__build_auto_op_evidence_block(self: TypeAnalysisSession, ops: [Set]String@symbol, candidates: []AutoCandidate) RETURNS String
+PRIVATE FN typeAnalysisSession__build_auto_op_evidence_block(MUTABLE self: TypeAnalysisSession, ops: [Set]String@symbol, candidates: []AutoCandidate) RETURNS String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (candidates.length() == 0) THEN
       RETURN "";
     END
@@ -6628,10 +6628,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__numeric_literal_value(self: TypeAnalysisSession, expr: Locatable) RETURNS ?Float64
+PRIVATE FN typeAnalysisSession__numeric_literal_value(MUTABLE self: TypeAnalysisSession, expr: Locatable) RETURNS ?Float64
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expr IS_A Literal AS literal THEN
       RETURN UNWRAP (literal.value).to_f();
     ELSE
@@ -6644,10 +6644,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__queue_backed_concurrent_source?(self: TypeAnalysisSession, node: BinaryOp) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__queue_backed_concurrent_source?(MUTABLE self: TypeAnalysisSession, node: BinaryOp) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lhs = COPY node.left;
     MUTABLE lhs_type = TRY (aST__full_type_mut(lhs));
     RETURN (((((typeAnalysisSession__shard_concurrent_source?(rtoc_self_view, lhs) OR TRY (typeAnalysisSession__bounded_stream_source?(&rtoc_self_view, &lhs))) OR (IF TRUE THEN
@@ -6799,7 +6799,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cap: ?Locatable = COPY options["capacity"];
     IF cap EXISTS AS cap_value THEN
       MUTABLE cap_value_mutable = COPY cap_value;
-      IF !(TRY (typeAnalysisSession__queue_backed_concurrent_source?(rtoc_self_view, node))) THEN
+      IF !(TRY (typeAnalysisSession__queue_backed_concurrent_source?(&rtoc_self_view, node))) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY cap_value_mutable }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_CAPACITY_BAD_INPUT }));
       END
       TRY (typeAnalysisSession__validate_positive_numeric_concurrent_option_mut(&rtoc_self_view, "capacity", cap_value_mutable));
@@ -8862,10 +8862,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__promote_suspends_for_current_context(self: TypeAnalysisSession, effect: String@symbol) RETURNS String@symbol
+PRIVATE FN typeAnalysisSession__promote_suspends_for_current_context(MUTABLE self: TypeAnalysisSession, effect: String@symbol) RETURNS String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((effect == suspends)) THEN
       RETURN effect;
     END
@@ -12983,7 +12983,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.condition IS_A IsA AND node.comptime) THEN
       TRY (typeAnalysisSession__annotate_comptime_is_a_mut(&rtoc_self_view, castLocatableToIsA__type_analysis_session(node.condition)));
     ELSE
-      IF (node.condition IS_A IsA AND TRY (typeAnalysisSession__static_type_expr?(rtoc_self_view, locatable__left(node.condition)))) THEN
+      IF (node.condition IS_A IsA AND TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, locatable__left(node.condition)))) THEN
         TRY (typeAnalysisSession__emit_is_a_needs_comptime_fix_mut(&rtoc_self_view, node));
       END
       typeAnalysisSession__with_if_is_a_condition(&rtoc_self_view, node.condition, %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -13027,7 +13027,7 @@ PRIVATE FN typeAnalysisSession__visit_IsA(MUTABLE self: TypeAnalysisSession, MUT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !(TRY (typeAnalysisSession__static_type_expr?(rtoc_self_view, castLocatableToNode(node.left)))) THEN
+    IF !(TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, castLocatableToNode(node.left)))) THEN
       TRY (typeAnalysisSession__annotate_runtime_is_a_mut(&rtoc_self_view, &node));
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ IsA: COPY node }, :Bool));
       RETURN NIL;
@@ -13168,10 +13168,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__runtime_is_a_payload_matches?(self: TypeAnalysisSession, payload: ?MatchPayload, target_names: []String, union_type: String@symbol, variant_name: String) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__runtime_is_a_payload_matches?(MUTABLE self: TypeAnalysisSession, payload: ?MatchPayload, target_names: []String, union_type: String@symbol, variant_name: String) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF UNWRAP (payload) IS_A Type@multiowned AS type_multiowned THEN
       MUTABLE payload_name = TRY (type__coercion_surface_name(TypeTypeInput{ Type: COPY type_multiowned }));
       MUTABLE payload_names = (CAST(Tuple{payload_name, payload_name.split(".").last()} AS Tuple<String, ?String>)) |> DISTINCT _ |> SELECT COPY _;
@@ -13216,7 +13216,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     # Past the Type arm the operand is an AST node; the helpers below take
     # Ruby's T.any(AST::Node, Type), which is NodeOrType.
     MUTABLE node: NodeOrType = castLocatableToNodeOrType(castIsARightToLocatable(operand));
-    IF TRY (typeAnalysisSession__static_type_expr?(rtoc_self_view, node)) THEN
+    IF TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, node)) THEN
       TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, castNodeToLocatable__type_analysis_session( castNodeOrTypeToNode(node)), :Type));
     ELSE
       TRY (typeAnalysisSession__visit(&rtoc_self_view, castNodeToOptionalLocatable__type_analysis_session(castNodeOrTypeToNode(node))));
@@ -13228,10 +13228,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(castNodeOrTypeToNode(node))), TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_OPERAND_NEEDS_TYPE }, [], {:side: side, :got: CAST(type_info AS String)}));
 }
 END
-PRIVATE FN typeAnalysisSession__static_type_expr?(self: TypeAnalysisSession, node: NodeOrType) RETURNS !Bool
+PRIVATE FN typeAnalysisSession__static_type_expr?(MUTABLE self: TypeAnalysisSession, node: NodeOrType) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A Type AS type THEN
       RETURN TRUE;
     ELSE_IF node IS_A Identifier AS identifier THEN
@@ -15179,7 +15179,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__bind_declares_new_symbol?(MUTABLE self: TypeAnalysisSession, node: BindExpr, scope: Scope) RETURNS Bool
+PRIVATE FN typeAnalysisSession__bind_declares_new_symbol?(MUTABLE self: TypeAnalysisSession, node: BindExpr, MUTABLE scope: Scope) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -15342,7 +15342,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ Identifier: COPY node }, :Type));
         RETURN NIL;
       END
-      TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ TokenMultiowned: COPY node.token }, node.name, (TRY (typeAnalysisSession__outer_scope_vars(rtoc_self_view))) |> SELECT COPY _, "Undefined variable '${node.name}'", "closest in-scope variable"));
+      TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ TokenMultiowned: COPY node.token }, node.name, (TRY (typeAnalysisSession__outer_scope_vars(&rtoc_self_view))) |> SELECT COPY _, "Undefined variable '${node.name}'", "closest in-scope variable"));
       RETURN NIL;
     END
 }
@@ -16799,7 +16799,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ WithBlock: COPY node }, :Void));
 }
 END
-PRIVATE FN typeAnalysisSession__validate_with_match_source_shape_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, capability_plan: WithCapabilityPlan) RETURNS !Void
+PRIVATE FN typeAnalysisSession__validate_with_match_source_shape_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, capability_plan: WithCapabilityPlan) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
