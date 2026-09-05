@@ -1252,7 +1252,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (scope__resolve_type_entry(rtoc_local_receiver_28, symbol(_.owner_name))) } THEN
           TRY (resolutionSession__error_mut(&rtoc_self_view, (IF _.owner_token EXISTS AS rtoc_wrap_1252 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_1252 } ELSE NIL END), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_NONLOCAL_OWNER }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
         ELSE
-          TRY (resolutionSession__error_mut(&rtoc_self_view, _.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_UNKNOWN_OWNER }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
+          TRY (resolutionSession__error_mut(&rtoc_self_view, (IF _.owner_token EXISTS AS rtoc_wrap_1254 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_1254 } ELSE NIL END), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_UNKNOWN_OWNER }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
         END
     END
     MUTABLE previous: ?ImplementationDef = COPY seen[_.owner_name];

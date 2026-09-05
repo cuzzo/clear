@@ -731,7 +731,7 @@ PRIVATE FN pipelineConcurrentLowerer__unwrap_binding_source(self: PipelineConcur
   IF (IF lhs IS_A BinaryOp AS binary_op THEN (binary_op.op == :BIND_VAR) ELSE FALSE END) THEN
     RETURN CAST(Tuple{(CAST(aST__node_right(lhs) AS Identifier)).name, CAST(locatable__left(lhs) AS Locatable)} AS Tuple<?String, Locatable>);
   ELSE
-    RETURN CAST(Tuple{NIL, lhs} AS Tuple<?String, Locatable>);
+    RETURN CAST(Tuple{NIL, COPY lhs} AS Tuple<?String, Locatable>);
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__bounded_identifier_stream?(self: PipelineConcurrentLowerer, MUTABLE lhs: Locatable) RETURNS !Bool ->

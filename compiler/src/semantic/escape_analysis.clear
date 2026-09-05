@@ -1509,7 +1509,7 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
     END
     escape_nodes = ruby_array_concat_Locatable(escape_nodes, summary_value_mutable.escape_nodes);
     escape_nodes = ruby_array_concat_Locatable(escape_nodes, CAST(hoist_bindings AS []Locatable));
-    RETURN FunctionFacts{ fn: fn_value, symbols: symbols, binding_values: COPY binding_values, return_values: COPY return_values, assignment_nodes: COPY assignment_nodes, escape_nodes: COPY escape_nodes, lambda_body_identifier_refs: COPY summary_value_mutable.lambda_body_identifier_refs };
+    RETURN FunctionFacts{ fn: COPY fn_value, symbols: symbols, binding_values: COPY binding_values, return_values: COPY return_values, assignment_nodes: COPY assignment_nodes, escape_nodes: COPY escape_nodes, lambda_body_identifier_refs: COPY summary_value_mutable.lambda_body_identifier_refs };
   END
   escapeAnalysis__walk_body(fn_value.body, %(node) USE(MUTABLE assignment_nodes, binding_values, MUTABLE escape_nodes, MUTABLE return_values, symbols) -> {
   IF node IS_A Locatable THEN
