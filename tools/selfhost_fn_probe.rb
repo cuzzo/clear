@@ -284,53 +284,27 @@ module SelfhostFnProbe
 
   # Open3.capture3 with a real deadline. A `timeout` wrapper is not enough: it
   # kills its own child, but the zig grandchildren survive holding the pipe, so
-  # the read blocks forever anyway. The child leads its own process GROUP so a
-  # timeout can kill every descendant.
+  # the read blocks forever anyway. Run the build in its own process GROUP and
+  # let a watchdog kill the group, which is the only thing that reaches them.
   def capture3_with_group_timeout(env, cmd, seconds)
-    out_r, out_w = IO.pipe
-    err_r, err_w = IO.pipe
-    pid = Process.spawn(env, *cmd, chdir: ROOT, out: out_w, err: err_w, pgroup: true)
-    out_w.close
-    err_w.close
-    out = +''
-    err = +''
-    readers = [out_r, err_r]
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
-    until readers.empty?
-      left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      if left <= 0
-        begin
-          Process.kill('-KILL', Process.getpgid(pid))
-        rescue StandardError
-          nil
+    Open3.popen3(env, *cmd, chdir: ROOT, pgroup: true) do |stdin, stdout, stderr, wait_thr|
+      stdin.close
+      pid = wait_thr.pid
+      watchdog = Thread.new do
+        unless wait_thr.join(seconds)
+          begin
+            Process.kill('-KILL', Process.getpgid(pid))
+          rescue StandardError
+            nil
+          end
         end
-        break
       end
-      ready = IO.select(readers, nil, nil, [left, 1].min)
-      next unless ready
-
-      ready[0].each do |io|
-        chunk = begin
-          io.read_nonblock(65_536)
-        rescue EOFError, IOError
-          nil
-        rescue IO::WaitReadable
-          ''
-        end
-        if chunk.nil?
-          readers.delete(io)
-          next
-        end
-        (io.equal?(out_r) ? out : err) << chunk
-      end
+      out = stdout.read.to_s
+      err = stderr.read.to_s
+      status = wait_thr.value
+      watchdog.kill
+      [out, err, status]
     end
-    status = begin
-      Process.waitpid2(pid)[1]
-    rescue StandardError
-      nil
-    end
-    [out_r, err_r].each { |io| io.close unless io.closed? }
-    [out, err, status]
   end
 
   def compile(source_text, stage, extra_pkg = nil)
