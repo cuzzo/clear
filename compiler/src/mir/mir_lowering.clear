@@ -748,7 +748,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRLowering__widen_symbol_to_bytes(&rtoc_self_view, placed, ast_node));
 }
 END
-FN mIRLowering__async_payload_storage_value(MUTABLE self: MIRLowering, value: Emittable, shape: AsyncResultShape) RETURNS Emittable
+FN mIRLowering__async_payload_storage_value(MUTABLE self: MIRLowering, MUTABLE value: Emittable, shape: AsyncResultShape) RETURNS Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

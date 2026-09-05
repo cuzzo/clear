@@ -1364,7 +1364,7 @@ PRIVATE FN capabilityAuditSession__emit_with_guard_mutable_mutated_mut(MUTABLE s
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = COPY names_input;
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
-    names = names.to_a();
+    names = names;
     MUTABLE edits = List[];
     IF (((src != NIL) AND TRUE) AND node.token) THEN
       MUTABLE with_line = node.token.line;

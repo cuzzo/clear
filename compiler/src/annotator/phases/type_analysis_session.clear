@@ -2387,7 +2387,7 @@ PRIVATE FN typeAnalysisSession__emit_with_guard_mutable_mutated_mut(MUTABLE self
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = COPY names_input;
     MUTABLE src: ?String = typeAnalysisSession__source_code(&rtoc_self_view);
-    names = names.to_a();
+    names = names;
     MUTABLE edits = List[];
     IF (((src != NIL) AND TRUE) AND node.token) THEN
       MUTABLE with_line = node.token.line;
@@ -14767,7 +14767,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :type, fixes, NIL, code, :error, TRUE, CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__validate_rank_initializer_mut(MUTABLE self: TypeAnalysisSession, node: DeclarationNode, declared_type: Type) RETURNS !Void
+PRIVATE FN typeAnalysisSession__validate_rank_initializer_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode, declared_type: Type) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
