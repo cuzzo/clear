@@ -415,7 +415,14 @@ module SelfhostFnProbe
           end
           src = probe_source(target, group, cache, pkg_name)
           offset = @probe_offset
-          ok, msg, probe_line = compile(src, stage, pkg_flag)
+          # A raise here used to kill the worker thread silently: Ruby swallows
+          # it, the pool drains to nothing, and the run writes partial results
+          # and then hangs. Record it as this function's failure instead.
+          ok, msg, probe_line = begin
+            compile(src, stage, pkg_flag)
+          rescue StandardError => e
+            [false, "probe harness: #{e.class}: #{e.message}"[0, 200], nil]
+          end
           # The target is restated verbatim, so a probe line maps straight back.
           line = probe_line ? target.start + (probe_line.to_i - offset) : nil
           results[idx] = [rel(target.file), target.name, ok, msg, line]
