@@ -1,0 +1,51 @@
+# An IF in expression position must be promoted wherever it appears, not only
+# as a bare declaration value: as the receiver of a field access, and under a
+# COPY. Without promotion its branches stay statements, the IF types as Void,
+# and the field lookup (or the binding that reads it) fails on Void.
+
+STRUCT Entry { reg: Int64 }
+
+FN lookup(flag: Bool) RETURNS Entry ->
+  IF flag THEN
+    RETURN Entry{ reg: 7 };
+  END
+  RETURN Entry{ reg: 0 };
+END
+
+FN maybe(flag: Bool) RETURNS ?Entry ->
+  IF flag THEN
+    RETURN Entry{ reg: 5 };
+  END
+  RETURN NIL;
+END
+
+FN via_receiver(flag: Bool) RETURNS Int64 ->
+  RETURN (IF flag THEN
+      lookup(flag)
+    ELSE
+      Entry{ reg: 3 }
+    END).reg;
+END
+
+FN via_copy(flag: Bool) RETURNS Int64 ->
+  MUTABLE found: ?Entry = COPY (IF flag THEN
+      maybe(flag)
+    ELSE
+      NIL
+    END);
+  IF found EXISTS AS entry THEN
+    RETURN entry.reg;
+  END
+  RETURN 0;
+END
+
+FN main() RETURNS Void ->
+  a = via_receiver(TRUE);
+  print("a $a");
+  b = via_receiver(FALSE);
+  print("b $b");
+  c = via_copy(TRUE);
+  print("c $c");
+  d = via_copy(FALSE);
+  print("d $d");
+END

@@ -157,6 +157,14 @@ module Annotator
 
         # COPY produces an owned deep-copy. The source is NOT consumed.
         # Clone the Type so mutating provenance doesn't affect the inner node.
+        # An IF or MATCH under a COPY is still in expression position. Promote
+        # before reading the type: visiting it as a statement stamps Void, and
+        # the COPY would inherit that.
+        if node.value.is_a?(AST::IfStatement) || node.value.is_a?(AST::IfBind)
+          promote_to_expr_if!(node, node.value)
+        elsif node.value.is_a?(AST::MatchStatement)
+          promote_to_expr_match!(node, node.value)
+        end
         inner_type = node.value.full_type!(context: "COPY value")
         # Retained-identity v5 (V5-3b): a plain-source COPY is a payload_copy.
         # A retained source gets :shared_to_unique_copy stamped at the UNIQUE

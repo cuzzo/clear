@@ -125,6 +125,11 @@ module Annotator
         return if resolve_variant_access(node)
 
         visit(node.target)
+        # An IF or MATCH used as the receiver of a field access is in
+        # expression position exactly as it is in a declaration's value; without
+        # promotion its branches stay statements and the receiver reads Void.
+        promote_to_expr_if!(node, node.target) if node.target.is_a?(AST::IfStatement) || node.target.is_a?(AST::IfBind)
+        promote_to_expr_match!(node, node.target) if node.target.is_a?(AST::MatchStatement)
 
         emit_moved_field_path_error_if_needed!(node)
 
