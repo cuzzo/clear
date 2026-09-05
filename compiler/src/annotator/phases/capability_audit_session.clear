@@ -1707,7 +1707,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF info EXISTS AS info_value THEN
       MUTABLE tok: ?Token = NIL;
       MUTABLE decl: ?SymbolEntryRegInput = COPY info_value.reg;
-      IF ((decl != NIL) AND aST__node__token( castSymbolEntryRegInputToLocatable(decl))) THEN
+      IF ((decl != NIL) AND TRUE) THEN
         tok = aST__node__token(decl);
       ELSE_IF (symbolEntry__is_param(info_value) AND (COPY info_value.param_decl_token != NIL)) THEN
         tok = COPY info_value.param_decl_token;
