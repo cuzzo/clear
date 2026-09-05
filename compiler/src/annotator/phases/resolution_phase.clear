@@ -1407,7 +1407,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (implementation_file == owner_file) THEN
       RETURN;
     END
-    TRY (resolutionSession__error_mut(&rtoc_self_view, implementation.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_WRONG_FILE }, [], CAST({:owner: owner.name, :implementation_file: (implementation_file OR_ELSE "<source>"), :owner_file: (owner_file OR_ELSE "<source>")} AS {String@symbol}Any)));
+    TRY (resolutionSession__error_mut(&rtoc_self_view, (IF implementation.owner_token EXISTS AS rtoc_wrap_1409 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_1409 } ELSE NIL END), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_WRONG_FILE }, [], CAST({:owner: owner.name, :implementation_file: (implementation_file OR_ELSE "<source>"), :owner_file: (owner_file OR_ELSE "<source>")} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN resolutionSession__resolve_owner_generic_bindings_mut(MUTABLE self: ResolutionSession, implementation: ImplementationDef, owner: StructDef) RETURNS ![]OwnerGenericBinding
@@ -1417,7 +1417,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE binders = COPY implementation.binders;
     MUTABLE owner_params = COPY owner.generic_params;
     IF (binders.length() != owner_params.length()) THEN
-      TRY (resolutionSession__error_mut(&rtoc_self_view, implementation.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_ARITY }, [], CAST({:owner: owner.name, :expected: owner_params.length(), :got: binders.length(), :expected_params: (owner_params |> SELECT _.name).join(", ")} AS {String@symbol}Any)));
+      TRY (resolutionSession__error_mut(&rtoc_self_view, (IF implementation.owner_token EXISTS AS rtoc_wrap_1419 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_1419 } ELSE NIL END), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_ARITY }, [], CAST({:owner: owner.name, :expected: owner_params.length(), :got: binders.length(), :expected_params: (owner_params |> SELECT _.name).join(", ")} AS {String@symbol}Any)));
     END
     MUTABLE seen: [Set]String = Set[];
     FOR _ IN binders DO

@@ -79,7 +79,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.list_lowerer = TRY (pipelineHost__build_list_lowerer(&rtoc_self_view));
     rtoc_self_view.concurrent_lowerer = UNWRAP (TRY (pipelineHost__build_concurrent_lowerer(&rtoc_self_view)));
     rtoc_self_view.batch_window_lowerer = TRY (pipelineHost__build_batch_window_lowerer(&rtoc_self_view));
-    rtoc_self_view.set_index_lowerer = TRY (pipelineHost__build_set_index_lowerer(&rtoc_self_view));
+    rtoc_self_view.set_index_lowerer = UNWRAP (TRY (pipelineHost__build_set_index_lowerer(&rtoc_self_view)));
     rtoc_self_view.each_lowerer = TRY (pipelineHost__build_each_lowerer(&rtoc_self_view));
 }
 END
