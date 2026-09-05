@@ -7450,11 +7450,11 @@ PRIVATE FN typeAnalysisSession__check_prefixed_int_range_mut(MUTABLE self: TypeA
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF effective_type EXISTS AS effective_type_value THEN
-      MUTABLE val: ?Int64 = typeAnalysisSession__integer_literal_range_value(rtoc_self_view, node);
+      MUTABLE val: ?Int64 = typeAnalysisSession__integer_literal_range_value(&rtoc_self_view, node);
       IF val EXISTS AS val_value THEN
         MUTABLE literal_value = val_value;
         MUTABLE checked_type = COPY effective_type_value;
-        MUTABLE t: ?String@symbol = typeAnalysisSession__integer_range_target_type(rtoc_self_view, checked_type);
+        MUTABLE t: ?String@symbol = typeAnalysisSession__integer_range_target_type(&rtoc_self_view, checked_type);
         IF t EXISTS AS t_value THEN
           MUTABLE type_sym = t_value;
           MUTABLE max: ?Int64 = type__integer_type_max(type_sym);
@@ -7482,10 +7482,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__integer_literal_range_value(self: TypeAnalysisSession, node: Locatable) RETURNS ?Int64
+PRIVATE FN typeAnalysisSession__integer_literal_range_value(MUTABLE self: TypeAnalysisSession, node: Locatable) RETURNS ?Int64
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A Literal AS literal THEN
       IF ((literal.type == :PREFIXED_INT) OR (literal.type == :INT64)) THEN
         IF literal.value EXISTS AS token_value THEN
@@ -7496,13 +7496,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN NIL;
       END
     END
-    RETURN typeAnalysisSession__negative_integer_literal_range_value(rtoc_self_view, node);
+    RETURN typeAnalysisSession__negative_integer_literal_range_value(&rtoc_self_view, node);
 }
 END
-PRIVATE FN typeAnalysisSession__negative_integer_literal_range_value(self: TypeAnalysisSession, node: Locatable) RETURNS ?Int64
+PRIVATE FN typeAnalysisSession__negative_integer_literal_range_value(MUTABLE self: TypeAnalysisSession, node: Locatable) RETURNS ?Int64
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(node IS_A UnaryOp) THEN
       RETURN NIL;
     END
@@ -7519,10 +7519,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (-aST__node_value( UNWRAP (lit)));
 }
 END
-PRIVATE FN typeAnalysisSession__integer_range_target_type(self: TypeAnalysisSession, effective_type: TypeTypeInput) RETURNS ?String@symbol
+PRIVATE FN typeAnalysisSession__integer_range_target_type(MUTABLE self: TypeAnalysisSession, effective_type: TypeTypeInput) RETURNS ?String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE current_type = COPY effective_type;
     IF (IF current_type IS_A Type AS type THEN type__error_union?(type) ELSE FALSE END) THEN
       MUTABLE payload_type: !?Type = typeTypeInput__payload_type(current_type);
@@ -9036,7 +9036,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE span: ?EffectSpan = COPY fn_node.effects_span;
     MUTABLE reason = COPY UNWRAP (suggestion_reason[1]);
-    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, span?.start_token, :reentrance, [TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :REPLACE_REENTRANT_WITH_VARIANT, CAST({:suggestion: DiagnosticKwValue{ StringValue: COPY suggestion }, :reason: DiagnosticKwValue{ StringValue: COPY reason }} AS {String@symbol}?DiagnosticKwValue))), edits, :auto))], NIL, :PLAIN_REENTRANT_VARIANT_SUGGESTION, :info, FALSE, CAST({:fn: fn_node.name, :reason: reason, :suggestion: suggestion} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (IF span?.start_token EXISTS AS rtoc_wrap_9038 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_9038 } ELSE NIL END), :reentrance, [TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :REPLACE_REENTRANT_WITH_VARIANT, CAST({:suggestion: DiagnosticKwValue{ StringValue: COPY suggestion }, :reason: DiagnosticKwValue{ StringValue: COPY reason }} AS {String@symbol}?DiagnosticKwValue))), edits, :auto))], NIL, :PLAIN_REENTRANT_VARIANT_SUGGESTION, :info, FALSE, CAST({:fn: fn_node.name, :reason: reason, :suggestion: suggestion} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN typeAnalysisSession__validate_not_logical_return_mut(MUTABLE self: TypeAnalysisSession, fn_node: FunctionDef) RETURNS !Void
@@ -10619,7 +10619,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.stdlib_allocates = defn_allocates;
       node.mutates_receiver = TRY (functionSignature__mutates_receiver?(&defn_value_mutable));
       IF (TRY (functionSignature__mutates_receiver?(&defn_value_mutable)) OR (TRY (functionSignature__intrinsic_argument_takes_indices(&defn_value_mutable))).any?()) THEN
-        TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, TRY (typeAnalysisSession__collection_effect_signature(rtoc_self_view, &node, obj_type, &defn_value_mutable)), ([node.object] + node.args)));
+        TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, TRY (typeAnalysisSession__collection_effect_signature(&rtoc_self_view, &node, obj_type, &defn_value_mutable)), ([node.object] + node.args)));
         IF ((zig != NIL) AND TRUE) THEN
           node.matched_signature = resolved_defn;
         END
@@ -10649,10 +10649,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__collection_effect_signature(self: TypeAnalysisSession, MUTABLE node: MethodCall, receiver_type: Type, MUTABLE definition: FunctionSignature) RETURNS !FunctionSignature@multiowned
+PRIVATE FN typeAnalysisSession__collection_effect_signature(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, receiver_type: Type, MUTABLE definition: FunctionSignature) RETURNS !FunctionSignature@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE takes = (TRY (functionSignature__intrinsic_argument_takes_indices(&definition))) |> DISTINCT _;
     MUTABLE params: []Param = [Param{ name: "receiver", type: COPY receiver_type, required: TRUE, mutable: TRY (functionSignature__mutates_receiver?(&definition)), takes: FALSE, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }];
     MUTABLE rtoc_idx = 0;
@@ -12418,7 +12418,7 @@ PRIVATE FN typeAnalysisSession__protocol_requirement_signature(MUTABLE self: Typ
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE substitutions = protocol.associated_types |> REDUCE({:Self: receiver}) {
-    acc[symbol(_.name)] = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeProjectionExpression{ owner: COPY type__resolved(receiver), member: COPY symbol(_.name), protocol: COPY symbol(protocol.name) }) }));
+    acc[symbol(_.name)] = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of( TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved(receiver), member: COPY symbol(_.name), protocol: COPY symbol(protocol.name) } }) }));
     acc
     };
     RETURN TRY (functionSignature__new(requirement.params |> SELECT Param{ name: COPY _.name, type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(_.type), substitutions)) AS Type), required: TRUE, mutable: _.mutable, takes: _.takes, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }, TypeTypeInput{ Type: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(requirement.return_type), substitutions)) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_296: []String@symbol = List[]; rtoc_empty_list_296 } ), {}, (requirement.effects_decl == :reentrant), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_297: []String@symbol = List[]; rtoc_empty_list_297 } ), NIL, ( { MUTABLE rtoc_empty_list_298: []String@symbol = List[]; rtoc_empty_list_298 } )));
@@ -15250,14 +15250,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((target_sync == :atomic)) THEN
       RETURN;
     END
-    MUTABLE op: ?String@symbol = TRY (typeAnalysisSession__atomic_bind_operation(&rtoc_self_view, node));
+    MUTABLE op: ?String@symbol = TRY (typeAnalysisSession__atomic_bind_operation(&rtoc_self_view, &node));
     IF op EXISTS AS op_value THEN
       node.auto_atomic_op = op_value;
     END
     TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("CONTENTION")));
 }
 END
-PRIVATE FN typeAnalysisSession__atomic_bind_operation(MUTABLE self: TypeAnalysisSession, node: BindExpr) RETURNS !?String@symbol
+PRIVATE FN typeAnalysisSession__atomic_bind_operation(MUTABLE self: TypeAnalysisSession, MUTABLE node: BindExpr) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16258,7 +16258,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expected_map EXISTS AS expected_map_value THEN
       IF type__map?(expected_map_value) THEN
       MUTABLE expected_key = TRY ( type__key_type(UNWRAP (expected_map)));
-      MUTABLE expected_value = TRY (type__value_type(UNWRAP (expected_map)));
+      MUTABLE expected_value = TRY (type__value_type(UNWRAP (UNWRAP (expected_map))));
       FOR rtoc_each_key IN node.pairs.keys() DO
     MUTABLE value: Locatable = COPY UNWRAP (node.pairs[rtoc_each_key]);
     locatable__set_coerced_type_object_mut(&rtoc_each_key, expected_key);
