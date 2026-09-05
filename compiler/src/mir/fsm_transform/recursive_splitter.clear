@@ -486,7 +486,7 @@ PRIVATE FN fsmRecursiveSplitter__remap_tail(tail: SegmentTail, mapping: {Int64}I
     ELSE
       NIL
     END, next_index: IF lock_suspend.next_index THEN
-      mapping[lock_suspend.next_index]?
+      mapping[UNWRAP (lock_suspend.next_index)]?
     ELSE
       NIL
     END, lock_index: lock_suspend.lock_index, prior_lock_indices: COPY lock_suspend.prior_lock_indices } };
