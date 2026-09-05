@@ -1,0 +1,19 @@
+# A tuple owns and cleans up its elements the way a struct field does, so a
+# borrowed collection stored in one has the same lifetime problem: the tuple's
+# cleanup would free the lender's buffer. COPY makes the ownership explicit,
+# and the caller keeps its own collection afterwards.
+
+FN pack(n: Int64, names: []String) RETURNS !Int64 ->
+  MUTABLE _: Tuple<Int64, []String> = CAST(Tuple{n, COPY names} AS Tuple<Int64, []String>);
+  RETURN n + names.length();
+END
+
+FN main() RETURNS Void ->
+  MUTABLE names: []String = [];
+  &names.append("a");
+  first = TRY (pack(7, names));
+  print("first $first");
+  second = TRY (pack(9, names));
+  print("second $second");
+  print("size $names.length()");
+END

@@ -1405,6 +1405,18 @@ RSpec.describe "error emission coverage" do
       }.to raise_error(CompilerError, /Cannot store borrowed value 'v' into Pair\.a/)
     end
 
+    it "raises when a borrowed collection is stored into a tuple element" do
+      expect {
+        run(<<~CLEAR)
+          FN pack(n: Int64, names: []String) RETURNS !Int64 ->
+              MUTABLE _: Tuple<Int64, []String> = CAST(Tuple{n, names} AS Tuple<Int64, []String>);
+              RETURN n;
+          END
+          FN main() RETURNS Void -> _ = TRY (pack(1, [])); END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot store borrowed value 'names' into Tuple\._1/)
+    end
+
     it "compiles when the parameter is declared TAKES (function owns the value)" do
       run(<<~CLEAR)
         UNION Value { Nil, Str: String }

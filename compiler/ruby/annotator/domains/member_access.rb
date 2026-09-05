@@ -739,6 +739,12 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         node.items.each { |item| visit(item) }
+        # A tuple owns and cleans up its elements exactly as a struct field
+        # does, so storing a borrow into one has the same lifetime problem --
+        # and without this the tuple's cleanup frees the lender's buffer.
+        node.items.each_with_index do |item, index|
+          reject_borrowed_value!(item, "Tuple._#{index}")
+        end
         item_types = node.items.map { |item| item.full_type!(context: "tuple literal item") }
         stamp_type!(node, Type.generic_instance_of(:Tuple, item_types))
         node.storage = :stack
