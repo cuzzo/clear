@@ -3826,7 +3826,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE rtoc_each_items_27 = (transitive[callees[rtoc_idx]]);
+      MUTABLE rtoc_each_items_27 = (transitive[UNWRAP (callees[rtoc_idx])]);
       MUTABLE rtoc_idx_n4 = 0;
       WHILE rtoc_idx_n4 < rtoc_each_items_27.length() DO
           MUTABLE fn_set = transitive[rtoc_each_21];

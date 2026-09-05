@@ -476,7 +476,7 @@ PRIVATE FN fsmRecursiveSplitter__remap_tail(tail: SegmentTail, mapping: {Int64}I
     END);
   ELSE_IF tail IS_A NextSuspend AS next_suspend THEN
     RETURN nextSuspend__with_next_index(next_suspend, IF next_suspend.next_index THEN
-      mapping[next_suspend.next_index]?
+      mapping[UNWRAP (next_suspend.next_index)]?
     ELSE
       NIL
     END);
