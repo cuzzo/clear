@@ -4156,7 +4156,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (capabilityAuditSession__error_mut(&rtoc_self_view, rtoc_each_items_39[rtoc_idx]?.arg_node, CapabilityAuditCodeOrMessage{ SymbolValue: :GIVE_TO_BORROW_PARAM }, [], CAST({:param: rtoc_each_items_39[rtoc_idx]?.param_name} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
-    (TRY (capabilityAuditSession__deferred_give_validations(rtoc_self_view))).clear();
+    capabilityAuditSession__clear_deferred_give_validations_mut(&rtoc_self_view);
 }
 END
 PRIVATE FN capabilityAuditSession__flush_deferred_copy_retained_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS !Void
@@ -4179,7 +4179,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (capabilityAuditSession__error_mut(&rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.arg_node, CapabilityAuditCodeOrMessage{ SymbolValue: :COPY_RETAINED_NEEDS_UNIQUE }, [], CAST({:name: emittable__name(UNWRAP (rtoc_each_items_42[rtoc_idx])), :carrier: rtoc_each_items_42[rtoc_idx]?.carrier} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
-    (TRY (capabilityAuditSession__deferred_copy_retained_validations(rtoc_self_view))).clear();
+    capabilityAuditSession__clear_deferred_copy_retained_validations_mut(&rtoc_self_view);
 }
 END
 PRIVATE FN capabilityAuditSession__flush_deferred_recovery_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS !Void
@@ -4194,7 +4194,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     validation.left.can_fail = TRUE;
     validation.left.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput__capability_audit_session(validation.value_type)));
     END
-    (TRY (capabilityAuditSession__deferred_recovery_validations(rtoc_self_view))).clear();
+    capabilityAuditSession__clear_deferred_recovery_validations_mut(&rtoc_self_view);
 }
 END
 PRIVATE FN capabilityAuditSession__flush_deferred_with_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS ![]DeferredWithValidation
@@ -4252,7 +4252,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     rtoc_idx = rtoc_idx + 1;
     END
-    RETURN (TRY (capabilityAuditSession__deferred_with_validations(rtoc_self_view))).clear();
+    RETURN capabilityAuditSession__clear_deferred_with_validations_mut(&rtoc_self_view);
 }
 END
 PRIVATE FN capabilityAuditSession__finalize_program_audit_mut(MUTABLE self: CapabilityAuditSession, program: Program) RETURNS !Void
@@ -4625,5 +4625,49 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF rtoc_self_view.context.inputs.effect_state EXISTS AS MUTABLE rtoc_state THEN
       rtoc_state.call_site_arg_families[caller_name] = COPY value;
     END
+}
+END
+
+# Ruby's `deferred_give_validations.clear` empties the collection the session owns. The reader
+# accessor returns a COPY, so clearing THAT is a silent no-op; reach the owned
+# field instead.
+PRIVATE FN capabilityAuditSession__clear_deferred_give_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    &rtoc_self_view.context.inputs.deferred_give_validations.clear();
+}
+END
+
+# Ruby's `deferred_copy_retained_validations.clear` empties the collection the session owns. The reader
+# accessor returns a COPY, so clearing THAT is a silent no-op; reach the owned
+# field instead.
+PRIVATE FN capabilityAuditSession__clear_deferred_copy_retained_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    &rtoc_self_view.context.inputs.deferred_copy_retained_validations.clear();
+}
+END
+
+# Ruby's `deferred_recovery_validations.clear` empties the collection the session owns. The reader
+# accessor returns a COPY, so clearing THAT is a silent no-op; reach the owned
+# field instead.
+PRIVATE FN capabilityAuditSession__clear_deferred_recovery_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    &rtoc_self_view.context.inputs.deferred_recovery_validations.clear();
+}
+END
+
+# Ruby's `deferred_with_validations.clear` empties the collection the session owns. The reader
+# accessor returns a COPY, so clearing THAT is a silent no-op; reach the owned
+# field instead.
+PRIVATE FN capabilityAuditSession__clear_deferred_with_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    &rtoc_self_view.context.inputs.deferred_with_validations.clear();
 }
 END

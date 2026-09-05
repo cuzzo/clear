@@ -11565,9 +11565,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       identity = BodyIdentity{ definition_id: COPY DefId{ value: ordinal }, body_id: COPY BodyId{ value: ordinal } };
     END
     MUTABLE frame = bodyFactFrame__for_identity(identity);
-    (TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view))).append(frame);
+    typeAnalysisSession__push_body_fact_frame_mut(&rtoc_self_view, frame);
     DEFER {
-    MUTABLE popped: ?BodyFactFrame = (TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view))).pop();
+    MUTABLE popped: ?BodyFactFrame = typeAnalysisSession__pop_body_fact_frame_mut(&rtoc_self_view);
     IF (popped == NIL) THEN
       panic("BUG: body fact frame mismatch");
     END
@@ -22789,4 +22789,22 @@ FN castTypeAnalysisSessionReturnValueItemToFunctionSignatureLifetimeSource(value
     DEFAULT -> panic("Invalid cast to FunctionSignatureLifetimeSource");
   END
   panic("Invalid cast to FunctionSignatureLifetimeSource");
+END
+
+# Ruby pushes and pops the session's own frame stack. The reader accessor
+# returns a COPY, so mutating THAT is a silent no-op; reach the owned field.
+PRIVATE FN typeAnalysisSession__push_body_fact_frame_mut(MUTABLE self: TypeAnalysisSession, frame: BodyFactFrame) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    &rtoc_self_view.traversal_state.body_fact_frames.append(COPY frame);
+}
+END
+
+PRIVATE FN typeAnalysisSession__pop_body_fact_frame_mut(MUTABLE self: TypeAnalysisSession) RETURNS ?BodyFactFrame
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN &rtoc_self_view.traversal_state.body_fact_frames.pop();
+}
 END
