@@ -185,7 +185,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__pipeline_with_decl_alloc( &rtoc_self_view.lowering, alloc, blk);
 }
 END
-PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(MUTABLE self: PipelineLoweringBridge, MUTABLE insert: IndexInsert, value: Emittable, value_owns: Bool, target_alloc: String@symbol) RETURNS !IndexInsert
+PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(MUTABLE self: PipelineLoweringBridge, MUTABLE insert: IndexInsert, MUTABLE value: Emittable, value_owns: Bool, target_alloc: String@symbol) RETURNS !IndexInsert
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

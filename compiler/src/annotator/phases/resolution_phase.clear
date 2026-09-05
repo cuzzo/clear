@@ -1257,7 +1257,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE previous: ?ImplementationDef = COPY seen[_.owner_name];
     IF previous EXISTS AS previous_value THEN
-        TRY (resolutionSession__error_mut(&rtoc_self_view, _.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
+        TRY (resolutionSession__error_mut(&rtoc_self_view, (IF _.owner_token EXISTS AS rtoc_wrap_1259 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_1259 } ELSE NIL END), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
     END
     seen[_.owner_name] = COPY _;
     TRY (resolutionSession__validate_implementation_file_mut(&rtoc_self_view, _, UNWRAP (owner)));
