@@ -306,11 +306,13 @@ module SelfhostFnProbe
       cmd = [File.join(ROOT, 'clear'), 'build', source, '-o', File.join(dir, 'probe'),
              '--no-stack-check', '--main-tier', 'service',
              *ParserCompat.package_flags(SRC), *Array(extra_pkg)]
-      out, err, status = Open3.capture3(env, *cmd, chdir: ROOT)
+      # One pathological function can hang the compiler; without a cap it takes
+      # the whole sweep with it (observed twice, stalling a 3443-function run).
+      out, err, status = Open3.capture3(env, 'timeout', '300', *cmd, chdir: ROOT)
       if stage == :run && status.success?
         # Stage 3 needs what the function actually produced, not just that it
         # linked.
-        rout, rerr, rstatus = Open3.capture3(File.join(dir, 'probe'))
+        rout, rerr, rstatus = Open3.capture3('timeout', '60', File.join(dir, 'probe'))
         return [rstatus.success?, rout.to_s.strip, rerr.to_s[0, 120]]
       end
       text = "#{out}\n#{err}"
