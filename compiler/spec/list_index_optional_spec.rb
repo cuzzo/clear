@@ -68,6 +68,24 @@ RSpec.describe "optional @list indexing" do
     end
   end
 
+  it "explains the error when the receiver is an expression rather than a name" do
+    source = <<~CLEAR
+      STRUCT Entry { reg: Int64 }
+      FN maybe(flag: Bool) RETURNS ?Entry ->
+        IF flag THEN
+          RETURN Entry{ reg: 5 };
+        END
+        RETURN NIL;
+      END
+      FN pick(flag: Bool) RETURNS Int64 ->
+        RETURN (IF flag THEN maybe(flag) ELSE NIL END).reg;
+      END
+    CLEAR
+
+    expect { annotate(source) }
+      .to raise_error(CompilerError, /Cannot access field 'reg' on optional '\?Entry'/)
+  end
+
   it "lowers a safe list read to the bounds-safe optional runtime accessor" do
     zig = ZigTranspiler.new(source_dir: Dir.pwd).transpile(SAFE_SOURCE, source_dir: Dir.pwd)
 

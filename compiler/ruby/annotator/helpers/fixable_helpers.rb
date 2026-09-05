@@ -69,7 +69,10 @@ module FixableHelper
       code: :OPTIONAL_FIELD_REQUIRES_SAFE_NAV,
       field: node.field,
       type: Type.surface_name(target_type),
-      target: node.target.name,
+      # The receiver need not be a name: an IF or MATCH in expression position
+      # is a legal field-access target, and asking it for `.name` crashed the
+      # diagnostic that was trying to explain the error.
+      target: (node.target.respond_to?(:name) ? node.target.name : "the value"),
       category: :type,
       level: :error,
       fixes: [fix])
