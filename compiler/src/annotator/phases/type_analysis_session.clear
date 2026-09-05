@@ -5822,7 +5822,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, acc_type));
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &node.right, acc_type));
     node.storage_override = :stack;
-    MUTABLE acc_t = TRY (type__new((IF acc_type EXISTS AS rtoc_wrap_5824 THEN TypeConstructionInput{ SymbolValue: COPY rtoc_wrap_5824 } ELSE NIL END)));
+    MUTABLE acc_t = TRY (type__new( (IF acc_type EXISTS AS rtoc_wrap_5824 THEN TypeConstructionInput{ SymbolValue: COPY rtoc_wrap_5824 } ELSE NIL END)));
     IF !(TRY (type__collection_value?(acc_t))) THEN
       IF typeAnalysisSession__observable_reducible_scalar?(&rtoc_self_view, acc_type) THEN
         TRY (typeAnalysisSession__mark_observable_terminal_mut(&rtoc_self_view, &node, :reduce, symbol("~${acc_type}")));
@@ -8872,9 +8872,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (typeAnalysisSession__current_loop_depth(&rtoc_self_view) > 0) THEN
       RETURN :SUSPENDS_LOOP;
     ELSE_IF (typeAnalysisSession__current_conditional_depth(&rtoc_self_view) > 0) THEN
-      RETURN suspends_conditional;
+      RETURN :SUSPENDS_CONDITIONAL;
     ELSE
-      RETURN suspends;
+      RETURN :SUSPENDS;
     END
 }
 END
@@ -14434,7 +14434,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__validate_type_annotation_mut(&rtoc_self_view, castDeclarationNodeToAnnotationNode(node), &declared_type_value));
     END
     IF declared_type EXISTS AS declared_type_value THEN
-      TRY (typeAnalysisSession__validate_rank_initializer_mut(&rtoc_self_view, node, declared_type_value));
+      TRY (typeAnalysisSession__validate_rank_initializer_mut(&rtoc_self_view, &node, declared_type_value));
     END
     TRY (typeAnalysisSession__validate_stream_type_mut(&rtoc_self_view, node));
     TRY (typeAnalysisSession__materialize_inferred_wrapper_annotation_mut(&rtoc_self_view, &node));
@@ -14684,12 +14684,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE value_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(value)) }));
     MUTABLE asynchronous = (((type__future?(value_type) OR TRY (type__stream?(value_type))) OR type__future?( UNWRAP (error_success_type))) OR TRY (type__stream?( UNWRAP (error_success_type))));
     IF asynchronous THEN
-      TRY (typeAnalysisSession__emit_inferred_async_binding_mut(&rtoc_self_view, node, value_type, CAST(error_type AS ?Type)));
+      TRY (typeAnalysisSession__emit_inferred_async_binding_mut(&rtoc_self_view, &node, value_type, CAST(error_type AS ?Type)));
       RETURN;
     END
     MUTABLE fallible = !((error_type == NIL));
     IF fallible THEN
-      TRY (typeAnalysisSession__emit_inferred_wrapper_binding_mut(&rtoc_self_view, node, :INFERRED_FALLIBLE_BINDING, "TRY ", "!"));
+      TRY (typeAnalysisSession__emit_inferred_wrapper_binding_mut(&rtoc_self_view, &node, :INFERRED_FALLIBLE_BINDING, "TRY ", "!"));
       RETURN;
     END
     IF !(type__optional?(value_type)) THEN
@@ -14698,10 +14698,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((aST__node_safe_nav_chain(value) EXISTS) AND (value.safe_nav_chain == TRUE)) THEN
       RETURN;
     END
-    TRY (typeAnalysisSession__emit_inferred_wrapper_binding_mut(&rtoc_self_view, node, :INFERRED_OPTIONAL_BINDING, "UNWRAP ", "?"));
+    TRY (typeAnalysisSession__emit_inferred_wrapper_binding_mut(&rtoc_self_view, &node, :INFERRED_OPTIONAL_BINDING, "UNWRAP ", "?"));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_inferred_async_binding_mut(MUTABLE self: TypeAnalysisSession, node: DeclarationNode, value_type: Type, error_type: ?Type) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_inferred_async_binding_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode, value_type: Type, error_type: ?Type) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -14740,7 +14740,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :type, fixes, NIL, :INFERRED_ASYNC_BINDING, :error, TRUE, CAST({:name: UNWRAP (declarationNode__name(node)), :expected_action: action} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_inferred_wrapper_binding_mut(MUTABLE self: TypeAnalysisSession, node: DeclarationNode, code: String@symbol, prefix: String, wrapper: String) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_inferred_wrapper_binding_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode, code: String@symbol, prefix: String, wrapper: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

@@ -6080,7 +6080,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE ctx_ident = Ident{ name: "__ctx_${UNWRAP (ctx_id).toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
           MUTABLE target = FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "result", lowered_node_id: NIL, ownership_consumption: NIL };
           MUTABLE result_value = TRY (mIRLowering__coerce_fsm_result_value(rtoc_self_view, mIRLowering__strip_try(rtoc_self_view, UNWRAP (last_mir)), expr_t));
-          result_value = mIRLowering__async_payload_storage_value(&rtoc_self_view, result_value, (async_result_shape OR_ELSE TRY (asyncResultShape__promise(result_destination_type))));
+          result_value = mIRLowering__async_payload_storage_value(&rtoc_self_view, &result_value, (async_result_shape OR_ELSE TRY (asyncResultShape__promise(result_destination_type))));
           MUTABLE result_set = Set{ target: Emittable{ FieldGet: COPY target }, value: COPY result_value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
           MUTABLE transfer_facts = TRY (mIRLowering__fsm_result_transfer_facts(&rtoc_self_view, UNWRAP (last_mir), last_step_value_mutable.expr, result_destination_type));
           mIRLowering__capture_state(&rtoc_self_view).last_fsm_result_transfer_facts = ruby_array_concat_FsmResultTransferFact(mIRLowering__capture_state(&rtoc_self_view).last_fsm_result_transfer_facts, transfer_facts);
@@ -13303,7 +13303,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE last_pending = TRY (mIRLowering__flush_pending(&rtoc_self_view));
     MUTABLE result_target = FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${id}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "result", lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE shape = TRY (asyncResultShape__promise(inner_t));
-    MUTABLE stored_value = mIRLowering__async_payload_storage_value(&rtoc_self_view, last_mir, shape);
+    MUTABLE stored_value = mIRLowering__async_payload_storage_value(&rtoc_self_view, &last_mir, shape);
     MUTABLE produced = ((last_pending + TRY (mIRLowering__ownership_marks_for_transferred_temp(&rtoc_self_view, last_mir, :heap))) + [Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY result_target }, value: COPY stored_value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
     body_mir = ruby_array_concat_Emittable__mir_lowering(body_mir, TRY (mIRLowering__guard_bg_shared_node_statement(&rtoc_self_view, step.expr, produced)));
     NIL;
@@ -15123,7 +15123,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ruby_array_concat_Emittable__mir_lowering(body, CAST(TRY (mIRLowering__flush_pending(&rtoc_self_view)) AS []Emittable));
     MUTABLE result_target = FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_map${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "result", lowered_node_id: NIL, ownership_consumption: NIL };
     ruby_array_concat_Emittable__mir_lowering(body, CAST(TRY (mIRLowering__ownership_marks_for_transferred_temp(&rtoc_self_view, placed, :heap)) AS []Emittable));
-    &body.append(Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY result_target }, value: COPY mIRLowering__async_payload_storage_value(&rtoc_self_view, placed, result_shape), needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+    &body.append(Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY result_target }, value: COPY mIRLowering__async_payload_storage_value(&rtoc_self_view, &placed, result_shape), needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     TRY (mIRLowering__finalized_boundary_body_for_emit(&rtoc_self_view, body))
     });
     rtoc_lambda_result_564

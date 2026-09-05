@@ -2754,7 +2754,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (aST__node_error_union_type(node) != NIL) THEN
       RETURN TRUE;
     END
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature);
+    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap((IF locatable__matched_signature(node) EXISTS AS rtoc_wrap_2756 THEN X{ FunctionSignature: COPY rtoc_wrap_2756 } ELSE NIL END));
     IF type__error_union?((IF signature != NIL THEN
       functionSignature__return_type(signature)
     ELSE
