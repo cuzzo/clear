@@ -22,7 +22,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node EXISTS AS node_value THEN
       MUTABLE node_value_mutable = COPY node_value;
       TRY (stringConcatRewriter__rewrite_children_mut(&rtoc_self_view, &node_value_mutable));
-      MUTABLE parts = TRY (stringConcatRewriter__collect_parts(rtoc_self_view, node_value_mutable));
+      MUTABLE parts = TRY (stringConcatRewriter__collect_parts(&rtoc_self_view, node_value_mutable));
       IF (parts.length() > 2) THEN
         IF node_value_mutable IS_A BinaryOp AS binary_op THEN
           MUTABLE binary = COPY binary_op;
@@ -166,16 +166,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN stringConcatRewriter__collect_parts(self: StringConcatRewriter, node: Locatable) RETURNS ![]Locatable
+PRIVATE FN stringConcatRewriter__collect_parts(MUTABLE self: StringConcatRewriter, node: Locatable) RETURNS ![]Locatable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A StringConcat AS string_concat THEN
       RETURN COPY string_concat.parts;
     ELSE_IF node IS_A BinaryOp AS binary_op THEN
       IF stringConcatRewriter__string_concat?(&rtoc_self_view, Locatable{ BinaryOp: COPY binary_op }) THEN
-        RETURN (TRY (stringConcatRewriter__collect_parts(rtoc_self_view, binary_op.left)) + TRY (stringConcatRewriter__collect_parts(rtoc_self_view, binary_op.right)));
+        RETURN (TRY (stringConcatRewriter__collect_parts(&rtoc_self_view, binary_op.left)) + TRY (stringConcatRewriter__collect_parts(&rtoc_self_view, binary_op.right)));
       ELSE
         RETURN CAST([Locatable{ BinaryOp: COPY binary_op }] AS []Locatable);
       END

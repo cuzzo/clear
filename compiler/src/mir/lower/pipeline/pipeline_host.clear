@@ -873,7 +873,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     pipelineHost__with_soa_rewrite(&rtoc_self_view, FALSE, %() USE(fold_node, MUTABLE rtoc_self_view) -> {
       expr_mir = pipelineHost__with_pipeline_context(&rtoc_self_view, "it", NIL, %() USE(fold_node, rtoc_self_view) -> TRY (pipelineHost__visit_mir(&rtoc_self_view, UNWRAP (pipelineMaterializedScalarOp__expression(fold_node)))));
     fields = (pipelineHost__current_context(&rtoc_self_view).soa_needed_fields |> SELECT _.toString()) |> ORDER_BY _;
-    needs_whole_item = (fold_node IS_A FindOp OR !(!(((TRUE AND pipelineHost__ast_uses_bare_placeholder?(rtoc_self_view, pipelineMaterializedScalarOp__expression(fold_node)))))));
+    needs_whole_item = (fold_node IS_A FindOp OR !(!(((TRUE AND pipelineHost__ast_uses_bare_placeholder?(&rtoc_self_view, pipelineMaterializedScalarOp__expression(fold_node)))))));
     NIL
     });
     RETURN TRY (pipelineHost__build_soa_scalar_fold_block(rtoc_self_view, site, fold_node, label, source_mir, UNWRAP (expr_mir), fields, needs_whole_item));

@@ -78,7 +78,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE steps: []StepsItem = List[];
     WHILE TRUE DO
       MUTABLE atom = TRY (clearParser__parse_expression(&rtoc_self_view, 5));
-      IF TRY (clearParser__conditional_binding_predicate?(rtoc_self_view)) THEN
+      IF TRY (clearParser__conditional_binding_predicate?(&rtoc_self_view)) THEN
         &steps.append(StepsItem{ Binding: TRY (clearParser__parse_conditional_binding(&rtoc_self_view, atom)) });
       ELSE
         MUTABLE rtoc_atom_steps = TRY (clearParser__refinement_steps(&rtoc_self_view, atom, if_token));
@@ -237,10 +237,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN castLocatableToClearParserReturnValue(UNWRAP (body[0]));
 }
 END
-PRIVATE FN clearParser__conditional_binding_predicate?(self: ClearParser) RETURNS !Bool
+PRIVATE FN clearParser__conditional_binding_predicate?(MUTABLE self: ClearParser) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "EXISTS")) OR TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "IS_OK")));
 }
 END

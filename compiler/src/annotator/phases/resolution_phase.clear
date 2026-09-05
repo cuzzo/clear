@@ -419,8 +419,8 @@ PRIVATE FN resolutionSession__validate_union_method_mut(MUTABLE self: Resolution
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE entry: ?SymbolEntry@multiowned = NIL;
-    IF TRY (resolutionSession__lookup_scope_for(rtoc_self_view, requirement.name)) != NIL THEN
-      entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (UNWRAP (TRY (resolutionSession__lookup_scope_for(rtoc_self_view, requirement.name))));
+    IF TRY (resolutionSession__lookup_scope_for(&rtoc_self_view, requirement.name)) != NIL THEN
+      entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (UNWRAP (TRY (resolutionSession__lookup_scope_for(&rtoc_self_view, requirement.name))));
     scope__resolve_entry(rtoc_local_receiver_2, requirement.name) };
     END
     IF entry EXISTS AS entry_value THEN
@@ -674,10 +674,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN KEEP UNWRAP (((resolutionSession__scope_stack_for_helper(rtoc_self_view))).last());
 }
 END
-PRIVATE FN resolutionSession__lookup_scope_for(self: ResolutionSession, name: String) RETURNS !?Scope@multiowned
+PRIVATE FN resolutionSession__lookup_scope_for(MUTABLE self: ResolutionSession, name: String) RETURNS !?Scope@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_reverse_items_3: []Scope@multiowned = (resolutionSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_4 = rtoc_reverse_items_3.length() - 1;
     WHILE rtoc_reverse_i_4 >= 0 DO
@@ -690,15 +690,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN resolutionSession__resolve_variable_scope(self: ResolutionSession, name: String) RETURNS !?Scope@multiowned
+PRIVATE FN resolutionSession__resolve_variable_scope(MUTABLE self: ResolutionSession, name: String) RETURNS !?Scope@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE scope = TRY (resolutionSession__current_scope(rtoc_self_view));
     IF scope__entry?(&scope, name) THEN
       RETURN scope;
     ELSE
-      MUTABLE outer_scope: ?Scope@multiowned = TRY (resolutionSession__lookup_scope_for(rtoc_self_view, name));
+      MUTABLE outer_scope: ?Scope@multiowned = TRY (resolutionSession__lookup_scope_for(&rtoc_self_view, name));
       IF outer_scope EXISTS AS outer_scope_value THEN
         IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;

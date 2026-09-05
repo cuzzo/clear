@@ -703,8 +703,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF move_line EXISTS AS move_line_value THEN
       IF move_col THEN
         MUTABLE fanout_entry: ?SymbolEntry@multiowned = NIL;
-        IF TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name)) != NIL THEN
-          fanout_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (UNWRAP (TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name))));
+        IF TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name)) != NIL THEN
+          fanout_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = (UNWRAP (TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name))));
         scope__resolve_entry(rtoc_local_receiver_2, name) };
         END
         IF (((fanout_entry != NIL) AND symbolEntry__is_param(fanout_entry)) AND (symbolEntry__carrier_contract(fanout_entry) == :polymorphic)) THEN
@@ -767,7 +767,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             &candidate_caps.delete("@multiowned");
           END
         END
-        MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name));
+        MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
         MUTABLE decl: ?SymbolEntryRegInput = NIL;
         IF (IF scope != NIL THEN
           scope__resolve_entry(scope, name)
@@ -1408,9 +1408,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE syn = cap_var_sync(&var_node);
     MUTABLE fix_branch_value: ?Fix@multiowned = NIL;
     IF (syn == :locked) THEN
-      fix_branch_value = TRY (capabilityAuditSession__build_decl_cap_replace_fix(rtoc_self_view, name, "@locked", "@writeLocked", :REPLACE_LOCKED_WITH_WRITE_LOCKED, {}, :auto));
+      fix_branch_value = TRY (capabilityAuditSession__build_decl_cap_replace_fix(&rtoc_self_view, name, "@locked", "@writeLocked", :REPLACE_LOCKED_WITH_WRITE_LOCKED, {}, :auto));
     ELSE
-      fix_branch_value = TRY (capabilityAuditSession__build_decl_cap_insert_fix(rtoc_self_view, name, "@writeLocked", :WITH_ADD_WRITE_LOCKED, CAST({:reader: DiagnosticKwValue{ StringValue: COPY "via `WITH READ`" }} AS {String@symbol}?DiagnosticKwValue), :auto));
+      fix_branch_value = TRY (capabilityAuditSession__build_decl_cap_insert_fix(&rtoc_self_view, name, "@writeLocked", :WITH_ADD_WRITE_LOCKED, CAST({:reader: DiagnosticKwValue{ StringValue: COPY "via `WITH READ`" }} AS {String@symbol}?DiagnosticKwValue), :auto));
     END
     MUTABLE fix: ?Fix@multiowned = fix_branch_value;
     IF fix EXISTS AS fix_value THEN
@@ -1429,7 +1429,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       WithCapCandidate{ sigil: "@shared", description_code: :WITH_ADD_SHARED, description_params: {:suffix: DiagnosticKwValue{ StringValue: "across fibers" }} },
       WithCapCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} },
       WithCapCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: {:reader: DiagnosticKwValue{ StringValue: "via WITH READ" }} }];
-    MUTABLE fixes = candidates |> SELECT:? TRY (capabilityAuditSession__build_decl_cap_insert_fix(rtoc_self_view, name, _.sigil, _.description_code, _.description_params, :interactive)) |> WHERE _ != NIL |> SELECT UNWRAP (_);
+    MUTABLE fixes = candidates |> SELECT:? TRY (capabilityAuditSession__build_decl_cap_insert_fix(&rtoc_self_view, name, _.sigil, _.description_code, _.description_params, :interactive)) |> WHERE _ != NIL |> SELECT UNWRAP (_);
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_CANNOT_INFER_CAP }, [], CAST({:name: name} AS {String@symbol}Any)));
     END
@@ -1441,7 +1441,7 @@ PRIVATE FN capabilityAuditSession__emit_with_materialized_needs_tense_mut(MUTABL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
-    MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name));
+    MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
     IF (IF scope != NIL THEN
       scope__resolve_entry(scope, name)
@@ -1604,12 +1604,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN capabilityAuditSession__build_decl_cap_insert_fix(self: CapabilityAuditSession, name: String, sigil: String, description_code: String@symbol = :ADD_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}DiagnosticKwValue, confidence: String@symbol = :auto) RETURNS !?Fix
+PRIVATE FN capabilityAuditSession__build_decl_cap_insert_fix(MUTABLE self: CapabilityAuditSession, name: String, sigil: String, description_code: String@symbol = :ADD_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}DiagnosticKwValue, confidence: String@symbol = :auto) RETURNS !?Fix
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
-    MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name));
+    MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
     IF (IF scope != NIL THEN
       scope__resolve_entry(scope, name)
@@ -1644,12 +1644,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN capabilityAuditSession__build_decl_cap_replace_fix(self: CapabilityAuditSession, name: String, old_sigil: String, new_sigil: String, description_code: String@symbol = :CHANGE_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}DiagnosticKwValue, confidence: String@symbol = :auto) RETURNS !?Fix
+PRIVATE FN capabilityAuditSession__build_decl_cap_replace_fix(MUTABLE self: CapabilityAuditSession, name: String, old_sigil: String, new_sigil: String, description_code: String@symbol = :CHANGE_DECL_CAPABILITY_GENERIC, description_params: {String@symbol}DiagnosticKwValue, confidence: String@symbol = :auto) RETURNS !?Fix
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
-    MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name));
+    MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
     IF (IF scope != NIL THEN
       scope__resolve_entry(scope, name)
@@ -1684,7 +1684,7 @@ PRIVATE FN capabilityAuditSession__emit_with_cap_mismatch_mut(MUTABLE self: Capa
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fixes = candidates |> SELECT:? TRY (capabilityAuditSession__build_decl_cap_insert_fix(rtoc_self_view, name, _.sigil, _.description_code, _.description_params, confidence)) |> WHERE _ != NIL;
+    MUTABLE fixes = candidates |> SELECT:? TRY (capabilityAuditSession__build_decl_cap_insert_fix(&rtoc_self_view, name, _.sigil, _.description_code, _.description_params, confidence)) |> WHERE _ != NIL;
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned__capability_audit_session(kw)));
     END
@@ -2135,10 +2135,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN KEEP UNWRAP (((capabilityAuditSession__scope_stack_for_helper(rtoc_self_view))).last());
 }
 END
-PRIVATE FN capabilityAuditSession__lookup_scope_for(self: CapabilityAuditSession, name: String) RETURNS !?Scope@multiowned
+PRIVATE FN capabilityAuditSession__lookup_scope_for(MUTABLE self: CapabilityAuditSession, name: String) RETURNS !?Scope@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_reverse_items_6: []Scope@multiowned = (capabilityAuditSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_7 = rtoc_reverse_items_6.length() - 1;
     WHILE rtoc_reverse_i_7 >= 0 DO
@@ -2151,15 +2151,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN capabilityAuditSession__resolve_variable_scope(self: CapabilityAuditSession, name: String) RETURNS !?Scope@multiowned
+PRIVATE FN capabilityAuditSession__resolve_variable_scope(MUTABLE self: CapabilityAuditSession, name: String) RETURNS !?Scope@multiowned
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE scope = TRY (capabilityAuditSession__current_scope(rtoc_self_view));
     IF scope__entry?(&scope, name) THEN
       RETURN scope;
     ELSE
-      MUTABLE outer_scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, name));
+      MUTABLE outer_scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
       IF outer_scope EXISTS AS outer_scope_value THEN
         IF functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(outer_scope_value, name)) }) THEN
           RETURN outer_scope_value;
@@ -2483,7 +2483,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, callees[rtoc_idx]));
+      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, callees[rtoc_idx]));
       IF !(scope) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -2547,7 +2547,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, callees[rtoc_idx]));
+      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, callees[rtoc_idx]));
       IF !(scope) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -2615,7 +2615,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(rtoc_self_view, callees[rtoc_idx]));
+      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, callees[rtoc_idx]));
       IF !(scope) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;

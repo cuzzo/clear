@@ -123,7 +123,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((TRY (clearParser__match?(&rtoc_self_view, :VAR_ID)) AND clearParser__element_capability_tokens().contains?(token__display_value(rtoc_cur_3)))) THEN
       RETURN result;
     END
-    IF !(TRY (clearParser__element_capability_suffix?(rtoc_self_view))) THEN
+    IF !(TRY (clearParser__element_capability_suffix?(&rtoc_self_view))) THEN
       RETURN result;
     END
     MUTABLE token = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
@@ -138,10 +138,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN result;
 }
 END
-PRIVATE FN clearParser__element_capability_suffix?(self: ClearParser) RETURNS !Bool
+PRIVATE FN clearParser__element_capability_suffix?(MUTABLE self: ClearParser) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE next_tok: ?Token = clearParser__peek_at(rtoc_self_view, 1);
     IF clearParser__token_char?(&rtoc_self_view, next_tok, "[") THEN
       RETURN TRUE;

@@ -594,7 +594,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE variants: {String@symbol}?SchemasUnionSchemaVariantInput = {};
     MUTABLE method_reqs: []UnionMethodRequirement = List[];
     WHILE !(TRY (clearParser__match?(&rtoc_self_view, :CHAR, "}"))) DO
-      IF TRY (clearParser__starts_function_requirement?(rtoc_self_view)) THEN
+      IF TRY (clearParser__starts_function_requirement?(&rtoc_self_view)) THEN
         MUTABLE stub_vis = :package;
         IF TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "PUB")) THEN
           TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "PUB"));
@@ -1122,10 +1122,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY params;
 }
 END
-FN clearParser__starts_function_requirement?(self: ClearParser) RETURNS !Bool
+FN clearParser__starts_function_requirement?(MUTABLE self: ClearParser) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "FN")) THEN
       RETURN TRUE;
     END
@@ -1190,13 +1190,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE !(TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "END"))) DO
       IF TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "WHEN")) THEN
         &whens.append(TRY (clearParser__parse_when_block(&rtoc_self_view)));
-      ELSE_IF TRY (clearParser__test_hook_match?(rtoc_self_view, "BEFORE", "EACH")) THEN
+      ELSE_IF TRY (clearParser__test_hook_match?(&rtoc_self_view, "BEFORE", "EACH")) THEN
         &before_each.append(TRY (clearParser__parse_test_hook(&rtoc_self_view, "BEFORE", "EACH")));
-      ELSE_IF TRY (clearParser__test_hook_match?(rtoc_self_view, "AFTER", "EACH")) THEN
+      ELSE_IF TRY (clearParser__test_hook_match?(&rtoc_self_view, "AFTER", "EACH")) THEN
         &after_each.append(TRY (clearParser__parse_test_hook(&rtoc_self_view, "AFTER", "EACH")));
-      ELSE_IF TRY (clearParser__test_hook_match?(rtoc_self_view, "BEFORE", "ALL")) THEN
+      ELSE_IF TRY (clearParser__test_hook_match?(&rtoc_self_view, "BEFORE", "ALL")) THEN
         &before_all.append(TRY (clearParser__parse_test_hook(&rtoc_self_view, "BEFORE", "ALL")));
-      ELSE_IF TRY (clearParser__test_hook_match?(rtoc_self_view, "AFTER", "ALL")) THEN
+      ELSE_IF TRY (clearParser__test_hook_match?(&rtoc_self_view, "AFTER", "ALL")) THEN
         &after_all.append(TRY (clearParser__parse_test_hook(&rtoc_self_view, "AFTER", "ALL")));
       ELSE_IF TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "LET")) THEN
         &lets.append(TRY (clearParser__parse_let_binding(&rtoc_self_view)));
@@ -1227,10 +1227,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN LetBinding{ token: COPY tok, name: COPY name, expr: COPY expr, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 }
 END
-FN clearParser__test_hook_match?(self: ClearParser, first: String, second: String) RETURNS !Bool
+FN clearParser__test_hook_match?(MUTABLE self: ClearParser, first: String, second: String) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, first)) AND token__text_is?((rtoc_self_view.tokens[(rtoc_self_view.pos + 1)]?), second));
 }
 END
@@ -1269,13 +1269,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE tt = TRY (clearParser__parse_test_that(&rtoc_self_view));
         tt.pending = TRUE;
         &tests.append(tt);
-      ELSE_IF TRY (clearParser__test_hook_match?(rtoc_self_view, "BEFORE", "EACH")) THEN
+      ELSE_IF TRY (clearParser__test_hook_match?(&rtoc_self_view, "BEFORE", "EACH")) THEN
         &before_each.append(TRY (clearParser__parse_test_hook(&rtoc_self_view, "BEFORE", "EACH")));
-      ELSE_IF TRY (clearParser__test_hook_match?(rtoc_self_view, "AFTER", "EACH")) THEN
+      ELSE_IF TRY (clearParser__test_hook_match?(&rtoc_self_view, "AFTER", "EACH")) THEN
         &after_each.append(TRY (clearParser__parse_test_hook(&rtoc_self_view, "AFTER", "EACH")));
-      ELSE_IF TRY (clearParser__test_hook_match?(rtoc_self_view, "BEFORE", "ALL")) THEN
+      ELSE_IF TRY (clearParser__test_hook_match?(&rtoc_self_view, "BEFORE", "ALL")) THEN
         &before_all.append(TRY (clearParser__parse_test_hook(&rtoc_self_view, "BEFORE", "ALL")));
-      ELSE_IF TRY (clearParser__test_hook_match?(rtoc_self_view, "AFTER", "ALL")) THEN
+      ELSE_IF TRY (clearParser__test_hook_match?(&rtoc_self_view, "AFTER", "ALL")) THEN
         &after_all.append(TRY (clearParser__parse_test_hook(&rtoc_self_view, "AFTER", "ALL")));
       ELSE_IF TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "LET")) THEN
         &lets.append(TRY (clearParser__parse_let_binding(&rtoc_self_view)));

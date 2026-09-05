@@ -85,10 +85,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mIRLowering__task_config_variant(rtoc_self_view.lowering, size_name, NIL);
 }
 END
-PUB FN pipelineLoweringBridge__guarded_cleanup_name?(self: PipelineLoweringBridge, name: String) RETURNS Bool
+PUB FN pipelineLoweringBridge__guarded_cleanup_name?(MUTABLE self: PipelineLoweringBridge, name: String) RETURNS Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__pipeline_guarded_cleanup_name?(rtoc_self_view.lowering, name);
 }
 END
