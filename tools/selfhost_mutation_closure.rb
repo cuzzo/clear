@@ -89,72 +89,136 @@ module SelfhostMutationClosure
     grown
   end
 
+  def mark_text(text, positions)
+    out = +''
+    cursor = 0
+    marked = 0
+    while (call = text.index(/(?<![\w.&])[\w?!]+\(/, cursor))
+      name = text[call..][/\A[\w?!]+/]
+      open_paren = call + name.length + 1
+      unless positions.key?(name)
+        out << text[cursor...open_paren]
+        cursor = open_paren
+        next
+      end
+      depth = 1
+      scan = open_paren
+      start = open_paren
+      args = []
+      while scan < text.length && depth.positive?
+        ch = text[scan]
+        depth += 1 if '([{'.include?(ch)
+        if ')]}'.include?(ch)
+          depth -= 1
+          if depth.zero?
+            args << (start...scan)
+            break
+          end
+        elsif ch == ',' && depth == 1
+          args << (start...scan)
+          start = scan + 1
+        end
+        scan += 1
+      end
+      if depth.positive?
+        out << text[cursor...open_paren]
+        cursor = open_paren
+        next
+      end
+      out << text[cursor...open_paren]
+      args.each_with_index do |range, position|
+        inner, inner_marked = mark_text(text[range], positions)
+        marked += inner_marked
+        if positions[name].include?(position) && inner.match?(/\A\s*[a-z_]\w*\s*\z/)
+          inner = inner.sub(inner.strip, "&#{inner.strip}")
+          marked += 1
+        end
+        out << inner
+        out << ',' if position < args.length - 1
+      end
+      cursor = args.last.end
+    end
+    out << text[cursor..] if cursor < text.length
+    [out, marked]
+  end
+
   # `&` is the call-site half of the contract; without it the callee's MUTABLE
   # parameter has nothing to bind.
+  # `&` is the call-site half of the contract; without it the callee's MUTABLE
+  # parameter has nothing to bind. Scans whole-file rather than line-by-line:
+  # a call's arguments routinely continue onto following lines.
   def mark_call_sites!(sources)
     positions = mutable_positions(sources)
     return 0 if positions.empty?
 
     marked = 0
     sources.each do |path, text|
-      lines = text.split("\n", -1)
-      changed = false
-      lines.each_with_index do |line, index|
-        next if line =~ FN_HEAD
-
-        out = +''
-        cursor = 0
-        while (call = line.index(/(?<![\w.&])[\w?!]+\(/, cursor))
-          name = line[call..][/\A[\w?!]+/]
-          open_paren = call + name.length + 1
-          unless positions.key?(name)
-            out << line[cursor...open_paren]
-            cursor = open_paren
-            next
-          end
-          depth = 1
-          scan = open_paren
-          start = open_paren
-          args = []
-          while scan < line.length && depth.positive?
-            ch = line[scan]
-            depth += 1 if '([{'.include?(ch)
-            if ')]}'.include?(ch)
-              depth -= 1
-              if depth.zero?
-                args << (start...scan)
-                break
-              end
-            elsif ch == ',' && depth == 1
-              args << (start...scan)
-              start = scan + 1
-            end
-            scan += 1
-          end
-          if depth.positive?
-            out << line[cursor...open_paren]
-            cursor = open_paren
-            next
-          end
-          out << line[cursor...open_paren]
-          args.each_with_index do |range, position|
-            arg = line[range]
-            if positions[name].include?(position) && arg.match?(/\A\s*[a-z_]\w*\s*\z/)
-              arg = arg.sub(arg.strip, "&#{arg.strip}")
-              marked += 1
-            end
-            out << arg
-            out << ',' if position < args.length - 1
-          end
-          cursor = args.last.end
+      line_starts = [0]
+      text.each_char.with_index { |ch, i| line_starts << i + 1 if ch == "\n" }
+      head_lines = Set.new
+      text.split("\n", -1).each_with_index { |line, i| head_lines << i if line =~ FN_HEAD }
+      line_of = lambda do |offset|
+        low = 0
+        high = line_starts.length - 1
+        while low < high
+          mid = (low + high + 1) / 2
+          line_starts[mid] <= offset ? low = mid : high = mid - 1
         end
-        out << line[cursor..] if cursor < line.length
-        next if out == line
-
-        lines[index] = out
-        changed = true
+        low
       end
-      sources[path] = lines.join("\n") if changed
+
+      out = +''
+      cursor = 0
+      while (call = text.index(/(?<![\w.&])[\w?!]+\(/, cursor))
+        name = text[call..][/\A[\w?!]+/]
+        open_paren = call + name.length + 1
+        if !positions.key?(name) || head_lines.include?(line_of.call(call))
+          out << text[cursor...open_paren]
+          cursor = open_paren
+          next
+        end
+        depth = 1
+        scan = open_paren
+        start = open_paren
+        args = []
+        while scan < text.length && depth.positive?
+          ch = text[scan]
+          depth += 1 if '([{'.include?(ch)
+          if ')]}'.include?(ch)
+            depth -= 1
+            if depth.zero?
+              args << (start...scan)
+              break
+            end
+          elsif ch == ',' && depth == 1
+            args << (start...scan)
+            start = scan + 1
+          end
+          scan += 1
+        end
+        if depth.positive?
+          out << text[cursor...open_paren]
+          cursor = open_paren
+          next
+        end
+        out << text[cursor...open_paren]
+        args.each_with_index do |range, position|
+          # An argument routinely contains further calls; mark inside it too.
+          inner, inner_marked = mark_text(text[range], positions)
+          marked += inner_marked
+          if positions[name].include?(position) && inner.match?(/\A\s*[a-z_]\w*\s*\z/)
+            inner = inner.sub(inner.strip, "&#{inner.strip}")
+            marked += 1
+          end
+          out << inner
+          out << ',' if position < args.length - 1
+        end
+        cursor = args.last.end
+      end
+      out << text[cursor..] if cursor < text.length
+      next if out == text
+
+      sources[path] = out
     end
     marked
   end
