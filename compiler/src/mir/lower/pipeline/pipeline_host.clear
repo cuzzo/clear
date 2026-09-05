@@ -197,7 +197,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     NIL
-    }, pipeline_owned_cleanup_entry: %(value, ast_node) USE(rtoc_self_view) -> TRY (pipelineLoweringBridge__pipeline_owned_cleanup_entry(rtoc_self_view.lowering_bridge, value, ast_node)), pipeline_index_insert_with_ownership: %(insert, value, value_owns, target_alloc) USE(rtoc_self_view) -> TRY (pipelineLoweringBridge__pipeline_index_insert_with_ownership(rtoc_self_view.lowering_bridge, &insert, value, value_owns, target_alloc)), index_temp_name: %() USE(rtoc_self_view) -> "__idx_item_${(rtoc_self_view.pipe_temp_counter + 1).toString()}" };
+    }, pipeline_owned_cleanup_entry: %(value, ast_node) USE(rtoc_self_view) -> TRY (pipelineLoweringBridge__pipeline_owned_cleanup_entry(&rtoc_self_view.lowering_bridge, value, ast_node)), pipeline_index_insert_with_ownership: %(insert, value, value_owns, target_alloc) USE(rtoc_self_view) -> TRY (pipelineLoweringBridge__pipeline_index_insert_with_ownership(rtoc_self_view.lowering_bridge, &insert, value, value_owns, target_alloc)), index_temp_name: %() USE(rtoc_self_view) -> "__idx_item_${(rtoc_self_view.pipe_temp_counter + 1).toString()}" };
 }
 END
 PRIVATE FN pipelineHost__build_batch_window_lowerer(MUTABLE self: PipelineHost) RETURNS !PipelineBatchWindowLowerer
