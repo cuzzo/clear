@@ -818,7 +818,7 @@ PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionF
   MUTABLE fn = COPY facts.fn;
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < fn.params.length() DO
-    IF !(TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new( UNWRAP ((IF fn.params[rtoc_idx]?.type EXISTS AS rtoc_wrap_820 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_820 } ELSE NIL END)))), schema_lookup))) THEN
+    IF !(TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new( (IF fn.params[rtoc_idx]?.type EXISTS AS rtoc_wrap_820 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_820 } ELSE NIL END))), schema_lookup))) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1322,7 +1322,7 @@ PUB FN escapeAnalysis__propagate_assignment_ownership_mut(facts: FunctionFacts, 
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[target];
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[UNWRAP (target)];
     IF !(sym) THEN
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -1779,7 +1779,7 @@ END
 PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, names: [Set]String) RETURNS Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < names.length() DO
-    MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[names[rtoc_idx]];
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[UNWRAP (names[rtoc_idx])];
     IF !(sym) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
