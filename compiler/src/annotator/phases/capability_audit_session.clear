@@ -3822,7 +3822,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE callees: [Set]String = ((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[rtoc_each_21] OR_ELSE CAST(panic("missing hash key") AS [Set]String));
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < callees.length() DO
-      IF !(transitive[UNWRAP (callees[rtoc_idx])]) THEN
+      IF !(transitive[callees[rtoc_idx]]) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

@@ -239,7 +239,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.protocols[protocol.name] = COPY protocol;
 }
 END
-PUB FN resolutionSession__register_local_declaration_mut(MUTABLE self: ResolutionSession, MUTABLE node: Node) RETURNS !Void
+PUB FN resolutionSession__register_local_declaration_mut(MUTABLE self: ResolutionSession, node: Node) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1952,7 +1952,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN result;
 }
 END
-PRIVATE FN resolutionSession__register_type_declaration(MUTABLE self: ResolutionSession, MUTABLE node: TypeDeclaration) RETURNS !Void
+PRIVATE FN resolutionSession__register_type_declaration(MUTABLE self: ResolutionSession, node: TypeDeclaration) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

@@ -37,7 +37,7 @@ END
 
 # Ruby asks `respond_to?(:strip_layout_mut)` and then calls it. The variants that
 # can answer compute it; the rest do not respond.
-PUB FN matchPayload__strip_layout_mut(MUTABLE value: MatchPayload) RETURNS !?TypeCapabilities EFFECTS REENTRANT ->
+PUB FN matchPayload__strip_layout_mut(value: MatchPayload) RETURNS !?TypeCapabilities EFFECTS REENTRANT ->
   PARTIAL MATCH value START
     MatchPayload.TypeMultiowned AS MUTABLE item -> RETURN TRY (type__strip_layout_mut(&item));,
     MatchPayload.Type AS item -> RETURN TRY (type__strip_layout_mut(&item));,
