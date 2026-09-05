@@ -1250,7 +1250,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(owner) THEN
         IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_28 = TRY (resolutionSession__current_scope(rtoc_self_view));
         TRY (scope__resolve_type_entry(rtoc_local_receiver_28, symbol(_.owner_name))) } THEN
-          TRY (resolutionSession__error_mut(&rtoc_self_view, _.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_NONLOCAL_OWNER }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
+          TRY (resolutionSession__error_mut(&rtoc_self_view, (IF _.owner_token EXISTS AS rtoc_wrap_1252 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_1252 } ELSE NIL END), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_NONLOCAL_OWNER }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
         ELSE
           TRY (resolutionSession__error_mut(&rtoc_self_view, _.owner_token, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_UNKNOWN_OWNER }, [], CAST({:owner: _.owner_name} AS {String@symbol}Any)));
         END
@@ -2038,7 +2038,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (resolutionSession__error_mut(&rtoc_self_view, (IF COPY _.bounds[rtoc_idx]?.token != NIL THEN COPY _.bounds[rtoc_idx]?.token ELSE COPY _.token END), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_PROTOCOL }, [], CAST({:protocol: TRY (type__surface_name(castTypeToTypeTypeInput__resolution_phase( UNWRAP (_.bounds[rtoc_idx]?.type))))} AS {String@symbol}Any)));
+      TRY (resolutionSession__error_mut(&rtoc_self_view, (IF (IF COPY _.bounds[rtoc_idx]?.token != NIL THEN COPY _.bounds[rtoc_idx]?.token ELSE COPY _.token END) EXISTS AS rtoc_wrap_2040 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_2040 } ELSE NIL END), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_PROTOCOL }, [], CAST({:protocol: TRY (type__surface_name(castTypeToTypeTypeInput__resolution_phase( UNWRAP (_.bounds[rtoc_idx]?.type))))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
     END
