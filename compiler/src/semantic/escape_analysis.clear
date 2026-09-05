@@ -586,7 +586,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
   END
   IF (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == name) ELSE FALSE END) THEN
     MUTABLE sym: ?SymbolEntry@multiowned = locatable__symbol(node);
-    IF (!(UNWRAP (sym) IS_A SymbolEntry@multiowned) OR ((UNWRAP (sym)).binding_id == entry.binding_id)) THEN
+    IF (!(TRUE) OR ((UNWRAP (sym)).binding_id == entry.binding_id)) THEN
       MUTABLE stamp = (node.full_type());
       IF ((stamp IS_A Type) AND !(TRY (type__any_rc?(stamp)))) THEN
         TRY (type__set_ownership(&stamp, :multiowned));
@@ -818,7 +818,7 @@ PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionF
   MUTABLE fn = COPY facts.fn;
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < fn.params.length() DO
-    IF !(TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new( UNWRAP ((IF fn.params[rtoc_idx]?.type EXISTS AS rtoc_wrap_820 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_820 } ELSE NIL END)))), schema_lookup))) THEN
+    IF !(TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new( (IF fn.params[rtoc_idx]?.type EXISTS AS rtoc_wrap_820 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_820 } ELSE NIL END))), schema_lookup))) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END

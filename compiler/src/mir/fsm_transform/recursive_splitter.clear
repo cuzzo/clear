@@ -482,7 +482,7 @@ PRIVATE FN fsmRecursiveSplitter__remap_tail(tail: SegmentTail, mapping: {Int64}I
     END);
   ELSE_IF tail IS_A LockSuspend AS lock_suspend THEN
     RETURN SegmentTail{ LockSuspend: COPY LockSuspend{ with_node: KEEP lock_suspend.with_node, cap: COPY lock_suspend.cap, prior_caps: COPY lock_suspend.prior_caps, post_acquire_idx: IF lock_suspend.post_acquire_idx THEN
-      mapping[lock_suspend.post_acquire_idx]?
+      mapping[UNWRAP (lock_suspend.post_acquire_idx)]?
     ELSE
       NIL
     END, next_index: IF lock_suspend.next_index THEN
