@@ -1,0 +1,41 @@
+# Passing UNWRAP(x) to a borrowing parameter reads through the optional; it
+# does not hand the optional's ownership to the callee. Assigning the same
+# owned optional twice and reading it each time is therefore legal -- treating
+# the unwrap as a transfer made the second read a use-after-transfer.
+
+STRUCT Thing { items: []String }
+
+FN describe(self: Thing) RETURNS !Bool ->
+  RETURN self.items.length() > 0;
+END
+
+FN make() RETURNS !Thing ->
+  MUTABLE t = Thing{ items: [] };
+  &t.items.append("a");
+  RETURN t;
+END
+
+FN check(a: Bool, b: Bool) RETURNS !Int64 ->
+  MUTABLE ti: ?Thing = NIL;
+  MUTABLE hits = 0;
+  IF a THEN
+    ti = TRY (make());
+    IF TRY (describe(UNWRAP (ti))) THEN
+      hits = hits + 1;
+    END
+  END
+  IF b THEN
+    ti = TRY (make());
+    IF TRY (describe(UNWRAP (ti))) THEN
+      hits = hits + 10;
+    END
+  END
+  RETURN hits;
+END
+
+FN main() RETURNS Void ->
+  both = TRY (check(TRUE, TRUE));
+  print("both $both");
+  first = TRY (check(TRUE, FALSE));
+  print("first $first");
+END
