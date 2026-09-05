@@ -90,7 +90,7 @@ module SelfhostMutationClosure
         # capture it mutably, or the call inside the body is the one reported.
         (head...tail).each do |i|
           next unless lines[i].include?('USE(')
-          next unless mutating.any? { |callee| lines[i].include?("#{callee}(&") || lines[i].include?("#{callee}(rtoc_self_view") }
+          next unless lambda_mutates_capture?(lines, i, mutating)
 
           lines[i] = lines[i].gsub(/USE\(([^)]*)\)/) do
             names = Regexp.last_match(1).split(',').map do |n|
@@ -161,6 +161,26 @@ module SelfhostMutationClosure
     [out, marked]
   end
 
+  # A lambda body routinely spans many lines; the mutating call that forces a
+  # mutable capture is rarely on the `USE(...)` line itself.
+  def lambda_body_range(lines, start)
+    return (start..start) unless lines[start].include?('-> {')
+
+    depth = 0
+    (start...lines.length).each do |i|
+      depth += lines[i].count('{') - lines[i].count('}')
+      return (start..i) if depth <= 0 && i > start
+    end
+    (start..[start + 40, lines.length - 1].min)
+  end
+
+  def lambda_mutates_capture?(lines, index, mutating)
+    lambda_body_range(lines, index).any? do |i|
+      line = lines[i]
+      mutating.any? { |callee| line.include?("#{callee}(&") || line.include?("#{callee}(rtoc_self_view") }
+    end
+  end
+
   # A lambda body that mutates the captured receiver needs `USE(MUTABLE x)`
   # even when the enclosing function's own receiver is already mutable.
   def lambda_capture_needed?(lines, head, tail, mutating)
@@ -170,7 +190,7 @@ module SelfhostMutationClosure
       next false if line.match?(/USE\([^)]*MUTABLE (?:self|rtoc_self_view)/)
       next false unless line.match?(/USE\([^)]*(?:self|rtoc_self_view)/)
 
-      mutating.any? { |callee| line.include?("#{callee}(&") || line.include?("#{callee}(rtoc_self_view") }
+      lambda_mutates_capture?(lines, i, mutating)
     end
   end
 
