@@ -25,7 +25,7 @@ PUB FN pipelineLoweringBridge__initialize(MUTABLE self: PipelineLoweringBridge, 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.lowering = COPY lowering;
-    MUTABLE rtoc_writer_receiver_1: MIRLoweringRuntimeState = mIRLowering__runtime_state(rtoc_self_view.lowering);
+    MUTABLE rtoc_writer_receiver_1: MIRLoweringRuntimeState = mIRLowering__runtime_state(&rtoc_self_view.lowering);
     rtoc_writer_receiver_1.emitter = emitter;
 }
 END
@@ -118,7 +118,7 @@ PUB FN pipelineLoweringBridge__emit_mir(MUTABLE self: PipelineLoweringBridge, no
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_3 = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_2 = mIRLowering__runtime_state(rtoc_self_view.lowering);
+    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_3 = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_2 = mIRLowering__runtime_state(&rtoc_self_view.lowering);
     mIRLoweringRuntimeState__emitter_mut(&rtoc_mutable_receiver_2) });
     TRY (mIREmitter__emit(&rtoc_mutable_receiver_3, node)) };
 }
