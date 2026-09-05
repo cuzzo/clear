@@ -20201,7 +20201,7 @@ PRIVATE FN typeAnalysisSession__init_value_contents_heap?(MUTABLE self: TypeAnal
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF init EXISTS AS init_value THEN
       IF init_value IS_A StructLit AS struct_lit THEN
-        RETURN struct_lit.fields |> ALL (IF !(_._1) THEN TRUE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE fti = TRY (type__from_node_mut(_._1, "heap init field")); (IF !((TRY (type__string?( UNWRAP (fti))) OR type__collection?( UNWRAP (fti)))) THEN TRUE ELSE (_._1 IS_A Locatable AND symbolEntry__heap_storage?(_._1)) END) } END);
+        RETURN struct_lit.fields.values() |> ALL (IF !(_) THEN TRUE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE fti = TRY (type__from_node_mut(_, "heap init field")); (IF !((TRY (type__string?( UNWRAP (fti))) OR type__collection?( UNWRAP (fti)))) THEN TRUE ELSE (_ IS_A Locatable AND symbolEntry__heap_storage?(_)) END) } END);
       ELSE_IF init_value IS_A UnionVariantLit AS union_variant_lit THEN
         RETURN union_variant_lit.fields |> ALL (IF !(_._1) THEN TRUE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE fti = TRY (type__from_node_mut(_._1, "heap init field")); (IF !((TRY (type__string?( UNWRAP (fti))) OR type__collection?( UNWRAP (fti)))) THEN TRUE ELSE (_._1 IS_A Locatable AND symbolEntry__heap_storage?(_._1)) END) } END);
       ELSE_IF (init_value IS_A FuncCall) OR (init_value IS_A MethodCall) THEN

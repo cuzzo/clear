@@ -2073,7 +2073,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node.type_params.any?() THEN
       TRY (resolutionSession__validate_type_param_list_mut(&rtoc_self_view, Node{ UnionDef: COPY node }, node.type_params, "union"));
     END
-    IF (node.type_params.any?() AND (node.variants |> ANY schemas__inline_struct?(_._1))) THEN
+    IF (node.type_params.any?() AND (node.variants.values() |> ANY schemas__inline_struct?(_))) THEN
       TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ UnionDef: COPY node } }, ResolutionCodeOrMessage{ SymbolValue: :UNION_INLINE_IN_GENERIC }));
     END
     TRY (resolutionSession__register_inline_struct_variants_mut(&rtoc_self_view, node));
