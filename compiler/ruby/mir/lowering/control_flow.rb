@@ -137,8 +137,13 @@ module MIRLoweringControlFlow
       else_body = lower_body_with_break(node.else_branch || [], label)
       if_stmt = MIR::IfStmt.new(cond, then_body, else_body)
       if_stmt.comptime = node.comptime
-      block = with_expression_result_type(MIR::BlockExpr.new(label, [if_stmt]), node)
-      return with_pending(cond_pending, block)
+      # An allocating condition hoists statements. In expression position they
+      # belong INSIDE the labeled block that yields the value: wrapping the
+      # block in a ScopeBlock instead leaves a plain Zig block whose value is
+      # discarded, and hides the temps from ownership finalization.
+      return with_expression_result_type(
+        MIR::BlockExpr.new(label, cond_pending + [if_stmt]), node
+      )
     end
 
     then_body = lower_body(node.then_branch)

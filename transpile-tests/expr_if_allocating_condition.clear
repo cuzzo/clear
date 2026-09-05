@@ -1,0 +1,23 @@
+# An IF used as a value whose condition allocates (here two substr calls) hoists
+# statements. They belong inside the labeled block that yields the value: the
+# old ScopeBlock wrapper produced a plain Zig block whose value was discarded,
+# and hid the temps from ownership finalization so the MIR checker rejected
+# them as carrying unfinalized registry metadata.
+
+FN pick(left: String, right: String) RETURNS !Int64 ->
+  MUTABLE zero: Int64 = 0;
+  MUTABLE one: Int64 = 1;
+  MUTABLE cost: Int64 = IF (left.substr(0, 1) == right.substr(0, 1)) THEN
+      zero
+    ELSE
+      one
+    END;
+  RETURN cost;
+END
+
+FN main() RETURNS Void ->
+  same = TRY (pick("ab", "ac"));
+  print("same $same");
+  diff = TRY (pick("ab", "cd"));
+  print("diff $diff");
+END
