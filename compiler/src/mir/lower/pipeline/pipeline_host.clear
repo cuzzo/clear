@@ -87,7 +87,7 @@ PRIVATE FN pipelineHost__build_plan_builder(MUTABLE self: PipelineHost) RETURNS 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN PipelinePlanBuilder{ lowering_target: %() USE(rtoc_self_view) -> pipelineLoweringBridge__lowering_target(rtoc_self_view.lowering_bridge), range_chain: %(node) USE(rtoc_self_view) -> TRY (pipelineHost__unwrap_range_chain(rtoc_self_view, &node)), binding_chain: %(node) USE(rtoc_self_view) -> {
+    RETURN PipelinePlanBuilder{ lowering_target: %() USE(MUTABLE rtoc_self_view) -> pipelineLoweringBridge__lowering_target(rtoc_self_view.lowering_bridge), range_chain: %(node) USE(MUTABLE rtoc_self_view) -> TRY (pipelineHost__unwrap_range_chain(rtoc_self_view, &node)), binding_chain: %(node) USE(MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_1 = TRY (pipelineBindingChainLowerer__unwrap_chain(rtoc_self_view.binding_chain_lowerer, node));
     rtoc_lambda_result_1
     } };
@@ -213,7 +213,7 @@ PRIVATE FN pipelineHost__build_range_lowerer_host(MUTABLE self: PipelineHost) RE
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN runtimeHost__new(%(node) USE(MUTABLE rtoc_self_view) -> TRY (pipelineHost__visit_mir(&rtoc_self_view, node)), %(node, alloc) USE(MUTABLE substituted, MUTABLE rtoc_self_view) -> {
     MUTABLE substituted = TRY (pipelineHost__substitute_placeholders(&rtoc_self_view, node));
-    TRY (pipelineLoweringBridge__lower_node_with_decl_alloc(rtoc_self_view.lowering_bridge, substituted, alloc))
+    TRY (pipelineLoweringBridge__lower_node_with_decl_alloc(rtoc_self_view.lowering_bridge, &substituted, alloc))
     }, %(node, placeholder, acc) USE(MUTABLE rtoc_self_view) -> pipelineHost__with_pipeline_context(&rtoc_self_view, placeholder, acc, %() USE(node, MUTABLE rtoc_self_view) -> TRY (pipelineHost__visit_mir(&rtoc_self_view, node))), %(node, placeholder) USE(MUTABLE rtoc_self_view) -> pipelineLoweringBridge__lower_head(rtoc_self_view.lowering_bridge, %() USE(node, placeholder, MUTABLE rtoc_self_view) -> pipelineHost__with_pipeline_context(&rtoc_self_view, placeholder, NIL, %() USE(node, MUTABLE rtoc_self_view) -> TRY (pipelineHost__visit_mir(&rtoc_self_view, node)))), %(rt_name, blk) USE(MUTABLE rtoc_self_view) -> pipelineHost__with_fiber_capture_map(rtoc_self_view, {}, {}, rt_name, %() USE(blk) -> blk()), %(body_stmts, placeholder) USE(MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_12 = TRY (pipelineHost__visit_pipeline_body_mir(&rtoc_self_view, body_stmts, placeholder));
     rtoc_lambda_result_12
@@ -448,7 +448,7 @@ PUB FN pipelineHost__visit_mir_head(MUTABLE self: PipelineHost, node: Locatable)
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE substituted = TRY (pipelineHost__substitute_placeholders(&rtoc_self_view, node));
-    MUTABLE head = pipelineLoweringBridge__lower_head(rtoc_self_view.lowering_bridge, %() USE(substituted, MUTABLE rtoc_self_view) -> TRY (pipelineLoweringBridge__lower_node( &rtoc_self_view.lowering_bridge, substituted)));
+    MUTABLE head = pipelineLoweringBridge__lower_head(&rtoc_self_view.lowering_bridge, %() USE(substituted, MUTABLE rtoc_self_view) -> TRY (pipelineLoweringBridge__lower_node( &rtoc_self_view.lowering_bridge, substituted)));
     MUTABLE owned = ((TRY (ownershipEffect__of(head.value))).produces_owned OR (head.pending |> ANY _ IS_A AllocMark));
     RETURN PipelineElementHead{ value: COPY head.value, pending: COPY head.pending, owned: owned };
 }
@@ -1198,7 +1198,7 @@ PRIVATE FN pipelineHost__bc_target?(MUTABLE self: PipelineHost) RETURNS Bool
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN pipelineLoweringBridge__bc_target?(rtoc_self_view.lowering_bridge);
+    RETURN pipelineLoweringBridge__bc_target?(&rtoc_self_view.lowering_bridge);
 }
 END
 PRIVATE FN pipelineHost__pipeline_source_shape(MUTABLE self: PipelineHost, source_node: Locatable) RETURNS !PipelineSourceShape
