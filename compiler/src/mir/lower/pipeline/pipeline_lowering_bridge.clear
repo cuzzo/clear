@@ -42,7 +42,7 @@ PUB FN pipelineLoweringBridge__lowering_target(MUTABLE self: PipelineLoweringBri
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN mIRLowering__lowering_target(rtoc_self_view.lowering);
+    RETURN mIRLowering__lowering_target(&rtoc_self_view.lowering);
 }
 END
 PUB FN pipelineLoweringBridge__bc_target?(MUTABLE self: PipelineLoweringBridge) RETURNS Bool
