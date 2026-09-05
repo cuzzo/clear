@@ -2347,7 +2347,7 @@ PRIVATE FN capabilityAuditSession__resolve_maybe_effects(MUTABLE self: Capabilit
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE has_block_maybe = callee_set.contains?(:BLOCKING_MAYBE);
-    MUTABLE has_cont_maybe = callee_set.contains?(contention_maybe);
+    MUTABLE has_cont_maybe = callee_set.contains?(:CONTENTION_MAYBE);
     IF !((has_block_maybe OR has_cont_maybe)) THEN
       RETURN COPY callee_set;
     END
@@ -2751,7 +2751,7 @@ PRIVATE FN capabilityAuditSession__fallible_call_site_fact?(self: CapabilityAudi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node = COPY fact.node;
-    IF (aST__node_error_union_type(node) OR_ELSE FALSE) THEN
+    IF (aST__node_error_union_type(node) != NIL) THEN
       RETURN TRUE;
     END
     MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature);
