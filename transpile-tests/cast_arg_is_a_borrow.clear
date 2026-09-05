@@ -1,0 +1,31 @@
+# CAST reinterprets its operand; it does not hand the operand's ownership to
+# the callee. Passing CAST(x AS T) to a borrowing parameter therefore leaves x
+# readable afterwards -- treating the cast as a transfer made the next read a
+# use-after-transfer, while the same argument without the cast was fine.
+
+STRUCT Ty { name: String, args: []String }
+
+FN ty_new(n: String) RETURNS !Ty ->
+  MUTABLE t = Ty{ name: COPY n, args: [] };
+  &t.args.append("a");
+  RETURN t;
+END
+
+FN width(tag: Int64, item_type: Ty) RETURNS !Int64 ->
+  RETURN tag + item_type.args.length();
+END
+
+FN label(t: Ty) RETURNS !String ->
+  RETURN COPY t.name;
+END
+
+FN lower() RETURNS !String ->
+  MUTABLE item_t = TRY (ty_new("x"));
+  MUTABLE w = TRY (width(1, CAST(item_t AS Ty)));
+  MUTABLE name = TRY (label(item_t));
+  RETURN "$name:$w";
+END
+
+FN main() RETURNS Void ->
+  print(TRY (lower()));
+END

@@ -490,9 +490,15 @@ module Hoist
     if node.is_a?(AST::BinaryOp) && (node.op == :OR || node.op == :OR_ELSE)
       node = node.left
     end
-    # UNWRAP reads through the optional exactly as a field or index read does;
-    # a non-moved read of one is a borrow, not a take of the optional.
-    node = node.target while node.is_a?(AST::OptionalUnwrap)
+    # UNWRAP reads through the optional exactly as a field or index read does,
+    # and CAST reinterprets its operand rather than taking it; a non-moved read
+    # through either is a borrow, not a take of the source.
+    loop do
+      if node.is_a?(AST::OptionalUnwrap) then node = node.target
+      elsif node.is_a?(AST::Cast) then node = node.value
+      else break
+      end
+    end
     node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex) || node.is_a?(AST::Identifier)
   end
 
