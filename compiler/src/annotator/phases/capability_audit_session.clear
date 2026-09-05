@@ -2346,7 +2346,7 @@ PRIVATE FN capabilityAuditSession__resolve_maybe_effects(MUTABLE self: Capabilit
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE has_block_maybe = callee_set.contains?(blocking_maybe);
+    MUTABLE has_block_maybe = callee_set.contains?(:BLOCKING_MAYBE);
     MUTABLE has_cont_maybe = callee_set.contains?(contention_maybe);
     IF !((has_block_maybe OR has_cont_maybe)) THEN
       RETURN COPY callee_set;
@@ -2837,7 +2837,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
     MUTABLE effs = (fn_node.effects OR_ELSE Set[]);
     MUTABLE reason = NIL;
-    IF (effs.contains?(reentrant) OR fn_node.plain_reentrant?()) THEN
+    IF (effs.contains?(:REENTRANT) OR fn_node.plain_reentrant?()) THEN
         reason = :reentrant;
     ELSE_IF effs.contains?(extern_value) THEN
         reason = :extern;

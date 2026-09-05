@@ -8866,7 +8866,7 @@ PRIVATE FN typeAnalysisSession__promote_suspends_for_current_context(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !((effect == suspends)) THEN
+    IF !((effect == :SUSPENDS)) THEN
       RETURN effect;
     END
     IF (typeAnalysisSession__current_loop_depth(&rtoc_self_view) > 0) THEN
