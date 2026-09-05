@@ -3890,7 +3890,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF callee_fn EXISTS AS callee_fn_value THEN
       MUTABLE callee_param: ?Param = NIL;
       IF TRUE THEN
-        callee_param = COPY ((callee_fn_value.params)?[facts.index]);
+        callee_param = COPY ((callee_fn_value.params)[facts.index]);
       END
       MUTABLE contract: String@symbol = facts.param.carrier_contract;
       IF callee_param != NIL THEN
@@ -4847,7 +4847,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF node IS_A GetField AS get_field THEN
     IF get_field.target IS_A Identifier THEN
-      MUTABLE schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(aST__node_name(get_field.target))));
+      MUTABLE schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(UNWRAP (aST__node_name(get_field.target)))));
       IF ((schemas__union?(schema) OR schemas__enum?(schema))) THEN
         RETURN TRUE;
       END
@@ -5563,7 +5563,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))
     });
     IF !((locatable__resolved_type(UNWRAP (locatable__expression(node.right))) == :Bool)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :TAKE_WHILE_NEEDS_BOOL }, [], CAST({:got: locatable__expression(node.right).resolved_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :TAKE_WHILE_NEEDS_BOOL }, [], CAST({:got: UNWRAP (locatable__expression(node.right)).resolved_type} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF pipelineSourceFact__inf_stream?(source) THEN
       symbol("~${castTypeToString(item_type)}[INF]")
@@ -6152,7 +6152,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))
     });
     IF !((locatable__resolved_type(UNWRAP (locatable__expression(node.right))) == :Bool)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_CLAUSE_NEEDS_BOOL }, [], CAST({:clause: "FIND", :got: locatable__expression(node.right).resolved_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_CLAUSE_NEEDS_BOOL }, [], CAST({:clause: "FIND", :got: UNWRAP (locatable__expression(node.right)).resolved_type} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("?${castTypeToString(item_type)}") }))));
     node.storage_override = :stack;
@@ -6174,7 +6174,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))
     });
     IF !((locatable__resolved_type(UNWRAP (locatable__expression(node.right))) == :Bool)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_CLAUSE_NEEDS_BOOL }, [], CAST({:clause: "ANY", :got: locatable__expression(node.right).resolved_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_CLAUSE_NEEDS_BOOL }, [], CAST({:clause: "ANY", :got: UNWRAP (locatable__expression(node.right)).resolved_type} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, :Bool));
     node.storage_override = :stack;
@@ -6196,7 +6196,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))
     });
     IF !((locatable__resolved_type(UNWRAP (locatable__expression(node.right))) == :Bool)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_CLAUSE_NEEDS_BOOL }, [], CAST({:clause: "ALL", :got: locatable__expression(node.right).resolved_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_CLAUSE_NEEDS_BOOL }, [], CAST({:clause: "ALL", :got: UNWRAP (locatable__expression(node.right)).resolved_type} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, :Bool));
     node.storage_override = :stack;
@@ -6218,7 +6218,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))
     });
     IF !((locatable__resolved_type(UNWRAP (locatable__expression(node.right))) == :Bool)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_CLAUSE_NEEDS_BOOL }, [], CAST({:clause: "COUNT", :got: locatable__expression(node.right).resolved_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_CLAUSE_NEEDS_BOOL }, [], CAST({:clause: "COUNT", :got: UNWRAP (locatable__expression(node.right)).resolved_type} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ BinaryOp: COPY node }, :Int64));
     node.storage_override = :stack;
@@ -6439,7 +6439,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           map_type = COPY symbolEntry__type(entry);
         END
         IF !((map_type != NIL)) THEN
-          map_type = TRY (type__new( UNWRAP ((IF map_type EXISTS AS rtoc_wrap_6441 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_6441 } ELSE NIL END))));
+          map_type = TRY (type__new( (IF map_type EXISTS AS rtoc_wrap_6441 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_6441 } ELSE NIL END)));
         END
         IF !((type__sharded?(map_type) AND ((IF entry != NIL THEN
           symbolEntry__sync(entry)
@@ -8754,7 +8754,7 @@ PRIVATE FN typeAnalysisSession__field_container_source(MUTABLE self: TypeAnalysi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expr.target IS_A Identifier THEN
-      MUTABLE target_schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(aST__node_name(expr.target))));
+      MUTABLE target_schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(UNWRAP (aST__node_name(expr.target)))));
       IF ((schemas__union?(target_schema) OR schemas__enum?(target_schema))) THEN
         RETURN NIL;
       END
@@ -10796,7 +10796,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(node.target IS_A Identifier) THEN
       RETURN FALSE;
     END
-    MUTABLE type_name = symbol(aST__node_name(node.target));
+    MUTABLE type_name = symbol(UNWRAP (aST__node_name(node.target)));
     MUTABLE schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type_name));
     IF !((schemas__union?(schema) OR schemas__enum?(schema))) THEN
       RETURN FALSE;
@@ -12244,7 +12244,7 @@ PRIVATE FN typeAnalysisSession__normalize_explicit_mutable_arguments_mut(MUTABLE
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_288: ?[]Locatable = node__args(node);
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_288.length() DO
+    WHILE rtoc_idx < UNWRAP (rtoc_each_items_288).length() DO
       IF !(UNWRAP (rtoc_each_items_288[rtoc_idx]) IS_A MutableBorrow) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -12518,7 +12518,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
     TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, &node.type_name, TRY (type__new(TypeConstructionInput{ SymbolValue: :Type }))));
-    MUTABLE type_name = symbol(aST__node_name(node.type_name));
+    MUTABLE type_name = symbol(UNWRAP (aST__node_name(node.type_name)));
     MUTABLE schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type_name));
     IF (schemas__struct?(schema) AND schema.static_methods.key?(node.method_name)) THEN
       TRY (typeAnalysisSession__resolve_inherent_static_call_mut(&rtoc_self_view, &node, type_name));
@@ -13279,7 +13279,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(left IS_A Identifier) THEN
         RETURN NIL;
       END
-      MUTABLE type_param = symbol(locatable__name(left));
+      MUTABLE type_param = symbol(UNWRAP (locatable__name(left)));
       IF !(TRY (typeAnalysisSession__current_function_type_param?(&rtoc_self_view, type_param))) THEN
         RETURN NIL;
       END
@@ -14994,7 +14994,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       DeclarationNode.VarDecl AS item ->
         MUTABLE item_mutable = COPY item;
         item_mutable.value = wrapper;
-        node = DeclarationNode{ VarDecl: item_mutable };,
+        MUTABLE node = DeclarationNode{ VarDecl: item_mutable };,
       DeclarationNode.BindExpr AS item ->
         MUTABLE item_mutable = COPY item;
         item_mutable.value = wrapper;
@@ -18826,7 +18826,7 @@ PRIVATE FN typeAnalysisSession__promote_to_expr_if_mut(MUTABLE self: TypeAnalysi
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE else_result: ?Type = NIL;
     IF ((if_node.else_branch != NIL) AND (((if_node.else_branch)?).length() == 1)) THEN
-    MUTABLE nested = if_node.else_branch.first();
+    MUTABLE nested = UNWRAP (if_node.else_branch).first();
     IF (nested) IS_A IfStatement THEN
       TRY (typeAnalysisSession__promote_to_expr_if_mut(&rtoc_self_view, Locatable{ IfStatement: COPY if_node }, &nested));
       else_result = TRY (aST__full_type_mut(nested));
@@ -19001,7 +19001,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(((compare_types).length() == 1)) THEN
       RETURN NIL;
     END
-    RETURN TRY (type__optional_of( UNWRAP ((IF payloads.first() EXISTS AS rtoc_wrap_19003 THEN TypeTypeInput{ Type: COPY rtoc_wrap_19003 } ELSE NIL END))));
+    RETURN TRY (type__optional_of( (IF payloads.first() EXISTS AS rtoc_wrap_19003 THEN TypeTypeInput{ Type: COPY rtoc_wrap_19003 } ELSE NIL END)));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_MoveNode(MUTABLE self: TypeAnalysisSession, MUTABLE node: MoveNode) RETURNS !?[Set]String
