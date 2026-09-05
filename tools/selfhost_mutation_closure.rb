@@ -68,20 +68,39 @@ module SelfhostMutationClosure
       lines = text.split("\n", -1)
       changed = false
       function_spans(lines).each do |_, head, tail|
-        next unless lines[head].match?(/\((?!MUTABLE )self: /)
-
         body = lines[head...tail].join("\n")
         calls = body.scan(/(?<![\w.])([\w?!]+)\(\s*#{RECEIVERS}/).flatten
+        mutates = calls.any? { |callee| mutating.include?(callee) }
+        receiver_mutable = !lines[head].match?(/\((?!MUTABLE )self: /)
         alias_mutable = lines[head...tail].any? { |l| l.include?('WITH POLYMORPHIC self AS MUTABLE ') }
-        next unless alias_mutable || calls.any? { |callee| mutating.include?(callee) }
 
-        lines[head] = lines[head].sub(/\((?!MUTABLE )self: /, '(MUTABLE self: ')
+        # The receiver and its WITH alias state one fact; either one being
+        # mutable makes the other mutable, or the call site reports the alias.
+        want_mutable = mutates || alias_mutable || receiver_mutable
+        next unless want_mutable
+        next if receiver_mutable && alias_mutable && !lambda_capture_needed?(lines, head, tail, mutating)
+
+        lines[head] = lines[head].sub(/\((?!MUTABLE )self: /, '(MUTABLE self: ') unless receiver_mutable
         (head...tail).each do |i|
           next unless lines[i].include?('WITH POLYMORPHIC self AS ') && !lines[i].include?('AS MUTABLE ')
 
           lines[i] = lines[i].sub('WITH POLYMORPHIC self AS ', 'WITH POLYMORPHIC self AS MUTABLE ')
         end
-        grown += 1
+        # A lambda that calls a mutating method on a captured receiver has to
+        # capture it mutably, or the call inside the body is the one reported.
+        (head...tail).each do |i|
+          next unless lines[i].include?('USE(')
+          next unless mutating.any? { |callee| lines[i].include?("#{callee}(&") || lines[i].include?("#{callee}(rtoc_self_view") }
+
+          lines[i] = lines[i].gsub(/USE\(([^)]*)\)/) do
+            names = Regexp.last_match(1).split(',').map do |n|
+              t = n.strip
+              t.start_with?('MUTABLE ') || !t.match?(/\A(?:self|rtoc_self_view)\z/) ? t : "MUTABLE #{t}"
+            end
+            "USE(#{names.join(', ')})"
+          end
+        end
+        grown += 1 unless receiver_mutable
         changed = true
       end
       sources[path] = lines.join("\n") if changed
@@ -140,6 +159,19 @@ module SelfhostMutationClosure
     end
     out << text[cursor..] if cursor < text.length
     [out, marked]
+  end
+
+  # A lambda body that mutates the captured receiver needs `USE(MUTABLE x)`
+  # even when the enclosing function's own receiver is already mutable.
+  def lambda_capture_needed?(lines, head, tail, mutating)
+    (head...tail).any? do |i|
+      line = lines[i]
+      next false unless line.include?('USE(')
+      next false if line.match?(/USE\([^)]*MUTABLE (?:self|rtoc_self_view)/)
+      next false unless line.match?(/USE\([^)]*(?:self|rtoc_self_view)/)
+
+      mutating.any? { |callee| line.include?("#{callee}(&") || line.include?("#{callee}(rtoc_self_view") }
+    end
   end
 
   # `&` is the call-site half of the contract; without it the callee's MUTABLE

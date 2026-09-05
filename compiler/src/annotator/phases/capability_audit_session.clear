@@ -4303,8 +4303,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (bgCaptureClassifier__classify_all_mut(fn_nodes, %(type) USE(rtoc_self_view) -> (TRY (capabilityAuditSession__lookup_type_schema(rtoc_self_view, type)))));
     TRY (effectInference__analyze_mut(fn_nodes));
-    MUTABLE error_handler = %(node: Locatable, message: String) USE(rtoc_self_view) -> TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, CapabilityAuditCodeOrMessage{ SymbolValue: :EFFECT_INFERENCE_VIOLATION }, [], CAST({:detail: message} AS {String@symbol}Any)));
-    MUTABLE warning_handler = %(node: Locatable, message: String) USE(rtoc_self_view) -> capabilityAuditSession__note_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, message);
+    MUTABLE error_handler = %(node: Locatable, message: String) USE(MUTABLE rtoc_self_view) -> TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, CapabilityAuditCodeOrMessage{ SymbolValue: :EFFECT_INFERENCE_VIOLATION }, [], CAST({:detail: message} AS {String@symbol}Any)));
+    MUTABLE warning_handler = %(node: Locatable, message: String) USE(MUTABLE rtoc_self_view) -> capabilityAuditSession__note_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, message);
     MUTABLE root_scope = capabilityAuditSession__whole_program_root_scope(rtoc_self_view);
     MUTABLE signature_lookup = %(name) USE(root_scope) -> (IF scope__resolve_entry(root_scope, name) != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_47 = (scope__resolve_entry(root_scope, name));
