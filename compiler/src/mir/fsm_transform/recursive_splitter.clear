@@ -334,19 +334,19 @@ PRIVATE FN fsmRecursiveSplitter__emit_suspend(susp_tail: SuspendTail, after_idx:
   RETURN idx;
 END
 PRIVATE FN fsmRecursiveSplitter__emit_while_fragment(while_stmt: SplitterWhileStmt, after_idx: Int64, builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
-  MUTABLE _: Tuple<SplitterWhileStmt, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{COPY while_stmt, after_idx, COPY builder, COPY lowering, ctx} AS Tuple<SplitterWhileStmt, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
+  MUTABLE _: Tuple<SplitterWhileStmt, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{COPY while_stmt, after_idx, COPY builder, COPY lowering, COPY ctx} AS Tuple<SplitterWhileStmt, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
   panic("WhileLoop recursive FSM lowering requires structural MIR conditions");
 END
 PRIVATE FN fsmRecursiveSplitter__emit_for_range_fragment(for_stmt: ForRange, after_idx: Int64, builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
-  MUTABLE _: Tuple<ForRange, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{COPY for_stmt, after_idx, COPY builder, COPY lowering, ctx} AS Tuple<ForRange, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
+  MUTABLE _: Tuple<ForRange, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{COPY for_stmt, after_idx, COPY builder, COPY lowering, COPY ctx} AS Tuple<ForRange, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
   panic("ForRange recursive FSM lowering requires structural MIR loop state");
 END
 PRIVATE FN fsmRecursiveSplitter__emit_for_each_fragment(for_stmt: ForEach, after_idx: Int64, builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
-  MUTABLE _: Tuple<ForEach, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{COPY for_stmt, after_idx, COPY builder, COPY lowering, ctx} AS Tuple<ForEach, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
+  MUTABLE _: Tuple<ForEach, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{COPY for_stmt, after_idx, COPY builder, COPY lowering, COPY ctx} AS Tuple<ForEach, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
   panic("ForEach recursive FSM lowering requires structural MIR iterator state");
 END
 PRIVATE FN fsmRecursiveSplitter__emit_if_fragment(if_stmt: IfStatement, after_idx: Int64, builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
-  MUTABLE _: Tuple<IfStatement, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{COPY if_stmt, after_idx, COPY builder, COPY lowering, ctx} AS Tuple<IfStatement, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
+  MUTABLE _: Tuple<IfStatement, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{COPY if_stmt, after_idx, COPY builder, COPY lowering, COPY ctx} AS Tuple<IfStatement, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
   panic("IfStatement recursive FSM lowering requires structural MIR conditions");
 END
 PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx: Int64, MUTABLE builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
