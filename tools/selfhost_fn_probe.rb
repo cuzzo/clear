@@ -282,6 +282,57 @@ module SelfhostFnProbe
     idx.select { |n, _| want.include?(n) }
   end
 
+  # Open3.capture3 with a real deadline. A `timeout` wrapper is not enough: it
+  # kills its own child, but the zig grandchildren survive holding the pipe, so
+  # the read blocks forever anyway. The child leads its own process GROUP so a
+  # timeout can kill every descendant.
+  def capture3_with_group_timeout(env, cmd, seconds)
+    out_r, out_w = IO.pipe
+    err_r, err_w = IO.pipe
+    pid = Process.spawn(env, *cmd, chdir: ROOT, out: out_w, err: err_w, pgroup: true)
+    out_w.close
+    err_w.close
+    out = +''
+    err = +''
+    readers = [out_r, err_r]
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    until readers.empty?
+      left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      if left <= 0
+        begin
+          Process.kill('-KILL', Process.getpgid(pid))
+        rescue StandardError
+          nil
+        end
+        break
+      end
+      ready = IO.select(readers, nil, nil, [left, 1].min)
+      next unless ready
+
+      ready[0].each do |io|
+        chunk = begin
+          io.read_nonblock(65_536)
+        rescue EOFError, IOError
+          nil
+        rescue IO::WaitReadable
+          ''
+        end
+        if chunk.nil?
+          readers.delete(io)
+          next
+        end
+        (io.equal?(out_r) ? out : err) << chunk
+      end
+    end
+    status = begin
+      Process.waitpid2(pid)[1]
+    rescue StandardError
+      nil
+    end
+    [out_r, err_r].each { |io| io.close unless io.closed? }
+    [out, err, status]
+  end
+
   def compile(source_text, stage, extra_pkg = nil)
     Dir.mktmpdir('fn-probe') do |dir|
       source = File.join(dir, 'probe.clear')
@@ -308,7 +359,7 @@ module SelfhostFnProbe
              *ParserCompat.package_flags(SRC), *Array(extra_pkg)]
       # One pathological function can hang the compiler; without a cap it takes
       # the whole sweep with it (observed twice, stalling a 3443-function run).
-      out, err, status = Open3.capture3(env, 'timeout', '300', *cmd, chdir: ROOT)
+      out, err, status = capture3_with_group_timeout(env, cmd, 300)
       if stage == :run && status.success?
         # Stage 3 needs what the function actually produced, not just that it
         # linked.
