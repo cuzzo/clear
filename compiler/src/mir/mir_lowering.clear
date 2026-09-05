@@ -702,7 +702,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__function_state(&rtoc_self_view).lowered_guarded_cleanup_names.contains?(name);
 }
 END
-FN mIRLowering__with_runtime_binding_name<U>(self: MIRLowering, rt_name: String, blk: FN() -> U) RETURNS U
+FN mIRLowering__with_runtime_binding_name<U>(MUTABLE self: MIRLowering, rt_name: String, blk: FN() -> U) RETURNS U
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1517,7 +1517,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF TRY (type__heap_ptr?( UNWRAP (ti))) THEN
           RETURN ti;
         END
-        RETURN TRY (type__new( UNWRAP ((IF ti EXISTS AS rtoc_wrap_1519 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_1519 } ELSE NIL END)), NIL, NIL, :indirect));
+        RETURN TRY (type__new( (IF ti EXISTS AS rtoc_wrap_1519 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_1519 } ELSE NIL END), NIL, NIL, :indirect));
       ELSE
         RETURN ti;
       END
@@ -2313,7 +2313,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN mIRLowering__discard_expr_stmt?<T>(self: MIRLowering, stmt: MIRLoweringLowerableStmt, mir: T) RETURNS Bool
+FN mIRLowering__discard_expr_stmt?<T>(MUTABLE self: MIRLowering, stmt: MIRLoweringLowerableStmt, mir: T) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -3364,7 +3364,7 @@ FN mIRLowering__ownership_operand_type(MUTABLE self: MIRLowering, MUTABLE ast_va
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE coerced: ?Type = locatable__coerced_type_object(ast_value);
-    RETURN TRY (type__new( UNWRAP ((IF coerced EXISTS AS rtoc_wrap_3366 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_3366 } ELSE NIL END))));
+    RETURN TRY (type__new( (IF coerced EXISTS AS rtoc_wrap_3366 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_3366 } ELSE NIL END)));
 }
 END
 FN mIRLowering__ownership_operands_for_sink_value(MUTABLE self: MIRLowering, MUTABLE value_mir: Emittable, MUTABLE ast_value: Locatable, ti: Type, source: String, target_alloc: ?String@symbol, MUTABLE require_visible_owned: Bool) RETURNS ![]OwnershipOperandFact
@@ -5407,7 +5407,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE stripped = mIRLowering__strip_try(rtoc_self_view, left);
     MUTABLE out = TryCatch{ expr: COPY stripped, catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     IF ((emittable__result_type(stripped) != NIL) AND emittable__result_type(stripped)) THEN
-      out.result_type = TRY (type__new( UNWRAP ((IF emittable__result_type(stripped) EXISTS AS rtoc_wrap_5409 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_5409 } ELSE NIL END))));
+      out.result_type = TRY (type__new( (IF emittable__result_type(stripped) EXISTS AS rtoc_wrap_5409 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_5409 } ELSE NIL END)));
     ELSE_IF ((fallback != NIL) AND mIRLoweringFallback__responds_to_full_type?(fallback)) THEN
       out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(fallback)) }));
     END
@@ -5670,7 +5670,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(source.existing_owned_source) THEN
         RETURN keep;
       END
-      IF (TRY (mIRLowering__owned_sink_value?(&rtoc_self_view, value, ast_node)) AND !(ast_node IS_A CopyNode)) THEN
+      IF (TRY (mIRLowering__owned_sink_value?(&rtoc_self_view, value, &ast_node)) AND !(ast_node IS_A CopyNode)) THEN
         RETURN keep;
       END
       IF TRY (mIRLowering__explicit_owned_sink_transfer?(&rtoc_self_view, ast_node, mIRLowering__owned_sink_source_node(rtoc_self_view, ast_node))) THEN
@@ -5738,7 +5738,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE source_node = mIRLowering__owned_sink_source_node(rtoc_self_view, ast_node);
     MUTABLE entry = TRY (mIRLowering__owned_sink_source_entry(&rtoc_self_view, source_node));
     MUTABLE value_alloc = (mIRLowering__mir_owned_alloc(&rtoc_self_view, value) OR_ELSE TRY (mIRLowering__placement_for_node(&rtoc_self_view, ast_node)));
-    RETURN OwnedSinkSourceFact{ source_alloc: COPY value_alloc, moved_without_copy: TRY (mIRLowering__explicit_owned_sink_transfer?(&rtoc_self_view, ast_node, &source_node)), owned_parameter: mIRLowering__owned_parameter_source_node?(rtoc_self_view, source_node), needs_heap_create: !(!(((aST__node_needs_heap_create(ast_node) OR_ELSE FALSE)))), same_alloc_verifiable: cleanupEntry__needs_cleanup?(entry), same_alloc_transfer_source: cleanupEntry__present?(entry), transfer_without_local_cleanup: (cleanupEntry__present?(entry) AND !(cleanupEntry__needs_cleanup?(entry))), already_owned_value: TRY (mIRLowering__owned_sink_value?(&rtoc_self_view, value, ast_node)), existing_owned_source: TRY (mIRLowering__existing_owned_source_node?(&rtoc_self_view, source_node)), borrowed_union_sink: TRY (mIRLowering__borrowed_union_sink_source?(&rtoc_self_view, ast_node, source_node, ti)) };
+    RETURN OwnedSinkSourceFact{ source_alloc: COPY value_alloc, moved_without_copy: TRY (mIRLowering__explicit_owned_sink_transfer?(&rtoc_self_view, ast_node, &source_node)), owned_parameter: mIRLowering__owned_parameter_source_node?(rtoc_self_view, source_node), needs_heap_create: !(!(((aST__node_needs_heap_create(ast_node) OR_ELSE FALSE)))), same_alloc_verifiable: cleanupEntry__needs_cleanup?(entry), same_alloc_transfer_source: cleanupEntry__present?(entry), transfer_without_local_cleanup: (cleanupEntry__present?(entry) AND !(cleanupEntry__needs_cleanup?(entry))), already_owned_value: TRY (mIRLowering__owned_sink_value?(&rtoc_self_view, value, &ast_node)), existing_owned_source: TRY (mIRLowering__existing_owned_source_node?(&rtoc_self_view, source_node)), borrowed_union_sink: TRY (mIRLowering__borrowed_union_sink_source?(&rtoc_self_view, ast_node, source_node, ti)) };
 }
 END
 PRIVATE FN mIRLowering__owned_sink_source_node(self: MIRLowering, ast_node: Locatable) RETURNS Locatable
@@ -5796,16 +5796,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__owned_sink_value?(MUTABLE self: MIRLowering, value: Emittable, ast_node: Locatable) RETURNS !Bool
+PRIVATE FN mIRLowering__owned_sink_value?(MUTABLE self: MIRLowering, value: Emittable, MUTABLE ast_node: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF value IS_A MIRCast AS mir_cast THEN
-      RETURN TRY (mIRLowering__owned_sink_value?(&rtoc_self_view, cast__expr(mir_cast), ast_node));
+      RETURN TRY (mIRLowering__owned_sink_value?(&rtoc_self_view, cast__expr(mir_cast), &ast_node));
     END
     IF (value IS_A TryExpr OR value IS_A TryOptional) THEN
-      RETURN TRY (mIRLowering__owned_sink_value?(&rtoc_self_view, UNWRAP (emittable__expr(value)), ast_node));
+      RETURN TRY (mIRLowering__owned_sink_value?(&rtoc_self_view, UNWRAP (emittable__expr(value)), &ast_node));
     END
     IF (ast_node IS_A MoveNode OR ast_node IS_A KeepNode) THEN
       RETURN TRUE;
@@ -8230,7 +8230,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY zig_type_value;
     END
     MUTABLE ti: ?Type = TRY (type__from_node_mut(UNWRAP (ast_node), "deep-copy zig type"));
-    MUTABLE bare = TRY (type__new( UNWRAP ((IF ti EXISTS AS rtoc_wrap_8232 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_8232 } ELSE NIL END))));
+    MUTABLE bare = TRY (type__new( (IF ti EXISTS AS rtoc_wrap_8232 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_8232 } ELSE NIL END)));
     type__mark_stack_value_mut(&bare);
     RETURN TRY (type__zig_type(bare));
 }
@@ -10319,7 +10319,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_ternary_value_382? });
     END
     MUTABLE ti: ?Type = ti_branch_value;
-    RETURN TRY (mIRLowering__call_type_owned_return?(&rtoc_self_view, ti, sig));
+    RETURN TRY (mIRLowering__call_type_owned_return?(&rtoc_self_view, ti, &sig));
 }
 END
 PRIVATE FN mIRLowering__call_never_returns_success?(self: MIRLowering, MUTABLE node: CallNode) RETURNS !Bool
@@ -10380,10 +10380,10 @@ PRIVATE FN mIRLowering__concrete_call_type_owned_return?(MUTABLE self: MIRLoweri
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIRLowering__call_type_owned_return?(&rtoc_self_view, ti, sig_obj));
+    RETURN TRY (mIRLowering__call_type_owned_return?(&rtoc_self_view, ti, &sig_obj));
 }
 END
-PRIVATE FN mIRLowering__call_type_owned_return?(MUTABLE self: MIRLowering, ti_input: ?Type, sig_obj: ?FunctionSignature) RETURNS !Bool
+PRIVATE FN mIRLowering__call_type_owned_return?(MUTABLE self: MIRLowering, ti_input: ?Type, MUTABLE sig_obj: ?FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -11199,7 +11199,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((((source != NIL) AND (source.abi == :c)) AND (param != NIL))) THEN
       RETURN lowered;
     END
-    MUTABLE type = TRY (type__new( UNWRAP ((IF param?.type EXISTS AS rtoc_wrap_11201 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_11201 } ELSE NIL END))));
+    MUTABLE type = TRY (type__new( (IF param?.type EXISTS AS rtoc_wrap_11201 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_11201 } ELSE NIL END)));
     MUTABLE signature: ?FunctionType = type__function_type(type);
     IF !(((signature != NIL) AND (signature.abi == :c))) THEN
       RETURN lowered;
@@ -15635,7 +15635,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE builtin =   IF (type__list_collection?(ti) AND ((element_type != NIL) AND type__node?(element_type))) THEN
       :getNodeAt
     ELSE
-      ((IF ({:string_map: {:get: {:zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :key_alloc: :receiver_storage, :val_alloc: :receiver_storage, :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :numeric_map: {:get: {:zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})", :sharded_zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :receiver_storage, :sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})", :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :array: {:get: {:zig: "CheatLib.getAt({target}, {index})", :return_type: :r_element_of, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :list: {:get: {:zig: "CheatLib.getAtOpt({target}, {index})", :builtin: :getAtOpt, :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :pool: {:get: {:zig: "{target}.get({index})", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :set_collection: {:get: {:zig: "if ({target}.contains({index})) {index} else null", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :string_raw: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :raw}, :container_borrow: TRUE}}, :string_symbol: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :symbol}, :container_borrow: TRUE}}})[TRY (type__dispatch_key(ti))] != NIL THEN
+      ((IF ({:string_map: {:get: {:zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :key_alloc: :receiver_storage, :val_alloc: :receiver_storage, :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :numeric_map: {:get: {:zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})", :sharded_zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :receiver_storage, :sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})", :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :array: {:get: {:zig: "CheatLib.getAt({target}, {index})", :return_type: :r_element_of, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :list: {:get: {:zig: "CheatLib.getAtOpt({target}, {index})", :builtin: :getAtOpt, :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :pool: {:get: {:zig: "{target}.get({index})", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :set_collection: {:get: {:zig: "if ({target}.contains({index})) {index} else null", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :string_raw: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :raw}, :container_borrow: TRUE}}, :string_symbol: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :symbol}, :container_borrow: TRUE}}})[UNWRAP (TRY (type__dispatch_key(ti)))] != NIL THEN
     (IF ((({:string_map: {:get: {:zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :key_alloc: :receiver_storage, :val_alloc: :receiver_storage, :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :numeric_map: {:get: {:zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})", :sharded_zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :receiver_storage, :sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})", :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :array: {:get: {:zig: "CheatLib.getAt({target}, {index})", :return_type: :r_element_of, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :list: {:get: {:zig: "CheatLib.getAtOpt({target}, {index})", :builtin: :getAtOpt, :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :pool: {:get: {:zig: "{target}.get({index})", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :set_collection: {:get: {:zig: "if ({target}.contains({index})) {index} else null", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :string_raw: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :raw}, :container_borrow: TRUE}}, :string_symbol: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :symbol}, :container_borrow: TRUE}}})[TRY (type__dispatch_key(ti))])?)[:get] != NIL THEN
     ((((({:string_map: {:get: {:zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :key_alloc: :receiver_storage, :val_alloc: :receiver_storage, :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :numeric_map: {:get: {:zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})", :sharded_zig: "{target}.get({index})", :shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})", :return_type: :r_optional_value, :container_borrow: TRUE, :bc: TRUE, :bc_op: :map_get}, :set: {:zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :receiver_storage, :sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})", :shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})", :shard_alloc: :heap, :bc: TRUE, :bc_op: :map_set}}, :array: {:get: {:zig: "CheatLib.getAt({target}, {index})", :return_type: :r_element_of, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :list: {:get: {:zig: "CheatLib.getAtOpt({target}, {index})", :builtin: :getAtOpt, :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "CheatLib.setAt({target}, {index}, {value})", :takes_value: TRUE, :val_alloc: :receiver_storage}}, :pool: {:get: {:zig: "{target}.get({index})", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :set_collection: {:get: {:zig: "if ({target}.contains({index})) {index} else null", :return_type: :r_optional_element, :container_borrow: TRUE}, :set: {:zig: "try {target}.insert({alloc}, {value})", :takes_value: TRUE, :allocates: TRUE, :alloc: :heap}}, :string_raw: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :raw}, :container_borrow: TRUE}}, :string_symbol: {:get: {:builtin: :charAt, :return_type: {:type: :String, :sync: :symbol}, :container_borrow: TRUE}}})[TRY (type__dispatch_key(ti))])?)[:get])?)[:builtin]
     ELSE
