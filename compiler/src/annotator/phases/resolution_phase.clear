@@ -281,7 +281,7 @@ PUB FN resolutionSession__stamp_type_mut<Stamp>(self: ResolutionSession, MUTABLE
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (value == NIL) THEN
+    IF (FALSE) THEN
       panic("resolution stamp missing type for {}");
     END
     node.full_type = COPY CAST(value AS SyntheticTypeInput);
