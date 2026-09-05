@@ -168,7 +168,7 @@ END
 PUB FN suspendResolvers__ownership_bearing_result_type?(type_info: ?Type, lowering: MIRLowering) RETURNS !Bool ->
   IF type_info EXISTS AS type_info_value THEN
     MUTABLE schema_lookup = IF TRUE THEN
-      mIRLowering__mir_schema_lookup(&lowering)
+      mIRLowering__mir_schema_lookup(lowering)
     ELSE
       NIL
     END;
