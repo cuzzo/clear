@@ -16,6 +16,7 @@
 #   ruby tools/selfhost_fn_probe.rb --all --jobs 24                    # the SCC
 #   ruby tools/selfhost_fn_probe.rb --all --stage zig                  # through Zig
 require 'open3'
+require 'timeout'
 require 'optparse'
 require 'tmpdir'
 require 'json'
@@ -451,33 +452,36 @@ module SelfhostFnProbe
           # The target is restated verbatim, so a probe line maps straight back.
           line = probe_line ? target.start + (probe_line.to_i - offset) : nil
           results[idx] = [rel(target.file), target.name, ok, msg, line]
+          # Only the counter and the progress write belong under the lock. The
+          # cache sweep used to run here too -- including a `df` BACKTICK, whose
+          # waitpid held the mutex and stalled every worker behind it.
+          sweep_now = false
           mutex.synchronize do
             done += 1
-            # Each build leaves Zig cache entries behind; 3405 of them fill the
-            # disk and every probe after that fails for the wrong reason.
-            if (done % (stage == :clear ? 200 : 15)).zero?
-              # Only entries no in-flight build is using. Deleting the whole
-              # cache while other workers are mid-build removes the runtime
-              # modules they staged, and they fail with FileNotFound for files
-              # that are plainly present -- which reads as a code failure.
-              cutoff = Time.now - 300
-              Dir.glob(File.join(ROOT, 'zig', '.clear-cache', '*')).each do |entry|
-                FileUtils.rm_rf(entry) if File.mtime(entry) < cutoff
-              rescue Errno::ENOENT
-                next
-              end
-              # The transpile cache is content-addressed and grows without
-              # bound across thousands of distinct probe sources; the types
-              # package is the only entry worth keeping warm.
-              free = `df -P #{ROOT} | tail -1`.split[3].to_i
-              FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-transpile-cache')) if free < 2_000_000
-            end
+            sweep_now = (done % (stage == :clear ? 200 : 15)).zero?
             if (done % 20).zero?
               good = results.count { |r| r && r[2] }
               warn "  #{done}/#{targets.length}  compiling: #{good} (#{(100.0 * good / done).round(1)}%)"
-              File.write(File.join(ROOT, (only_file || only_fns) ? '.fn_probe_file.json' : '.fn_probe.json'), JSON.pretty_generate(
+              File.write(File.join(ROOT, (only_file || only_fns) ? '.fn_probe_file.json' : '.fn_probe.json'),
+                         JSON.generate(
                            results.compact.map { |f, n, o, m, l| { file: f, fn: n, ok: o, error: m, line: l } }))
             end
+          end
+          if sweep_now
+            # Only entries no in-flight build is using: deleting the whole cache
+            # mid-build removes the runtime modules other workers staged.
+            cutoff = Time.now - 300
+            Dir.glob(File.join(ROOT, 'zig', '.clear-cache', '*')).each do |entry|
+              FileUtils.rm_rf(entry) if File.mtime(entry) < cutoff
+            rescue Errno::ENOENT
+              next
+            end
+            stat = begin
+              Timeout.timeout(20) { `df -P #{ROOT} | tail -1`.split[3].to_i }
+            rescue StandardError
+              nil
+            end
+            FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-transpile-cache')) if stat && stat < 2_000_000
           end
         end
       end
