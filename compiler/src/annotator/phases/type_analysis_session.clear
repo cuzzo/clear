@@ -5788,7 +5788,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lhs_t = (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &node.left, "RECOVER input") OR_ELSE TRY (type__new(TypeConstructionInput{ Type: COPY lhs_type })));
     MUTABLE lhs_t_value = lhs_t;
     IF TRUE THEN
-      IF lhs_t_value.error_union?() THEN
+      IF type__error_union?(lhs_t_value) THEN
       MUTABLE fallback_type = node.right.default_expr.full_type_mut({:context: "RECOVER fallback"});
       MUTABLE plan = TRY (tenseOperationPlanner__or_else(lhs_t, fallback_type, TenseOperationKind.OrElseValue, TenseRecovery.Fallback));
       node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY plan };
@@ -12115,7 +12115,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &rtoc_self_view.audit_inputs.deferred_with_validations.append(DeferredWithValidation{ node: COPY node, fact: COPY fact });
 }
 END
-PRIVATE FN typeAnalysisSession__record_deferred_recovery_validation_mut(MUTABLE self: TypeAnalysisSession, node: BinaryOp, left: FuncCall, callee_name: String, value_type: Type) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_deferred_recovery_validation_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: BinaryOp, left: FuncCall, callee_name: String, value_type: Type) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16283,7 +16283,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, node.end));
     END
     MUTABLE target_type = TRY (aST__full_type_mut(node.target));
-    IF target_type EXISTS AS target_type_value THEN
+    MUTABLE target_type_value = target_type;
+    IF TRUE THEN
       IF type__array?(target_type_value) THEN
       MUTABLE element: ?Type = TRY (type__element_type(target_type));
       MUTABLE slice_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${type__resolved(UNWRAP (element))}[]") }));
@@ -18116,7 +18117,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF type__optional?(left_value_type) THEN
         t_left_type = COPY left_value_type;
       ELSE_IF (node.left IS_A FuncCall AND (TRY (typeAnalysisSession__function_node_map(&rtoc_self_view))).contains?(node.left.name())) THEN
-        TRY (typeAnalysisSession__record_deferred_recovery_validation_mut(&rtoc_self_view, node, castLocatableToFuncCall__type_analysis_session(node.left), node.left.name(), left_value_type));
+        TRY (typeAnalysisSession__record_deferred_recovery_validation_mut(&rtoc_self_view, &node, castLocatableToFuncCall__type_analysis_session(node.left), node.left.name(), left_value_type));
         t_left_type = TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(left_value_type)));
       ELSE
         t_left_type = left_value_type;
@@ -19213,7 +19214,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ CopyNode: COPY node }, result_type));
     MUTABLE ti = TRY (aST__full_type_mut(Locatable{ CopyNode: COPY node }));
     MUTABLE source_sync = IF (locatable__symbol(node.value) != NIL) THEN
-      (IF node.value.symbol != NIL THEN
+      (IF locatable__symbol(node.value) != NIL THEN
       (node.value.symbol).sync()
     ELSE
       NIL
@@ -19421,7 +19422,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (locatable__storage(node.value) != NIL) THEN
       node.storage_override = locatable__storage(node.value);
     END
-    IF type EXISTS AS type_value THEN
+    MUTABLE type_value = type;
+    IF TRUE THEN
       IF TRY (type__any_rc?(type_value)) THEN
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
             MUTABLE rtoc_mutable_receiver_473 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
