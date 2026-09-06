@@ -5822,7 +5822,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, acc_type));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, acc_type));
     node.storage_override = :stack;
-    MUTABLE acc_t = TRY (type__new( UNWRAP ((IF acc_type EXISTS AS rtoc_wrap_5824 THEN TypeConstructionInput{ SymbolValue: COPY rtoc_wrap_5824 } ELSE NIL END))));
+    MUTABLE acc_t = TRY (type__new( TypeConstructionInput{ SymbolValue: COPY UNWRAP (acc_type) }));
     IF !(TRY (type__collection_value?(acc_t))) THEN
       IF typeAnalysisSession__observable_reducible_scalar?(&rtoc_self_view, acc_type) THEN
         TRY (typeAnalysisSession__mark_observable_terminal_mut(&rtoc_self_view, &node, :reduce, symbol("~${acc_type}")));
@@ -6243,7 +6243,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(type__numeric?((TRY (type__new( TypeConstructionInput{ SymbolValue: COPY UNWRAP (expr_type) }))))) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node.right }, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_NEEDS_NUMERIC }, [], CAST({:op: "SUM", :got: expr_type} AS {String@symbol}Any)));
     END
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, typeAnalysisSession__sum_result_clear_type(rtoc_self_view, expr_type)));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, typeAnalysisSession__sum_result_clear_type(rtoc_self_view, UNWRAP (expr_type))));
     node.storage_override = :stack;
     RETURN CAST(TRY (typeAnalysisSession__mark_observable_terminal_mut(&rtoc_self_view, &node, :sum, symbol("~${typeAnalysisSession__sum_result_clear_type(rtoc_self_view, expr_type)}"))) AS ?Type);
 }
@@ -6587,7 +6587,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     MUTABLE key_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__key_expr(shard_op)));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__target_map(shard_op)));
-    MUTABLE target_info = shard_op.target_map.full_type_mut({:context: "shard op target map"});
+    MUTABLE target_info = locatable__target_map(shard_op).full_type_mut({:context: "shard op target map"});
     MUTABLE target_sync = IF TRUE THEN
       (IF shard_op.target_map.symbol != NIL THEN
       (shard_op.target_map.symbol).sync()
@@ -13341,7 +13341,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__static_is_a_target_type(MUTABLE self: TypeAnalysisSession, node: NodeOrType) RETURNS !?Type
+PRIVATE FN typeAnalysisSession__static_is_a_target_type(MUTABLE self: TypeAnalysisSession, MUTABLE node: NodeOrType) RETURNS !?Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
