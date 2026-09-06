@@ -1941,11 +1941,10 @@ PRIVATE FN typeAnalysisSession__smallest_fitting_int_type(MUTABLE self: TypeAnal
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE order = IF (val >= 0) THEN
-      fixableHelpers__unsigned_order()
-    ELSE
-      fixableHelpers__signed_order()
-    END;
+    MUTABLE order = fixableHelpers__unsigned_order();
+    IF !((val >= 0)) THEN
+      order = fixableHelpers__signed_order();
+    END
     MUTABLE selected: ?String@symbol = NIL;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < order.length() DO
@@ -2309,7 +2308,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF src EXISTS AS src_value THEN
       MUTABLE line_num = node.source_range?.start_line;
       MUTABLE line_text = (src_value.split("\n")[(UNWRAP (line_num) - 1)] OR_ELSE "");
-      MUTABLE body = line_text.trim();
+      body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.trimStart();
       MUTABLE index = COPY node.index;
@@ -2341,7 +2340,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF src EXISTS AS src_value THEN
       MUTABLE line_num = UNWRAP (locatable__source_range(node)).start_line;
       MUTABLE line_text = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
-      MUTABLE body = line_text.trim();
+      body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.trimStart();
       IF !(inner.empty?()) THEN
@@ -6922,7 +6921,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rubyToClearVoid__type_analysis_session()
     });
     node.right.capture_analysis = (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(locatable__right(node)), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis);
-    TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, node));
+    TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }));
     MUTABLE result_type = TRY (typeAnalysisSession__concurrent_select_family_result_type(&rtoc_self_view, node, UNWRAP (item_type)));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, result_type));
     node.storage_override = :heap;
@@ -6978,7 +6977,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rubyToClearVoid__type_analysis_session()
     });
     node.right.capture_analysis = (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(locatable__right(node)), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis);
-    TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, node));
+    TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }));
     MUTABLE result_type = TRY (typeAnalysisSession__concurrent_select_family_result_type(&rtoc_self_view, node, item_type));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ Type: COPY result_type }))));
     node.storage_override = :heap;
@@ -12671,7 +12670,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE reject_when: ?String@symbol = TRY (functionSignature__intrinsic_reject_when(&matched_def_value_mutable));
       MUTABLE first_arg: ?Locatable = COPY args.first();
       IF (((reject_when != NIL) AND (first_arg != NIL)) AND TRY (typeAnalysisSession__reject_arg_type_matches?(&rtoc_self_view, UNWRAP (first_arg), symbol(UNWRAP (reject_when))))) THEN
-        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(&matched_def_value_mutable)) OR_ELSE "${aST__node_name(UNWRAP (castNodeToLocatable(node)))}() is not valid for ${first_arg.resolved_type}");
+        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(&matched_def_value_mutable)) OR_ELSE "${aST__node_name(castNodeToLocatable(node))}() is not valid for ${first_arg.resolved_type}");
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_REJECTED }, [], CAST({:detail: reason} AS {String@symbol}Any)));
         RETURN NIL;
       END
@@ -13189,7 +13188,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__runtime_is_a_target_label(MUTABLE self: TypeAnalysisSession, node: Node) RETURNS !String
+PRIVATE FN typeAnalysisSession__runtime_is_a_target_label(MUTABLE self: TypeAnalysisSession, MUTABLE node: Node) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13989,7 +13988,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       IF !(struct_schema.fields.contains?(destructure.fields[rtoc_idx]?.name)) THEN
-          TRY (typeAnalysisSession__emit_unknown_destructure_field_mut(&rtoc_self_view, &node, destructure.fields[rtoc_idx]?, struct_schema, variant_name));
+          TRY (typeAnalysisSession__emit_unknown_destructure_field_mut(&rtoc_self_view, &node, destructure.fields[UNWRAP (rtoc_idx)]?, struct_schema, variant_name));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -17251,7 +17250,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
     typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, rtoc_mutable_block_param_419, AsyncValidationNode{ DoBlock: COPY node }, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
       full_analysis = typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, rtoc_mutable_block_param_419.parallel, FALSE, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
-        TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, rtoc_mutable_block_param_419.body));
+        TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, &rtoc_mutable_block_param_419.body));
         rubyToClearVoid__type_analysis_session()
       });
       rubyToClearVoid__type_analysis_session()
