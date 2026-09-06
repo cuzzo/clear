@@ -2514,7 +2514,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__emit_can_smash_unsupported_error_mut(MUTABLE self: TypeAnalysisSession, node: AsyncValidationNode) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_can_smash_unsupported_error_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: AsyncValidationNode) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -11132,7 +11132,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__visit_test_hook_bodies(MUTABLE self: TypeAnalysisSession, node: TestContainerNode) RETURNS !Void
+PRIVATE FN typeAnalysisSession__visit_test_hook_bodies(MUTABLE self: TypeAnalysisSession, MUTABLE node: TestContainerNode) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
