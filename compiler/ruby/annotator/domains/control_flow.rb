@@ -787,7 +787,7 @@ module Annotator
           if node.type_args.length != type_params.length
             error!(node, :GENERIC_WRONG_ARG_COUNT, type: node.name, expected: type_params.length, got: node.type_args.length)
           end
-          type_params.zip(node.type_args).each { |param, arg| subst[param] = Type.new(arg) }
+          type_params.each_with_index { |param, __i| subst[param] = Type.new(node.type_args[__i]) }
         elsif type_params.any?
           params_hint = type_params.map(&:to_s).join(', ')
           error!(node, :GENERIC_MISSING_TYPE_ARGS, type: node.name, type2: node.name, hint: params_hint)

@@ -264,7 +264,10 @@ module GenericAnalysis
     error!(facts.node, :GENERIC_WRONG_ARG_COUNT, type: base_name, expected: expected, got: actual) if actual != expected
     inner.generic_args.each { |arg| validate_generic_type_arg!(facts, arg) }
     if schema.is_a?(Schemas::StructSchema)
-      schema.generic_params.zip(inner.generic_args).each do |param, argument|
+      # CLEAR has no `zip`; walking the first list and indexing the second
+      # reads identically and calls the same validator.
+      schema.generic_params.each_with_index do |param, __i|
+        argument = inner.generic_args[__i]
         next unless param && argument
         validate_generic_argument_bounds!(facts.node, param, argument)
       end

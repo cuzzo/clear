@@ -7808,13 +7808,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__validate_generic_type_arg_mut(&rtoc_self_view, facts, _));
     END
     IF schema? IS_A StructSchema AS struct_schema THEN
-      (struct_schema.generic_params.zip(TRY (type__generic_args(inner)))).keys() |> EACH {
-    MUTABLE argument: Any = ((struct_schema.generic_params.zip(TRY (type__generic_args(inner))))[_] OR_ELSE panic("missing hash key"));
-    IF !((_ AND argument)) THEN
-      CONTINUE;
-    END
-    TRY (typeAnalysisSession__validate_generic_argument_bounds_mut(&rtoc_self_view, facts.node, _, argument));
-      };
+      MUTABLE rtoc_gp_idx = 0;
+      WHILE rtoc_gp_idx < struct_schema.generic_params.length() DO
+        MUTABLE param: ?GenericParamDecl = struct_schema.generic_params[rtoc_gp_idx];
+        MUTABLE argument: ?Type = (TRY (type__generic_args(inner)))[rtoc_gp_idx];
+        IF ((param != NIL) AND (argument != NIL)) THEN
+          TRY (typeAnalysisSession__validate_generic_argument_bounds_mut(&rtoc_self_view, facts.node, param, argument));
+        END
+        rtoc_gp_idx = rtoc_gp_idx + 1;
+      END
     END
 }
 END

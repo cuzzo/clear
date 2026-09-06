@@ -230,7 +230,7 @@ module Annotator
           end
           yield
         ensure
-          frames.zip(snapshots).each { |frame, snapshot| frame.restore_context(T.must(snapshot)) }
+          frames.each_with_index { |frame, __i| frame.restore_context(T.must(snapshots[__i])) }
         end
       end
 
@@ -251,7 +251,7 @@ module Annotator
           end
           yield
         ensure
-          frames.zip(snapshots).each { |frame, snapshot| frame.restore_context(T.must(snapshot)) }
+          frames.each_with_index { |frame, __i| frame.restore_context(T.must(snapshots[__i])) }
         end
       end
 
@@ -269,7 +269,7 @@ module Annotator
           frames.each { |frame| frame.lambda_body_stack << node }
           yield
         ensure
-          frames.zip(snapshots).each { |frame, snapshot| frame.restore_context(T.must(snapshot)) }
+          frames.each_with_index { |frame, __i| frame.restore_context(T.must(snapshots[__i])) }
         end
       end
 
@@ -289,7 +289,7 @@ module Annotator
           frames.each { |frame| frame.failure_absorbed = true }
           yield
         ensure
-          frames.zip(snapshots).each { |frame, snapshot| frame.restore_context(T.must(snapshot)) }
+          frames.each_with_index { |frame, __i| frame.restore_context(T.must(snapshots[__i])) }
         end
       end
 
@@ -307,7 +307,7 @@ module Annotator
           frames.each { |frame| frame.with_scope_stack = [scope] if frame.track_with_scope_stack }
           yield
         ensure
-          frames.zip(snapshots).each { |frame, snapshot| frame.restore_context(T.must(snapshot)) }
+          frames.each_with_index { |frame, __i| frame.restore_context(T.must(snapshots[__i])) }
         end
       end
 
