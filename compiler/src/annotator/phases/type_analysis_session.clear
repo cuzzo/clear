@@ -2423,7 +2423,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, [fix], NIL, :WITH_GUARD_MUTABLE_MUTATED, :error, TRUE, kw));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_with_read_needs_write_lock_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, name: String, MUTABLE var_node: Locatable) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_with_read_needs_write_lock_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, name: String, MUTABLE var_node: Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9308,7 +9308,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, &node, fact));
         ELSE
           MUTABLE name = COPY fact.target_label;
-          TRY (typeAnalysisSession__emit_with_read_needs_write_lock_mut(&rtoc_self_view, node, name, &var_node));
+          TRY (typeAnalysisSession__emit_with_read_needs_write_lock_mut(&rtoc_self_view, &node, name, &var_node));
         END
       END
     ELSE_IF (fact.capability == symbol("RESTRICT")) THEN
@@ -10938,7 +10938,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__record_lock_clause_site_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, lock_capabilities: []CapabilityTransition) RETURNS Void
+PRIVATE FN typeAnalysisSession__record_lock_clause_site_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, lock_capabilities: []CapabilityTransition) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16843,7 +16843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__validate_no_multi_object_atomic_mut(&rtoc_self_view, &node));
     TRY (typeAnalysisSession__validate_lock_error_clause_mut(&rtoc_self_view, &node, lock_capabilities));
     TRY (typeAnalysisSession__mark_with_runtime_requirements_mut(&rtoc_self_view, &node));
-    typeAnalysisSession__record_lock_clause_site_mut(&rtoc_self_view, node, lock_capabilities);
+    typeAnalysisSession__record_lock_clause_site_mut(&rtoc_self_view, &node, lock_capabilities);
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ WithBlock: COPY node }, :Void));
 }
 END
