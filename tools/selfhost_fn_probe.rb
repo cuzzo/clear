@@ -366,7 +366,9 @@ module SelfhostFnProbe
     limit = nil
     passing = nil
     OptionParser.new do |p|
-      p.on('--file REL') { |v| only_file = v }
+      # Several files at once: the annotator is three of them, and measuring
+      # just those skips a hang in an unrelated file that has killed whole runs.
+      p.on('--file REL') { |v| (only_file ||= []).concat(v.split(',')) }
       # Probing one function is the fast edit/measure loop; a full file is minutes.
       p.on('--fn NAMES') { |v| only_fns = v.split(',').to_set }
       p.on('--all') { only_file = nil }
@@ -378,7 +380,7 @@ module SelfhostFnProbe
     end.parse!(argv)
 
     group = members
-    files = only_file ? [only_file] : group
+    files = only_file ? Array(only_file) : group
     cache = {}
     group.each { |m| cache[File.join(SRC, m)] = dissect(File.join(SRC, m)) }
 
