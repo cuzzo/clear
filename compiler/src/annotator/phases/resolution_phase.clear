@@ -734,7 +734,7 @@ END
 PRIVATE FN resolutionSession__all_known_type_names(MUTABLE self: ResolutionSession) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = List[];
     FOR _ IN (resolutionSession__scope_stack_for_helper(rtoc_self_view)) DO
     ruby_array_concat_Any__resolution_phase(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));

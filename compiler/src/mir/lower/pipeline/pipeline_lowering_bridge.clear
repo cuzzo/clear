@@ -189,15 +189,15 @@ PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(MUTABLE self
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRLowering__pipeline_index_insert_with_ownership(&rtoc_self_view.lowering, &insert, &value, value_owns, target_alloc));
 }
 END
-PUB FN pipelineLoweringBridge__with_runtime_binding_name<U>(self: PipelineLoweringBridge, rt_name: String, blk: FN() -> U) RETURNS U
+PUB FN pipelineLoweringBridge__with_runtime_binding_name<U>(MUTABLE self: PipelineLoweringBridge, rt_name: String, blk: FN() -> U) RETURNS U
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLowering__with_runtime_binding_name(rtoc_self_view.lowering, rt_name, blk);
 }
 END

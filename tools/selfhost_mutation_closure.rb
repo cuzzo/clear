@@ -19,7 +19,7 @@ require 'set'
 module SelfhostMutationClosure
   extend self
 
-  FN_HEAD = /\A\s*(?:PUB |PRIVATE )?FN ([\w?!]+)\(/
+  FN_HEAD = /\A\s*(?:PUB |PRIVATE )?FN ([\w?!]+)(?:<[^>]*>)?\(/
   RECEIVERS = /&?(?:self|rtoc_self_view|rtoc_local_receiver_\d+|rtoc_mutable_receiver_\d+)\b/
 
   # Top-level comma split: a nested call's commas are not parameter separators.
@@ -41,7 +41,7 @@ module SelfhostMutationClosure
   def mutable_positions(sources)
     positions = Hash.new { |h, k| h[k] = Set.new }
     sources.each_value do |text|
-      text.scan(/^(?:PUB |PRIVATE )?FN ([\w?!]+)\((.*?)\)\s*(?:RETURNS|$)/) do |name, params|
+      text.scan(/^(?:PUB |PRIVATE )?FN ([\w?!]+)(?:<[^>]*>)?\((.*?)\)\s*(?:RETURNS|$)/) do |name, params|
         split_top(params).each_with_index do |param, index|
           positions[name] << index if param.strip.start_with?('MUTABLE ')
         end
@@ -62,7 +62,7 @@ module SelfhostMutationClosure
   # receiver -- that is what Ruby means, so the property propagates upward.
   def grow_mutating_receivers!(sources)
     mutating = Set.new
-    sources.each_value { |text| mutating.merge(text.scan(/^(?:PUB |PRIVATE )?FN ([\w?!]+)\(MUTABLE self: /).flatten) }
+    sources.each_value { |text| mutating.merge(text.scan(/^(?:PUB |PRIVATE )?FN ([\w?!]+)(?:<[^>]*>)?\(MUTABLE self: /).flatten) }
     grown = 0
     sources.each do |path, text|
       lines = text.split("\n", -1)

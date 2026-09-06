@@ -482,7 +482,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     ELSE
       eff_capture_map = capture_map;
     END
-    MUTABLE lowered_mir = mIRLowering__with_fsm_segment_lowering_context(lowering_api, pointer_captures, inherited_capture_names, inherited_capture_names, owned_result_guards, %() USE(ast_stmts, bg_rt, ctx, eff_capture_map, id, lowering_api, want_result) -> mIRLowering__with_fiber_capture_map(lowering_api, eff_capture_map, {:rt_override: bg_rt}, "__rt", %() USE(ast_stmts, ctx, id, lowering_api, want_result) -> {
+    MUTABLE lowered_mir = mIRLowering__with_fsm_segment_lowering_context(&lowering_api, pointer_captures, inherited_capture_names, inherited_capture_names, owned_result_guards, %() USE(ast_stmts, bg_rt, ctx, eff_capture_map, id, lowering_api, want_result) -> mIRLowering__with_fiber_capture_map(&lowering_api, eff_capture_map, {:rt_override: bg_rt}, "__rt", %() USE(ast_stmts, ctx, id, lowering_api, want_result) -> {
     IF want_result THEN
       RETURN TRY (mIRLowering__lower_finalized_fsm_step_mir( &lowering_api, ast_stmts, FALSE, id, ctx.async_result_shape));
     ELSE
@@ -947,7 +947,7 @@ PRIVATE FN emit__build_segment_descriptor(seg: Segment, ctx: FsmEmitContext, low
   END
   MUTABLE bg_rt = COPY ctx.bg_rt;
   MUTABLE pointer_captures = COPY ctx.pointer_captures;
-  MUTABLE result = mIRLowering__with_bg_fiber_body_context(lowering_api, pointer_captures, %() USE(bg_rt, capture_map, ctx, lowering_api, seg, sp_idx) -> {
+  MUTABLE result = mIRLowering__with_bg_fiber_body_context(&lowering_api, pointer_captures, %() USE(bg_rt, capture_map, ctx, lowering_api, seg, sp_idx) -> {
   rtoc_lambda_result_48 = mIRLowering__with_fiber_capture_map(&lowering_api, capture_map, {:rt_override: bg_rt}, "__rt", %() USE(ctx, lowering_api, seg, sp_idx) -> {
   MUTABLE eff_sp = (sp_idx OR_ELSE ((seg.index + 1)));
   TRY (suspendResolvers__resolve(seg, ctx, lowering_api, eff_sp))

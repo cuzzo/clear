@@ -386,7 +386,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
       alias_overrides[CAST(_[:alias_name]? AS String)] = COPY CAST(_[:alias_data_ref]? AS String);
       END
       MUTABLE cs_entry: Int64 = CAST(builder__with_alias_overrides(&builder, alias_overrides, %() USE(alias_overrides, bg_rt, body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
-  rtoc_lambda_result_14 = mIRLowering__with_fiber_capture_map(lowering, alias_overrides, {:rt_override: bg_rt}, "__rt", %() USE(body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
+  rtoc_lambda_result_14 = mIRLowering__with_fiber_capture_map(&lowering, alias_overrides, {:rt_override: bg_rt}, "__rt", %() USE(body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
   rtoc_lambda_result_13 = TRY (fsmRecursiveSplitter__emit_stmts(body_stmts, release_idx, &builder, lowering, ctx));
   rtoc_lambda_result_13
       });
