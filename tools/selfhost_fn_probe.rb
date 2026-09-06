@@ -214,6 +214,19 @@ module SelfhostFnProbe
   # A probe is then tiny: require the types, stub exactly what the target
   # calls, and restate the target under a name that cannot collide with its
   # own stub.
+  # A file's module-level constants are as much a part of a function's context
+  # as the functions it calls: `FOR c IN conflicts` reads one. Without them the
+  # probe reports "Undefined variable" for something the real build resolves --
+  # a harness artifact, not a translation defect.
+  def module_consts(target)
+    decls = File.read(target.file).lines.select do |line|
+      line.match?(/\A[a-z_]\w*(?:: [^=\n]+)? = /)
+    end
+    return '' if decls.empty?
+
+    "\n# --- module-level constants from #{rel(target.file)} ---\n" + decls.join
+  end
+
   def probe_source(target, _group, cache, pkg_name)
     idx = fn_index(cache)
     safe = "probe__#{target.name.delete('?').delete('!')}"
@@ -239,7 +252,7 @@ module SelfhostFnProbe
     body = body.gsub(/(?<![\w.])#{Regexp.escape(target.name)}\(/, "#{safe}(")
 
     head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n), "\n", extern_decls(cache),
-            "\n# --- stand-ins for what it calls ---\n", stubs.join,
+            module_consts(target), "\n# --- stand-ins for what it calls ---\n", stubs.join,
             "\n# --- #{rel(target.file)} : #{target.name} ---\n"].join
     @probe_offset = head.lines.length
     # Stage 3 supplies a main() that runs recorded inputs through the target
