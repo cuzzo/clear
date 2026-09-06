@@ -3146,7 +3146,7 @@ PRIVATE FN typeAnalysisSession__analyze_routine(MUTABLE self: TypeAnalysisSessio
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__verify_captures_mut(&rtoc_self_view, node));
     MUTABLE found_returns = typeAnalysisSession__collect_routine_returns(&rtoc_self_view, %() USE(body, node, MUTABLE rtoc_self_view) -> {
-    typeAnalysisSession__with_routine_analysis_scope(&rtoc_self_view, node, %() USE(body, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_routine_analysis_scope(&rtoc_self_view, &node, %() USE(body, node, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__declare_and_verify_params(&rtoc_self_view, node));
       TRY (typeAnalysisSession__declare_captures(&rtoc_self_view, node));
       MUTABLE parameter_ids_branch_value: ?Set = NIL;
@@ -3228,7 +3228,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN seeded;
 }
 END
-PRIVATE FN typeAnalysisSession__with_routine_analysis_scope(MUTABLE self: TypeAnalysisSession, node: RoutineNode, blk: FN() -> Void) RETURNS !Void
+PRIVATE FN typeAnalysisSession__with_routine_analysis_scope(MUTABLE self: TypeAnalysisSession, MUTABLE node: RoutineNode, blk: FN() -> Void) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -3291,7 +3291,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lambda_ctx = TRY (functionContext__new("<lambda>", TypeTypeInput{ SymbolValue: :Any }, ( { MUTABLE rtoc_empty_list_55: []FunctionContextLifetimeSource = List[]; rtoc_empty_list_55 } ), ( { MUTABLE rtoc_empty_list_56: []String@symbol = List[]; rtoc_empty_list_56 } ), ( { MUTABLE rtoc_empty_list_57: []GenericParamDecl = List[]; rtoc_empty_list_57 } )));
     typeAnalysisSession__push_function_context_mut( &rtoc_self_view, lambda_ctx);
     DEFER typeAnalysisSession__pop_function_context_mut( &rtoc_self_view);
-    MUTABLE return_type: ?String@symbol = TRY (typeAnalysisSession__with_body_fact_nested_body(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__with_body_fact_lambda_body(&rtoc_self_view, node, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__analyze_routine(&rtoc_self_view, RoutineNode{ LambdaLit: COPY node }, castLambdaBodyToRoutineBody(node.body), TypeTypeInput{ SymbolValue: :Any }, TRUE))))));
+    MUTABLE return_type: ?String@symbol = TRY (typeAnalysisSession__with_body_fact_nested_body(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__with_body_fact_lambda_body(&rtoc_self_view, &node, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__analyze_routine(&rtoc_self_view, RoutineNode{ LambdaLit: COPY node }, castLambdaBodyToRoutineBody(node.body), TypeTypeInput{ SymbolValue: :Any }, TRUE))))));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ LambdaLit: COPY node }, TRY (typeAnalysisSession__build_lambda_signature(&rtoc_self_view, (node.params OR_ELSE List[]), CAST(return_type AS String@symbol)))));
 }
 END
@@ -11499,7 +11499,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__concrete_program_type_for(MUTABLE self: TypeAnalysisSession, node: Locatable) RETURNS !?Type
+PRIVATE FN typeAnalysisSession__concrete_program_type_for(MUTABLE self: TypeAnalysisSession, MUTABLE node: Locatable) RETURNS !?Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -11639,7 +11639,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN block();
 }
 END
-PRIVATE FN typeAnalysisSession__with_body_fact_lambda_body<RESULT>(MUTABLE self: TypeAnalysisSession, node: LambdaLit, block: FN() -> RESULT) RETURNS !RESULT
+PRIVATE FN typeAnalysisSession__with_body_fact_lambda_body<RESULT>(MUTABLE self: TypeAnalysisSession, MUTABLE node: LambdaLit, block: FN() -> RESULT) RETURNS !RESULT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
