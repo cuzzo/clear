@@ -1278,7 +1278,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       Locatable.CapabilityWrap AS capability_wrap -> TRY (typeAnalysisSession__visit_CapabilityWrap(&rtoc_self_view, &capability_wrap)),
       AST.OptionalUnwrap -> TRY (typeAnalysisSession__visit_OptionalUnwrap(&rtoc_self_view, &node)),
       Locatable.TenseNavigation AS tense_navigation -> TRY (typeAnalysisSession__visit_TenseNavigation(&rtoc_self_view, &tense_navigation)),
-      Locatable.MutableBorrow AS mutable_borrow -> TRY (typeAnalysisSession__visit_MutableBorrow(&rtoc_self_view, mutable_borrow)),
+      Locatable.MutableBorrow AS mutable_borrow -> TRY (typeAnalysisSession__visit_MutableBorrow(&rtoc_self_view, &mutable_borrow)),
       Locatable.FuncCall AS func_call -> TRY (typeAnalysisSession__visit_FuncCall(&rtoc_self_view, &func_call)),
       AST.MethodCall -> TRY (typeAnalysisSession__visit_MethodCall(&rtoc_self_view, &node)),
       Locatable.StaticCall AS static_call -> TRY (typeAnalysisSession__visit_StaticCall(&rtoc_self_view, &static_call)),
@@ -12302,7 +12302,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__visit_MutableBorrow(MUTABLE self: TypeAnalysisSession, node: MutableBorrow) RETURNS !Void
+PRIVATE FN typeAnalysisSession__visit_MutableBorrow(MUTABLE self: TypeAnalysisSession, MUTABLE node: MutableBorrow) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -19203,7 +19203,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ((node.own OR_ELSE FALSE) AND TRY (type__any_rc?(inner_type))) THEN
         result_type_branch_value = TRY (type__bare_data_type(inner_type));
       ELSE
-        result_type_branch_value = TRY (type__new(inner_type));
+        result_type_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY inner_type }));
       END
     ELSE
       result_type_branch_value = inner_type;
