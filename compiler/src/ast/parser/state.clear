@@ -131,17 +131,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF (((token.type == type)) OR matches_value) THEN
       IF ((value != NIL) AND !(matches_value)) THEN
-        TRY (clearParser__emit_consume_error_with_fix(&rtoc_self_view, token, type, value));
+        TRY (clearParser__emit_consume_error_with_fix(&rtoc_self_view, &token, type, value));
       END
       rtoc_self_view.pos = (rtoc_self_view.pos + 1);
       RETURN token;
     ELSE
-      TRY (clearParser__emit_consume_error_with_fix(&rtoc_self_view, token, type, value));
+      TRY (clearParser__emit_consume_error_with_fix(&rtoc_self_view, &token, type, value));
       RETURN token;
     END
 }
 END
-PRIVATE FN clearParser__emit_consume_error_with_fix(MUTABLE self: ClearParser, token: Token, expected_type: String@symbol, expected_value: ?String) RETURNS !Void
+PRIVATE FN clearParser__emit_consume_error_with_fix(MUTABLE self: ClearParser, MUTABLE token: Token, expected_type: String@symbol, expected_value: ?String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

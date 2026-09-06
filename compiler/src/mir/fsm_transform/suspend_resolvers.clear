@@ -10,16 +10,16 @@ REQUIRE "pkg:rtoc_6d69722f6d69725f6c6f776572696e672e636c656172" AS mir_lowering
 REQUIRE "pkg:rtoc_6d69722f66736d5f7472616e73666f726d2f6c6f776572696e675f70726f746f636f6c2e636c656172" AS lowering_protocol
 # Ruby module FsmTransform
 # Ruby module FsmTransform::SuspendResolvers
-PUB FN suspendResolvers__resolve(seg: Segment, ctx: FsmEmitContext, lowering: MIRLowering, susp_idx: ?Int64 = NIL) RETURNS !SuspendDescriptor ->
+PUB FN suspendResolvers__resolve(seg: Segment, ctx: FsmEmitContext, MUTABLE lowering: MIRLowering, susp_idx: ?Int64 = NIL) RETURNS !SuspendDescriptor ->
   IF (seg.tail IS_A IoSuspend) THEN
-    RETURN TRY (suspendResolvers__resolve_io(seg.tail, ctx, lowering));
+    RETURN TRY (suspendResolvers__resolve_io(seg.tail, ctx, &lowering));
   ELSE_IF (seg.tail IS_A NextSuspend) THEN
     RETURN TRY (suspendResolvers__resolve_next(seg.tail, ctx, &lowering, (susp_idx OR_ELSE ((seg.index + 1)))));
   ELSE
     panic("{}Add a resolve_<kind> branch when introducing a new suspend kind.");
   END
 END
-PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext, lowering: MIRLowering) RETURNS !SuspendDescriptor ->
+PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext, MUTABLE lowering: MIRLowering) RETURNS !SuspendDescriptor ->
   MUTABLE stdlib_def: ?FunctionSignature = COPY io_tail.stdlib_def;
   IF !(stdlib_def) THEN
     panic("IoSuspend missing stdlib_def");

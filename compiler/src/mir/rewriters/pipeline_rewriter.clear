@@ -151,12 +151,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node IS_A UnaryOp) THEN
       node.right = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, aST__node_right(node)));
     ELSE_IF (node IS_A FuncCall) OR (node IS_A MethodCall) THEN
-      node.args = locatable__args(node) |> SELECT TRY (pipelineRewriter__rewrite_call_argument(&rtoc_self_view, _));
+      node.args = locatable__args(node) |> SELECT TRY (pipelineRewriter__rewrite_call_argument(&rtoc_self_view, &_));
     ELSE_IF node IS_A StructLit AS struct_lit THEN
       MUTABLE struct_lit_mutable = COPY struct_lit;
       FOR rtoc_key IN struct_lit_mutable.fields.keys() DO
     MUTABLE v: Any = COPY UNWRAP (struct_lit_mutable.fields[rtoc_key]);
-      struct_lit_mutable.fields[rtoc_key] = TRY (pipelineRewriter__rewrite_struct_field(&rtoc_self_view, v));
+      struct_lit_mutable.fields[rtoc_key] = TRY (pipelineRewriter__rewrite_struct_field(&rtoc_self_view, &v));
       END
     ELSE_IF node IS_A ListLit AS list_lit THEN
       MUTABLE list_lit_mutable = COPY list_lit;
@@ -181,7 +181,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN pipelineRewriter__rewrite_call_argument(MUTABLE self: PipelineRewriter, argument: Locatable) RETURNS !Locatable
+PRIVATE FN pipelineRewriter__rewrite_call_argument(MUTABLE self: PipelineRewriter, MUTABLE argument: Locatable) RETURNS !Locatable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -202,7 +202,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN replaced;
 }
 END
-PRIVATE FN pipelineRewriter__rewrite_struct_field(MUTABLE self: PipelineRewriter, value: Locatable) RETURNS !Locatable
+PRIVATE FN pipelineRewriter__rewrite_struct_field(MUTABLE self: PipelineRewriter, MUTABLE value: Locatable) RETURNS !Locatable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

@@ -568,7 +568,7 @@ PRIVATE FN clearParser__parse_capability_wrap_suffix(MUTABLE self: ClearParser, 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE token = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
-    TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, token));
+    TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, &token));
     MUTABLE attrs: ?SigilAttrs = clearParser__cap_sigil_attrs()[TRY (token__text_mut(&token))];
     MUTABLE joined = TRY (clearParser__parse_cap_join(&rtoc_self_view, token, UNWRAP (attrs)));
     MUTABLE cw = CapabilityWrap{ token: COPY token, value: COPY lhs, ownership: joined.ownership, sync: joined.sync, layout: joined.layout, lock_rank: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };

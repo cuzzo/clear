@@ -104,14 +104,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PUB FN functionCFG__build(fn_node: FunctionDef, can_fail_fns: ?[Set]String = NIL) RETURNS !FunctionCFG@multiowned ->
   MUTABLE cfg = functionCFG__new(fn_node.name, can_fail_fns);
-  MUTABLE last_block: ?BasicBlock = TRY (functionCFG__build_body(fn_node.body, KEEP cfg.entry, KEEP cfg.exit_block, cfg));
+  MUTABLE last_block: ?BasicBlock = TRY (functionCFG__build_body(fn_node.body, KEEP cfg.entry, KEEP cfg.exit_block, &cfg));
   IF last_block EXISTS AS last_block_value THEN
     MUTABLE last_block_value_mutable = COPY last_block_value;
     basicBlock__add_successor(&last_block_value_mutable, KEEP cfg.exit_block);
   END
   RETURN cfg;
 END
-PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: BasicBlock, exit_target: BasicBlock, cfg: FunctionCFG, break_target: ?BasicBlock = NIL, continue_target: ?BasicBlock = NIL) RETURNS !?BasicBlock@multiowned EFFECTS REENTRANT ->
+PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: BasicBlock, exit_target: BasicBlock, MUTABLE cfg: FunctionCFG, break_target: ?BasicBlock = NIL, continue_target: ?BasicBlock = NIL) RETURNS !?BasicBlock@multiowned EFFECTS REENTRANT ->
   MUTABLE current_block = COPY current_block_input;
   MUTABLE stmts = COPY stmts_input;
   MUTABLE rtoc_idx = 0;
@@ -129,13 +129,13 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       MUTABLE join_block = functionCFG__new_block(&cfg);
       basicBlock__add_successor(&current_block, then_block);
       basicBlock__add_successor(&current_block, (else_block OR_ELSE join_block));
-      MUTABLE then_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.then_branch OR_ELSE List[]), then_block, exit_target, cfg, break_target, continue_target));
+      MUTABLE then_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.then_branch OR_ELSE List[]), then_block, exit_target, &cfg, break_target, continue_target));
       IF then_exit EXISTS AS then_exit_value THEN
         MUTABLE then_exit_value_mutable = COPY then_exit_value;
         basicBlock__add_successor(&then_exit_value_mutable, join_block);
       END
       IF stmts[rtoc_idx]?.else_branch THEN
-        MUTABLE else_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.else_branch, else_block?, exit_target, cfg, break_target, continue_target));
+        MUTABLE else_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.else_branch, else_block?, exit_target, &cfg, break_target, continue_target));
         IF else_exit EXISTS AS else_exit_value THEN
           MUTABLE else_exit_value_mutable = COPY else_exit_value;
           basicBlock__add_successor(&else_exit_value_mutable, join_block);
@@ -148,7 +148,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       MUTABLE after_block = functionCFG__new_block(&cfg);
       basicBlock__add_successor(&current_block, body_block);
       basicBlock__add_successor(&current_block, after_block);
-      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.do_branch OR_ELSE List[]), body_block, exit_target, cfg, after_block, current_block));
+      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body((stmts[rtoc_idx]?.do_branch OR_ELSE List[]), body_block, exit_target, &cfg, after_block, current_block));
       IF body_exit != NIL THEN
             basicBlock__add_successor(&body_exit, current_block);
       END
@@ -159,7 +159,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       MUTABLE after_block = functionCFG__new_block(&cfg);
       basicBlock__add_successor(&current_block, body_block);
       basicBlock__add_successor(&current_block, after_block);
-      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.body(), body_block, exit_target, cfg, after_block, current_block));
+      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.body(), body_block, exit_target, &cfg, after_block, current_block));
       IF body_exit != NIL THEN
             basicBlock__add_successor(&body_exit, current_block);
       END
@@ -170,7 +170,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       FOR _ IN (stmts[rtoc_idx]?.cases) DO
     MUTABLE case_block = functionCFG__new_block(&cfg);
     basicBlock__add_successor(&current_block, case_block);
-    MUTABLE case_exit: ?BasicBlock = TRY (functionCFG__build_body(_.body(), case_block, exit_target, cfg, break_target, continue_target));
+    MUTABLE case_exit: ?BasicBlock = TRY (functionCFG__build_body(_.body(), case_block, exit_target, &cfg, break_target, continue_target));
     IF case_exit EXISTS AS case_exit_value THEN
           MUTABLE case_exit_value_mutable = COPY case_exit_value;
           basicBlock__add_successor(&case_exit_value_mutable, join_block);
@@ -179,7 +179,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       IF stmts[rtoc_idx]?.default_case THEN
         MUTABLE default_block = functionCFG__new_block(&cfg);
         basicBlock__add_successor(&current_block, default_block);
-        MUTABLE default_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.default_case, default_block, exit_target, cfg, break_target, continue_target));
+        MUTABLE default_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.default_case, default_block, exit_target, &cfg, break_target, continue_target));
         IF default_exit EXISTS AS default_exit_value THEN
           MUTABLE default_exit_value_mutable = COPY default_exit_value;
           basicBlock__add_successor(&default_exit_value_mutable, join_block);
@@ -192,7 +192,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       MUTABLE after_block = functionCFG__new_block(&cfg);
       basicBlock__add_successor(&current_block, body_block);
       basicBlock__add_successor(&current_block, after_block);
-      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.body(), body_block, exit_target, cfg, break_target, continue_target));
+      MUTABLE body_exit: ?BasicBlock = TRY (functionCFG__build_body(stmts[rtoc_idx]?.body(), body_block, exit_target, &cfg, break_target, continue_target));
       IF body_exit EXISTS AS body_exit_value THEN
         MUTABLE body_exit_value_mutable = COPY body_exit_value;
         basicBlock__add_successor(&body_exit_value_mutable, after_block);
@@ -204,7 +204,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       FOR _ IN (stmts[rtoc_idx]?.branches) DO
     MUTABLE branch_block = functionCFG__new_block(&cfg);
     basicBlock__add_successor(&current_block, branch_block);
-    MUTABLE branch_exit: ?BasicBlock = TRY (functionCFG__build_body(_.body(), branch_block, exit_target, cfg, break_target, continue_target));
+    MUTABLE branch_exit: ?BasicBlock = TRY (functionCFG__build_body(_.body(), branch_block, exit_target, &cfg, break_target, continue_target));
     IF branch_exit EXISTS AS branch_exit_value THEN
           MUTABLE branch_exit_value_mutable = COPY branch_exit_value;
           basicBlock__add_successor(&branch_exit_value_mutable, join_block);
@@ -218,7 +218,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       MUTABLE after_block = functionCFG__new_block(&cfg);
       basicBlock__add_successor(&current_block, body_block);
       basicBlock__add_successor(&current_block, after_block);
-      TRY (functionCFG__build_body(stmts[rtoc_idx]?.body(), body_block, exit_target, cfg, break_target, continue_target));
+      TRY (functionCFG__build_body(stmts[rtoc_idx]?.body(), body_block, exit_target, &cfg, break_target, continue_target));
       current_block = after_block;
   ELSE_IF (stmts[rtoc_idx]? IS_A ReturnNode) OR (stmts[rtoc_idx]? IS_A Raise) THEN
       &current_block.stmts.append(COPY stmts[rtoc_idx]?);
@@ -777,11 +777,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN TRY (ownershipDataflow__dup_state(rtoc_self_view, (rtoc_self_view.block_in[block.id] OR_ELSE TRY (ownershipDataflow__empty_ownership_state(rtoc_self_view)))));
 }
 END
-PUB FN ownershipDataflow__replay_transfer_stmt_mut(MUTABLE self: OwnershipDataflow, stmt: Locatable, state: {PlaceId}OwnerEntry) RETURNS !Void
+PUB FN ownershipDataflow__replay_transfer_stmt_mut(MUTABLE self: OwnershipDataflow, stmt: Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (ownershipDataflow__transfer_stmt(&rtoc_self_view, stmt, state));
+    TRY (ownershipDataflow__transfer_stmt(&rtoc_self_view, stmt, &state));
     NIL;
 }
 END
@@ -963,12 +963,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN :maybe_moved;
 }
 END
-PRIVATE FN ownershipDataflow__apply_transfer(MUTABLE self: OwnershipDataflow, block: BasicBlock, state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
+PRIVATE FN ownershipDataflow__apply_transfer(MUTABLE self: OwnershipDataflow, block: BasicBlock, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN block.stmts DO
-    TRY (ownershipDataflow__transfer_stmt(&rtoc_self_view, castNodeToLocatable__control_flow(_), state));
+    TRY (ownershipDataflow__transfer_stmt(&rtoc_self_view, castNodeToLocatable__control_flow(_), &state));
     END
     RETURN COPY state;
 }
@@ -1046,7 +1046,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (analysis.resource_captures() OR_ELSE List[]);
 }
 END
-PRIVATE FN ownershipDataflow__transfer_stmt(MUTABLE self: OwnershipDataflow, stmt: Locatable, state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
+PRIVATE FN ownershipDataflow__transfer_stmt(MUTABLE self: OwnershipDataflow, stmt: Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1475,7 +1475,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE state = TRY (ownershipDataflow__replay_state_for_block(rtoc_self_view.dataflow, _));
     FOR _ IN _.stmts DO
       TRY (useAfterMoveChecker__check_stmt_reads(&rtoc_self_view, castNodeToLocatable__control_flow(_), state));
-      TRY (ownershipDataflow__replay_transfer_stmt_mut(rtoc_self_view.dataflow, castNodeToLocatable__control_flow(_), state));
+      TRY (ownershipDataflow__replay_transfer_stmt_mut(rtoc_self_view.dataflow, castNodeToLocatable__control_flow(_), &state));
     END
     END
     MUTABLE rtoc_owned_return_19: UseAfterMoveChecker@multiowned = rtoc_self_view;

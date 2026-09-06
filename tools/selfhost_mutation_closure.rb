@@ -194,6 +194,77 @@ module SelfhostMutationClosure
     end
   end
 
+  # A parameter handed to a callee's MUTABLE parameter must itself be MUTABLE --
+  # the same contract as the receiver, one argument over. Without this the
+  # cascade walks the call graph one function per sweep round, driven by
+  # diagnostics, instead of closing in a single pass.
+  def grow_mutating_params!(sources)
+    positions = mutable_positions(sources)
+    return 0 if positions.empty?
+
+    grown = 0
+    sources.each do |path, text|
+      lines = text.split("\n", -1)
+      changed = false
+      function_spans(lines).each do |_, head, tail|
+        params = split_top(lines[head][/\((.*?)\)\s*(?:RETURNS|$)/, 1].to_s)
+        plain = {}
+        params.each do |param|
+          t = param.strip
+          next if t.start_with?('MUTABLE ', 'TAKES ')
+
+          name = t.split(':').first.to_s.strip
+          plain[name] = true unless name.empty?
+        end
+        next if plain.empty?
+
+        body = lines[head...tail].join("\n")
+        # Balanced scan: a call's arguments routinely contain further calls, so
+        # a [^()]* argument list matches almost nothing real.
+        body.to_enum(:scan, /(?<![\w.&])([\w?!]+)\(/).each do
+          m = Regexp.last_match
+          callee = m[1]
+          slots = positions[callee] or next
+          depth = 1
+          j = m.end(0)
+          start_arg = j
+          args = []
+          while j < body.length && depth.positive?
+            ch = body[j]
+            depth += 1 if '([{'.include?(ch)
+            if ')]}'.include?(ch)
+              depth -= 1
+              if depth.zero?
+                args << body[start_arg...j]
+                break
+              end
+            elsif ch == ',' && depth == 1
+              args << body[start_arg...j]
+              start_arg = j + 1
+            end
+            j += 1
+          end
+          next if depth.positive?
+
+          args.each_with_index do |arg, idx|
+            next unless slots.include?(idx)
+
+            name = arg.strip.delete_prefix('&')
+            next unless plain[name]
+
+            lines[head] = lines[head].sub(/(?<=[(, ])#{Regexp.escape(name)}: /,
+                                          "MUTABLE #{name}: ")
+            plain.delete(name)
+            grown += 1
+            changed = true
+          end
+        end
+      end
+      sources[path] = lines.join("\n") if changed
+    end
+    grown
+  end
+
   # `&` is the call-site half of the contract; without it the callee's MUTABLE
   # parameter has nothing to bind.
   # `&` is the call-site half of the contract; without it the callee's MUTABLE
@@ -287,6 +358,7 @@ module SelfhostMutationClosure
     total_marked = 0
     12.times do |round|
       grown = grow_mutating_receivers!(sources)
+      grown += grow_mutating_params!(sources)
       marked = mark_call_sites!(sources)
       total_grown += grown
       total_marked += marked
