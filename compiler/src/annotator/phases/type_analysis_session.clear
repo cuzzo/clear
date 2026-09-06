@@ -6588,7 +6588,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__target_map(shard_op)));
     MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(shard_op)));
     MUTABLE target_sync = IF TRUE THEN
-      (IF shard_op.target_map.symbol != NIL THEN
+      (IF locatable__symbol(shard_op.target_map) != NIL THEN
       (shard_op.target_map.symbol).sync()
     ELSE
       NIL
@@ -13120,7 +13120,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE union_schema: UnionSchema@multiowned = castOptionalMatchSchemaToUnionSchemaMultiowned(schema);
     MUTABLE subst = TRY (typeAnalysisSession__match_union_substitution(&rtoc_self_view, subject_type, MatchSchema{ UnionSchemaMultiowned: COPY union_schema }, TRUE));
-    MUTABLE variant_name = TRY (typeAnalysisSession__resolve_runtime_is_a_variant_mut(&rtoc_self_view, node, union_schema, type_name, subst));
+    MUTABLE variant_name = TRY (typeAnalysisSession__resolve_runtime_is_a_variant_mut(&rtoc_self_view, &node, union_schema, type_name, subst));
     node.runtime_variant_name = variant_name;
     TRY (typeAnalysisSession__stamp_runtime_is_a_target_mut(&rtoc_self_view, castIsARightToNodeOrType(node.right), type_name));
     MUTABLE binding: ?String = COPY node.binding;
@@ -13138,7 +13138,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__resolve_runtime_is_a_variant_mut(MUTABLE self: TypeAnalysisSession, node: IsA, schema: UnionSchema, union_type: String@symbol, union_subst: {String@symbol}String@symbol) RETURNS !String
+PRIVATE FN typeAnalysisSession__resolve_runtime_is_a_variant_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: IsA, schema: UnionSchema, union_type: String@symbol, union_subst: {String@symbol}String@symbol) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13159,7 +13159,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IsA: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_UNKNOWN_VARIANT }, [], CAST({:target: TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, node.right)), :union: union_type} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__runtime_is_a_target_names(self: TypeAnalysisSession, node: Node) RETURNS ![]String
+PRIVATE FN typeAnalysisSession__runtime_is_a_target_names(self: TypeAnalysisSession, MUTABLE node: Node) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
