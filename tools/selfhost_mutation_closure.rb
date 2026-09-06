@@ -235,10 +235,13 @@ module SelfhostMutationClosure
 
         # Balanced scan: a call's arguments routinely contain further calls, so
         # a [^()]* argument list matches almost nothing real.
-        body.to_enum(:scan, /(?<![\w.&])([\w?!]+)\(/).each do
-          m = Regexp.last_match
+        pos = 0
+        while (m = /(?<![\w.&])([\w?!]+)\(/.match(body, pos))
+          pos = m.end(0)
           callee = m[1]
-          slots = positions[callee] or next
+          slots = positions[callee]
+          next unless slots
+
           depth = 1
           j = m.end(0)
           start_arg = j
