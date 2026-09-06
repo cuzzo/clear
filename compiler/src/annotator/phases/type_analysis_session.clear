@@ -2356,7 +2356,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, :capability, fixes, NIL, :DIRECT_VIEW_ACCESS_REQUIRES_WITH, :error, TRUE, CAST({:name: name, :permission: permission} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_with_guard_all_bindings_need_as_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, missing_caps: []CapabilityTransition) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_with_guard_all_bindings_need_as_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, missing_caps: []CapabilityTransition) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9513,7 +9513,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__validate_and_visit_with_guards_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock) RETURNS !Void
+PRIVATE FN typeAnalysisSession__validate_and_visit_with_guards_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9531,7 +9531,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE missing_alias = caps |> WHERE !(_.alias_explicit);
     IF !(missing_alias.empty?()) THEN
-      TRY (typeAnalysisSession__emit_with_guard_all_bindings_need_as_mut(&rtoc_self_view, node, missing_alias));
+      TRY (typeAnalysisSession__emit_with_guard_all_bindings_need_as_mut(&rtoc_self_view, &node, missing_alias));
     END
     MUTABLE aliases = caps |> SELECT _.alias_name;
     FOR _ IN guarded DO
@@ -10831,7 +10831,7 @@ PRIVATE FN typeAnalysisSession__visit_UnionVariantLit(MUTABLE self: TypeAnalysis
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(node.union_name)));
     MUTABLE var_data: ?InlineStructVariant@multiowned = TRY (typeAnalysisSession__validate_union_schema_mut(&rtoc_self_view, node, schema));
-    TRY (typeAnalysisSession__validate_union_fields_mut(&rtoc_self_view, node, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_248 = UNWRAP (var_data);
+    TRY (typeAnalysisSession__validate_union_fields_mut(&rtoc_self_view, &node, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_248 = UNWRAP (var_data);
     TRY (inlineStructVariant__typed_fields(rtoc_local_receiver_248)) }));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ UnionVariantLit: COPY node }, symbol(node.union_name)));
 }
@@ -10862,7 +10862,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN var_data;
 }
 END
-PRIVATE FN typeAnalysisSession__validate_union_fields_mut(MUTABLE self: TypeAnalysisSession, node: UnionVariantLit, expected_fields: {String}Type) RETURNS !Void
+PRIVATE FN typeAnalysisSession__validate_union_fields_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: UnionVariantLit, expected_fields: {String}Type) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16754,7 +16754,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       FOR _ IN expanded_capabilities DO
       TRY (typeAnalysisSession__declare_capability_scope_mut(&rtoc_self_view, _));
       END
-      TRY (typeAnalysisSession__validate_and_visit_with_guards_mut(&rtoc_self_view, node));
+      TRY (typeAnalysisSession__validate_and_visit_with_guards_mut(&rtoc_self_view, &node));
       typeAnalysisSession__with_body_fact_scope(&rtoc_self_view, node, %() USE(node, MUTABLE rtoc_self_view) -> {
         rtoc_lambda_result_412 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, node.body));
         rtoc_lambda_result_412
