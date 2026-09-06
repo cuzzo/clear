@@ -2533,7 +2533,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), :reentrance, [fix], NIL, :CAN_SMASH_NOT_SUPPORTED, :error));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_type_mismatch_assign_error_mut(MUTABLE self: TypeAnalysisSession, node: Node, target_type: TypeTypeInput, value_type: String@symbol) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_type_mismatch_assign_error_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: Node, target_type: TypeTypeInput, value_type: String@symbol) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -11377,7 +11377,7 @@ PRIVATE FN typeAnalysisSession__restamp_stale_auto_nodes_mut(MUTABLE self: TypeA
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE nodes: []Locatable = ( { MUTABLE rtoc_empty_list_258: []Locatable = List[]; rtoc_empty_list_258 } );
-    aST__each_locatable(Locatable{ Program: COPY program }, TRUE, %(node: Locatable) USE(MUTABLE nodes) -> {
+    aST__each_locatable(Locatable{ Program: COPY program }, TRUE, %(MUTABLE node: Locatable) USE(MUTABLE nodes) -> {
     &nodes.append(COPY node);
     rubyToClearVoid__type_analysis_session()
     });
@@ -15801,7 +15801,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         RETURN;
       END
-      TRY (typeAnalysisSession__emit_type_mismatch_assign_error_mut(&rtoc_self_view, node, castTypeToTypeTypeInput__type_analysis_session(target), type__resolved(value)));
+      TRY (typeAnalysisSession__emit_type_mismatch_assign_error_mut(&rtoc_self_view, &node, castTypeToTypeTypeInput__type_analysis_session(target), type__resolved(value)));
     ELSE
       RETURN;
     END
