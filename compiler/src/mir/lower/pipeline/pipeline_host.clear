@@ -1010,7 +1010,7 @@ PRIVATE FN pipelineHost__pipeline_alloc(MUTABLE self: PipelineHost, smooth_node:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF (smooth_node.storage() == :heap) THEN
+    IF (smooth_node.storage == :heap) THEN
       RETURN :heap;
     END
     RETURN pipelineHost__pipeline_result_alloc(&rtoc_self_view);

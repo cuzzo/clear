@@ -1708,17 +1708,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE tok: ?Token = NIL;
       MUTABLE decl: ?SymbolEntryRegInput = COPY info_value.reg;
       IF ((decl != NIL) AND TRUE) THEN
-        tok = aST__node__token(decl);
+        tok = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
       ELSE_IF (symbolEntry__is_param(info_value) AND (COPY info_value.param_decl_token != NIL)) THEN
         tok = COPY info_value.param_decl_token;
       END
       IF !(tok) THEN
         RETURN NIL;
       END
-      IF (tok.value() == "MUTABLE") THEN
+      IF (token__text_is?(UNWRAP (tok), "MUTABLE")) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: tok.line} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
+      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: UNWRAP (tok).line} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
     ELSE
       RETURN NIL;
     END
@@ -1867,7 +1867,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRUE AND (slot.shape != NIL)) THEN
       RETURN;
     END
-    MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__capability_audit_session(resolution.type));
+    MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, resolution.type);
     MUTABLE label: ?String = TRY (capabilityAuditSession__auto_slot_label(rtoc_self_view, slot));
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
     TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, TRY (capabilityAuditSession__build_auto_replace_fixes(rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_TYPE, :info, FALSE, CAST({:label: label, :type: type_str} AS {String@symbol}Any)));
@@ -2534,9 +2534,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
     MUTABLE declared_fallible = ({
       MUTABLE rtoc_value_block_marker = 0;
-      MUTABLE rt = functionSignature__return_type(fn_node);
-      ((rt IS_A Type AND TRUE) AND rt.error_union?())
-    } OR_ELSE FALSE);
+      MUTABLE rt: ?Type = fn_node.return_type;
+      ((rt != NIL AND TRUE) AND type__error_union?(rt))
+    });
     error_fallible[_] = ((TRY (capabilityAuditSession__function_raises_directly?(rtoc_self_view, _)) OR declared_fallible) OR (_ == name));
     };
     FOR rtoc_each_10 IN (TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view))).keys() DO
