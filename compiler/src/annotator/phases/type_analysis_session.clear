@@ -2280,7 +2280,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetField: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, kw));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_foreign_with_view_needs_unsafe_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, fact: CapabilityTransition) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_foreign_with_view_needs_unsafe_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, fact: CapabilityTransition) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9326,7 +9326,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE t: Type = t_branch_value?;
       IF TRY (type__c_array_view?(t)) THEN
-        TRY (typeAnalysisSession__emit_foreign_with_view_needs_unsafe_mut(&rtoc_self_view, node, fact));
+        TRY (typeAnalysisSession__emit_foreign_with_view_needs_unsafe_mut(&rtoc_self_view, &node, fact));
         RETURN;
       END
       IF !((type__future?(t) AND type__observable?(t))) THEN
@@ -10405,7 +10405,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN type__resolve_resource_close(ti, %(name: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, name)));
 }
 END
-PRIVATE FN typeAnalysisSession__declaration_allocates?(MUTABLE self: TypeAnalysisSession, node: AllocDeclarationNode) RETURNS Bool
+PRIVATE FN typeAnalysisSession__declaration_allocates?(MUTABLE self: TypeAnalysisSession, MUTABLE node: AllocDeclarationNode) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
