@@ -3049,7 +3049,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         stack_bytes = (stack_bytes * n);
     END
-    MUTABLE return_t: ?Type = functionSignature__return_type(fn_node);
+    MUTABLE return_t: ?Type = fn_node.return_type;
     IF ((return_t != NIL) AND !(TRUE)) THEN
         return_t = TRY (type__new(castTypeToTypeConstructionInput__capability_audit_session(return_t)));
     END

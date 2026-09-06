@@ -242,7 +242,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
         END
         IF !(escapeAnalysis__param_sync_was_declared?(callee_fn.params[rtoc_idx]?)) THEN
             MUTABLE unified = escapeAnalysis__unify_caller_attr(sites, rtoc_idx, %(s) -> {
-          IF s.sync() THEN
+          IF s.sync THEN
                 RETURN s.sync();
           END
           MUTABLE t = s.type();
@@ -599,7 +599,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
   });
 END
 PUB FN escapeAnalysis__unify_caller_attr(sites: []CallSiteFact, idx: Int64, project: FN(SymbolEntry) -> ?String@symbol) RETURNS ?String@symbol ->
-  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY locatable__args(_)[idx]; (IF !(((arg != NIL) AND (aST__node__symbol(arg) EXISTS))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol = locatable__symbol(arg); (IF !(symbol IS_A SymbolEntry@multiowned) THEN NIL ELSE project(symbol) END) } END) };
+  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY _.args[idx]; (IF !(((arg != NIL) AND (aST__node__symbol(arg) EXISTS))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol = locatable__symbol(arg); (IF !(symbol IS_A SymbolEntry@multiowned) THEN NIL ELSE project(symbol) END) } END) };
   IF (observed.length() == 0) THEN
     RETURN NIL;
   END
@@ -818,7 +818,7 @@ PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionF
   MUTABLE fn = COPY facts.fn;
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < fn.params.length() DO
-    IF !(TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new( UNWRAP ((IF fn.params[rtoc_idx]?.type EXISTS AS rtoc_wrap_820 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_820 } ELSE NIL END)))), schema_lookup))) THEN
+    IF !(TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new( (IF fn.params[rtoc_idx]?.type EXISTS AS rtoc_wrap_820 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_820 } ELSE NIL END))), schema_lookup))) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1377,7 +1377,7 @@ PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes
 END
 PUB FN escapeAnalysis__ownership_transferring_expr?(expr: ?Locatable, include_allocating_expr: Bool) RETURNS !Bool ->
   MUTABLE value: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
-  IF (UNWRAP (value) IS_A BinaryOp AND (UNWRAP (value).op() == symbol("OR_ELSE"))) THEN
+  IF (UNWRAP (value) IS_A BinaryOp AND (UNWRAP (value).op == symbol("OR_ELSE"))) THEN
     value = escapeAnalysis__unwrap_value(value.left());
   END
   IF (value IS_A CopyNode OR value IS_A KeepNode) THEN
@@ -1957,7 +1957,7 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
 END
 PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
   MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
-  IF (UNWRAP (node) IS_A BinaryOp AND (UNWRAP (node).op() == symbol("OR_ELSE"))) THEN
+  IF (UNWRAP (node) IS_A BinaryOp AND (UNWRAP (node).op == symbol("OR_ELSE"))) THEN
     node = escapeAnalysis__unwrap_value(node.left());
   END
   IF ((aST__node_storage(node) EXISTS) AND ([:rodata, :borrow]).contains?(node.storage())) THEN
