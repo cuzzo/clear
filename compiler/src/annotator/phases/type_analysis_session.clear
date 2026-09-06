@@ -2331,7 +2331,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetIndex: COPY node } }, :capability, fixes, NIL, :FOREIGN_POINTER_DIRECT_INDEX, :error, TRUE, CAST({:name: name} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_direct_view_access_finding_mut(MUTABLE self: TypeAnalysisSession, node: Locatable, name: String, permission: String) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_direct_view_access_finding_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: Locatable, name: String, permission: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -10830,13 +10830,13 @@ PRIVATE FN typeAnalysisSession__visit_UnionVariantLit(MUTABLE self: TypeAnalysis
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(node.union_name)));
-    MUTABLE var_data: ?InlineStructVariant@multiowned = TRY (typeAnalysisSession__validate_union_schema_mut(&rtoc_self_view, node, schema));
+    MUTABLE var_data: ?InlineStructVariant@multiowned = TRY (typeAnalysisSession__validate_union_schema_mut(&rtoc_self_view, &node, schema));
     TRY (typeAnalysisSession__validate_union_fields_mut(&rtoc_self_view, &node, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_248 = UNWRAP (var_data);
     TRY (inlineStructVariant__typed_fields(rtoc_local_receiver_248)) }));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ UnionVariantLit: COPY node }, symbol(node.union_name)));
 }
 END
-PRIVATE FN typeAnalysisSession__validate_union_schema_mut(MUTABLE self: TypeAnalysisSession, node: UnionVariantLit, schema: ?SchemaValue) RETURNS !?InlineStructVariant@multiowned
+PRIVATE FN typeAnalysisSession__validate_union_schema_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: UnionVariantLit, schema: ?SchemaValue) RETURNS !?InlineStructVariant@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
