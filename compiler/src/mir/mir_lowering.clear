@@ -3930,7 +3930,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     mIRLowering__program_state(rtoc_self_view).emitted_import_type_aliases.clear();
 }
 END
-FN mIRLowering__append_lowered_items_mut(MUTABLE self: MIRLowering, target: LoweredItemTarget, lowered: ?MIRLoweringLoweredMir) RETURNS Void
+FN mIRLowering__append_lowered_items_mut(MUTABLE self: MIRLowering, MUTABLE target: LoweredItemTarget, lowered: ?MIRLoweringLoweredMir) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

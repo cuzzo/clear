@@ -67,7 +67,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN marker;
 }
 END
-PUB FN mIRPass__transform_mut(MUTABLE self: MIRPass, ast: Program) RETURNS !Void
+PUB FN mIRPass__transform_mut(MUTABLE self: MIRPass, MUTABLE ast: Program) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

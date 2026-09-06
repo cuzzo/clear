@@ -68,7 +68,7 @@ PUB FN compilerFrontend__compile(cheat_code_input: String, importer: ModuleImpor
   MUTABLE lifecycle_registry = COPY KEEP (UNWRAP ((KEEP annotator.annotation_products).typed_program)).lifecycle_registry;
   MUTABLE derived_program = COPY KEEP (UNWRAP ((KEEP annotator.annotation_products).capability_audit)).derived_program;
   MUTABLE mir_pass = mIRPass__new(fn_nodes, schema_lookup, lifecycle_registry, TRY (semanticIndex__body_summaries(UNWRAP (annotator.semantic_index))), hoist_result.bindings_by_function);
-  TRY (mIRPass__transform_mut(&mir_pass, ast));
+  TRY (mIRPass__transform_mut(&mir_pass, &ast));
   MUTABLE struct_schemas: {String@symbol}StructSchema@multiowned = {};
   MUTABLE enum_schemas: {String@symbol}[]TypeEnumVariantsItem = {};
   MUTABLE union_schemas: {String@symbol}UnionSchema@multiowned = {};

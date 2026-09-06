@@ -2380,7 +2380,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, [fix], NIL, :WITH_GUARD_ALL_BINDINGS_NEED_AS, :error, TRUE));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_with_guard_mutable_mutated_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, names_input: []String, verb: String) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_with_guard_mutable_mutated_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, names_input: []String, verb: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9632,7 +9632,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__validate_with_guard_no_body_mutation_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock) RETURNS !Void
+PRIVATE FN typeAnalysisSession__validate_with_guard_no_body_mutation_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9654,7 +9654,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       is_or_are = "are";
     END
-    TRY (typeAnalysisSession__emit_with_guard_mutable_mutated_mut(&rtoc_self_view, node, mutated, is_or_are));
+    TRY (typeAnalysisSession__emit_with_guard_mutable_mutated_mut(&rtoc_self_view, &node, mutated, is_or_are));
 }
 END
 PRIVATE FN typeAnalysisSession__alias_mutated?(MUTABLE self: TypeAnalysisSession, alias_name: String) RETURNS !Bool
@@ -10626,7 +10626,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           node.matched_signature = resolved_defn;
         END
       END
-      TRY (typeAnalysisSession__narrow_receiver_collection_mut(&rtoc_self_view, node, obj_type, &defn_value_mutable));
+      TRY (typeAnalysisSession__narrow_receiver_collection_mut(&rtoc_self_view, &node, obj_type, &defn_value_mutable));
       IF defn_allocates THEN
         IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
                 MUTABLE rtoc_mutable_receiver_243 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
@@ -10751,7 +10751,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY value_arg }, :type, fixes, NIL, :INDIRECT_ELEMENT_EXPLICIT, :error, TRUE, CAST({:type: type__resolved(element_type)} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__narrow_receiver_collection_mut(MUTABLE self: TypeAnalysisSession, node: MethodCall, obj_type: Type, MUTABLE defn: FunctionSignature) RETURNS !Void
+PRIVATE FN typeAnalysisSession__narrow_receiver_collection_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, obj_type: Type, MUTABLE defn: FunctionSignature) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -10907,7 +10907,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__record_lock_type_rank_mut(MUTABLE self: TypeAnalysisSession, type_sym: String@symbol, rank: Int64, node: CapabilityWrap) RETURNS !?Int64
+PRIVATE FN typeAnalysisSession__record_lock_type_rank_mut(MUTABLE self: TypeAnalysisSession, type_sym: String@symbol, rank: Int64, MUTABLE node: CapabilityWrap) RETURNS !?Int64
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16759,7 +16759,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_lambda_result_412 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, node.body));
         rtoc_lambda_result_412
       });
-      TRY (typeAnalysisSession__validate_with_guard_no_body_mutation_mut(&rtoc_self_view, node));
+      TRY (typeAnalysisSession__validate_with_guard_no_body_mutation_mut(&rtoc_self_view, &node));
       MUTABLE fallible_sources = TRY (typeAnalysisSession__retryable_with_fallible_sources(&rtoc_self_view, &node));
       IF (is_snapshot_txn_body AND !((fallible_sources.length() == 0))) THEN
           TRY (typeAnalysisSession__retryable_with_fallible_body_error_mut(&rtoc_self_view, &node, "WITH SNAPSHOT ... AS MUTABLE", fallible_sources));
@@ -18729,7 +18729,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       type__pin_heap_for_indirect_mut(&ti);
     END
     IF (node.lock_rank AND capabilityWrap__locked_sync?(node)) THEN
-      TRY (typeAnalysisSession__record_lock_type_rank_mut(&rtoc_self_view, TRY (type__base_type(ti)), node.lock_rank, node));
+      TRY (typeAnalysisSession__record_lock_type_rank_mut(&rtoc_self_view, TRY (type__base_type(ti)), node.lock_rank, &node));
     END
     IF ((node.ownership OR node.sync) OR node.layout) THEN
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
@@ -19821,7 +19821,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__finalize_scope(MUTABLE self: TypeAnalysisSession, node: Locatable, branch: ?String@symbol = NIL) RETURNS !Void
+PRIVATE FN typeAnalysisSession__finalize_scope(MUTABLE self: TypeAnalysisSession, MUTABLE node: Locatable, branch: ?String@symbol = NIL) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

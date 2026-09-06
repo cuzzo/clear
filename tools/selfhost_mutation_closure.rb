@@ -219,6 +219,20 @@ module SelfhostMutationClosure
         next if plain.empty?
 
         body = lines[head...tail].join("\n")
+        # A body that passes the parameter mutably (`&p`) or assigns through it
+        # needs it MUTABLE, whatever the callee's slots say.
+        plain.keys.each do |name|
+          next unless body.match?(/(?<![\w.])&#{Regexp.escape(name)}(?![\w])/) ||
+                      body.match?(/(?<![\w.])#{Regexp.escape(name)}\.\w+ =(?!=)/)
+
+          lines[head] = lines[head].sub(/(?<=[(, ])#{Regexp.escape(name)}: /,
+                                        "MUTABLE #{name}: ")
+          plain.delete(name)
+          grown += 1
+          changed = true
+        end
+        next if plain.empty?
+
         # Balanced scan: a call's arguments routinely contain further calls, so
         # a [^()]* argument list matches almost nothing real.
         body.to_enum(:scan, /(?<![\w.&])([\w?!]+)\(/).each do
