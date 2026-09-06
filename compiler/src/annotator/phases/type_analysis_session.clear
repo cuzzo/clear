@@ -5824,7 +5824,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.storage_override = :stack;
     MUTABLE acc_t = TRY (type__new( TypeConstructionInput{ SymbolValue: COPY UNWRAP (acc_type) }));
     IF !(TRY (type__collection_value?(acc_t))) THEN
-      IF typeAnalysisSession__observable_reducible_scalar?(&rtoc_self_view, acc_type) THEN
+      IF typeAnalysisSession__observable_reducible_scalar?(&rtoc_self_view, UNWRAP (acc_type)) THEN
         TRY (typeAnalysisSession__mark_observable_terminal_mut(&rtoc_self_view, &node, :reduce, symbol("~${acc_type}")));
       END
     END
@@ -6245,7 +6245,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, typeAnalysisSession__sum_result_clear_type(rtoc_self_view, UNWRAP (expr_type))));
     node.storage_override = :stack;
-    RETURN CAST(TRY (typeAnalysisSession__mark_observable_terminal_mut(&rtoc_self_view, &node, :sum, symbol("~${typeAnalysisSession__sum_result_clear_type(rtoc_self_view, expr_type)}"))) AS ?Type);
+    RETURN CAST(TRY (typeAnalysisSession__mark_observable_terminal_mut(&rtoc_self_view, &node, :sum, symbol("~${typeAnalysisSession__sum_result_clear_type(rtoc_self_view, UNWRAP (expr_type))}"))) AS ?Type);
 }
 END
 PRIVATE FN typeAnalysisSession__analyze_average_op(MUTABLE self: TypeAnalysisSession, MUTABLE node: BinaryOp) RETURNS !?Type
@@ -6587,7 +6587,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     MUTABLE key_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__key_expr(shard_op)));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__target_map(shard_op)));
-    MUTABLE target_info = locatable__target_map(shard_op).full_type_mut({:context: "shard op target map"});
+    MUTABLE target_info = UNWRAP (locatable__target_map(shard_op)).full_type_mut({:context: "shard op target map"});
     MUTABLE target_sync = IF TRUE THEN
       (IF shard_op.target_map.symbol != NIL THEN
       (shard_op.target_map.symbol).sync()
@@ -13285,13 +13285,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE name = symbol(identifier__name(identifier));
       RETURN ((TRY (typeAnalysisSession__current_function_type_param?(&rtoc_self_view, name)) OR (CAST({:Float64: "f64", :Int64: "i64", :String: "[]const u8", :Void: "void", :Bool: "bool", :Byte: "u8", :Int8: "i8", :Int16: "i16", :Int32: "i32", :UInt8: "u8", :UInt16: "u16", :UInt32: "u32", :UInt64: "u64", :Float32: "f32", :TargetInt: "c_int", :TargetUInt: "c_uint", :TargetLong: "c_long", :TargetULong: "c_ulong", :TargetLongLong: "c_longlong", :TargetULongLong: "c_ulonglong", :Any: "f64", :Range: "CheatLib.Range", :File: "CheatLib.File", :TCPServer: "i32", :TCPClient: "i32"} AS {String@symbol}String)).contains?(name)) OR !(!(TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, name)))));
     ELSE_IF node IS_A GetField AS get_field THEN
-      RETURN typeAnalysisSession__static_dotted_type_expr?(&rtoc_self_view, get_field);
+      RETURN typeAnalysisSession__static_dotted_type_expr?(&rtoc_self_view, &get_field);
     ELSE
       RETURN FALSE;
     END
 }
 END
-PRIVATE FN typeAnalysisSession__static_dotted_type_expr?(MUTABLE self: TypeAnalysisSession, node: GetField) RETURNS Bool
+PRIVATE FN typeAnalysisSession__static_dotted_type_expr?(MUTABLE self: TypeAnalysisSession, MUTABLE node: GetField) RETURNS Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13330,7 +13330,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(TRY (typeAnalysisSession__current_function_type_param?(&rtoc_self_view, type_param))) THEN
         RETURN NIL;
       END
-      MUTABLE narrowed_type: ?Type@multiowned = TRY (typeAnalysisSession__static_is_a_target_type(&rtoc_self_view, is_a.right));
+      MUTABLE narrowed_type: ?Type@multiowned = TRY (typeAnalysisSession__static_is_a_target_type(&rtoc_self_view, &is_a.right));
       IF narrowed_type EXISTS AS narrowed_type_value THEN
         RETURN CAST(Tuple{type_param, narrowed_type_value} AS Tuple<String@symbol, Type@multiowned>);
       ELSE
