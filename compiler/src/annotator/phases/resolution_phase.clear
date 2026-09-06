@@ -1534,7 +1534,7 @@ PRIVATE FN resolutionSession__validate_extern_return_lifetime_mut(MUTABLE self: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE parameter_names = (node.params |> SELECT _.name) |> DISTINCT _;
+    MUTABLE parameter_names = (UNWRAP (node.params) |> SELECT _.name) |> DISTINCT _;
     MUTABLE rtoc_each_items_43 = (TRY (functionSignature__return_lifetime(signature)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_43.length() DO
@@ -1646,7 +1646,7 @@ PRIVATE FN resolutionSession__reject_duplicate_seen_signature_mut(MUTABLE self: 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE key: String = "";
     IF (IF node IS_A ExternFnDecl AS extern_fn_decl THEN (extern_fn_decl.owner_type != NIL) ELSE FALSE END) THEN
-      key = "${node__owner_type(node)}.${aST__node_name(UNWRAP (castNodeToLocatable(node)))}";
+      key = "${UNWRAP (node__owner_type(node)).toString()}.${aST__node_name(UNWRAP (castNodeToLocatable(node)))}";
     ELSE
       key = aST__node_name(UNWRAP (castNodeToLocatable(node)));
     END
