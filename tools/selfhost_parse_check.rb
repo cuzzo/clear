@@ -39,3 +39,4 @@ files.each do |rel|
 end
 puts "#{files.size - failed}/#{files.size} parse"
 exit(failed.zero? ? 0 : 1)
+exit(failed.zero? ? 0 : 1)

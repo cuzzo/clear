@@ -365,6 +365,10 @@ module SelfhostFnProbe
       text = "#{out}\n#{err}"
       msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|error: [^\n]*/, 0]
       probe_line = text[/^\s*(\d+) \|/, 1] || text[/line (\d+)/, 1]
+      # The column is what makes a positional diagnostic anchorable: several
+      # rules otherwise have to guess which argument on the line the compiler
+      # meant, and refuse whenever the guess is ambiguous.
+      probe_col = text[/Column (\d+)/, 1]
       # Not every failure announces itself with one of those banners -- a Ruby
       # backtrace out of the compiler, a Zig error, an ENOSPC. Fall back to the
       # last lines that are not warnings, so no failure lands without a reason.
@@ -376,13 +380,14 @@ module SelfhostFnProbe
       if (violations = text[/MIR ownership verification failed[^\n]*\n\n(.+)/m, 1])
         msg = "MIR ownership: #{violations.lines.first(2).join(' ').strip}"
       end
-      [status.success?, msg.to_s.gsub(/\e\[[0-9;]*m/, '')[0, 200], probe_line]
+      [status.success?, msg.to_s.gsub(/\e\[[0-9;]*m/, '')[0, 200], probe_line, probe_col]
     end
   end
 
   def main(argv)
     only_file = nil
     only_fns = nil
+    out_path = nil
     jobs = [Etc.nprocessors - 4, 1].max
     stage = :clear
     limit = nil
@@ -394,6 +399,9 @@ module SelfhostFnProbe
       # Probing one function is the fast edit/measure loop; a full file is minutes.
       p.on('--fn NAMES') { |v| only_fns = v.split(',').to_set }
       p.on('--all') { only_file = nil }
+      # Depth workers run one per file at once; a shared result path would
+      # have them clobbering each other's JSON.
+      p.on('--out PATH') { |v| out_path = v }
       p.on('--jobs N', Integer) { |v| jobs = v }
       p.on('--stage S') { |v| stage = v.to_sym }
       p.on('--limit N', Integer) { |v| limit = v }
@@ -442,16 +450,16 @@ module SelfhostFnProbe
           # with the parent asleep in waitpid. Building the source counts --
           # it reads the target's file -- so the rescue has to cover that too.
           offset = @probe_offset
-          ok, msg, probe_line = begin
+          ok, msg, probe_line, probe_col = begin
             src = probe_source(target, group, cache, pkg_name)
             offset = @probe_offset
             compile(src, stage, pkg_flag)
           rescue StandardError => e
-            [false, "probe harness: #{e.class}: #{e.message}"[0, 200], nil]
+            [false, "probe harness: #{e.class}: #{e.message}"[0, 200], nil, nil]
           end
           # The target is restated verbatim, so a probe line maps straight back.
           line = probe_line ? target.start + (probe_line.to_i - offset) : nil
-          results[idx] = [rel(target.file), target.name, ok, msg, line]
+          results[idx] = [rel(target.file), target.name, ok, msg, line, probe_col&.to_i]
           # Only the counter and the progress write belong under the lock. The
           # cache sweep used to run here too -- including a `df` BACKTICK, whose
           # waitpid held the mutex and stalled every worker behind it.
@@ -462,9 +470,9 @@ module SelfhostFnProbe
             if (done % 20).zero?
               good = results.count { |r| r && r[2] }
               warn "  #{done}/#{targets.length}  compiling: #{good} (#{(100.0 * good / done).round(1)}%)"
-              File.write(File.join(ROOT, (only_file || only_fns) ? '.fn_probe_file.json' : '.fn_probe.json'),
+              File.write((out_path || File.join(ROOT, (only_file || only_fns) ? '.fn_probe_file.json' : '.fn_probe.json')),
                          JSON.generate(
-                           results.compact.map { |f, n, o, m, l| { file: f, fn: n, ok: o, error: m, line: l } }))
+                           results.compact.map { |f, n, o, m, l, c| { file: f, fn: n, ok: o, error: m, line: l, col: c } }))
             end
           end
           if sweep_now
@@ -500,8 +508,8 @@ module SelfhostFnProbe
 
       puts format('  %3d/%3d fail  %s', bad, rs.length, f)
     end
-    File.write(File.join(ROOT, (only_file || only_fns) ? '.fn_probe_file.json' : '.fn_probe.json'), JSON.pretty_generate(
-                 results.compact.map { |f, n, o, m, l| { file: f, fn: n, ok: o, error: m, line: l } }
+    File.write((out_path || File.join(ROOT, (only_file || only_fns) ? '.fn_probe_file.json' : '.fn_probe.json')), JSON.pretty_generate(
+                 results.compact.map { |f, n, o, m, l, c| { file: f, fn: n, ok: o, error: m, line: l, col: c } }
                ))
     warn "\nwrote .fn_probe.json"
     0

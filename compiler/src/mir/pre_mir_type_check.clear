@@ -194,7 +194,7 @@ PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@
         MUTABLE tok: ?Token = walkNode__token(node_value_mutable);
         MUTABLE loc: String = "";
         IF (TRUE AND TRUE) THEN
-          loc = "${tok.line()}:${tok.column()}";
+          loc = "${tok.line}:${tok.column}";
         ELSE
           loc = "?";
         END

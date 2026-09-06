@@ -150,7 +150,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN pipelineHost__with_named_binding(&rtoc_self_view, entry.name, entry.zig, %() USE(blk, entries, index_value, MUTABLE rtoc_self_view) -> pipelineHost__apply_named_bindings(&rtoc_self_view, entries, (index_value + 1), blk));
 }
 END
-PRIVATE FN pipelineHost__build_each_lowerer(MUTABLE self: PipelineHost) RETURNS !PipelineEachLowerer
+PRIVATE FN pipelineHost__build_each_lowerer(MUTABLE self: PipelineHost) RETURNS !?PipelineEachLowerer
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

@@ -2098,8 +2098,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       CONTINUE;
         END
         MUTABLE idx: ?Int64 = available.indexOf(UNWRAP (expected_alloc));
-        IF idx THEN
-            &available.remove(UNWRAP (idx));
+        IF idx EXISTS AS idx_value THEN
+            &available.remove(UNWRAP (idx_value));
         ELSE
             &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_ALLOC_MISMATCH, Name{ StringValue: COPY rtoc_let.name }, "owned-result initializer produces :${UNWRAP (expected_alloc)} storage but no MIR::AllocMark uses :${UNWRAP (expected_alloc)} (marks: ${((UNWRAP (marks)) |> SELECT ":${_.alloc}").join(", ")})")));
         END
