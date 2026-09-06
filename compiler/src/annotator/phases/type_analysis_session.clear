@@ -2702,7 +2702,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__emit_with_cap_mismatch_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, name: String, code: String@symbol, candidates: []CapabilityFixCandidate, confidence: String@symbol = :auto, kw: {String@symbol}DiagnosticKwValue = {}) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_with_cap_mismatch_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, name: String, code: String@symbol, candidates: []CapabilityFixCandidate, confidence: String@symbol = :auto, kw: {String@symbol}DiagnosticKwValue = {}) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9300,7 +9300,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         MUTABLE storage: ?String@symbol = COPY fact.storage;
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, node, name, :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY storage }} AS {String@symbol}DiagnosticKwValue)));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY storage }} AS {String@symbol}DiagnosticKwValue)));
       END
     ELSE_IF (fact.capability == :write_locked_read) THEN
       IF !(capabilityTransition__write_locked_sync?(fact)) THEN
@@ -9390,17 +9390,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             actual = "plain";
           END
         END
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, node, name, :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC, [CapabilityFixCandidate{ sigil: "@versioned", description_code: :WITH_ADD_VERSIONED, description_params: {} }, CapabilityFixCandidate{ sigil: "@boxed:atomic", description_code: :WITH_ADD_INDIRECT_ATOMIC, description_params: {} }], {:confidence: :interactive, :name: name, :actual: actual}));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC, [CapabilityFixCandidate{ sigil: "@versioned", description_code: :WITH_ADD_VERSIONED, description_params: {} }, CapabilityFixCandidate{ sigil: "@boxed:atomic", description_code: :WITH_ADD_INDIRECT_ATOMIC, description_params: {} }], {:confidence: :interactive, :name: name, :actual: actual}));
       END
     ELSE_IF (fact.capability == :multiowned) THEN
       IF !((fact.storage == :multiowned)) THEN
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, node, name, :WITH_NEEDS_MULTIOWNED, [CapabilityFixCandidate{ sigil: "@multiowned", description_code: :WITH_ADD_MULTIOWNED, description_params: CAST({:suffix: DiagnosticKwValue{ StringValue: COPY " via WITH" }} AS {String@symbol}DiagnosticKwValue) }], {:confidence: :auto, :name: name}));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_NEEDS_MULTIOWNED, [CapabilityFixCandidate{ sigil: "@multiowned", description_code: :WITH_ADD_MULTIOWNED, description_params: CAST({:suffix: DiagnosticKwValue{ StringValue: COPY " via WITH" }} AS {String@symbol}DiagnosticKwValue) }], {:confidence: :auto, :name: name}));
       END
     ELSE_IF (fact.capability == :shared) THEN
       IF !((fact.storage == :shared)) THEN
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, node, name, :WITH_NEEDS_SHARED, [CapabilityFixCandidate{ sigil: "@shared", description_code: :WITH_ADD_SHARED, description_params: CAST({:suffix: DiagnosticKwValue{ StringValue: COPY "to clone across fibers" }} AS {String@symbol}DiagnosticKwValue) }], {:confidence: :auto, :name: name}));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_NEEDS_SHARED, [CapabilityFixCandidate{ sigil: "@shared", description_code: :WITH_ADD_SHARED, description_params: CAST({:suffix: DiagnosticKwValue{ StringValue: COPY "to clone across fibers" }} AS {String@symbol}DiagnosticKwValue) }], {:confidence: :auto, :name: name}));
       END
     ELSE_IF (fact.capability == :ATOMIC) THEN
       MUTABLE syn: ?String@symbol = COPY fact.sync;
@@ -9420,7 +9420,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               "plain"
             END);
           END
-          TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, node, name, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, [CapabilityFixCandidate{ sigil: "@shared:atomic", description_code: :WITH_ADD_SHARED_ATOMIC, description_params: {} }], {:confidence: :auto, :name: name, :actual: actual}));
+          TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, [CapabilityFixCandidate{ sigil: "@shared:atomic", description_code: :WITH_ADD_SHARED_ATOMIC, description_params: {} }], {:confidence: :auto, :name: name, :actual: actual}));
         END
       END
     ELSE
@@ -11432,7 +11432,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (type__untyped?(type) OR type__auto?(type));
 }
 END
-PRIVATE FN typeAnalysisSession__concrete_symbol_type_for(MUTABLE self: TypeAnalysisSession, node: Locatable) RETURNS !?Type
+PRIVATE FN typeAnalysisSession__concrete_symbol_type_for(MUTABLE self: TypeAnalysisSession, MUTABLE node: Locatable) RETURNS !?Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

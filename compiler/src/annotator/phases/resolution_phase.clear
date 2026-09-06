@@ -1975,6 +1975,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE schema =   IF ((node.close_method != NIL) AND (node.from_module != NIL)) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
+      MUTABLE close_plan = resourceClosePlan__c_function(UNWRAP (node.close_method));
       IF (node.extern_source?.abi == :c) THEN
       close_plan = resourceClosePlan__c_function(UNWRAP (node.close_method));
     ELSE
