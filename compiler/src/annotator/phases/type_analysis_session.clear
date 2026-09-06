@@ -3927,7 +3927,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         name = "the value";
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, arg, TypeAnalysisCodeOrMessage{ SymbolValue: :RETAINED_NEEDS_OWN_COPY }, [], CAST({:name: name, :carrier: carrier, :param: facts.param.name} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY arg }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETAINED_NEEDS_OWN_COPY }, [], CAST({:name: name, :carrier: carrier, :param: facts.param.name} AS {String@symbol}Any)));
     ELSE
       RETURN;
     END
@@ -4053,7 +4053,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__verify_owned_takes_argument_mut(&rtoc_self_view, facts));
     MUTABLE container_alloc = (typeAnalysisSession__receiver_container_alloc(&rtoc_self_view, facts.site.node) OR_ELSE :heap);
     MUTABLE inner_type = TRY (aST__full_type_mut(facts.inner_node));
-    MUTABLE give_needs_representation_copy = (facts.is_give AND ((type__list_collection?(inner_type) OR ((TRY (type__string?(inner_type)) AND inner_type.rodata?())))));
+    MUTABLE give_needs_representation_copy = (facts.is_give AND ((type__list_collection?(inner_type) OR ((TRY (type__string?(inner_type)) AND type__rodata?(inner_type))))));
     MUTABLE owned_branch_value: ?Locatable = NIL;
     IF (facts.is_give AND !(give_needs_representation_copy)) THEN
       owned_branch_value = NIL;
@@ -6589,7 +6589,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(shard_op)));
     MUTABLE target_sync = IF TRUE THEN
       (IF locatable__symbol(UNWRAP (locatable__target_map(shard_op))) != NIL THEN
-      (locatable__symbol(shard_op.target_map)).sync()
+      (locatable__symbol(locatable__target_map(shard_op))).sync()
     ELSE
       NIL
     END)
@@ -12342,10 +12342,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE value_type = TRY (typeAnalysisSession__protocol_map_associated_type(&rtoc_self_view, receiver, :Value));
     TRY (typeAnalysisSession__verify_generic_map_receiver_mutability_mut(&rtoc_self_view, node, receiver, operation));
     IF expected_arity.positive?() THEN
-      TRY (typeAnalysisSession__verify_protocol_method_argument_mut(&rtoc_self_view, node, 0, CAST(key_type AS Type)));
+      TRY (typeAnalysisSession__verify_protocol_method_argument_mut(&rtoc_self_view, &node, 0, CAST(key_type AS Type)));
     END
     IF (operation == :put) THEN
-      TRY (typeAnalysisSession__verify_protocol_method_argument_mut(&rtoc_self_view, node, 1, CAST(value_type AS Type)));
+      TRY (typeAnalysisSession__verify_protocol_method_argument_mut(&rtoc_self_view, &node, 1, CAST(value_type AS Type)));
     END
     IF (operation == :put) THEN
       TRY (typeAnalysisSession__consume_generic_map_value_mut(&rtoc_self_view, UNWRAP (node.args[1]), CAST(value_type AS Type)));
@@ -12470,7 +12470,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (functionSignature__new(requirement.params |> SELECT Param{ name: COPY _.name, type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(_.type), substitutions)) AS Type), required: TRUE, mutable: _.mutable, takes: _.takes, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }, TypeTypeInput{ Type: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(requirement.return_type), substitutions)) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_296: []String@symbol = List[]; rtoc_empty_list_296 } ), {}, (requirement.effects_decl == :reentrant), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_297: []String@symbol = List[]; rtoc_empty_list_297 } ), NIL, ( { MUTABLE rtoc_empty_list_298: []String@symbol = List[]; rtoc_empty_list_298 } )));
 }
 END
-PRIVATE FN typeAnalysisSession__verify_protocol_method_argument_mut(MUTABLE self: TypeAnalysisSession, node: MethodCall, index_value: Int64, expected: Type) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_protocol_method_argument_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, index_value: Int64, expected: Type) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -19199,7 +19199,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.carrier_op = :payload_copy;
     END
     MUTABLE result_type_branch_value: ?Type = NIL;
-    IF inner_type IS_A Type THEN
+    IF TRUE THEN
       IF (node.own AND TRY (type__any_rc?(inner_type))) THEN
         result_type_branch_value = TRY (type__bare_data_type(inner_type));
       ELSE
