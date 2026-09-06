@@ -2664,7 +2664,7 @@ PRIVATE FN capabilityAuditSession__enforce_fallible_returns_mut(MUTABLE self: Ca
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
-    IF !(fallible_returns_enforce) THEN
+    IF !(TRUE) THEN
       RETURN;
     END
     FOR rtoc_each_14 IN fn_nodes.keys() DO

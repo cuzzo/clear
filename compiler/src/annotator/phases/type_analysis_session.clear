@@ -5789,7 +5789,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lhs_t_value = lhs_t;
     IF TRUE THEN
       IF type__error_union?(lhs_t_value) THEN
-      MUTABLE fallback_type = UNWRAP (locatable__default_expr(node.right)).full_type_mut({:context: "RECOVER fallback"});
+      MUTABLE fallback_type = aST__full_type_mut(UNWRAP (locatable__default_expr(node.right)));
       MUTABLE plan = TRY (tenseOperationPlanner__or_else(lhs_t, fallback_type, TenseOperationKind.OrElseValue, TenseRecovery.Fallback));
       node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY plan };
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, plan.result_type));
@@ -7117,7 +7117,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN;
       END
       MUTABLE total = schemaValue__fields(UNWRAP (schema)).keys().length();
-      IF (total < soa_min_fields) THEN
+      IF (total < 4) THEN
         RETURN;
       END
       MUTABLE ratio = (accessed_value.length().to_f() / total);
@@ -8305,7 +8305,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE kind = COPY expression.kind;
     MUTABLE cap = COPY expression.capabilities;
     IF (kind IS_A NamedTypeExpression) THEN
-      IF (typeExpressionKind__arguments(kind).empty?() AND subst.contains?(kind.name())) THEN
+      IF (UNWRAP (typeExpressionKind__arguments(kind)).empty?() AND subst.contains?(kind.name())) THEN
         MUTABLE replacement = TRY (type__new(castOptionalGenericBindingToTypeConstructionInput(subst[kind.name()])));
         IF (type__generic_payload_type_arg?(replacement) AND !(cap.polymorphic_shared)) THEN
           TRY (type__strip_runtime_capabilities_mut(&replacement));
@@ -11803,7 +11803,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN summary;
 }
 END
-PRIVATE FN typeAnalysisSession__record_local_binding_fact_mut(MUTABLE self: TypeAnalysisSession, frame: BodyFactFrame, node: BindingNode, name: String) RETURNS Void
+PRIVATE FN typeAnalysisSession__record_local_binding_fact_mut(MUTABLE self: TypeAnalysisSession, frame: BodyFactFrame, MUTABLE node: BindingNode, name: String) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -12274,7 +12274,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(node.object IS_A TenseNavigation) THEN
       RETURN;
     END
-    IF (locatable__markers(node.object).contains?("~") AND (node.mutates_receiver != NIL)) THEN
+    IF (UNWRAP (locatable__markers(node.object)).contains?("~") AND (node.mutates_receiver != NIL)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :TENSE_NAVIGATION_MUTATION }, [], CAST({:markers: node.object.markers()} AS {String@symbol}Any)));
     END
     MUTABLE mapped_type = (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &node, "tense navigation method result") OR_ELSE TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node })));
@@ -13642,7 +13642,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE subst: {String@symbol}GenericBinding = {};
     IF node.type_args EXISTS AS type_args_value THEN
       IF type_args_value.any?() THEN
-      IF type_params.empty?() THEN
+      IF UNWRAP (type_params).empty?() THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_NOT_GENERIC }, [], CAST({:type: node.name} AS {String@symbol}Any)));
       END
       IF (node.type_args.length() != (type_params).length()) THEN

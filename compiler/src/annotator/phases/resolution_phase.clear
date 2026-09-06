@@ -924,7 +924,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (binders.length() == 0) THEN
       MUTABLE names = ((TRY (type__generic_args(declaration.protocol_type))) |> SELECT:? {
     MUTABLE kind = COPY _.shape.expression.kind;
-    (    IF ((kind IS_A NamedTypeExpression AND UNWRAP (typeExpressionKind__arguments(kind)).empty?()) AND !(resolutionSession__builtin_type_parameter_names().contains?(kind.name()))) THEN
+    (    IF ((kind IS_A NamedTypeExpression AND UNWRAP (typeExpressionKind__arguments(kind)).empty?()) AND !(resolutionSession__builtin_type_parameter_names().contains?(kind.name))) THEN
           CAST(kind.name() AS String)
         ELSE
           NIL
