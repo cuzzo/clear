@@ -818,7 +818,7 @@ PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionF
   MUTABLE fn = COPY facts.fn;
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < fn.params.length() DO
-    IF !(TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new( (IF fn.params[rtoc_idx]?.type EXISTS AS rtoc_wrap_820 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_820 } ELSE NIL END))), schema_lookup))) THEN
+    IF !(TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new( UNWRAP ((IF fn.params[rtoc_idx]?.type EXISTS AS rtoc_wrap_820 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_820 } ELSE NIL END)))), schema_lookup))) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
