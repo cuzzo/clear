@@ -13991,7 +13991,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__check_match_exhaustiveness_mut(MUTABLE self: TypeAnalysisSession, node: MatchStatement, plan: MatchSubjectPlan) RETURNS !Void
+PRIVATE FN typeAnalysisSession__check_match_exhaustiveness_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MatchStatement, plan: MatchSubjectPlan) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -14007,10 +14007,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node.cases |> ANY (matchCase__kind(_) == :when) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_FORBIDS_WHEN }));
     END
-    TRY (typeAnalysisSession__emit_missing_match_variants_mut(&rtoc_self_view, node, plan));
+    TRY (typeAnalysisSession__emit_missing_match_variants_mut(&rtoc_self_view, &node, plan));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_missing_match_variants_mut(MUTABLE self: TypeAnalysisSession, node: MatchStatement, plan: MatchSubjectPlan) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_missing_match_variants_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MatchStatement, plan: MatchSubjectPlan) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -14088,7 +14088,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     node.case_drops = all_drops |> SELECT (_ OR_ELSE List[]);
     TRY (typeAnalysisSession__reject_duplicate_match_patterns_mut(&rtoc_self_view, node, plan));
-    TRY (typeAnalysisSession__check_match_exhaustiveness_mut(&rtoc_self_view, node, plan));
+    TRY (typeAnalysisSession__check_match_exhaustiveness_mut(&rtoc_self_view, &node, plan));
     node.case_result_types = node.cases |> SELECT TRY (typeAnalysisSession__expr_result_type(&rtoc_self_view, TRY (matchCase__body(_))));
     node.default_result_type = TRY (typeAnalysisSession__expr_result_type(&rtoc_self_view, (node.default_case OR_ELSE List[])));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(rtoc_self_view, Locatable{ MatchStatement: COPY node }, :Void));
