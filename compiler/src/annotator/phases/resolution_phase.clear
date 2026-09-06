@@ -1646,7 +1646,7 @@ PRIVATE FN resolutionSession__reject_duplicate_seen_signature_mut(MUTABLE self: 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE key: String = "";
     IF (IF node IS_A ExternFnDecl AS extern_fn_decl THEN (extern_fn_decl.owner_type != NIL) ELSE FALSE END) THEN
-      key = "${node.owner_type}.${aST__node_name(UNWRAP (castNodeToLocatable(node)))}";
+      key = "${node__owner_type(node)}.${aST__node_name(UNWRAP (castNodeToLocatable(node)))}";
     ELSE
       key = aST__node_name(UNWRAP (castNodeToLocatable(node)));
     END

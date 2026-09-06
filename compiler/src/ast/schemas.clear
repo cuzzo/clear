@@ -747,3 +747,27 @@ PUB FN schemaValue__methods(value: SchemaValue) RETURNS ?{String@symbol}Function
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:variants)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN schemaValue__variants(value: SchemaValue) RETURNS ?[Set]String ->
+  PARTIAL MATCH value START
+    SchemaValue.EnumSchemaMultiowned AS item -> RETURN COPY item.variants;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:kind)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN schemaValue__kind(value: SchemaValue) RETURNS ?String@symbol EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    SchemaValue.EnumSchemaMultiowned AS item -> RETURN enumSchema__kind(item);,
+    SchemaValue.StructSchemaMultiowned AS item -> RETURN structSchema__kind(item);,
+    SchemaValue.UnionSchemaMultiowned AS item -> RETURN unionSchema__kind(item);,
+    SchemaValue.ResourceSchemaMultiowned AS item -> RETURN resourceSchema__kind(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

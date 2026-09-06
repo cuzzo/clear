@@ -17450,3 +17450,26 @@ PUB FN locatable__body(value: Locatable) RETURNS ?[]Locatable ->
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:key_expr)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__key_expr(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.JoinOp AS item -> RETURN COPY item.key_expr;,
+    Locatable.ShardOp AS item -> RETURN COPY item.key_expr;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:owner_type)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN node__owner_type(value: Node) RETURNS ?Type ->
+  PARTIAL MATCH value START
+    Node.ConformanceDef AS item -> RETURN COPY item.owner_type;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
