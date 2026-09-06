@@ -17401,3 +17401,52 @@ PUB FN locatable__pool_method(value: Locatable) RETURNS ?String@symbol ->
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:right)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__right(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.BinaryOp AS item -> RETURN COPY item.right;,
+    Locatable.UnaryOp AS item -> RETURN COPY item.right;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:target)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__target(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.GetField AS item -> RETURN COPY item.target;,
+    Locatable.GetIndex AS item -> RETURN COPY item.target;,
+    Locatable.Slice AS item -> RETURN COPY item.target;,
+    Locatable.OptionalUnwrap AS item -> RETURN COPY item.target;,
+    Locatable.TenseNavigation AS item -> RETURN COPY item.target;,
+    Locatable.MutableBorrow AS item -> RETURN COPY item.target;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:body)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__body(value: Locatable) RETURNS ?[]Locatable ->
+  PARTIAL MATCH value START
+    Locatable.FunctionDef AS item -> RETURN COPY item.body;,
+    Locatable.DeferStmt AS item -> RETURN COPY item.body;,
+    Locatable.WithBlock AS item -> RETURN COPY item.body;,
+    Locatable.EachOp AS item -> RETURN COPY item.body;,
+    Locatable.TapOp AS item -> RETURN COPY item.body;,
+    Locatable.BlockExpr AS item -> RETURN COPY item.body;,
+    Locatable.BgBlock AS item -> RETURN COPY item.body;,
+    Locatable.BgStreamBlock AS item -> RETURN COPY item.body;,
+    Locatable.ForRange AS item -> RETURN COPY item.body;,
+    Locatable.ForEach AS item -> RETURN COPY item.body;,
+    Locatable.TestThat AS item -> RETURN COPY item.body;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
