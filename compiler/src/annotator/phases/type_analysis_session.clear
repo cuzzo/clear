@@ -6586,7 +6586,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     MUTABLE key_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__key_expr(shard_op)));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__target_map(shard_op)));
-    MUTABLE target_info = aST__full_type_mut(UNWRAP (locatable__target_map(shard_op)));
+    MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(shard_op)));
     MUTABLE target_sync = IF TRUE THEN
       (IF shard_op.target_map.symbol != NIL THEN
       (shard_op.target_map.symbol).sync()
@@ -13163,7 +13163,7 @@ PRIVATE FN typeAnalysisSession__runtime_is_a_target_names(self: TypeAnalysisSess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE segments = TRY (typeAnalysisSession__runtime_is_a_target_segments(rtoc_self_view, node));
+    MUTABLE segments = TRY (typeAnalysisSession__runtime_is_a_target_segments(rtoc_self_view, &node));
     MUTABLE full = segments.join(".");
     MUTABLE names: []String = [COPY full];
     IF segments.last() EXISTS AS last_segment THEN
@@ -13172,7 +13172,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST((names |> DISTINCT _) AS []String);
 }
 END
-PRIVATE FN typeAnalysisSession__runtime_is_a_target_segments(self: TypeAnalysisSession, node: Node) RETURNS ![]String
+PRIVATE FN typeAnalysisSession__runtime_is_a_target_segments(self: TypeAnalysisSession, MUTABLE node: Node) RETURNS ![]String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -13192,7 +13192,7 @@ PRIVATE FN typeAnalysisSession__runtime_is_a_target_label(MUTABLE self: TypeAnal
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN (TRY (typeAnalysisSession__runtime_is_a_target_segments(rtoc_self_view, node))).join(".");
+    RETURN (TRY (typeAnalysisSession__runtime_is_a_target_segments(rtoc_self_view, &node))).join(".");
 }
 END
 PRIVATE FN typeAnalysisSession__runtime_union_variant_key(MUTABLE self: TypeAnalysisSession, schema: UnionSchema, name: String) RETURNS ?TypeAnalysisSessionReturnValue
