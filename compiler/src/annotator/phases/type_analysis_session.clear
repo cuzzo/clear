@@ -11586,13 +11586,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_264: []BodyFactContext = List[]; rtoc_empty_list_264 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    MUTABLE rtoc_defer_pairs_0 = frames.zip(snapshots);
-    MUTABLE rtoc_defer_keys_0 = rtoc_defer_pairs_0.keys();
-    DEFER rtoc_defer_keys_0 |> EACH {
-    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_0[_] OR_ELSE panic("missing hash key"));
-    bodyFactFrame__restore_context(&_, snapshot_value);
-    };
-    FOR _ IN frames DO
+    DEFER {
+      MUTABLE rtoc_restore_idx_0 = 0;
+      WHILE rtoc_restore_idx_0 < frames.length() DO
+        MUTABLE rtoc_snap_0: ?BodyFactContext = snapshots[rtoc_restore_idx_0];
+        IF frames[rtoc_restore_idx_0] EXISTS AS MUTABLE rtoc_frame_0 THEN
+
+          IF rtoc_snap_0 != NIL THEN
+
+            bodyFactFrame__restore_context(&rtoc_frame_0, rtoc_snap_0);
+
+          END
+        END
+        rtoc_restore_idx_0 = rtoc_restore_idx_0 + 1;
+      END
+    }
+    FOR MUTABLE _ IN frames DO
     _.record_call_sites = FALSE;
     _.track_with_scope_stack = FALSE;
     _.with_scope_stack = ( { MUTABLE rtoc_empty_list_265: []WithBlock@multiowned = List[]; rtoc_empty_list_265 } );
@@ -11608,13 +11617,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_267: []BodyFactContext = List[]; rtoc_empty_list_267 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    MUTABLE rtoc_defer_pairs_1 = frames.zip(snapshots);
-    MUTABLE rtoc_defer_keys_1 = rtoc_defer_pairs_1.keys();
-    DEFER rtoc_defer_keys_1 |> EACH {
-    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_1[_] OR_ELSE panic("missing hash key"));
-    bodyFactFrame__restore_context(&_, snapshot_value);
-    };
-    FOR _ IN frames DO
+    DEFER {
+      MUTABLE rtoc_restore_idx_1 = 0;
+      WHILE rtoc_restore_idx_1 < frames.length() DO
+        MUTABLE rtoc_snap_1: ?BodyFactContext = snapshots[rtoc_restore_idx_1];
+        IF frames[rtoc_restore_idx_1] EXISTS AS MUTABLE rtoc_frame_1 THEN
+
+          IF rtoc_snap_1 != NIL THEN
+
+            bodyFactFrame__restore_context(&rtoc_frame_1, rtoc_snap_1);
+
+          END
+        END
+        rtoc_restore_idx_1 = rtoc_restore_idx_1 + 1;
+      END
+    }
+    FOR MUTABLE _ IN frames DO
     _.track_with_scope_stack = FALSE;
     _.with_scope_stack = ( { MUTABLE rtoc_empty_list_268: []WithBlock@multiowned = List[]; rtoc_empty_list_268 } );
     END
@@ -11629,12 +11647,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_270: []BodyFactContext = List[]; rtoc_empty_list_270 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    MUTABLE rtoc_defer_pairs_2 = frames.zip(snapshots);
-    MUTABLE rtoc_defer_keys_2 = rtoc_defer_pairs_2.keys();
-    DEFER rtoc_defer_keys_2 |> EACH {
-    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_2[_] OR_ELSE panic("missing hash key"));
-    bodyFactFrame__restore_context(&_, snapshot_value);
-    };
+    DEFER {
+      MUTABLE rtoc_restore_idx_2 = 0;
+      WHILE rtoc_restore_idx_2 < frames.length() DO
+        MUTABLE rtoc_snap_2: ?BodyFactContext = snapshots[rtoc_restore_idx_2];
+        IF frames[rtoc_restore_idx_2] EXISTS AS MUTABLE rtoc_frame_2 THEN
+
+          IF rtoc_snap_2 != NIL THEN
+
+            bodyFactFrame__restore_context(&rtoc_frame_2, rtoc_snap_2);
+
+          END
+        END
+        rtoc_restore_idx_2 = rtoc_restore_idx_2 + 1;
+      END
+    }
     FOR MUTABLE rtoc_mutable_block_param_271 IN frames DO
     &rtoc_mutable_block_param_271.lambda_body_stack.append(COPY node);
     END
@@ -11652,13 +11679,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_273: []BodyFactContext = List[]; rtoc_empty_list_273 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    MUTABLE rtoc_defer_pairs_3 = frames.zip(snapshots);
-    MUTABLE rtoc_defer_keys_3 = rtoc_defer_pairs_3.keys();
-    DEFER rtoc_defer_keys_3 |> EACH {
-    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_3[_] OR_ELSE panic("missing hash key"));
-    bodyFactFrame__restore_context(&_, snapshot_value);
-    };
-    FOR _ IN frames DO
+    DEFER {
+      MUTABLE rtoc_restore_idx_3 = 0;
+      WHILE rtoc_restore_idx_3 < frames.length() DO
+        MUTABLE rtoc_snap_3: ?BodyFactContext = snapshots[rtoc_restore_idx_3];
+        IF frames[rtoc_restore_idx_3] EXISTS AS MUTABLE rtoc_frame_3 THEN
+
+          IF rtoc_snap_3 != NIL THEN
+
+            bodyFactFrame__restore_context(&rtoc_frame_3, rtoc_snap_3);
+
+          END
+        END
+        rtoc_restore_idx_3 = rtoc_restore_idx_3 + 1;
+      END
+    }
+    FOR MUTABLE _ IN frames DO
     _.failure_absorbed = TRUE;
     END
     RETURN block();
@@ -11672,13 +11708,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_275: []BodyFactContext = List[]; rtoc_empty_list_275 } );
     frames = TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view));
     snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
-    MUTABLE rtoc_defer_pairs_4 = frames.zip(snapshots);
-    MUTABLE rtoc_defer_keys_4 = rtoc_defer_pairs_4.keys();
-    DEFER rtoc_defer_keys_4 |> EACH {
-    MUTABLE snapshot_value: Any = (rtoc_defer_pairs_4[_] OR_ELSE panic("missing hash key"));
-    bodyFactFrame__restore_context(&_, snapshot_value);
-    };
-    FOR _ IN frames DO
+    DEFER {
+      MUTABLE rtoc_restore_idx_4 = 0;
+      WHILE rtoc_restore_idx_4 < frames.length() DO
+        MUTABLE rtoc_snap_4: ?BodyFactContext = snapshots[rtoc_restore_idx_4];
+        IF frames[rtoc_restore_idx_4] EXISTS AS MUTABLE rtoc_frame_4 THEN
+
+          IF rtoc_snap_4 != NIL THEN
+
+            bodyFactFrame__restore_context(&rtoc_frame_4, rtoc_snap_4);
+
+          END
+        END
+        rtoc_restore_idx_4 = rtoc_restore_idx_4 + 1;
+      END
+    }
+    FOR MUTABLE _ IN frames DO
     IF _.track_with_scope_stack THEN
       _.with_scope_stack = [scope];
     END
