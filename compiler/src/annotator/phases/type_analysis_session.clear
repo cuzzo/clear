@@ -6588,7 +6588,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__target_map(shard_op)));
     MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(shard_op)));
     MUTABLE target_sync = IF TRUE THEN
-      (IF locatable__symbol(shard_op.target_map) != NIL THEN
+      (IF locatable__symbol(locatable__target_map(shard_op)) != NIL THEN
       (shard_op.target_map.symbol).sync()
     ELSE
       NIL
@@ -12536,7 +12536,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__reject_mutating_borrowed_receiver_mut(MUTABLE self: TypeAnalysisSession, node: MethodCall) RETURNS !Void
+PRIVATE FN typeAnalysisSession__reject_mutating_borrowed_receiver_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -12773,7 +12773,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__record_held_lock_call_site_mut(MUTABLE self: TypeAnalysisSession, node: FuncCall) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_held_lock_call_site_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: FuncCall) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
