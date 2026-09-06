@@ -11731,7 +11731,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN block();
 }
 END
-PRIVATE FN typeAnalysisSession__current_body_fact_scope_nodes(MUTABLE self: TypeAnalysisSession, node: WithBlock) RETURNS ![]Locatable
+PRIVATE FN typeAnalysisSession__current_body_fact_scope_nodes(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock) RETURNS ![]Locatable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16959,7 +16959,7 @@ PRIVATE FN typeAnalysisSession__retryable_with_fallible_sources(MUTABLE self: Ty
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE sources: []String = ( { MUTABLE rtoc_empty_list_418: []String = List[]; rtoc_empty_list_418 } );
-    FOR _ IN TRY (typeAnalysisSession__current_body_fact_scope_nodes(&rtoc_self_view, node)) DO
+    FOR _ IN TRY (typeAnalysisSession__current_body_fact_scope_nodes(&rtoc_self_view, &node)) DO
     IF (_ IS_A Raise) THEN
       &sources.append("RAISE");
     ELSE_IF (_ IS_A OrElseRaise) THEN
