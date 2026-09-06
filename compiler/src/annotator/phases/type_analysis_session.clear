@@ -2254,7 +2254,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, :lifetime, [fix], NIL, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, :error, FALSE, kw));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_cap_field_needs_with_mut(MUTABLE self: TypeAnalysisSession, node: GetField, code: String@symbol, name: NameCandidate, field: String, cap: String, perm: String) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_cap_field_needs_with_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: GetField, code: String@symbol, name: NameCandidate, field: String, cap: String, perm: String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -10252,7 +10252,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN store;
 }
 END
-PRIVATE FN typeAnalysisSession__record_capability_binding(MUTABLE self: TypeAnalysisSession, var_name: String, node: Locatable, final_type: FinalType, storage: String@symbol) RETURNS !?BindingAuditRecord
+PRIVATE FN typeAnalysisSession__record_capability_binding(MUTABLE self: TypeAnalysisSession, var_name: String, MUTABLE node: Locatable, final_type: FinalType, storage: String@symbol) RETURNS !?BindingAuditRecord
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16267,7 +16267,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END), :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@boxed:atomic"]]) |> FIND _[0];
     IF ((cap_error AND !(in_auto_lock)) AND !(in_with_block)) THEN
-      TRY (typeAnalysisSession__emit_cap_field_needs_with_mut(&rtoc_self_view, node, cap_error[1], node.target.name(), node.field, cap_error[3], cap_error[2]));
+      TRY (typeAnalysisSession__emit_cap_field_needs_with_mut(&rtoc_self_view, &node, cap_error[1], node.target.name(), node.field, cap_error[3], cap_error[2]));
     END
 }
 END
