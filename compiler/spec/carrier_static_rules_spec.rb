@@ -23,6 +23,22 @@ RSpec.describe "carrier correctness static rules" do
     expect { annotate(src) }.to raise_error(SourceError) { |e| expect(e.message).to include("KEEP_ON_KNOWN_CARRIER") }
   end
 
+  # A non-TAKES param is neither UNIQUE nor carrier-polymorphic, so it used to
+  # fall between rules 4 and 5 and reach emit as a bare payload in an Rc slot --
+  # a Zig type error rather than a diagnostic.
+  it "rule 5: KEEP on a plain non-TAKES param is an error (use COPY)" do
+    src = PRE + "FN f(u: User) RETURNS Void -> sink(KEEP u); RETURN; END"
+    expect { annotate(src) }.to raise_error(SourceError) { |e| expect(e.message).to include("KEEP_ON_KNOWN_CARRIER") }
+  end
+
+  # Capabilities are forbidden on parameters, so a TAKES slot the caller fills
+  # is the only param whose carrier is unknown. Tightening rule 5 must leave it
+  # alone.
+  it "still allows KEEP on a carrier-polymorphic TAKES param" do
+    src = PRE + "FN f(TAKES u: User) RETURNS Void -> sink(KEEP u); RETURN; END"
+    expect { annotate(src) }.not_to raise_error
+  end
+
   it "rule 6: COPY on a carrier-polymorphic param is an error (use KEEP/UNIQUE)" do
     src = PRE + "FN f(TAKES u: User) RETURNS Void -> sink(COPY u); sink(u); RETURN; END"
     expect { annotate(src) }.to raise_error(SourceError) { |e| expect(e.message).to include("COPY_ON_POLYMORPHIC_PARAM") }

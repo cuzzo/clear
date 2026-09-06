@@ -344,10 +344,15 @@ module Annotator
         # local falls through to rule 4.
         retained = ty.is_a?(Type) &&
           (ty.any_rc? || ty.split_open_stream? || ty.shared_promise? || ty.split?)
+        # A parameter only has an unknown carrier when it is carrier-polymorphic
+        # (a TAKES slot the caller fills). Without that it is as statically
+        # plain as a local, so rules 4 and 5 are the same question -- and a
+        # non-TAKES parameter used to fall between them, reaching emit as a
+        # bare payload in an Rc slot.
         carrier = if entry.is_param && entry.carrier_contract == :unique
           "UNIQUE parameter"
-        elsif !entry.is_param && !entry.carrier_polymorphic && !retained
-          "plain local"
+        elsif !entry.carrier_polymorphic && !retained
+          entry.is_param ? "plain parameter" : "plain local"
         end
         return nil unless carrier
 
