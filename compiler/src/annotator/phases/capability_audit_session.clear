@@ -2319,7 +2319,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE current: ?Any = COPY resolved[rtoc_each_7];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < callees.length() DO
-        MUTABLE callee_effs: ?Any = COPY resolved[callees[rtoc_idx]];
+        MUTABLE callee_effs: ?Any = COPY resolved[UNWRAP (callees[rtoc_idx])];
         IF !(callee_effs) THEN
               rtoc_idx = rtoc_idx + 1;
       CONTINUE;
@@ -3054,7 +3054,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         return_t = TRY (type__new(castTypeToTypeConstructionInput__capability_audit_session(return_t)));
     END
     MUTABLE declared_runtime_return = !(!((((return_t != NIL) AND (((type__heap?(return_t) OR type__indirect?(return_t)) OR TRY (type__needs_escape_promotion?(return_t))))))));
-    MUTABLE tier =   IF (((effs.contains?(:HEAP) OR effs.contains?(:BLOCKING)) OR effs.contains?(extern_value)) OR functionDef__runtime_stack_required?(fn_node, capabilityAuditSession__recursion_yield_needed?(rtoc_self_view, fn_node), declared_runtime_return)) THEN
+    MUTABLE tier =   IF (((effs.contains?(:HEAP) OR effs.contains?(:BLOCKING)) OR effs.contains?(:EXTERN)) OR functionDef__runtime_stack_required?(fn_node, capabilityAuditSession__recursion_yield_needed?(rtoc_self_view, fn_node), declared_runtime_return)) THEN
         :standard
       ELSE
         :micro

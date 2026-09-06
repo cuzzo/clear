@@ -198,7 +198,7 @@ PUB FN pipelineLoweringBridge__with_runtime_binding_name<U>(MUTABLE self: Pipeli
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN mIRLowering__with_runtime_binding_name(rtoc_self_view.lowering, rt_name, blk);
+    RETURN mIRLowering__with_runtime_binding_name(&rtoc_self_view.lowering, rt_name, blk);
 }
 END
 PUB FN pipelineLoweringBridge__with_fiber_capture_map<U>(MUTABLE self: PipelineLoweringBridge, new_entries: {String}String, capture_symbols: {String}SymbolEntry, rt_override: String, blk: FN() -> U) RETURNS U
