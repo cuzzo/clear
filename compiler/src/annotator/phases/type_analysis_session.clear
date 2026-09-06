@@ -2458,7 +2458,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, :WITH_CANNOT_INFER_CAP, :error, TRUE, CAST({:name: name} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_with_materialized_needs_tense_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, name: String, got: TypeTypeInput) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_with_materialized_needs_tense_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, name: String, got: TypeTypeInput) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9347,7 +9347,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE t: Type = t_branch_value?;
       IF !(type__future?(t)) THEN
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_materialized_needs_tense_mut(&rtoc_self_view, node, name, TypeTypeInput{ StringValue: CAST(type__resolved(t) AS String) }));
+        TRY (typeAnalysisSession__emit_with_materialized_needs_tense_mut(&rtoc_self_view, &node, name, TypeTypeInput{ StringValue: CAST(type__resolved(t) AS String) }));
       END
     ELSE_IF (fact.capability == :UNSAFE_VIEW) THEN
       MUTABLE t_branch_value: ?Type = NIL;
@@ -10982,7 +10982,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__check_lock_rank_ordering_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, lock_capabilities: []CapabilityTransition) RETURNS !?[]CapabilityTransition
+PRIVATE FN typeAnalysisSession__check_lock_rank_ordering_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, lock_capabilities: []CapabilityTransition) RETURNS !?[]CapabilityTransition
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16733,7 +16733,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lock_capabilities = TRY (withCapabilityPlan__locks(capability_plan));
     TRY (typeAnalysisSession__validate_with_match_source_shape_mut(&rtoc_self_view, &node, capability_expansion));
     TRY (typeAnalysisSession__check_nested_lock_reacquire_mut(&rtoc_self_view, node, lock_capabilities));
-    TRY (typeAnalysisSession__check_lock_rank_ordering_mut(&rtoc_self_view, node, lock_capabilities));
+    TRY (typeAnalysisSession__check_lock_rank_ordering_mut(&rtoc_self_view, &node, lock_capabilities));
     MUTABLE fn_name_for_lock: String = "<top>";
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
       fn_name_for_lock = ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view))?).name;
