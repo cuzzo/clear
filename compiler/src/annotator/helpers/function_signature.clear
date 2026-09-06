@@ -324,7 +324,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN functionSignature__requires(self: FunctionSignature) RETURNS !{String}[Set]String@symbol
-  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

@@ -76,7 +76,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__type(self: SymbolEntry) RETURNS Type
-  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -84,7 +83,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN symbolEntry__storage(self: SymbolEntry) RETURNS String@symbol
-  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -196,7 +194,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__is_param(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -244,7 +241,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__carrier_polymorphic(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -334,7 +330,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN symbolEntry__borrowed_alias(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {

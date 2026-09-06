@@ -477,7 +477,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN lifecycleRegistry__fetch(self: LifecycleRegistry, type_info: Type) RETURNS !LifecyclePlan
-  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
