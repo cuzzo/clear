@@ -5786,7 +5786,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__default_expr(node.right)));
     MUTABLE lhs_type = TRY (aST__full_type_mut(node.left));
     MUTABLE lhs_t = (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &node.left, "RECOVER input") OR_ELSE TRY (type__new(TypeConstructionInput{ Type: COPY lhs_type })));
-    IF lhs_t EXISTS AS lhs_t_value THEN
+    MUTABLE lhs_t_value = lhs_t;
+    IF TRUE THEN
       IF lhs_t_value.error_union?() THEN
       MUTABLE fallback_type = node.right.default_expr.full_type_mut({:context: "RECOVER fallback"});
       MUTABLE plan = TRY (tenseOperationPlanner__or_else(lhs_t, fallback_type, TenseOperationKind.OrElseValue, TenseRecovery.Fallback));
