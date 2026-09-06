@@ -2189,7 +2189,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :reentrance, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:name: fn_node.name} AS {String@symbol}Any)));
 }
 END
-PRIVATE FN typeAnalysisSession__emit_capture_immutable_as_mutable_error_mut(MUTABLE self: TypeAnalysisSession, node: FunctionDef, cap_name: String, owner_scope: Scope) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_capture_immutable_as_mutable_error_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: FunctionDef, cap_name: String, owner_scope: Scope) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2470,11 +2470,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) != NIL THEN
-      decl = COPY (((IF scope != NIL THEN
+      decl = UNWRAP (COPY (((IF scope != NIL THEN
       scope__resolve_entry(scope, name)
     ELSE
       NIL
-    END))).reg;
+    END)))).reg;
     END
     MUTABLE fix: ?Fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
@@ -2638,11 +2638,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) != NIL THEN
-      decl = COPY (((IF scope != NIL THEN
+      decl = UNWRAP (COPY (((IF scope != NIL THEN
       scope__resolve_entry(scope, name)
     ELSE
       NIL
-    END))).reg;
+    END)))).reg;
     END
     IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
       RETURN NIL;
@@ -2678,11 +2678,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) != NIL THEN
-      decl = COPY (((IF scope != NIL THEN
+      decl = UNWRAP (COPY (((IF scope != NIL THEN
       scope__resolve_entry(scope, name)
     ELSE
       NIL
-    END))).reg;
+    END)))).reg;
     END
     IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
       RETURN NIL;
@@ -4738,7 +4738,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE entry = scope__entry_for_write_mut(&owner_scope, cap_name);
       IF (captures[rtoc_idx].mutable() AND !(entry.mutable)) THEN
       IF node IS_A FunctionDef AS node_narrowed THEN
-          TRY (typeAnalysisSession__emit_capture_immutable_as_mutable_error_mut(&rtoc_self_view, node_narrowed, cap_name, owner_scope));
+          TRY (typeAnalysisSession__emit_capture_immutable_as_mutable_error_mut(&rtoc_self_view, &node_narrowed, cap_name, owner_scope));
       END
       END
       scope__mark_read(&owner_scope, cap_name);
@@ -4929,11 +4929,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         NIL
       END) != NIL THEN
-        reg = COPY (((IF scope != NIL THEN
+        reg = UNWRAP (COPY (((IF scope != NIL THEN
         scope__resolve_entry(scope, identifier__name(identifier))
       ELSE
         NIL
-      END))).reg;
+      END)))).reg;
       END
       RETURN !(!(((TRUE AND (aST__node__container_borrow(reg) == TRUE)))));
     END
@@ -10225,7 +10225,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN blk();
 }
 END
-PRIVATE FN typeAnalysisSession__validate_capture_analysis_mut(MUTABLE self: TypeAnalysisSession, node: Node, analysis: CaptureAnalysis, MUTABLE is_parallel: Bool, MUTABLE is_pinned: Bool) RETURNS !?CaptureAnalysis
+PRIVATE FN typeAnalysisSession__validate_capture_analysis_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: Node, analysis: CaptureAnalysis, MUTABLE is_parallel: Bool, MUTABLE is_pinned: Bool) RETURNS !?CaptureAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

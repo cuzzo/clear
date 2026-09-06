@@ -1447,11 +1447,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) != NIL THEN
-      decl = COPY (((IF scope != NIL THEN
+      decl = UNWRAP (COPY (((IF scope != NIL THEN
       scope__resolve_entry(scope, name)
     ELSE
       NIL
-    END))).reg;
+    END)))).reg;
     END
     MUTABLE fix: ?Fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
@@ -1615,11 +1615,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) != NIL THEN
-      decl = COPY (((IF scope != NIL THEN
+      decl = UNWRAP (COPY (((IF scope != NIL THEN
       scope__resolve_entry(scope, name)
     ELSE
       NIL
-    END))).reg;
+    END)))).reg;
     END
     IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
       RETURN NIL;
@@ -1655,11 +1655,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) != NIL THEN
-      decl = COPY (((IF scope != NIL THEN
+      decl = UNWRAP (COPY (((IF scope != NIL THEN
       scope__resolve_entry(scope, name)
     ELSE
       NIL
-    END))).reg;
+    END)))).reg;
     END
     IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
       RETURN NIL;
