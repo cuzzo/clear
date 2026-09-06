@@ -11747,7 +11747,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__record_body_fact_with_block_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_body_fact_with_block_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16749,7 +16749,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE is_snapshot_txn_body = ((node.snapshot_mode == :transaction));
     MUTABLE with_body = proc(%() USE(expanded_capabilities, is_snapshot_txn_body, node, MUTABLE rtoc_self_view) -> {
-    TRY (typeAnalysisSession__record_body_fact_with_block_mut(&rtoc_self_view, node));
+    TRY (typeAnalysisSession__record_body_fact_with_block_mut(&rtoc_self_view, &node));
     typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(&rtoc_self_view), %() USE(expanded_capabilities, is_snapshot_txn_body, node, MUTABLE rtoc_self_view) -> {
       FOR _ IN expanded_capabilities DO
       TRY (typeAnalysisSession__declare_capability_scope_mut(&rtoc_self_view, _));
