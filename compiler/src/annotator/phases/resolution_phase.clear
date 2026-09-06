@@ -1340,7 +1340,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE seen = COPY seen_input;
     MUTABLE key = type__semantic_type_key(type);
     IF seen.contains?(key) THEN
-      RETURN Set[];
+      MUTABLE rtoc_empty_1342: [Set]String = Set[];
+      RETURN rtoc_empty_1342;
     END
     seen = (COPY seen).insert(key);
     MUTABLE nested: []Type = ( { MUTABLE rtoc_empty_list_31: []Type = List[]; rtoc_empty_list_31 } );

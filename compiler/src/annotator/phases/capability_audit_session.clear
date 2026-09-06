@@ -3054,7 +3054,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         return_t = TRY (type__new(castTypeToTypeConstructionInput__capability_audit_session(return_t)));
     END
     MUTABLE declared_runtime_return = !(!((((return_t != NIL) AND (((type__heap?(return_t) OR type__indirect?(return_t)) OR TRY (type__needs_escape_promotion?(return_t))))))));
-    MUTABLE tier =   IF (((effs.contains?(heap) OR effs.contains?(blocking)) OR effs.contains?(extern_value)) OR functionDef__runtime_stack_required?(fn_node, capabilityAuditSession__recursion_yield_needed?(rtoc_self_view, fn_node), declared_runtime_return)) THEN
+    MUTABLE tier =   IF (((effs.contains?(:HEAP) OR effs.contains?(blocking)) OR effs.contains?(extern_value)) OR functionDef__runtime_stack_required?(fn_node, capabilityAuditSession__recursion_yield_needed?(rtoc_self_view, fn_node), declared_runtime_return)) THEN
         :standard
       ELSE
         :micro
