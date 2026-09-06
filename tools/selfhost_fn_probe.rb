@@ -303,10 +303,18 @@ module SelfhostFnProbe
     Open3.popen3(env, *cmd, chdir: ROOT, pgroup: true) do |stdin, stdout, stderr, wait_thr|
       stdin.close
       pid = wait_thr.pid
+      # Capture the group NOW. Looking it up after the deadline can find a
+      # RECYCLED pid's group -- which is how a timeout came to kill this
+      # process's own workers and leave the parent asleep in waitpid.
+      pgid = begin
+        Process.getpgid(pid)
+      rescue StandardError
+        nil
+      end
       watchdog = Thread.new do
         unless wait_thr.join(seconds)
           begin
-            Process.kill('-KILL', Process.getpgid(pid))
+            Process.kill('-KILL', pgid) if pgid && pgid != Process.getpgid(0)
           rescue StandardError
             nil
           end
