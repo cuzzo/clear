@@ -3735,7 +3735,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE facts = TRY (typeAnalysisSession__call_argument_facts(&rtoc_self_view, site, param, site.args[rtoc_idx]?, rtoc_idx));
       TRY (typeAnalysisSession__verify_param_lifetime_mut(&rtoc_self_view, facts.arg_node, facts.param, signature));
       TRY (typeAnalysisSession__verify_mutable_argument_mut(&rtoc_self_view, facts));
-      TRY (typeAnalysisSession__verify_takes_argument_mut(&rtoc_self_view, facts));
+      TRY (typeAnalysisSession__verify_takes_argument_mut(&rtoc_self_view, &facts));
       TRY (typeAnalysisSession__verify_link_argument_mut(&rtoc_self_view, facts));
       TRY (typeAnalysisSession__verify_argument_type_mut(&rtoc_self_view, &facts, signature, &atomic_bare_value_args));
       TRY (typeAnalysisSession__verify_argument_aliases_mut(&rtoc_self_view, facts, &encountered_args));
@@ -4033,7 +4033,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__verify_takes_argument_mut(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_takes_argument_mut(MUTABLE self: TypeAnalysisSession, MUTABLE facts: CallArgumentFacts) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -6589,7 +6589,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(shard_op)));
     MUTABLE target_sync = IF TRUE THEN
       (IF locatable__symbol(UNWRAP (locatable__target_map(shard_op))) != NIL THEN
-      (locatable__symbol(locatable__target_map(shard_op))).sync()
+      (locatable__symbol(UNWRAP (locatable__target_map(shard_op)))).sync()
     ELSE
       NIL
     END)
@@ -12340,7 +12340,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE key_type = TRY (typeAnalysisSession__protocol_map_associated_type(&rtoc_self_view, receiver, :Key));
     MUTABLE value_type = TRY (typeAnalysisSession__protocol_map_associated_type(&rtoc_self_view, receiver, :Value));
-    TRY (typeAnalysisSession__verify_generic_map_receiver_mutability_mut(&rtoc_self_view, node, receiver, operation));
+    TRY (typeAnalysisSession__verify_generic_map_receiver_mutability_mut(&rtoc_self_view, &node, receiver, operation));
     IF expected_arity.positive?() THEN
       TRY (typeAnalysisSession__verify_protocol_method_argument_mut(&rtoc_self_view, &node, 0, CAST(key_type AS Type)));
     END
@@ -12381,7 +12381,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRUE;
 }
 END
-PRIVATE FN typeAnalysisSession__verify_generic_map_receiver_mutability_mut(MUTABLE self: TypeAnalysisSession, node: MethodCall, receiver: Type, operation: String@symbol) RETURNS !Void
+PRIVATE FN typeAnalysisSession__verify_generic_map_receiver_mutability_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, receiver: Type, operation: String@symbol) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -19200,7 +19200,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE result_type_branch_value: ?Type = NIL;
     IF TRUE THEN
-      IF (node.own AND TRY (type__any_rc?(inner_type))) THEN
+      IF ((node.own OR_ELSE FALSE) AND TRY (type__any_rc?(inner_type))) THEN
         result_type_branch_value = TRY (type__bare_data_type(inner_type));
       ELSE
         result_type_branch_value = TRY (type__new(inner_type));
