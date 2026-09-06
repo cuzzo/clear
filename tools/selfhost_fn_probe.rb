@@ -436,12 +436,14 @@ module SelfhostFnProbe
           rescue ThreadError
             break
           end
-          src = probe_source(target, group, cache, pkg_name)
+          # A raise ANYWHERE in here used to kill the worker thread silently:
+          # Ruby swallows it, the pool drains to nothing, and the run hangs
+          # with the parent asleep in waitpid. Building the source counts --
+          # it reads the target's file -- so the rescue has to cover that too.
           offset = @probe_offset
-          # A raise here used to kill the worker thread silently: Ruby swallows
-          # it, the pool drains to nothing, and the run writes partial results
-          # and then hangs. Record it as this function's failure instead.
           ok, msg, probe_line = begin
+            src = probe_source(target, group, cache, pkg_name)
+            offset = @probe_offset
             compile(src, stage, pkg_flag)
           rescue StandardError => e
             [false, "probe harness: #{e.class}: #{e.message}"[0, 200], nil]
