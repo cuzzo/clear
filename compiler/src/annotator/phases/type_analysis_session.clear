@@ -5789,7 +5789,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lhs_t_value = lhs_t;
     IF TRUE THEN
       IF type__error_union?(lhs_t_value) THEN
-      MUTABLE fallback_type = node.right.default_expr.full_type_mut({:context: "RECOVER fallback"});
+      MUTABLE fallback_type = locatable__default_expr(node.right).full_type_mut({:context: "RECOVER fallback"});
       MUTABLE plan = TRY (tenseOperationPlanner__or_else(lhs_t, fallback_type, TenseOperationKind.OrElseValue, TenseRecovery.Fallback));
       node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY plan };
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, plan.result_type));
@@ -9296,7 +9296,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (capabilityTransition__exclusive_validation_action(fact) == :valid) OR (capabilityTransition__exclusive_validation_action(fact) == :declared_contract) THEN
     
       ELSE_IF (capabilityTransition__exclusive_validation_action(fact) == :defer) THEN
-        TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, node, fact));
+        TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, &node, fact));
       ELSE
         MUTABLE storage: ?String@symbol = COPY fact.storage;
         MUTABLE name = COPY fact.target_label;
@@ -9305,7 +9305,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (fact.capability == :write_locked_read) THEN
       IF !(capabilityTransition__write_locked_sync?(fact)) THEN
         IF capabilityTransition__deferred_sync_param?(fact) THEN
-          TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, node, fact));
+          TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, &node, fact));
         ELSE
           MUTABLE name = COPY fact.target_label;
           TRY (typeAnalysisSession__emit_with_read_needs_write_lock_mut(&rtoc_self_view, node, name, &var_node));
@@ -9406,7 +9406,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE syn: ?String@symbol = COPY fact.sync;
       IF !((syn == :atomic)) THEN
         IF capabilityTransition__deferred_sync_param?(fact) THEN
-          TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, node, fact));
+          TRY (typeAnalysisSession__record_deferred_with_validation_mut(&rtoc_self_view, &node, fact));
         ELSE
           MUTABLE name = COPY fact.target_label;
           MUTABLE storage: ?String@symbol = COPY fact.storage;
@@ -12108,7 +12108,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "EFFECTS REENTRANT${suffix}";
 }
 END
-PRIVATE FN typeAnalysisSession__record_deferred_with_validation_mut(MUTABLE self: TypeAnalysisSession, node: WithBlock, fact: CapabilityTransition) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_deferred_with_validation_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: WithBlock, fact: CapabilityTransition) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -19215,7 +19215,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ti = TRY (aST__full_type_mut(Locatable{ CopyNode: COPY node }));
     MUTABLE source_sync = IF (locatable__symbol(node.value) != NIL) THEN
       (IF locatable__symbol(node.value) != NIL THEN
-      (node.value.symbol).sync()
+      (locatable__symbol(node.value)).sync()
     ELSE
       NIL
     END)
