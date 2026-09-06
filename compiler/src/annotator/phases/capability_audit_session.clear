@@ -2669,7 +2669,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     FOR rtoc_each_14 IN fn_nodes.keys() DO
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_14] OR_ELSE panic("missing hash key"));
-    IF !(functionSignature__error_fallible(fn_node)) THEN
+    IF !(fn_node.error_fallible) THEN
       CONTINUE;
     END
     IF (rtoc_each_14 == name) THEN
