@@ -89,7 +89,10 @@ module Annotator
         deferred_copy_retained_validations.each do |d|
           param = function_node_for(d.callee_name)&.params&.fetch(d.param_index, nil)
           next if param&.symbol&.kept_identity # v4 kept-edge exception (Phase 6b removes this)
-          error!(d.arg_node, :COPY_RETAINED_NEEDS_UNIQUE, name: d.name, carrier: d.carrier)
+          # `d.name` is often the generic 'the value'; the callee and argument
+          # position are what actually locate the site in generated code.
+          error!(d.arg_node, :COPY_RETAINED_NEEDS_UNIQUE, name: d.name, carrier: d.carrier,
+                 callee: d.callee_name, arg_index: d.param_index + 1)
         end
         deferred_copy_retained_validations.clear
       end

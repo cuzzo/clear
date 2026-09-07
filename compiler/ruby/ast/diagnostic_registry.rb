@@ -2919,7 +2919,7 @@ module DiagnosticRegistry
     },
     COPY_RETAINED_NEEDS_UNIQUE: {
       severity: :error, category: :ownership,
-      template: "COPY of '%{name}' is not allowed: it is a retained %{carrier} handle, and COPY is a memcpy -- copying the handle bits would duplicate a shared owner without touching the reference count",
+      template: "COPY of '%{name}' (argument %{arg_index} of '%{callee}') is not allowed: it is a retained %{carrier} handle, and COPY is a memcpy -- copying the handle bits would duplicate a shared owner without touching the reference count",
       summary:  "COPY (a memcpy) cannot copy a live @multiowned/@shared handle.",
       cause: "COPY performs a bitwise copy of the value. For a retained carrier the value IS a handle, so a memcpy would create a second owner that never incremented the reference count -- a double free. Retaining another handle or detaching an independent payload are different operations.",
       fix_hint: "Use KEEP %{name} to retain another handle (carrier-preserving), or OWN COPY %{name} to own an independent copy of the payload.",
