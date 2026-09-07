@@ -45,7 +45,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 FN enumSchema__kind(self: EnumSchema) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN :enum;
@@ -168,7 +167,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 FN resourceSchema__kind(self: ResourceSchema) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN :resource;
@@ -406,7 +404,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 FN unionSchema__kind(self: UnionSchema) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN :union;
@@ -520,7 +517,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 FN structSchema__kind(self: StructSchema) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
