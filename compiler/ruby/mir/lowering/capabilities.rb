@@ -448,7 +448,13 @@ module MIRLoweringCapabilities
       source_mir
     end
     stmts = T.let([MIR::Let.new(safe_alias, value, false, nil, nil)], T::Array[MIR::Emittable])
-    stmts << MIR::Suppress.new(safe_alias) unless context.var_sync == :local || context.cap.alias_mutable
+    # A MUTABLE alias is normally written, so suppressing it would be noise --
+    # but a POLYMORPHIC alias is a comptime carrier view bound as a const, and
+    # a body that never reads it leaves Zig with an unused local constant and
+    # no CLEAR-level diagnostic to explain it.
+    skip_suppress = !context.node.polymorphic &&
+      (context.var_sync == :local || context.cap.alias_mutable)
+    stmts << MIR::Suppress.new(safe_alias) unless skip_suppress
     stmts
   end
 
