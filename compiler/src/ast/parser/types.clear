@@ -47,7 +47,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :KEYWORD, "CALLCONV"))) THEN
       MUTABLE abi_token = clearParser__current(rtoc_self_view);
       TRY (clearParser__consume(&rtoc_self_view, abi_token.type));
-      abi = symbol((TRY (token__text_mut(&abi_token))).downcase());
+      abi = symbol((TRY (token__text_mut(abi_token))).downcase());
       IF !((abi == :c)) THEN
         TRY (clearParser__error_mut(&rtoc_self_view, abi_token, CodeOrMessage{ SymbolValue: :PARSER_EXPECTED }, [], {:expected: "C", :got: "${token__display_value(abi_token)}", :type: "${abi_token.type}", :line: abi_token.line.toString()}));
       END
@@ -296,17 +296,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(fixCollector__type_migrations_enabled?()) THEN
       RETURN;
     END
-    IF !((["@indirect", "indirect"]).contains?(TRY (token__text_mut(&token)))) THEN
+    IF !((["@indirect", "indirect"]).contains?(TRY (token__text_mut(token)))) THEN
       RETURN;
     END
     MUTABLE replacement: String = "";
-    IF (TRY (token__text_mut(&token))).startsWith?("@") THEN
+    IF (TRY (token__text_mut(token))).startsWith?("@") THEN
       replacement = "@boxed";
     ELSE
       replacement = "boxed";
     END
-    MUTABLE edit = edit__new(span__new(NIL, token.line, token.column, (TRY (token__text_mut(&token))).codepointCount()), replacement);
-    TRY (fixCollector__push(TRY (fixableFinding__new(:info, "Legacy @indirect capability is now spelled @boxed", token, :type_migration, [TRY (fix__new(TRY (clearParser__fix_description(rtoc_self_view, :RENAME_BOXED_CAPABILITY, {:old: "${TRY (token__text_mut(&token))}", :new: "${replacement}"})), [edit], :auto))]))));
+    MUTABLE edit = edit__new(span__new(NIL, token.line, token.column, (TRY (token__text_mut(token))).codepointCount()), replacement);
+    TRY (fixCollector__push(TRY (fixableFinding__new(:info, "Legacy @indirect capability is now spelled @boxed", token, :type_migration, [TRY (fix__new(TRY (clearParser__fix_description(rtoc_self_view, :RENAME_BOXED_CAPABILITY, {:old: "${TRY (token__text_mut(token))}", :new: "${replacement}"})), [edit], :auto))]))));
 }
 END
 PRIVATE FN clearParser__inline_type_annotation_start?(self: ClearParser) RETURNS Bool
@@ -375,7 +375,7 @@ PRIVATE FN clearParser__parse_inline_prefixed_expression(MUTABLE self: ClearPars
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE prefix_token = TRY (clearParser__consume(&rtoc_self_view, :CHAR));
-    MUTABLE prefix = TRY (token__text_mut(&prefix_token));
+    MUTABLE prefix = TRY (token__text_mut(prefix_token));
     MUTABLE inner = TRY (clearParser__parse_inline_type_expression(&rtoc_self_view));
     IF (prefix == "?") THEN
       IF inner.kind IS_A StreamTypeExpression THEN

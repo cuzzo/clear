@@ -545,7 +545,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE tok: Token = tok_branch_value?;
       MUTABLE fixes = List[];
-      IF (TRY (token__text_mut(&tok)) == "MUTABLE") THEN
+      IF (TRY (token__text_mut(tok)) == "MUTABLE") THEN
         &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_UNUSED)), [edit__new(span__new(NIL, tok.line, tok.column, "MUTABLE ".codepointCount()), "")], :auto)));
       END
       TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, diagnosticAnchor__of(castCapabilityAuditRegToLocatable(reg_value)), :lint, fixes, NIL, :MUTABLE_UNUSED, :warning, FALSE, CAST({:name: name} AS {String@symbol}Any)));

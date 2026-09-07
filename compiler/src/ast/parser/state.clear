@@ -125,7 +125,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       # TokenPayloadError for every token whose payload is not a String.
       IF (COPY token.value) EXISTS AS payload THEN
         IF payload IS_A String THEN
-          matches_value = (TRY (token__text_mut(&token)) == expected_value);
+          matches_value = (TRY (token__text_mut(token)) == expected_value);
         END
       END
     END
@@ -162,7 +162,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
      END
     END
     IF prev_tok EXISTS AS prev_suffix_tok THEN
-     IF ((((token.type == :CHAR) AND (TRY (token__text_mut(&token)) == "!")) AND ([:VAR_ID, :TYPE_ID]).contains?(prev_suffix_tok.type)) AND (prev_suffix_tok.end_offset == token.start_offset)) THEN
+     IF ((((token.type == :CHAR) AND (TRY (token__text_mut(token)) == "!")) AND ([:VAR_ID, :TYPE_ID]).contains?(prev_suffix_tok.type)) AND (prev_suffix_tok.end_offset == token.start_offset)) THEN
       TRY (clearParser__error_mut(&rtoc_self_view, token, CodeOrMessage{ SymbolValue: :LEGACY_MUTATION_NAME_SUFFIX }));
      END
     END
@@ -205,7 +205,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF val EXISTS AS val_value THEN
       MUTABLE expected_value = COPY val_value;
-      RETURN (TRY (token__text_mut(&token)) == expected_value);
+      RETURN (TRY (token__text_mut(token)) == expected_value);
     ELSE
       RETURN TRUE;
     END
@@ -254,7 +254,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       IF val EXISTS AS val_value THEN
         MUTABLE expected_value = COPY val_value;
-        RETURN (TRY (token__text_mut(&tok_value_mutable)) == expected_value);
+        RETURN (TRY (token__text_mut(tok_value_mutable)) == expected_value);
       ELSE
         RETURN TRUE;
       END
@@ -273,10 +273,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF ((nxt_value_mutable.type == :ARROW) OR (nxt_value_mutable.type == :EOF)) THEN
         RETURN FALSE;
       END
-      IF ((nxt_value_mutable.type == :KEYWORD) AND (["AS", "WHEN", "DEFAULT", "END"]).contains?(TRY (token__text_mut(&nxt_value_mutable)))) THEN
+      IF ((nxt_value_mutable.type == :KEYWORD) AND (["AS", "WHEN", "DEFAULT", "END"]).contains?(TRY (token__text_mut(nxt_value_mutable)))) THEN
         RETURN FALSE;
       END
-      IF ((nxt_value_mutable.type == :CHAR) AND (TRY (token__text_mut(&nxt_value_mutable)) == "{")) THEN
+      IF ((nxt_value_mutable.type == :CHAR) AND (TRY (token__text_mut(nxt_value_mutable)) == "{")) THEN
         RETURN FALSE;
       END
       RETURN TRUE;

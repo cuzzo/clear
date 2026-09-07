@@ -48,7 +48,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN result;
     END
     MUTABLE capability_token = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
-    TRY (clearParser__apply_capability_mut(&rtoc_self_view, &result, &capability_token, TRY (token__text_mut(&capability_token))));
+    TRY (clearParser__apply_capability_mut(&rtoc_self_view, &result, &capability_token, TRY (token__text_mut(capability_token))));
     MUTABLE no_restriction: []String = List[];
     TRY (clearParser__parse_capability_chain_mut(&rtoc_self_view, &result, no_restriction, NIL, FALSE));
     RETURN result;
@@ -69,13 +69,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF TRY (clearParser__match?(&rtoc_self_view, :VAR_ID)) THEN
       MUTABLE tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
       MUTABLE normalized: String = "";
-      IF (TRY (token__text_mut(&tok))).startsWith?("@") THEN
-        normalized = TRY (token__text_mut(&tok));
+      IF (TRY (token__text_mut(tok))).startsWith?("@") THEN
+        normalized = TRY (token__text_mut(tok));
       ELSE
-        normalized = "@${TRY (token__text_mut(&tok))}";
+        normalized = "@${TRY (token__text_mut(tok))}";
       END
       IF !(allowed.contains?(normalized)) THEN
-        TRY (clearParser__error_mut(&rtoc_self_view, tok, CodeOrMessage{ SymbolValue: :CAP_BAD_MODIFIER }, [], {:cap: "${TRY (token__text_mut(&cap_tok))}", :modifier: "${TRY (token__text_mut(&tok))}"}));
+        TRY (clearParser__error_mut(&rtoc_self_view, tok, CodeOrMessage{ SymbolValue: :CAP_BAD_MODIFIER }, [], {:cap: "${TRY (token__text_mut(cap_tok))}", :modifier: "${TRY (token__text_mut(tok))}"}));
       END
       TRY (clearParser__apply_capability_mut(&rtoc_self_view, &result, &tok, normalized, TRUE));
     END
@@ -96,18 +96,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
       MUTABLE normalized_value: String = "";
-      IF (TRY (token__text_mut(&tok))).startsWith?("@") THEN
-        normalized_value = TRY (token__text_mut(&tok));
+      IF (TRY (token__text_mut(tok))).startsWith?("@") THEN
+        normalized_value = TRY (token__text_mut(tok));
       ELSE
-        normalized_value = "@${TRY (token__text_mut(&tok))}";
+        normalized_value = "@${TRY (token__text_mut(tok))}";
       END
       IF (!((allowed_values.length() == 0)) AND !(allowed_values.contains?(normalized_value))) THEN
         MUTABLE cap_label: String = "capability";
         IF cap_tok EXISTS AS cap_token THEN
           MUTABLE cap_token_mutable = COPY cap_token;
-          cap_label = TRY (token__text_mut(&cap_token_mutable));
+          cap_label = TRY (token__text_mut(cap_token_mutable));
         END
-        TRY (clearParser__error_mut(&rtoc_self_view, tok, CodeOrMessage{ SymbolValue: :CAP_BAD_MODIFIER }, [], {:cap: "${cap_label}", :modifier: "${TRY (token__text_mut(&tok))}"}));
+        TRY (clearParser__error_mut(&rtoc_self_view, tok, CodeOrMessage{ SymbolValue: :CAP_BAD_MODIFIER }, [], {:cap: "${cap_label}", :modifier: "${TRY (token__text_mut(tok))}"}));
       END
       TRY (clearParser__apply_capability_mut(&rtoc_self_view, &result, &tok, normalized_value, validate_shard_count));
     END
@@ -128,12 +128,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE token = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
     TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, &token));
-    clearParser__apply_element_capability_mut(&rtoc_self_view, &result, TRY (token__text_mut(&token)));
+    clearParser__apply_element_capability_mut(&rtoc_self_view, &result, TRY (token__text_mut(token)));
     IF TRY (clearParser__match?(&rtoc_self_view, :CHAR, ":")) THEN
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, ":"));
       token = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
       TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, &token));
-      clearParser__apply_element_capability_mut(&rtoc_self_view, &result, TRY (token__text_mut(&token)));
+      clearParser__apply_element_capability_mut(&rtoc_self_view, &result, TRY (token__text_mut(token)));
     END
     RETURN result;
 }
@@ -317,9 +317,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         {
     MUTABLE rtoc_value_block_marker = 0;
     cap_tok = TRY (clearParser__consume(&rtoc_self_view, :KEYWORD));
-    cap = symbol((TRY (token__text_mut(&cap_tok))));
+    cap = symbol((TRY (token__text_mut(cap_tok))));
     IF !(ruby_constant_capabilities().contains?(cap)) THEN
-        TRY (clearParser__emit_typo_suggestion_mut(&rtoc_self_view, cap_tok, TRY (token__text_mut(&cap_tok)), cap_names, "Unknown WITH capability '${cap}'", "closest WITH capability", :capability, TRUE));
+        TRY (clearParser__emit_typo_suggestion_mut(&rtoc_self_view, cap_tok, TRY (token__text_mut(cap_tok)), cap_names, "Unknown WITH capability '${cap}'", "closest WITH capability", :capability, TRUE));
       END
     cap
       }
@@ -575,13 +575,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE tok = TRY (clearParser__consume(&rtoc_self_view, :TYPE_ID));
     MUTABLE rtoc_kind_names = ruby_constant_error_kinds() |> SELECT _.toString();
-    MUTABLE rtoc_tok_text = TRY (token__text_mut(&tok));
+    MUTABLE rtoc_tok_text = TRY (token__text_mut(tok));
     MUTABLE form = IF rtoc_kind_names.contains?(rtoc_tok_text) THEN
       :kind
     ELSE
       :type
     END;
-    RETURN ErrorSelector{ form: COPY form, name: COPY symbol((TRY (token__text_mut(&tok)))), token: tok };
+    RETURN ErrorSelector{ form: COPY form, name: COPY symbol((TRY (token__text_mut(tok)))), token: tok };
 }
 END
 FN clearParser__parse_lock_action(MUTABLE self: ClearParser) RETURNS !ErrorAction
@@ -751,7 +751,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     WHILE TRUE DO
       MUTABLE tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
-      MUTABLE token_text = TRY (token__text_mut(&tok));
+      MUTABLE token_text = TRY (token__text_mut(tok));
       MUTABLE cap_name: String = "";
       IF token_text.startsWith?("@") THEN
         cap_name = COPY token_text;

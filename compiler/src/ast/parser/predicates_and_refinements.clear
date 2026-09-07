@@ -50,7 +50,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "AND")) OR TRY (clearParser__match?(&rtoc_self_view, :LEGACY_LOGICAL, "&&"))) THEN
         TRY (clearParser__error_mut(&rtoc_self_view, if_token, CodeOrMessage{ SymbolValue: :MULTIPLE_BINDINGS_NEED_PARENS }));
       END
-      MUTABLE bindings = [Binding{ expr: COPY condition, name: COPY TRY (token__text_mut(&name_tok)), name_token: name_tok, unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, predicate: :exists, mir_binding_entry: NIL }];
+      MUTABLE bindings = [Binding{ expr: COPY condition, name: COPY TRY (token__text_mut(name_tok)), name_token: name_tok, unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, predicate: :exists, mir_binding_entry: NIL }];
       RETURN ClearParserReturnValue{ IfBind: COPY TRY (clearParser__parse_if_bind_body(&rtoc_self_view, if_token, bindings)) };
     END
     TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "THEN"));
@@ -122,10 +122,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF token EXISTS AS token_value THEN
         MUTABLE token_value_mutable = COPY token_value;
         IF (token_value_mutable.type == :CHAR) THEN
-          IF "([{".contains?(TRY (token__text_mut(&token_value_mutable))) THEN
+          IF "([{".contains?(TRY (token__text_mut(token_value_mutable))) THEN
             depth = (depth + 1);
           END
-          IF ")]}".contains?(TRY (token__text_mut(&token_value_mutable))) THEN
+          IF ")]}".contains?(TRY (token__text_mut(token_value_mutable))) THEN
             depth = (depth - 1);
           END
         END
@@ -257,7 +257,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END;
     TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "AS"));
     MUTABLE name_tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
-    RETURN Binding{ expr: COPY expr, name: COPY TRY (token__text_mut(&name_tok)), name_token: name_tok, predicate: COPY predicate, unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, mir_binding_entry: NIL };
+    RETURN Binding{ expr: COPY expr, name: COPY TRY (token__text_mut(name_tok)), name_token: name_tok, predicate: COPY predicate, unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, mir_binding_entry: NIL };
 }
 END
 PRIVATE FN clearParser__parse_if_bind_body(MUTABLE self: ClearParser, if_token: Token, bindings: []Binding) RETURNS !IfBind
@@ -322,10 +322,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF TRY (clearParser__match?(&rtoc_self_view, :ARROW, "->")) THEN
         TRY (clearParser__consume(&rtoc_self_view, :ARROW, "->"));
         MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
-        RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(&name_tok)), binding_token: name_tok, do_branch: COPY [stmt], deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
+        RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(name_tok)), binding_token: name_tok, do_branch: COPY [stmt], deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
       END
       MUTABLE body = TRY (clearParser__parse_keyword_block(&rtoc_self_view, "DO"));
-      RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(&name_tok)), binding_token: name_tok, do_branch: COPY body, deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
+      RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(name_tok)), binding_token: name_tok, do_branch: COPY body, deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
     ELSE_IF TRY (clearParser__match?(&rtoc_self_view, :KEYWORD, "AS")) THEN
       TRY (clearParser__emit_legacy_optional_binding_mut(&rtoc_self_view, clearParser__current(rtoc_self_view)));
       TRY (clearParser__consume(&rtoc_self_view, :KEYWORD, "AS"));
@@ -333,10 +333,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF TRY (clearParser__match?(&rtoc_self_view, :ARROW, "->")) THEN
         TRY (clearParser__consume(&rtoc_self_view, :ARROW, "->"));
         MUTABLE stmt = TRY (clearParser__parse_statement(&rtoc_self_view));
-        RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(&name_tok)), binding_token: name_tok, do_branch: COPY [stmt], deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
+        RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(name_tok)), binding_token: name_tok, do_branch: COPY [stmt], deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
       END
       MUTABLE body = TRY (clearParser__parse_keyword_block(&rtoc_self_view, "DO"));
-      RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(&name_tok)), binding_token: name_tok, do_branch: COPY body, deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
+      RETURN ClearParserReturnValue{ WhileBindLoop: COPY WhileBindLoop{ token: COPY tok, condition: COPY condition, binding_name: TRY (token__text_mut(name_tok)), binding_token: name_tok, do_branch: COPY body, deferred_drops: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE } };
     END
     IF TRY (clearParser__match?(&rtoc_self_view, :ARROW, "->")) THEN
       TRY (clearParser__consume(&rtoc_self_view, :ARROW, "->"));
