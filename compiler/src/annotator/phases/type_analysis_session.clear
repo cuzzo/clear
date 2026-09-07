@@ -5121,7 +5121,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE result_ti: ?Type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY node }, "pipeline effect recording"));
     IF !(TRY (type__inf_stream?( UNWRAP (result_ti)))) THEN
         IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-              MUTABLE rtoc_mutable_receiver_109: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+              MUTABLE rtoc_mutable_receiver_109: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
               functionContext__record_frame_use_mut(&rtoc_mutable_receiver_109);
         END
         IF ((node.storage() == :heap) OR type__heap?( UNWRAP (result_ti))) THEN
@@ -5572,7 +5572,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.storage_override = :frame;
     IF !(pipelineSourceFact__inf_stream?(source)) THEN
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-            MUTABLE rtoc_mutable_receiver_117: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+            MUTABLE rtoc_mutable_receiver_117: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
             functionContext__record_frame_use_mut(&rtoc_mutable_receiver_117);
       END
     END
@@ -10889,7 +10889,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ef: ?Type = COPY expected_fields[rtoc_each_key];
     IF ((ef != NIL) AND type__indirect?(ef)) THEN
         locatable__set_needs_heap_create_mut(&val_node, TRUE);        IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-              MUTABLE rtoc_mutable_receiver_249: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+              MUTABLE rtoc_mutable_receiver_249: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
               functionContext__record_heap_use_mut(&rtoc_mutable_receiver_249);
         END
         TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("HEAP")));
