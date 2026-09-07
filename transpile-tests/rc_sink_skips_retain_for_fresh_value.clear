@@ -1,0 +1,24 @@
+# Test: an owned-sink plan reads the DESTINATION, so it asks for a retain
+# whenever the sink carries an Rc/Arc. Only the lowered source can say whether
+# a handle exists yet -- a freshly built value has none to retain, and
+# `rcRetain(T, T{...})` is a Zig type error with no CLEAR diagnostic. The
+# handle is constructed by the field store instead.
+
+STRUCT Inner { n: Int64 }
+STRUCT Outer { inner: Inner@multiowned, tag: String }
+
+FN build() RETURNS Outer ->
+    RETURN Outer{ inner: Inner{ n: 4 }, tag: COPY "fresh" };
+END
+
+FN main() RETURNS Void ->
+    o = build();
+    ASSERT o.inner.n == 4, "the fresh value became the sink's handle";
+    ASSERT o.tag == "fresh", "the sibling field is untouched";
+
+    # An existing handle is still retained, and both owners stay valid.
+    held: Inner@multiowned = Inner{ n: 9 };
+    kept = Outer{ inner: KEEP held, tag: COPY "kept" };
+    ASSERT kept.inner.n == 9, "an existing handle is retained";
+    ASSERT held.n == 9, "the original handle survives";
+END

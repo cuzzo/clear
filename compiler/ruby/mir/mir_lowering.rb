@@ -5387,7 +5387,17 @@ class MIRLowering
       value = MIR::ItemsAccess.new(value, true) if plan.source_slice_view
       MIR::DeepCopy.new(value, T.must(plan.zig_type), nil, T.must(plan.copy_mode), plan.target_alloc)
     when :rc_retain
-      MIR::RcRetain.new(value, T.must(plan.zig_type), T.must(plan.rc_func))
+      # A retain bumps the refcount of a handle that already exists. A freshly
+      # built value is not one yet, so it is CONSTRUCTED as a handle -- the
+      # same decision the declaration, struct-field and collection-element
+      # paths make. Retaining it emits `rcRetain(T, T{...})`, a Zig type error
+      # with no CLEAR diagnostic. The sink plan reads the DESTINATION; only the
+      # lowered source can say whether a handle exists yet.
+      if value.is_a?(MIR::StructInit)
+        value
+      else
+        MIR::RcRetain.new(value, T.must(plan.zig_type), T.must(plan.rc_func))
+      end
     when :dupe_union
       emit_builtin(:dupeUnionValue, [MIR::Ident.new(T.must(plan.zig_type)), value, MIR::AllocatorRef.new(plan.target_alloc)])
     else
