@@ -633,12 +633,11 @@ PUB FN schemaValue__fields(self: SchemaValue) RETURNS {String@symbol}StructField
 END
 PUB FN schemaValue__type_params(self: SchemaValue) RETURNS []String@symbol ->
   PARTIAL MATCH self START
-    SchemaValue.EnumSchemaMultiowned AS item -> RETURN COPY item.type_params;,
     SchemaValue.StructSchemaMultiowned AS item -> RETURN COPY item.type_params;,
     SchemaValue.UnionSchemaMultiowned AS item -> RETURN COPY item.type_params;,
     SchemaValue.ResourceSchemaMultiowned AS item -> RETURN COPY item.type_params;
   END
-  RETURN List[];
+  RETURN CAST(List[] AS []String@symbol);
 END
 PUB UNION FieldBearingSchema { StructSchemaMultiowned: StructSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, InlineStructVariantMultiowned: InlineStructVariant@multiowned }
 PUB FN struct?(s: ?SchemaValue) RETURNS Bool ->

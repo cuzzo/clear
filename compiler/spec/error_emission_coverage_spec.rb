@@ -2267,7 +2267,7 @@ RSpec.describe "error emission coverage" do
           END
           FN main() RETURNS Void -> _ = compute(); END
         CLEAR
-      }.to raise_error(CompilerError, /Function expected to return 'Int64', but returned 'String'|Function expected to return 'Int64', but returned '\[\d+\]Byte'/)
+      }.to raise_error(CompilerError, /Function '\w*' expected to return 'Int64', but returned 'String'|Function '\w*' expected to return 'Int64', but returned '\[\d+\]Byte'/)
     end
 
     it "renders collection types in current Inline Pivot syntax" do
@@ -2280,7 +2280,7 @@ RSpec.describe "error emission coverage" do
         CLEAR
       }.to raise_error(
         CompilerError,
-        /Function expected to return '\[\]Int64', but returned '\[\]String'/,
+        /Function '\w*' expected to return '\[\]Int64', but returned '\[\]String'/,
       )
     end
 

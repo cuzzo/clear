@@ -818,7 +818,7 @@ module DiagnosticRegistry
     },
     RETURN_MISMATCH: {
       severity: :error, category: :type,
-      template: "Type Error: Function expected to return '%{expected}', but returned '%{got}'",
+      template: "Type Error: Function '%{fn}' expected to return '%{expected}', but returned '%{got}'",
       summary:  "RETURN value's type doesn't match the function's declared return type.",
       cause: "A RETURN statement's value doesn't match the function's declared return type. Coercion was tried and failed.",
       fix_hint: "Either change the returned value to match the declared return type, or change the declared return type to match what the function actually returns.",

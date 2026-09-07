@@ -199,7 +199,7 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
       it "raises error when returning Float64 instead of String" do
-        expect { ast }.to raise_error(/Function expected/i)
+        expect { ast }.to raise_error(/Function '\w*' expected/i)
       end
     end
 

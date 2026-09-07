@@ -479,7 +479,11 @@ module Annotator
 
         return_checkable = !actual_is_auto && !expected_is_auto && expected != :Void && expected != :Any
         if return_checkable && !return_type_compatible?(actual_full, expected)
-          error!(node, :RETURN_MISMATCH, expected: type_display(expected), got: type_display(actual_full))
+          # Name the function: a RETURN carries no location of its own in
+          # generated code, so without this the diagnostic cannot be traced to
+          # a site at all.
+          error!(node, :RETURN_MISMATCH, fn: (current_fn_ctx&.name || 'unknown'),
+                 expected: type_display(expected), got: type_display(actual_full))
         elsif return_checkable && actual != expected
           # A value's coercion target is the PAYLOAD, never the error union
           # `!T`. `!` is the channel (added by the return mechanism / fn
