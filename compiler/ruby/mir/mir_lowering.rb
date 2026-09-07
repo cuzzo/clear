@@ -959,12 +959,76 @@ class MIRLowering
 
   sig { params(mir: MIR::Node, ti: Type).returns(MIR::Node) }
   def place_indirect_value_for_heap_destination(mir, ti)
+    # The box takes ownership of what it boxes, but an un-materialised operand
+    # has no name to record the transfer against -- the enclosing hoist gives
+    # it one only afterwards, leaving that temp with an ErrCleanup and no
+    # TransferMark. Name it here, the way the owned-copy placement does, so
+    # the box's operand provenance exists at the moment the box is built.
+    return place_indirect_named_value(mir, ti) if mir_produces_owned_result?(mir) && !mir.is_a?(MIR::Ident)
+
     with_ownership_consumption(
       MIR::HeapCreate.new(transpile_type(ti.resolved.to_s), mir, :heap, "blk"),
       mir_ident_names(mir),
       "MIR::HeapCreate",
       target_alloc: :heap,
     )
+  end
+
+  sig { params(mir: MIR::Node, ti: Type).returns(MIR::BlockExpr) }
+  def place_indirect_named_value(mir, ti)
+    tmp_id = lowering_counters.next_tmp_id
+    label = "__boxed_indirect_#{tmp_id}"
+    inner_name = "__boxed_indirect_val_#{tmp_id}"
+    inner_alloc = mir_owned_alloc(mir) || MIR::OwnershipEffect.alloc_of(mir) || :heap
+    # The value going into the cell is the payload; only the cell itself is
+    # indirect. Typing both the same makes the block yield a pointer where the
+    # destination wants a value.
+    payload_ti = ti.dup
+    payload_ti.strip_layout!
+    inner_cleanup = CleanupEntry.build(:uniform, alloc: inner_alloc, has_moved_guard: true,
+                                       zig_type: payload_ti.zig_type)
+    build_drop_entry!(inner_cleanup, payload_ti, nil)
+    inner = MIR::BindingMaterialization.new(
+      name: inner_name,
+      expr: mir,
+      alloc: inner_alloc,
+      type_info: payload_ti,
+      mutable: false,
+      cleanup_entry: inner_cleanup,
+      cleanup_mode: :err,
+    )
+    boxed = with_ownership_consumption(
+      MIR::HeapCreate.new(transpile_type(payload_ti.resolved.to_s), MIR::Ident.new(inner_name), :heap, "blk"),
+      [inner_name],
+      "MIR::HeapCreate",
+      target_alloc: :heap,
+      require_visible: false,
+    )
+    box_name = "__boxed_indirect_cell_#{tmp_id}"
+    box_cleanup = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true,
+                                     zig_type: ti.zig_type)
+    build_drop_entry!(box_cleanup, ti, nil)
+    box = MIR::BindingMaterialization.new(
+      name: box_name,
+      expr: boxed,
+      alloc: :heap,
+      type_info: ti,
+      mutable: false,
+      cleanup_entry: box_cleanup,
+      cleanup_mode: :err,
+    )
+    body = T.let(inner.statements + box.statements, T::Array[MIR::Stmt])
+    # The inner value's transfer records that the cell above took it, so it
+    # follows the statement that does the taking rather than preceding it.
+    body.concat(ownership_transfer_marks(inner_name, :owned_sink,
+                                         target_alloc: :heap, move_guarded: true))
+    body.concat(ownership_transfer_marks(box_name, :block_result,
+                                         target_alloc: :heap, move_guarded: true))
+    body << MIR::BreakStmt.new(label, MIR::Ident.new(box_name))
+    out = MIR::BlockExpr.new(label, body)
+    out.lazy_boundary = true
+    out.result_type = Type.new(ti)
+    out
   end
 
   sig { params(mir: MIR::Orelse, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
