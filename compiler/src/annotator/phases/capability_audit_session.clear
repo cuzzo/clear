@@ -3091,7 +3091,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           CONTINUE;
     END
     IF callees |> ANY ((fn_nodes[rtoc_each_17] != NIL) AND (((fn_nodes[rtoc_each_17])?).stack_tier == :unbounded)) THEN
-          fn.stack_tier = :unbounded;
+          IF fn EXISTS AS MUTABLE fn_present THEN
+            fn_present.stack_tier = :unbounded;
+          END
           changed = TRUE;
     END
             END

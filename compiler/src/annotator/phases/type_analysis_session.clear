@@ -12954,7 +12954,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         IF (node?.state != state) THEN
               IF (state == :moved) THEN
-                node.state = :moved;
+                IF node EXISTS AS MUTABLE node_present THEN
+                  node_present.state = :moved;
+                END
                 node.move_line = lightweightSnapshot__move_line_for( UNWRAP (snap), path);
                 node.move_col = lightweightSnapshot__move_col_for( UNWRAP (snap), path);
                 node.move_action = lightweightSnapshot__move_action_for( UNWRAP (snap), path);
@@ -17397,7 +17399,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF frame?.closed THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ CloseStream: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STREAM_ALREADY_CLOSED }));
     END
-    frame.closed = TRUE;
+    IF frame EXISTS AS MUTABLE frame_present THEN
+      frame_present.closed = TRUE;
+    END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ CloseStream: COPY node }, :Void));
     rtoc_self_view.traversal_state.branch_terminated = TRUE;
 }
@@ -20567,7 +20571,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF existing EXISTS AS existing_value THEN
         IF ownershipNode__specific_move_action?(existing_value) THEN
         IF ((consumer_param_type != NIL) AND (UNWRAP (existing).move_consumer_param_type == NIL)) THEN
-          existing.move_consumer_param_type = COPY castTypeToOptionalTypeTypeInput__type_analysis_session(consumer_param_type);
+          IF existing EXISTS AS MUTABLE existing_present THEN
+            existing_present.move_consumer_param_type = COPY castTypeToOptionalTypeTypeInput__type_analysis_session(consumer_param_type);
+          END
         END
         identifier_mutable.was_moved = TRUE;
         RETURN NIL;
@@ -20599,7 +20605,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF existing EXISTS AS existing_value THEN
         IF ownershipNode__specific_move_action?(existing_value) THEN
         IF ((consumer_param_type != NIL) AND (UNWRAP (existing).move_consumer_param_type == NIL)) THEN
-          existing.move_consumer_param_type = COPY castTypeToOptionalTypeTypeInput__type_analysis_session(consumer_param_type);
+          IF existing EXISTS AS MUTABLE existing_present THEN
+            existing_present.move_consumer_param_type = COPY castTypeToOptionalTypeTypeInput__type_analysis_session(consumer_param_type);
+          END
         END
         identifier_mutable.was_moved = TRUE;
         RETURN NIL;
@@ -20659,7 +20667,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END)) THEN
         RETURN FALSE;
       END
-      entry.kept_identity = (symbolEntry__kept_identity(UNWRAP (entry)) OR_ELSE KeptIdentityContract{ family: :multiowned, sink: COPY container_desc });
+      IF entry EXISTS AS MUTABLE entry_present THEN
+        entry_present.kept_identity = (symbolEntry__kept_identity(UNWRAP (entry)) OR_ELSE KeptIdentityContract{ family: :multiowned, sink: COPY container_desc });
+      END
       RETURN TRUE;
     ELSE
       RETURN FALSE;
