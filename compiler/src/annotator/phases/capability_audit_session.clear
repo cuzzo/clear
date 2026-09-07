@@ -1266,7 +1266,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE as_token: ?Token = COPY capability__as_token(fact.source);
     IF view_token EXISTS AS view_token_value THEN
       IF as_token EXISTS AS as_token_value THEN
-        MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CONVERT_FOREIGN_VIEW_TO_UNSAFE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, view_token_value.line, view_token_value.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token_value.line, as_token.column, 0), "LENGTH 0 ")], :interactive));
+        MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CONVERT_FOREIGN_VIEW_TO_UNSAFE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, view_token_value.line, view_token_value.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token_value.line, UNWRAP (as_token).column, 0), "LENGTH 0 ")], :interactive));
         TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, [fix], NIL, :WITH_VIEW_FOREIGN_NEEDS_UNSAFE, :error, TRUE, CAST({:name: name} AS {String@symbol}Any)));
       ELSE
         RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_VIEW_FOREIGN_NEEDS_UNSAFE }, [], CAST({:name: name} AS {String@symbol}Any)));
@@ -3641,7 +3641,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN CAST(( { MUTABLE rtoc_empty_list_25: []Edit = List[]; rtoc_empty_list_25 } ) AS []Edit);
     END
     MUTABLE end_col = (e.column + (CAST(e.value AS String)).codepointCount());
-    RETURN CAST([edit__new(span__new(NIL, UNWRAP (s).line, s.column, (end_col - s.column)), replacement)] AS []Edit);
+    RETURN CAST([edit__new(span__new(NIL, UNWRAP (s).line, UNWRAP (s).column, (end_col - s.column)), replacement)] AS []Edit);
 }
 END
 PRIVATE FN capabilityAuditSession__thunk_all_self_calls_in_tail_position?(self: CapabilityAuditSession, fn_node: FunctionDef, body_facts: CapabilityAuditBodyFacts) RETURNS Bool
