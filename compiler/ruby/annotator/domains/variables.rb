@@ -1131,12 +1131,13 @@ module Annotator
           if fix
             fixable!(node,
               code: :ASSIGN_VAR_IMMUTABLE,
+              fn: (current_fn_ctx&.name || 'unknown'),
               name: var_name,
               category: :ownership,
               level: :error,
               fixes: [fix])
           else
-            error!(node, :ASSIGN_VAR_IMMUTABLE, name: var_name)
+            error!(node, :ASSIGN_VAR_IMMUTABLE, name: var_name, fn: (current_fn_ctx&.name || 'unknown'))
           end
         end
 

@@ -609,7 +609,7 @@ module Annotator
         subject = binding.expr
         return unless subject.is_a?(AST::Identifier)
         entry = current_scope.resolve_entry(subject.name)
-        return error!(binding.expr, :ASSIGN_VAR_IMMUTABLE, name: subject.name) if entry && !entry.mutable
+        return error!(binding.expr, :ASSIGN_VAR_IMMUTABLE, name: subject.name, fn: (current_fn_ctx&.name || 'unknown')) if entry && !entry.mutable
 
         mark_var_mutated(subject.name)
       end
@@ -990,7 +990,7 @@ module Annotator
         return unless subject.is_a?(AST::Identifier)
         entry = current_scope.resolve_entry(subject.name)
         return if entry.nil? || entry.mutable
-        error!(node, :ASSIGN_VAR_IMMUTABLE, name: subject.name)
+        error!(node, :ASSIGN_VAR_IMMUTABLE, name: subject.name, fn: (current_fn_ctx&.name || 'unknown'))
       end
 
       # `IS_A T AS MUTABLE x` writes through to the subject, exactly as a
@@ -1001,7 +1001,7 @@ module Annotator
         subject = node.left
         return unless subject.is_a?(AST::Identifier)
         entry = current_scope.resolve_entry(subject.name)
-        return error!(node, :ASSIGN_VAR_IMMUTABLE, name: subject.name) if entry && !entry.mutable
+        return error!(node, :ASSIGN_VAR_IMMUTABLE, name: subject.name, fn: (current_fn_ctx&.name || 'unknown')) if entry && !entry.mutable
 
         mark_var_mutated(subject.name)
       end

@@ -787,7 +787,10 @@ module FixableHelper
   def emit_immutable_arg_error!(arg_node, scope, arg_idx, param_name)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fix = build_declare_mutable_fix(arg_node.name, scope)
-    kw = { index: arg_idx, param: param_name, actual: arg_node.name }
+    # Generated code carries no location on a call argument, so without the
+    # enclosing function the diagnostic cannot be traced to a site.
+    kw = { index: arg_idx, param: param_name, actual: arg_node.name,
+           fn: (current_fn_ctx&.name || 'unknown') }
     return error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw) unless fix
     fixable!(arg_node,
       code: :IMMUTABLE_ARG_PASSED_AS_MUTABLE,
