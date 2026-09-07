@@ -123,8 +123,81 @@ module FnIoRecord
   # The same value as CLEAR source, so a probe can reconstruct the argument
   # Ruby was given. Anything that cannot be written as a literal -- a cycle, a
   # closure, a depth cutoff -- becomes NIL and the caller skips that call.
+  # An AST node nests several layers deep before it bottoms out in tokens and
+  # Types, so the old depth of 6 cut off most arguments mid-render.
+  # The generated tree is the authority on what a field holds. A Ruby value
+  # whose class is a variant of the field's declared UNION has to be written as
+  # `Union{ Variant: <payload> }`; emitting the bare payload is a
+  # FIELD_TYPE_MISMATCH, which was most of what stage 3 could not build.
+  def schema
+    @schema ||= begin
+      structs = Hash.new { |h, k| h[k] = {} }
+      unions = Hash.new { |h, k| h[k] = {} }
+      Dir.glob(File.join(SRC, '**', '*.clear')).each do |f|
+        text = File.read(f)
+        text.scan(/^(?:PUB |PRIVATE )?STRUCT (\w+)[^{\n]*\{(.*)\}\s*$/) do |name, body|
+          split_fields(body).each do |part|
+            field, type = part.split(':', 2)
+            next unless field && type
+
+            structs[name][field.strip] = type.strip
+          end
+        end
+        text.scan(/^(?:PUB |PRIVATE )?UNION (\w+)\s*\{(.*)\}\s*$/) do |name, body|
+          split_fields(body).each do |part|
+            variant, type = part.split(':', 2)
+            unions[name][variant.strip] = (type || variant).strip
+          end
+        end
+      end
+      [structs, unions]
+    end
+  end
+
+  # A field type can carry commas of its own ({String@symbol}Type, [4]Int64),
+  # so only top-level commas separate declarations.
+  def split_fields(body)
+    out = []
+    depth = 0
+    current = +''
+    body.each_char do |ch|
+      case ch
+      when '{', '[', '(' then depth += 1
+      when '}', ']', ')' then depth -= 1
+      end
+      if ch == ',' && depth.zero?
+        out << current
+        current = +''
+      else
+        current << ch
+      end
+    end
+    out << current
+    out.reject { |p| p.strip.empty? }
+  end
+
+  # The variant of `union_name` whose payload type is `class_name`, if any.
+  def variant_for(union_name, class_name)
+    _structs, unions = schema
+    variants = unions[union_name]
+    return nil if variants.nil? || variants.empty?
+    return class_name if variants.key?(class_name)
+
+    variants.find { |_v, t| t.sub(/@\w+\z/, '').delete_prefix('?') == class_name }&.first
+  end
+
+  def wrap_for_field(owner_class, field, value, literal)
+    structs, _unions = schema
+    declared = structs[owner_class] && structs[owner_class][field]
+    return literal unless declared
+
+    bare = declared.delete_prefix('?').sub(/@\w+\z/, '')
+    variant = variant_for(bare, value.class.name.to_s.split('::').last)
+    variant ? "#{bare}{ #{variant}: #{literal} }" : literal
+  end
+
   def clear_literal(value, depth = 0, seen = {})
-    return nil if depth > 6
+    return nil if depth > 14
 
     case value
     when nil then 'NIL'
@@ -136,7 +209,17 @@ module FnIoRecord
     when String then value.inspect
     when Array
       items = value.map { |v| clear_literal(v, depth + 1, seen) }
-      items.any?(&:nil?) ? nil : "[#{items.join(', ')}]"
+      # An empty list literal is `List[]` in CLEAR; a bare `[]` does not parse.
+      if items.any?(&:nil?) then nil
+      elsif items.empty? then 'List[]'
+      else "[#{items.join(', ')}]"
+      end
+    when Set
+      items = value.map { |v| clear_literal(v, depth + 1, seen) }
+      if items.any?(&:nil?) then nil
+      elsif items.empty? then 'Set[]'
+      else "Set[#{items.join(', ')}]"
+      end
     when Hash
       pairs = value.map do |k, v|
         kk = clear_literal(k, depth + 1, seen)
@@ -151,11 +234,18 @@ module FnIoRecord
       fields =
         if value.is_a?(Struct) then value.members.to_h { |m| [m.to_s, value[m]] }
         elsif value.class.respond_to?(:props) then value.class.props.keys.to_h { |n| [n.to_s, safe_send(value, n)] }
+        # Type, SymbolEntry and friends are plain classes -- neither a Struct
+        # nor a T::Struct -- and bailing here is what made nearly every
+        # annotator argument unrenderable, so stage 3 had nothing to replay.
+        # rtoc derives the CLEAR struct's fields from these same ivars.
+        elsif !value.instance_variables.empty?
+          value.instance_variables.to_h { |iv| [iv.to_s.delete_prefix('@'), value.instance_variable_get(iv)] }
         else return nil
         end
+      owner_class = value.class.name.to_s.split('::').last
       parts = fields.map do |f, v|
         lit = clear_literal(v, depth + 1, seen)
-        lit ? "#{f}: #{lit}" : nil
+        lit ? "#{f}: #{wrap_for_field(owner_class, f, v, lit)}" : nil
       end
       return nil if parts.any?(&:nil?)
 
