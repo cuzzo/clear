@@ -2638,8 +2638,14 @@ class MIREmitter
     et = node.elem_type
     items = emit(node.items_expr)
     cmp = node.string_keys ? "std.mem.order(u8, #{emit(node.key_a)}, #{emit(node.key_b)}) == .lt" : "#{emit(node.key_a)} < #{emit(node.key_b)}"
+    # A sort key need not mention the element -- `xs |> ORDER_BY k` for a `k`
+    # from an enclosing scope is a legal no-op ordering. Zig rejects the
+    # parameter it leaves untouched, so discard what the key does not read.
+    discards = %w[a b].reject { |p| cmp.match?(/(?<![\w.])#{p}(?![\w])/) }
+                      .map { |p| "        _ = #{p};\n" }.join
     "std.mem.sort(#{et}, #{items}, {}, struct {\n" \
       "    pub fn lessThan(_: void, a: #{et}, b: #{et}) bool {\n" \
+      "#{discards}" \
       "        return #{cmp};\n" \
       "    }\n" \
       "}.lessThan);"

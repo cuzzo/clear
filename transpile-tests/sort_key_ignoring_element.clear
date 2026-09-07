@@ -1,0 +1,20 @@
+# Test: a sort key that does not mention the element is a legal no-op
+# ordering. The emitted Zig comparator still declares both operands, and Zig
+# rejects a parameter nothing reads -- so the comparator has to discard
+# whichever operand the key does not use.
+
+FN main() RETURNS Void ->
+    outer = "z";
+    MUTABLE items: []String = List[];
+    &items.append(COPY "b");
+    &items.append(COPY "a");
+
+    # The key is a constant from an enclosing scope: every element compares
+    # equal, so a stable sort leaves the order alone.
+    by_constant = (items |> ORDER_BY outer).join(",");
+    ASSERT by_constant == "b,a", "a constant key leaves the order untouched";
+
+    # The ordinary form still orders by the element itself.
+    by_element = (items |> ORDER_BY _).join(",");
+    ASSERT by_element == "a,b", "the element key still sorts";
+END
