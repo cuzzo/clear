@@ -179,6 +179,10 @@ module AnnotatorCompat
       parser.banner = 'Usage: ruby tools/annotator_compat.rb [options]'
       parser.on('--out DIR') { |value| options[:out_dir] = File.expand_path(value) }
       parser.on('--ruby-only', 'Encode the Ruby side only (the CLEAR annotator is not built yet)') { options[:ruby_only] = true }
+      # Building the CLEAR side is the slow half and the only half that moves
+      # while the blocker chain is being worked; re-encoding Ruby every
+      # iteration just costs minutes.
+      parser.on('--clear-only', 'Skip the Ruby side and reuse ruby.msgpack from --out') { options[:clear_only] = true }
       parser.on('--limit N', Integer) { |value| options[:limit] = value }
       parser.on('--generated-root DIR') { |value| options[:generated_root] = File.expand_path(value) }
       parser.on('-h', '--help') { puts parser; exit 0 }
@@ -188,16 +192,21 @@ module AnnotatorCompat
     cases = CASES
     cases = cases.first(options[:limit]) if options[:limit]
 
-    ruby_payload = payload('ruby', cases)
-    ParserCompat.write_msgpack(File.join(options[:out_dir], 'ruby.msgpack'), ruby_payload)
-
-    ok = ruby_payload['cases'].count { |entry| entry['status'] == 'ok' }
-    puts "annotator cases: #{ok}/#{ruby_payload['cases'].length} annotated"
-    puts "ruby msgpack: #{File.join(options[:out_dir], 'ruby.msgpack')}"
+    ruby_path = File.join(options[:out_dir], 'ruby.msgpack')
+    if options[:clear_only] && File.exist?(ruby_path)
+      ruby_payload = MessagePack.unpack(File.binread(ruby_path))
+      puts "annotator cases: reusing #{ruby_path}"
+    else
+      ruby_payload = payload('ruby', cases)
+      ParserCompat.write_msgpack(ruby_path, ruby_payload)
+      ok = ruby_payload['cases'].count { |entry| entry['status'] == 'ok' }
+      puts "annotator cases: #{ok}/#{ruby_payload['cases'].length} annotated"
+    end
+    puts "ruby msgpack: #{ruby_path}"
 
     if options[:ruby_only]
       puts 'clear side: skipped (--ruby-only)'
-      return ok == ruby_payload['cases'].length ? 0 : 1
+      return ruby_payload['cases'].all? { |e| e['status'] == 'ok' } ? 0 : 1
     end
 
     clear_payload = run_clear_payload(cases, options)
@@ -234,7 +243,11 @@ module AnnotatorCompat
     _out, err, status = Open3.capture3(env, *build)
     unless status.success?
       limit = ENV.fetch('ANNOTATOR_COMPAT_ERROR_LIMIT', '8').to_i
-      warn "annotator_compat: CLEAR build failed\n#{err.lines.grep(/Error|error/).first(limit).join}"
+      # A bare /error/ grep matches warnings that merely mention one (an
+      # `error_handler` parameter), which pushed the real diagnostic out of the
+      # first few lines and left the failure looking blank.
+      lines = err.lines.reject { |l| l.include?('[Warning]') || l.include?('[Note]') || l.include?('hint:') }
+      warn "annotator_compat: CLEAR build failed\n#{lines.grep(/Error|error/).first(limit).join}"
       return { 'schema' => SCHEMA, 'implementation' => 'clear', 'cases' => [] }
     end
 
