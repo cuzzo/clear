@@ -1241,7 +1241,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (((src != NIL) AND TRUE)) THEN
       MUTABLE line_num = node.token.line;
       MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR_ELSE "");
-      MUTABLE body = line_text.trim();
+      body = line_text.trim();
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.trimStart();
       IF (!(inner.empty?()) AND !(inner.contains?("\n"))) THEN
@@ -3643,7 +3643,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN CAST(( { MUTABLE rtoc_empty_list_25: []Edit = List[]; rtoc_empty_list_25 } ) AS []Edit);
     END
     MUTABLE end_col = (e.column + (CAST(e.value AS String)).codepointCount());
-    RETURN CAST([edit__new(span__new(NIL, UNWRAP (s).line, UNWRAP (s).column, (end_col - s.column)), replacement)] AS []Edit);
+    RETURN CAST([edit__new(span__new(NIL, UNWRAP (s).line, UNWRAP (s).column, (end_col - UNWRAP (s).column)), replacement)] AS []Edit);
 }
 END
 PRIVATE FN capabilityAuditSession__thunk_all_self_calls_in_tail_position?(self: CapabilityAuditSession, fn_node: FunctionDef, body_facts: CapabilityAuditBodyFacts) RETURNS Bool
