@@ -255,7 +255,13 @@ module SelfhostFnVerify
     row = rows.find { |r| r['fn'] == kase.fn }
     return [:build_failed, row && row['error'].to_s[0, 120]] unless row && row['ok']
 
-    actual = row['error'].to_s.strip   # stage :run puts the program's stdout here
+    actual = row['error'].to_s.strip   # stage :run puts the program's output here
+    # An empty transcript is not a result. A replay that prints nothing has
+    # failed to run, and reporting it as a difference invents divergences that
+    # are not there -- it did exactly that for functionRegistry__names, whose
+    # probe prints nothing even for a main that is only `print("START")`.
+    return [:no_output, 'the replay produced no output'] if actual.empty? && !kase.expected.to_s.strip.empty?
+
     actual == kase.expected.to_s.strip ? [:match, actual] : [:differs, "ruby=#{kase.expected.inspect} clear=#{actual.inspect}"]
   ensure
     body&.unlink
@@ -298,7 +304,11 @@ module SelfhostFnVerify
     matched = tally[:match]
     puts "#{matched}/#{checked} replayed calls return what Ruby returned" \
          "#{checked.zero? ? '' : format(' (%.1f%%)', 100.0 * matched / checked)}"
-    puts "build_failed=#{tally[:build_failed]} differs=#{tally[:differs]}"
+    puts "build_failed=#{tally[:build_failed]} differs=#{tally[:differs]} no_output=#{tally[:no_output]}"
+    if tally[:no_output].positive?
+      puts 'WARNING: replays that produced no output are harness/runtime failures,'
+      puts 'NOT comparisons -- do not read them as agreement or divergence.'
+    end
     0
   end
 end
