@@ -8,7 +8,10 @@ PUB STRUCT OwnershipTransportPlan {
   destination: String,
   alias_root: String,
   last_alias_use: ?Identifier,
-  conflicting_mutation: ?Locatable,
+  # Locatable -> VarDecl -> OwnershipTransportPlan -> Locatable is a by-value
+  # cycle; Zig rejects it as a dependency loop. This back-reference to a node
+  # is the natural edge to break, the way TypeExpression.kind is boxed.
+  conflicting_mutation: ?Locatable@boxed,
   hidden_cost: ?String@symbol
 }
 PUB STRUCT OwnershipTransportFacts {
