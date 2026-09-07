@@ -77,13 +77,14 @@ END
 PUB FN mIRPassState__for_mut(MUTABLE program: PassStateProgram) RETURNS MIRPassState@multiowned ->
   IF program IS_A Program AS program_node THEN
     MUTABLE program_mutable = COPY program_node;
+    # Ruby's `mir_pass_state` is T.nilable(MIRPassState) and the CLEAR field
+    # matches it, so there is no union to narrow -- the IS_A guard and the
+    # PassStateValue wrap were translation artifacts.
     IF program_mutable.mir_pass_state EXISTS AS existing THEN
-      IF existing IS_A MIRPassState AS existing_state THEN
-        RETURN COPY existing_state @multiowned;
-      END
+      RETURN COPY existing @multiowned;
     END
     MUTABLE fresh = mIRPassState__new();
-    program_mutable.mir_pass_state = PassStateValue{ MIRPassState: COPY fresh };
+    program_mutable.mir_pass_state = KEEP fresh;
     RETURN fresh;
   END
   RETURN mIRPassState__new();
@@ -91,11 +92,9 @@ END
 PUB FN mIRPassState__class_require_mut(program: PassStateProgram, stage: String@symbol, consumer: String) RETURNS !Void EFFECTS REENTRANT ->
   IF program IS_A Program AS program_node THEN
     IF program_node.mir_pass_state EXISTS AS carried THEN
-      IF carried IS_A MIRPassState AS state THEN
-        MUTABLE state_mutable = COPY state;
-        TRY (mIRPassState__require_mut(&state_mutable, stage, consumer));
-        RETURN;
-      END
+      MUTABLE state_mutable = COPY carried;
+      TRY (mIRPassState__require_mut(&state_mutable, stage, consumer));
+      RETURN;
     END
   END
   RAISE Input, MIRPassOrderError, "{} requires pass state; program was not produced by the MIR pipeline";
