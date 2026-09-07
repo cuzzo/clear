@@ -135,18 +135,30 @@ module FnIoRecord
       unions = Hash.new { |h, k| h[k] = {} }
       Dir.glob(File.join(SRC, '**', '*.clear')).each do |f|
         text = File.read(f)
-        text.scan(/^(?:PUB |PRIVATE )?STRUCT (\w+)[^{\n]*\{(.*)\}\s*$/) do |name, body|
+        # A declaration can span lines (STRUCT Token spells one field per
+        # line), so take the body by balancing braces rather than by matching
+        # to the end of the line.
+        text.to_enum(:scan, /^(?:PUB |PRIVATE )?(STRUCT|UNION) (\w+)[^{\n]*\{/).each do
+          kind, name = Regexp.last_match(1), Regexp.last_match(2)
+          i = Regexp.last_match.end(0)
+          depth = 1
+          body = +''
+          while i < text.length && depth.positive?
+            ch = text[i]
+            depth += 1 if ch == '{'
+            depth -= 1 if ch == '}'
+            body << ch if depth.positive?
+            i += 1
+          end
+          into = kind == 'STRUCT' ? structs[name] : unions[name]
+          # A declaration body carries comment lines; without dropping them the
+          # comment text parses as a field and shadows the real one.
+          body = body.lines.reject { |l| l.strip.start_with?('#') }.join
           split_fields(body).each do |part|
             field, type = part.split(':', 2)
-            next unless field && type
+            next unless field
 
-            structs[name][field.strip] = type.strip
-          end
-        end
-        text.scan(/^(?:PUB |PRIVATE )?UNION (\w+)\s*\{(.*)\}\s*$/) do |name, body|
-          split_fields(body).each do |part|
-            variant, type = part.split(':', 2)
-            unions[name][variant.strip] = (type || variant).strip
+            into[field.strip] = (type || field).strip
           end
         end
       end
@@ -176,6 +188,18 @@ module FnIoRecord
     out.reject { |p| p.strip.empty? }
   end
 
+  # A Ruby scalar's CLEAR spelling. Matching on the Ruby class name alone sends
+  # a Symbol to no variant at all (CLEAR spells it String@symbol) and a String
+  # to whichever String-ish variant is declared first, symbol or not.
+  CLEAR_TYPE_OF = {
+    'Symbol' => 'String@symbol',
+    'String' => 'String',
+    'Integer' => 'Int64',
+    'Float' => 'Float64',
+    'TrueClass' => 'Bool',
+    'FalseClass' => 'Bool',
+  }.freeze
+
   # The variant of `union_name` whose payload type is `class_name`, if any.
   def variant_for(union_name, class_name)
     _structs, unions = schema
@@ -183,17 +207,64 @@ module FnIoRecord
     return nil if variants.nil? || variants.empty?
     return class_name if variants.key?(class_name)
 
-    variants.find { |_v, t| t.sub(/@\w+\z/, '').delete_prefix('?') == class_name }&.first
+    wanted = CLEAR_TYPE_OF[class_name] || class_name
+    exact = variants.find { |_v, t| t.delete_prefix('?') == wanted }
+    return exact.first if exact
+
+    # Only then fall back to ignoring capabilities, so String never lands on a
+    # String@symbol variant while a plain String variant exists.
+    variants.find { |_v, t| t.sub(/@\w+\z/, '').delete_prefix('?') == wanted }&.first
   end
 
-  def wrap_for_field(owner_class, field, value, literal)
+  def wrap_for_field(owner_class, field, value, literal, depth = 0, seen = {})
     structs, _unions = schema
     declared = structs[owner_class] && structs[owner_class][field]
     return literal unless declared
 
     bare = declared.delete_prefix('?').sub(/@\w+\z/, '')
+    # A collection field declares its ELEMENT type; the wrap belongs on each
+    # element, not on the map or list as a whole.
+    if (elem = element_type(bare))
+      return render_collection(value, elem, depth, seen) || literal
+    end
+
     variant = variant_for(bare, value.class.name.to_s.split('::').last)
     variant ? "#{bare}{ #{variant}: #{literal} }" : literal
+  end
+
+  # `{K}V`, `HashMap<K,V>`, `[]T` and `[Set]T` all name an element type.
+  def element_type(type)
+    case type
+    when /\A\{[^}]*\}(.+)\z/ then Regexp.last_match(1)
+    when /\AHashMap<[^,]+,\s*(.+)>\z/ then Regexp.last_match(1)
+    when /\A\[\](.+)\z/, /\A\[Set\](.+)\z/ then Regexp.last_match(1)
+    end
+  end
+
+  def render_collection(value, elem_type, depth, seen)
+    bare = elem_type.delete_prefix('?').sub(/@\w+\z/, '')
+    wrap = lambda do |v|
+      lit = clear_literal(v, depth + 1, seen)
+      return nil unless lit
+
+      variant = variant_for(bare, v.class.name.to_s.split('::').last)
+      variant ? "#{bare}{ #{variant}: #{lit} }" : lit
+    end
+    case value
+    when Hash
+      pairs = value.map do |k, v|
+        kk = clear_literal(k, depth + 1, seen)
+        vv = wrap.call(v)
+        kk && vv ? "#{kk}: #{vv}" : nil
+      end
+      pairs.any?(&:nil?) ? nil : "{#{pairs.join(', ')}}"
+    when Array
+      items = value.map { |v| wrap.call(v) }
+      if items.any?(&:nil?) then nil
+      elsif items.empty? then 'List[]'
+      else "[#{items.join(', ')}]"
+      end
+    end
   end
 
   def clear_literal(value, depth = 0, seen = {})
@@ -242,10 +313,15 @@ module FnIoRecord
           value.instance_variables.to_h { |iv| [iv.to_s.delete_prefix('@'), value.instance_variable_get(iv)] }
         else return nil
         end
+      # Ruby carries ivars the generated struct never declared. Emitting them
+      # is a "has no field" error, and the struct literal has to name every
+      # declared field anyway -- so the CLEAR declaration is the authority.
+      declared_fields = schema[0][value.class.name.to_s.split('::').last]
+      fields = fields.select { |f, _| declared_fields.key?(f) } if declared_fields&.any?
       owner_class = value.class.name.to_s.split('::').last
       parts = fields.map do |f, v|
         lit = clear_literal(v, depth + 1, seen)
-        lit ? "#{f}: #{wrap_for_field(owner_class, f, v, lit)}" : nil
+        lit ? "#{f}: #{wrap_for_field(owner_class, f, v, lit, depth, seen)}" : nil
       end
       return nil if parts.any?(&:nil?)
 
