@@ -2958,7 +2958,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_contract_present = FALSE;
       IF contract EXISTS AS rtoc_contract THEN
         MUTABLE rtoc_contract_mutable = COPY rtoc_contract;
-        rtoc_contract_present = !(ownershipContract__empty?(&rtoc_contract_mutable));
+        rtoc_contract_present = !(ownershipContract__empty?(rtoc_contract_mutable));
       END
       IF !((mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) OR rtoc_contract_present)) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -3100,7 +3100,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < nodes.length() DO
     IF nodes[rtoc_idx]? IS_A MIRBgBlock AS mir_bg_block THEN
         MUTABLE mir_bg_block_mutable = COPY mir_bg_block;
-        TRY (mIRChecker__verify_execution_boundary_fact_mut(&rtoc_self_view, bgBlock__boundary_fact(&mir_bg_block_mutable), "MIR::BgBlock"));
+        TRY (mIRChecker__verify_execution_boundary_fact_mut(&rtoc_self_view, bgBlock__boundary_fact(mir_bg_block_mutable), "MIR::BgBlock"));
         IF (((!(mir_bg_block_mutable.run_body) OR (mir_bg_block_mutable.run_body.length() == 0))) AND !(mir_bg_block_mutable.fsm_structure)) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :BOUNDARY_FACT_REQUIRED, Name{ StringValue: COPY "MIR::BgBlock" }, "FSM-consumed BG body has no typed FsmStructure; rendered execution-boundary code is unverifiable")));
         END
@@ -3109,7 +3109,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
     ELSE_IF nodes[rtoc_idx]? IS_A StreamSpawn AS stream_spawn THEN
         MUTABLE stream_spawn_mutable = COPY stream_spawn;
-        TRY (mIRChecker__verify_execution_boundary_fact_mut(&rtoc_self_view, streamSpawn__boundary_fact(&stream_spawn_mutable), "MIR::StreamSpawn"));
+        TRY (mIRChecker__verify_execution_boundary_fact_mut(&rtoc_self_view, streamSpawn__boundary_fact(stream_spawn_mutable), "MIR::StreamSpawn"));
     ELSE_IF nodes[rtoc_idx]? IS_A MIRDoBlock AS mir_do_block THEN
         MUTABLE mir_do_block_mutable = COPY mir_do_block;
         MUTABLE facts = COPY TRY (doBlock__boundary_facts(mir_do_block_mutable));
@@ -3196,7 +3196,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF contract EXISTS AS rtoc_contract THEN
       MUTABLE rtoc_contract_mutable = COPY rtoc_contract;
-      IF !(ownershipContract__empty?(&rtoc_contract_mutable)) THEN
+      IF !(ownershipContract__empty?(rtoc_contract_mutable)) THEN
         RETURN TRUE;
       END
     END
@@ -3348,7 +3348,7 @@ PRIVATE FN mIRChecker__ownership_contract_present?(self: MIRChecker, MUTABLE con
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (!(ownershipContract__empty?(&contract)) OR contract.covers_consuming_params);
+    RETURN (!(ownershipContract__empty?(contract)) OR contract.covers_consuming_params);
 }
 END
 PRIVATE FN mIRChecker__ownership_node_name(self: MIRChecker, node: Emittable) RETURNS String
@@ -3620,7 +3620,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
             END
       END
-      FOR _ IN TRY (ifBindStmt__body_slots(&if_bind_stmt_mutable)) DO
+      FOR _ IN TRY (ifBindStmt__body_slots(if_bind_stmt_mutable)) DO
       TRY (mIRChecker__check_stmts_for_unhoisted(&rtoc_self_view, _.body));
       END
       RETURN;
@@ -3634,7 +3634,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF while_stmt_mutable.update THEN
         TRY (mIRChecker__check_expr_for_unhoisted(&rtoc_self_view, while_stmt_mutable.update));
       END
-      FOR _ IN TRY (whileStmt__body_slots(&while_stmt_mutable)) DO
+      FOR _ IN TRY (whileStmt__body_slots(while_stmt_mutable)) DO
       TRY (mIRChecker__check_stmts_for_unhoisted(&rtoc_self_view, _.body));
       END
       RETURN;
@@ -3875,8 +3875,8 @@ END
 # answers too.
 PUB FN mIRCheckerRegistryOwnershipNode__mutating_receiver_allocator_op?(value: MIRCheckerRegistryOwnershipNode) RETURNS !?Bool ->
   PARTIAL MATCH value START
-    MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN TRY (registryCall__mutating_receiver_allocator_op?(&item));,
-    MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN TRY (indexedStore__mutating_receiver_allocator_op?(&item));,
+    MIRCheckerRegistryOwnershipNode.RegistryCall AS item -> RETURN TRY (registryCall__mutating_receiver_allocator_op?(item));,
+    MIRCheckerRegistryOwnershipNode.IndexedStore AS item -> RETURN TRY (indexedStore__mutating_receiver_allocator_op?(item));,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;

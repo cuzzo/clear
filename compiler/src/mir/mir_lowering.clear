@@ -7690,7 +7690,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((aST__node_expr(expr) OR_ELSE FALSE)) THEN
       RETURN prefix;
     END
-    IF (IF expr IS_A MIRBlockExpr AS mir_block_expr THEN (blockExpr__lazy_boundary(&mir_block_expr) != NIL) ELSE FALSE END) THEN
+    IF (IF expr IS_A MIRBlockExpr AS mir_block_expr THEN (blockExpr__lazy_boundary(mir_block_expr) != NIL) ELSE FALSE END) THEN
       RETURN prefix;
     END
     IF expr IS_A TryCatch AS try_catch THEN
@@ -7755,7 +7755,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expr IS_A Ident AS ident THEN
       RETURN CAST(Tuple{prefix, COPY ident} AS Tuple<[]Emittable, Emittable>);
     END
-    IF (IF expr IS_A MIRBlockExpr AS mir_block_expr THEN (blockExpr__lazy_boundary(&mir_block_expr) != NIL) ELSE FALSE END) THEN
+    IF (IF expr IS_A MIRBlockExpr AS mir_block_expr THEN (blockExpr__lazy_boundary(mir_block_expr) != NIL) ELSE FALSE END) THEN
       RETURN CAST(Tuple{prefix, COPY expr} AS Tuple<[]Emittable, Emittable>);
     END
     IF expr IS_A IfOptional AS if_optional THEN
@@ -7959,7 +7959,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((registryCall__has_alloc_metadata?(registry_call_mutable) OR (TRY (ownershipEffect__of(Emittable{ RegistryCall: COPY registry_call_mutable }))).produces_owned)) THEN
         RETURN;
       END
-      IF TRY (registryCall__mutating_receiver_allocator_op?(&registry_call_mutable)) THEN
+      IF TRY (registryCall__mutating_receiver_allocator_op?(registry_call_mutable)) THEN
         RETURN;
       END
       registry_call_mutable.target_var = COPY name;

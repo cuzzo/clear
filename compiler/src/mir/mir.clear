@@ -57,7 +57,7 @@ END
 FN fnDef__has_own_frame?(self: FnDef) RETURNS Bool ->
   RETURN TRUE;
 END
-FN fnDef__body_slots(MUTABLE self: FnDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN fnDef__body_slots(self: FnDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([fnDef__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN fnDef__body(self: FnDef) RETURNS ![]Emittable ->
@@ -233,7 +233,7 @@ PUB FN mIRStructDef__source_line(self: MIRStructDef) RETURNS ?Int64 ->
   COPY self.source_line;
 END
 
-FN structDef__body_slots(MUTABLE self: MIRStructDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN structDef__body_slots(self: MIRStructDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF self.methods EXISTS AS methods_value THEN
     RETURN CAST([structDef__body_slot(self, :methods, methods_value)] AS []MIRBodySlot);
   END
@@ -877,13 +877,13 @@ PUB STRUCT TestDef {
   source_line: ?Int64
 }
 
-FN testDef__needs_scheduler(MUTABLE self: TestDef) RETURNS Bool ->
+FN testDef__needs_scheduler(self: TestDef) RETURNS Bool ->
   RETURN (self.needs_scheduler == TRUE);
 END
 FN testDef__set_needs_scheduler(MUTABLE self: TestDef, value: Bool) RETURNS Void ->
   self.needs_scheduler = COPY value;
 END
-FN testDef__body_slots(MUTABLE self: TestDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN testDef__body_slots(self: TestDef) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([testDef__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN testDef__body(self: TestDef) RETURNS ![]Emittable ->
@@ -1392,7 +1392,7 @@ PUB STRUCT IfStmt {
 FN ifStmt__child_exprs(self: IfStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (ifStmt__compact_child_exprs(self, [CAST(self.cond AS Any)]));
 END
-FN ifStmt__body_slots(MUTABLE self: IfStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN ifStmt__body_slots(self: IfStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [ifStmt__body_slot(self, :then_body, self.then_body)];
   IF self.else_body != NIL THEN
     &slots.append(ifStmt__body_slot(self, :else_body, UNWRAP (self.else_body)));
@@ -1474,7 +1474,7 @@ FN ifBindStmt__child_exprs(self: IfBindStmt) RETURNS ![]Emittable EFFECTS REENTR
   END
   RETURN TRY (ifBindStmt__compact_child_exprs(self, exprs));
 END
-PUB FN ifBindStmt__body_slots(MUTABLE self: IfBindStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+PUB FN ifBindStmt__body_slots(self: IfBindStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [ifBindStmt__body_slot(self, :then_body, self.then_body)];
   IF self.else_body != NIL THEN
     &slots.append(ifBindStmt__body_slot(self, :else_body, UNWRAP (self.else_body)));
@@ -1546,7 +1546,7 @@ PUB STRUCT WhileStmt {
 FN whileStmt__child_exprs(self: WhileStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (whileStmt__compact_child_exprs(self, [CAST(self.cond AS Any), CAST(self.update AS Any)]));
 END
-PUB FN whileStmt__body_slots(MUTABLE self: WhileStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+PUB FN whileStmt__body_slots(self: WhileStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([whileStmt__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN whileStmt__body(self: WhileStmt) RETURNS ![]Emittable ->
@@ -1617,7 +1617,7 @@ PUB STRUCT ForStmt {
 FN forStmt__child_exprs(self: ForStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (forStmt__compact_child_exprs(self, [CAST(self.iter AS Any)]));
 END
-FN forStmt__body_slots(MUTABLE self: ForStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN forStmt__body_slots(self: ForStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([forStmt__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN forStmt__body(self: ForStmt) RETURNS ![]Emittable ->
@@ -1680,7 +1680,7 @@ PUB STRUCT ScopeBlock {
   source_line: ?Int64
 }
 
-FN scopeBlock__body_slots(MUTABLE self: ScopeBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN scopeBlock__body_slots(self: ScopeBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([scopeBlock__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN scopeBlock__body(self: ScopeBlock) RETURNS ![]Emittable ->
@@ -1762,7 +1762,7 @@ FN switchStmt__child_exprs(self: SwitchStmt) RETURNS ![]Emittable EFFECTS REENTR
   &pattern_exprs.append(COPY self.subject);
   RETURN TRY (switchStmt__compact_child_exprs(self, pattern_exprs));
 END
-FN switchStmt__body_slots(MUTABLE self: SwitchStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN switchStmt__body_slots(self: SwitchStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_25: []MIRBodySlot = List[]; rtoc_empty_list_25 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.arms.length() DO
@@ -1836,7 +1836,7 @@ PUB STRUCT UnionMatchStmt {
 FN unionMatchStmt__child_exprs(self: UnionMatchStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (unionMatchStmt__compact_child_exprs(self, [CAST(self.subject AS Any)]));
 END
-FN unionMatchStmt__body_slots(MUTABLE self: UnionMatchStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN unionMatchStmt__body_slots(self: UnionMatchStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_27: []MIRBodySlot = List[]; rtoc_empty_list_27 } );
   IF TRUE THEN
       MUTABLE rtoc_each_items_28 = COPY self.arms;
@@ -1916,7 +1916,7 @@ FN ifChain__child_exprs(self: IfChain) RETURNS ![]Emittable EFFECTS REENTRANT ->
   END
   RETURN TRY (ifChain__compact_child_exprs(self, conds));
 END
-FN ifChain__body_slots(MUTABLE self: IfChain) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN ifChain__body_slots(self: IfChain) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_30: []MIRBodySlot = List[]; rtoc_empty_list_30 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.branches.length() DO
@@ -2505,7 +2505,7 @@ PUB STRUCT DebugOnly {
   source_line: ?Int64
 }
 
-FN debugOnly__body_slots(MUTABLE self: DebugOnly) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN debugOnly__body_slots(self: DebugOnly) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([debugOnly__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN debugOnly__body(self: DebugOnly) RETURNS ![]Emittable ->
@@ -2997,7 +2997,7 @@ END
 FN deferStmt__initialize(MUTABLE self: MIRDeferStmt, body: DeferBodyInput) RETURNS !Void ->
   TRY (mIR__validate_defer_body_mut(body, "MIR::DeferStmt"));
 END
-FN deferStmt__body_slots(MUTABLE self: MIRDeferStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN deferStmt__body_slots(self: MIRDeferStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF self.body IS_A []Emittable THEN
     RETURN CAST([deferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body))] AS []MIRBodySlot);
   ELSE
@@ -3074,7 +3074,7 @@ PUB STRUCT ErrDeferStmt {
 FN errDeferStmt__initialize(MUTABLE self: ErrDeferStmt, body: DeferBodyInput) RETURNS !Void ->
   TRY (mIR__validate_defer_body_mut(body, "MIR::ErrDeferStmt"));
 END
-FN errDeferStmt__body_slots(MUTABLE self: ErrDeferStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN errDeferStmt__body_slots(self: ErrDeferStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF self.body IS_A []Emittable THEN
     RETURN CAST([errDeferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body))] AS []MIRBodySlot);
   ELSE
@@ -3330,14 +3330,14 @@ FN bgBlock__initialize(MUTABLE self: MIRBgBlock, code: BgBlockPlan, captures_val
     panic("MIR::BgBlock code must be a structural emission plan, got {}");
   END
 END
-FN bgBlock__result_type(MUTABLE self: MIRBgBlock) RETURNS ?Type ->
+FN bgBlock__result_type(self: MIRBgBlock) RETURNS ?Type ->
   RETURN COPY self.result_type;
 END
 FN bgBlock__set_result_type(MUTABLE self: MIRBgBlock, value: ?Type) RETURNS ?Type ->
   self.result_type = COPY value;
   RETURN COPY value;
 END
-PUB FN bgBlock__boundary_fact(MUTABLE self: MIRBgBlock) RETURNS ?ExecutionBoundaryFact ->
+PUB FN bgBlock__boundary_fact(self: MIRBgBlock) RETURNS ?ExecutionBoundaryFact ->
   RETURN COPY self.boundary_fact;
 END
 FN bgBlock__set_boundary_fact(MUTABLE self: MIRBgBlock, value: ?ExecutionBoundaryFact) RETURNS ?ExecutionBoundaryFact ->
@@ -3347,7 +3347,7 @@ END
 FN bgBlock__expr?(self: MIRBgBlock) RETURNS Bool ->
   RETURN TRUE;
 END
-FN bgBlock__body_slots(MUTABLE self: MIRBgBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN bgBlock__body_slots(self: MIRBgBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF self.run_body THEN
     RETURN CAST([bgBlock__body_slot(self, :run_body, self.run_body)] AS []MIRBodySlot);
   ELSE
@@ -3414,7 +3414,7 @@ PUB STRUCT StreamSpawn {
   source_line: ?Int64
 }
 
-PUB FN streamSpawn__boundary_fact(MUTABLE self: StreamSpawn) RETURNS ?ExecutionBoundaryFact ->
+PUB FN streamSpawn__boundary_fact(self: StreamSpawn) RETURNS ?ExecutionBoundaryFact ->
   RETURN COPY self.boundary_fact;
 END
 FN streamSpawn__set_boundary_fact(MUTABLE self: StreamSpawn, value: ?ExecutionBoundaryFact) RETURNS ?ExecutionBoundaryFact ->
@@ -3424,7 +3424,7 @@ END
 FN streamSpawn__expr?(self: StreamSpawn) RETURNS Bool ->
   RETURN TRUE;
 END
-FN streamSpawn__body_slots(MUTABLE self: StreamSpawn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN streamSpawn__body_slots(self: StreamSpawn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([streamSpawn__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN streamSpawn__body(self: StreamSpawn) RETURNS ![]Emittable ->
@@ -3518,7 +3518,7 @@ PUB FN fsmStructure__set_ownership_facts(MUTABLE self: FsmStructure, value: []Fs
   self.facts.ownership_facts = COPY value;
   RETURN value;
 END
-FN fsmStructure__owned_result_required(MUTABLE self: FsmStructure) RETURNS Bool ->
+FN fsmStructure__owned_result_required(self: FsmStructure) RETURNS Bool ->
   RETURN (self.owned_result_required == TRUE);
 END
 FN fsmStructure__set_owned_result_required(MUTABLE self: FsmStructure, value: Bool) RETURNS Bool ->
@@ -4328,7 +4328,7 @@ END
 FN catchWrapper__has_default(self: CatchWrapper) RETURNS Bool ->
   RETURN (self.default_action == CatchDefaultAction.Body);
 END
-FN catchWrapper__body_slots(MUTABLE self: CatchWrapper) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN catchWrapper__body_slots(self: CatchWrapper) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_68: []MIRBodySlot = List[]; rtoc_empty_list_68 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.clauses.length() DO
@@ -4433,7 +4433,7 @@ FN doBlock__set_boundary_facts(MUTABLE self: MIRDoBlock, value: []ExecutionBound
   self.boundary_facts = COPY value;
   RETURN COPY value;
 END
-FN doBlock__body_slots(MUTABLE self: MIRDoBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN doBlock__body_slots(self: MIRDoBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_70: []MIRBodySlot = List[]; rtoc_empty_list_70 } );
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.branch_bodies.length() DO
@@ -6542,7 +6542,7 @@ END
 FN snapshotRead__child_exprs(self: SnapshotRead) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (snapshotRead__compact_child_exprs(self, [CAST(self.cell_unwrap AS Any)]));
 END
-FN snapshotRead__body_slots(MUTABLE self: SnapshotRead) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN snapshotRead__body_slots(self: SnapshotRead) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([snapshotRead__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN snapshotRead__body(self: SnapshotRead) RETURNS ![]Emittable ->
@@ -6621,7 +6621,7 @@ FN snapshotTransaction__child_exprs(self: SnapshotTransaction) RETURNS ![]Emitta
   END
   RETURN TRY (snapshotTransaction__compact_child_exprs(self, values));
 END
-FN snapshotTransaction__body_slots(MUTABLE self: SnapshotTransaction) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN snapshotTransaction__body_slots(self: SnapshotTransaction) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [snapshotTransaction__body_slot(self, :body, self.body)];
   IF self.conflict_action THEN
     slots = ruby_array_concat_MIRBodySlot(slots, TRY (emittable__body_slots(self.conflict_action)));
@@ -6702,7 +6702,7 @@ FN snapshotMultiTxn__child_exprs(self: SnapshotMultiTxn) RETURNS ![]Emittable EF
   END
   RETURN TRY (snapshotMultiTxn__compact_child_exprs(self, values));
 END
-FN snapshotMultiTxn__body_slots(MUTABLE self: SnapshotMultiTxn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN snapshotMultiTxn__body_slots(self: SnapshotMultiTxn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [snapshotMultiTxn__body_slot(self, :body, self.body)];
   IF self.conflict_action THEN
     slots = ruby_array_concat_MIRBodySlot(slots, TRY (emittable__body_slots(self.conflict_action)));
@@ -6776,7 +6776,7 @@ END
 FN polymorphicMutate__child_exprs(self: PolymorphicMutate) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (polymorphicMutate__compact_child_exprs(self, [CAST(self.cell AS Any)]));
 END
-FN polymorphicMutate__body_slots(MUTABLE self: PolymorphicMutate) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN polymorphicMutate__body_slots(self: PolymorphicMutate) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([polymorphicMutate__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN polymorphicMutate__body(self: PolymorphicMutate) RETURNS ![]Emittable ->
@@ -6849,7 +6849,7 @@ END
 FN polymorphicMutateFlow__child_exprs(self: PolymorphicMutateFlow) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (polymorphicMutateFlow__compact_child_exprs(self, [CAST(self.cell AS Any), CAST(self.guard_cond AS Any)]));
 END
-FN polymorphicMutateFlow__body_slots(MUTABLE self: PolymorphicMutateFlow) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN polymorphicMutateFlow__body_slots(self: PolymorphicMutateFlow) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   MUTABLE slots: []MIRBodySlot = [polymorphicMutateFlow__body_slot(self, :body, self.body)];
   IF self.guard_fail_body != NIL THEN
     &slots.append(polymorphicMutateFlow__body_slot(self, :guard_fail_body, UNWRAP (self.guard_fail_body)));
@@ -7823,7 +7823,7 @@ PUB STRUCT Call {
   result_type: ?Type
 }
 
-FN call__result_type(MUTABLE self: Call) RETURNS ?Type ->
+FN call__result_type(self: Call) RETURNS ?Type ->
   RETURN COPY self.result_type;
 END
 FN call__set_result_type(MUTABLE self: Call, value: ?Type) RETURNS ?Type ->
@@ -7852,7 +7852,7 @@ FN call__explicit_ownership_contract(self: Call) RETURNS ?OwnershipContract@mult
   RETURN NIL;
   END
 END
-FN call__without_try(MUTABLE self: Call) RETURNS !Call ->
+FN call__without_try(self: Call) RETURNS !Call ->
   MUTABLE out = Call{ callee: COPY self.callee, args: COPY self.args, try_wrap: FALSE, owned_return: self.owned_return, callable_contract: COPY self.callable_contract, lowered_node_id: NIL, never_success: FALSE, ownership_consumption: NIL, result_type: NIL };
   out.never_success = self.never_success;
   IF self.result_type EXISTS AS result_type_value THEN
@@ -8111,7 +8111,7 @@ PUB FN mIRMethodCall__result_type(self: MIRMethodCall) RETURNS ?Type ->
   self.result_type;
 END
 
-FN methodCall__result_type(MUTABLE self: MIRMethodCall) RETURNS ?Type ->
+FN methodCall__result_type(self: MIRMethodCall) RETURNS ?Type ->
   RETURN COPY self.result_type;
 END
 FN methodCall__set_result_type(MUTABLE self: MIRMethodCall, value: ?Type) RETURNS ?Type ->
@@ -8131,7 +8131,7 @@ FN methodCall__explicit_ownership_contract(self: MIRMethodCall) RETURNS ?Ownersh
   RETURN NIL;
   END
 END
-FN methodCall__without_try(MUTABLE self: MIRMethodCall) RETURNS !MIRMethodCall ->
+FN methodCall__without_try(self: MIRMethodCall) RETURNS !MIRMethodCall ->
   MUTABLE out = MIRMethodCall{ receiver: COPY self.receiver, method: COPY self.method, args: COPY self.args, try_wrap: FALSE, callable_contract: COPY self.callable_contract, owned_result_alloc: COPY self.owned_result_alloc, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
   IF self.result_type EXISTS AS result_type_value THEN
     MUTABLE result_type_value_mutable = COPY result_type_value;
@@ -9704,25 +9704,25 @@ PUB FN mIRBlockExpr__result_type(self: MIRBlockExpr) RETURNS ?Type ->
   self.result_type;
 END
 
-PUB FN blockExpr__lazy_boundary(MUTABLE self: MIRBlockExpr) RETURNS Bool ->
+PUB FN blockExpr__lazy_boundary(self: MIRBlockExpr) RETURNS Bool ->
   RETURN (self.lazy_boundary == TRUE);
 END
 FN blockExpr__set_lazy_boundary(MUTABLE self: MIRBlockExpr, value: Bool) RETURNS Void ->
   self.lazy_boundary = COPY value;
 END
-FN blockExpr__result_type(MUTABLE self: MIRBlockExpr) RETURNS ?Type ->
+FN blockExpr__result_type(self: MIRBlockExpr) RETURNS ?Type ->
   RETURN COPY self.result_type;
 END
 FN blockExpr__set_result_type(MUTABLE self: MIRBlockExpr, value: ?Type) RETURNS Void ->
   self.result_type = COPY value;
 END
-FN blockExpr__borrowed_view(MUTABLE self: MIRBlockExpr) RETURNS Bool ->
+FN blockExpr__borrowed_view(self: MIRBlockExpr) RETURNS Bool ->
   RETURN (self.borrowed_view == TRUE);
 END
 FN blockExpr__set_borrowed_view(MUTABLE self: MIRBlockExpr, value: Bool) RETURNS Void ->
   self.borrowed_view = COPY value;
 END
-FN blockExpr__body_slots(MUTABLE self: MIRBlockExpr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN blockExpr__body_slots(self: MIRBlockExpr) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([blockExpr__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 PUB FN blockExpr__body(self: MIRBlockExpr) RETURNS ![]Emittable ->
@@ -10001,7 +10001,7 @@ PUB STRUCT TryCatch {
   result_type: ?Type
 }
 
-FN tryCatch__result_type(MUTABLE self: TryCatch) RETURNS ?Type ->
+FN tryCatch__result_type(self: TryCatch) RETURNS ?Type ->
   RETURN COPY self.result_type;
 END
 FN tryCatch__set_result_type(MUTABLE self: TryCatch, value: ?Type) RETURNS Void ->
@@ -10075,7 +10075,7 @@ PUB STRUCT Orelse {
   result_type: ?Type
 }
 
-FN orelse__result_type(MUTABLE self: Orelse) RETURNS ?Type ->
+FN orelse__result_type(self: Orelse) RETURNS ?Type ->
   RETURN COPY self.result_type;
 END
 FN orelse__set_result_type(MUTABLE self: Orelse, value: ?Type) RETURNS Void ->
@@ -10210,7 +10210,7 @@ PUB STRUCT IfOptional {
   result_type: ?Type
 }
 
-FN ifOptional__result_type(MUTABLE self: IfOptional) RETURNS ?Type ->
+FN ifOptional__result_type(self: IfOptional) RETURNS ?Type ->
   RETURN COPY self.result_type;
 END
 FN ifOptional__set_result_type(MUTABLE self: IfOptional, value: ?Type) RETURNS Void ->
@@ -11327,7 +11327,7 @@ PUB FN mIRRangeLit__result_type(self: MIRRangeLit) RETURNS ?Type ->
   self.result_type;
 END
 
-FN rangeLit__result_type(MUTABLE self: MIRRangeLit) RETURNS ?Type ->
+FN rangeLit__result_type(self: MIRRangeLit) RETURNS ?Type ->
   RETURN COPY self.result_type;
 END
 FN rangeLit__set_result_type(MUTABLE self: MIRRangeLit, value: ?Type) RETURNS Void ->
@@ -12131,11 +12131,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN distinct_names;
 }
 END
-PUB FN ownershipContract__empty?(MUTABLE self: OwnershipContract) RETURNS Bool
+PUB FN ownershipContract__empty?(self: OwnershipContract) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((((rtoc_self_view.operands.length() == 0) AND (rtoc_self_view.produces.length() == 0)) AND (rtoc_self_view.borrows.length() == 0)) AND !(rtoc_self_view.covers_consuming_params));
 }
 END
@@ -13825,7 +13825,7 @@ FN failureAction__child_exprs(self: FailureAction) RETURNS ![]Emittable EFFECTS 
   END
   RETURN TRY (failureAction__compact_child_exprs(self, values));
 END
-FN failureAction__body_slots(MUTABLE self: FailureAction) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN failureAction__body_slots(self: FailureAction) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF !((self.kind == FailureActionKind.Block)) THEN
     RETURN CAST(( { MUTABLE rtoc_empty_list_206: []MIRBodySlot = List[]; rtoc_empty_list_206 } ) AS []MIRBodySlot);
   END
@@ -14200,11 +14200,11 @@ PUB FN registryCall__has_alloc_metadata?(self: RegistryCall) RETURNS Bool ->
   MUTABLE metadata: ?InlineAllocMetadata@multiowned = COPY self.allocs;
   RETURN ((metadata != NIL) AND !(inlineAllocMetadata__empty?(metadata)));
 END
-PUB FN registryCall__mutating_receiver_allocator_op?(MUTABLE self: RegistryCall) RETURNS !Bool ->
+PUB FN registryCall__mutating_receiver_allocator_op?(self: RegistryCall) RETURNS !Bool ->
   RETURN (registryCall__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_212 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(rtoc_mutable_receiver_212)) });
 END
-FN registryCall__assignable_allocating_result?(MUTABLE self: RegistryCall) RETURNS !Bool ->
+FN registryCall__assignable_allocating_result?(self: RegistryCall) RETURNS !Bool ->
   RETURN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_213 = (COPY self.entry);
   TRY (functionSignature__emits_allocating?(rtoc_mutable_receiver_213)) } AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_214 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(rtoc_mutable_receiver_214)) }));
@@ -14311,7 +14311,7 @@ FN indexedStore__has_alloc_metadata?(self: IndexedStore) RETURNS Bool ->
   RETURN !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_222 = (COPY self.allocs);
   inlineAllocMetadata__empty?(rtoc_local_receiver_222) });
 END
-PUB FN indexedStore__mutating_receiver_allocator_op?(MUTABLE self: IndexedStore) RETURNS !Bool ->
+PUB FN indexedStore__mutating_receiver_allocator_op?(self: IndexedStore) RETURNS !Bool ->
   RETURN (indexedStore__has_alloc_metadata?(self) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_223 = (COPY self.entry);
   TRY (functionSignature__mutates_receiver?(rtoc_mutable_receiver_223)) });
 END
@@ -14557,7 +14557,7 @@ PUB STRUCT ObservableConsumerSpawn {
 FN observableConsumerSpawn__explicit_ownership_contract(self: ObservableConsumerSpawn) RETURNS OwnershipContract@multiowned EFFECTS REENTRANT ->
   RETURN COPY self.ownership_contract;
 END
-FN observableConsumerSpawn__body_slots(MUTABLE self: ObservableConsumerSpawn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN observableConsumerSpawn__body_slots(self: ObservableConsumerSpawn) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([observableConsumerSpawn__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN observableConsumerSpawn__mir?(self: ObservableConsumerSpawn) RETURNS Bool ->
@@ -14639,7 +14639,7 @@ PUB STRUCT ShardConcurrentEach {
 FN shardConcurrentEach__child_exprs(self: ShardConcurrentEach) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (shardConcurrentEach__compact_child_exprs(self, [self.map_expr, self.start_expr, self.finish_expr, self.capacity_expr, self.batch_size_expr]));
 END
-FN shardConcurrentEach__body_slots(MUTABLE self: ShardConcurrentEach) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
+FN shardConcurrentEach__body_slots(self: ShardConcurrentEach) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN CAST([shardConcurrentEach__body_slot(self, :producer_key_body, self.producer_key_body), shardConcurrentEach__body_slot(self, :capture_setup, self.capture_setup), shardConcurrentEach__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
 FN shardConcurrentEach__mir?(self: ShardConcurrentEach) RETURNS Bool ->
@@ -14935,7 +14935,7 @@ END
 PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF value IS_A FnDef AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (fnDef__body_slots(&receiver));
+    RETURN TRY (fnDef__body_slots(receiver));
   END
   IF value IS_A ProtocolAdapterDef AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14971,7 +14971,7 @@ PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS RE
   END
   IF value IS_A TestDef AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (testDef__body_slots(&receiver));
+    RETURN TRY (testDef__body_slots(receiver));
   END
   IF value IS_A Let AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -14995,35 +14995,35 @@ PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS RE
   END
   IF value IS_A IfStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ifStmt__body_slots(&receiver));
+    RETURN TRY (ifStmt__body_slots(receiver));
   END
   IF value IS_A IfBindStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ifBindStmt__body_slots(&receiver));
+    RETURN TRY (ifBindStmt__body_slots(receiver));
   END
   IF value IS_A WhileStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (whileStmt__body_slots(&receiver));
+    RETURN TRY (whileStmt__body_slots(receiver));
   END
   IF value IS_A ForStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (forStmt__body_slots(&receiver));
+    RETURN TRY (forStmt__body_slots(receiver));
   END
   IF value IS_A ScopeBlock AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (scopeBlock__body_slots(&receiver));
+    RETURN TRY (scopeBlock__body_slots(receiver));
   END
   IF value IS_A SwitchStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (switchStmt__body_slots(&receiver));
+    RETURN TRY (switchStmt__body_slots(receiver));
   END
   IF value IS_A UnionMatchStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (unionMatchStmt__body_slots(&receiver));
+    RETURN TRY (unionMatchStmt__body_slots(receiver));
   END
   IF value IS_A IfChain AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (ifChain__body_slots(&receiver));
+    RETURN TRY (ifChain__body_slots(receiver));
   END
   IF value IS_A ReturnStmt AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -15059,7 +15059,7 @@ PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS RE
   END
   IF value IS_A DebugOnly AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (debugOnly__body_slots(&receiver));
+    RETURN TRY (debugOnly__body_slots(receiver));
   END
   IF value IS_A Sort AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -15087,7 +15087,7 @@ PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS RE
   END
   IF value IS_A ErrDeferStmt AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (errDeferStmt__body_slots(&receiver));
+    RETURN TRY (errDeferStmt__body_slots(receiver));
   END
   IF value IS_A ExprStmt AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -15107,7 +15107,7 @@ PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS RE
   END
   IF value IS_A StreamSpawn AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (streamSpawn__body_slots(&receiver));
+    RETURN TRY (streamSpawn__body_slots(receiver));
   END
   IF value IS_A FsmStructure AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -15139,7 +15139,7 @@ PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS RE
   END
   IF value IS_A FailureAction AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (failureAction__body_slots(&receiver));
+    RETURN TRY (failureAction__body_slots(receiver));
   END
   IF value IS_A CapabilityLockTarget AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -15159,7 +15159,7 @@ PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS RE
   END
   IF value IS_A CatchWrapper AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (catchWrapper__body_slots(&receiver));
+    RETURN TRY (catchWrapper__body_slots(receiver));
   END
   IF value IS_A Noop AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -15283,23 +15283,23 @@ PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS RE
   END
   IF value IS_A SnapshotRead AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (snapshotRead__body_slots(&receiver));
+    RETURN TRY (snapshotRead__body_slots(receiver));
   END
   IF value IS_A SnapshotTransaction AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (snapshotTransaction__body_slots(&receiver));
+    RETURN TRY (snapshotTransaction__body_slots(receiver));
   END
   IF value IS_A SnapshotMultiTxn AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (snapshotMultiTxn__body_slots(&receiver));
+    RETURN TRY (snapshotMultiTxn__body_slots(receiver));
   END
   IF value IS_A PolymorphicMutate AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (polymorphicMutate__body_slots(&receiver));
+    RETURN TRY (polymorphicMutate__body_slots(receiver));
   END
   IF value IS_A PolymorphicMutateFlow AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (polymorphicMutateFlow__body_slots(&receiver));
+    RETURN TRY (polymorphicMutateFlow__body_slots(receiver));
   END
   IF value IS_A PolymorphicFlowSignal AS payload THEN
     MUTABLE receiver = COPY payload;
@@ -15579,11 +15579,11 @@ PUB FN emittable__body_slots(value: Emittable) RETURNS ![]MIRBodySlot EFFECTS RE
   END
   IF value IS_A ObservableConsumerSpawn AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (observableConsumerSpawn__body_slots(&receiver));
+    RETURN TRY (observableConsumerSpawn__body_slots(receiver));
   END
   IF value IS_A ShardConcurrentEach AS payload THEN
     MUTABLE receiver = COPY payload;
-    RETURN TRY (shardConcurrentEach__body_slots(&receiver));
+    RETURN TRY (shardConcurrentEach__body_slots(receiver));
   END
   IF value IS_A InlineBc AS payload THEN
     MUTABLE receiver = COPY payload;
