@@ -83,6 +83,81 @@ module SelfhostFnVerify
     items
   end
 
+  # The target's declared parameter types. A recorded argument is the concrete
+  # Ruby object, so a parameter declared as a UNION needs the wrap the struct
+  # fields already get -- passing the bare payload is an ARGUMENT_TYPE_ERROR.
+  def params_of(fn)
+    @params ||= begin
+      map = {}
+      Dir.glob(File.join(ROOT, 'compiler', 'src', '**', '*.clear')).each do |f|
+        File.read(f).scan(/^(?:PUB |PRIVATE )?FN ([\w?!]+)\((.*?)\)\s*(?:RETURNS|REQUIRES)/m) do |name, plist|
+          map[name] ||= split_top(plist).map { |p| p.split(':', 2)[1].to_s.strip }
+        end
+      end
+      map
+    end
+    @params[fn] || []
+  end
+
+  def split_top(text)
+    out = []
+    depth = 0
+    cur = +''
+    text.each_char do |ch|
+      depth += 1 if '{[(<'.include?(ch)
+      depth -= 1 if '}])>'.include?(ch)
+      if ch == ',' && depth.zero?
+        out << cur
+        cur = +''
+      else
+        cur << ch
+      end
+    end
+    out << cur
+    out.reject { |p| p.strip.empty? }
+  end
+
+  def unions
+    @unions ||= begin
+      map = Hash.new { |h, k| h[k] = [] }
+      Dir.glob(File.join(ROOT, 'compiler', 'src', '**', '*.clear')).each do |f|
+        text = File.read(f)
+        text.to_enum(:scan, /^(?:PUB |PRIVATE )?UNION (\w+)\s*\{/).each do
+          name = Regexp.last_match(1)
+          i = Regexp.last_match.end(0)
+          depth = 1
+          body = +''
+          while i < text.length && depth.positive?
+            depth += 1 if text[i] == '{'
+            depth -= 1 if text[i] == '}'
+            body << text[i] if depth.positive?
+            i += 1
+          end
+          map[name] = split_top(body).map { |v| v.split(':', 1).first.to_s.strip.split(':').first.to_s.strip }
+        end
+      end
+      map
+    end
+  end
+
+  # Wraps `Ctor{...}` as `Union{ Ctor: Ctor{...} }` when the parameter at that
+  # position declares the union and it has a matching variant.
+  def wrap_arg(literal, declared)
+    return literal unless declared
+
+    bare = declared.to_s.strip.delete_prefix('?').sub(/@\w+\z/, '')
+    ctor = literal[/\A([A-Z]\w*)\{/, 1]
+    return literal unless ctor && ctor != bare
+    return literal unless unions[bare].include?(ctor)
+
+    "#{bare}{ #{ctor}: #{literal} }"
+  end
+
+  def returns_void?(fn)
+    fallible?(fn) # populates @returns
+    @returns[fn].to_s.delete_prefix('!') == 'Void'
+  end
+
   def fallible?(fn)
     @returns ||= begin
       map = {}
@@ -126,10 +201,15 @@ module SelfhostFnVerify
     # The probe restates the target under a prefixed name so it cannot collide
     # with the stub set; the replay has to call that name.
     safe = "probe__#{kase.fn.delete('?').delete('!')}"
-    inner = "#{safe}(#{kase.args.join(', ')})"
+    declared = params_of(kase.fn)
+    args = kase.args.each_with_index.map { |a, i| wrap_arg(a, declared[i]) }
+    inner = "#{safe}(#{args.join(', ')})"
     # TRY on a non-fallible call is itself an error, so wrap only what the
     # target's declared return type says is fallible.
     call = fallible?(kase.fn) ? "TRY (#{inner})" : inner
+    # A Void target has no value to bind or print; Ruby recorded its nil, so an
+    # empty transcript is the match.
+    return "  #{call};\n  RETURN;\n" if returns_void?(kase.fn)
     case kase.kind
     when :list
       "  verify_result = #{call};\n" \
@@ -141,7 +221,12 @@ module SelfhostFnVerify
         case kase.ruby_class
         when 'TrueClass', 'FalseClass'
           "  IF verify_result THEN\n    print(\"true\");\n  ELSE\n    print(\"false\");\n  END\n"
-        when 'String', 'Symbol', 'NilClass'
+        when 'NilClass'
+          # Ruby returned nil, so the expected text is empty. Interpolating an
+          # optional is a type error, so presence is what gets printed: nothing
+          # for NIL (a match), a marker otherwise (a difference).
+          "  IF verify_result EXISTS THEN\n    print(\"SOME\");\n  END\n"
+        when 'String', 'Symbol'
           "  print(\"${verify_result}\");\n"
         else
           "  print(verify_result.toString());\n"
