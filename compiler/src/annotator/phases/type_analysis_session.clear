@@ -4062,7 +4062,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE owned: ?Locatable = owned_branch_value;
     IF owned EXISTS AS owned_value THEN
-      callSignatureSite__replace_arg_mut(facts.site, facts.index, owned_value);
+      callSignatureSite__replace_arg_mut(&facts.site, facts.index, owned_value);
     END
     MUTABLE current_arg: ?Locatable = COPY facts.site.args[facts.index];
     IF (IF current_arg? IS_A CopyNode AS copy_node THEN (container_alloc != :heap) ELSE FALSE END) THEN
@@ -7463,7 +7463,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE min = (type__integer_type_min(type_sym) OR_ELSE 0);
             IF ((literal_value < min) OR (literal_value > max_value)) THEN
               IF node IS_A Literal AS literal THEN
-                TRY (typeAnalysisSession__handle_prefixed_int_overflow_mut(&rtoc_self_view, literal, literal_value, type_sym, min, max_value));
+                TRY (typeAnalysisSession__handle_prefixed_int_overflow_mut(&rtoc_self_view, &literal, literal_value, type_sym, min, max_value));
               ELSE
                 TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :INT_LITERAL_OVERFLOW }, [], CAST({:val: literal_value, :type: type_sym, :min: min, :max: max_value} AS {String@symbol}Any)));
               END
@@ -12670,7 +12670,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE reject_when: ?String@symbol = TRY (functionSignature__intrinsic_reject_when(matched_def_value_mutable));
       MUTABLE first_arg: ?Locatable = COPY args.first();
-      IF (((reject_when != NIL) AND (first_arg != NIL)) AND TRY (typeAnalysisSession__reject_arg_type_matches?(&rtoc_self_view, first_arg, symbol(reject_when)))) THEN
+      IF (((reject_when != NIL) AND (first_arg != NIL)) AND TRY (typeAnalysisSession__reject_arg_type_matches?(&rtoc_self_view, &first_arg, symbol(reject_when)))) THEN
         MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(matched_def_value_mutable)) OR_ELSE "${aST__node_name(castNodeToLocatable(node))}() is not valid for ${first_arg.resolved_type}");
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_REJECTED }, [], CAST({:detail: reason} AS {String@symbol}Any)));
         RETURN NIL;
@@ -14336,7 +14336,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__emit_use_of_moved_in_loop_error_mut(&rtoc_self_view, node, UNWRAP (rtoc_each_items_361[rtoc_idx]), graph_node, code));
+      TRY (typeAnalysisSession__emit_use_of_moved_in_loop_error_mut(&rtoc_self_view, &node, UNWRAP (rtoc_each_items_361[rtoc_idx]), graph_node, code));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -15341,7 +15341,7 @@ PRIVATE FN typeAnalysisSession__visit_Identifier(MUTABLE self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (typeAnalysisSession__predicate_identifier_allowed_mut(&rtoc_self_view, node));
+    TRY (typeAnalysisSession__predicate_identifier_allowed_mut(&rtoc_self_view, &node));
     MUTABLE scope_branch_value: ?Scope@multiowned = NIL;
     IF (typeAnalysisSession__smooth_depth(&rtoc_self_view) > 0) THEN
       scope_branch_value = TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, node.name));
@@ -16241,7 +16241,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_400 = typeAnalysisSession__ownership_graph(&rtoc_self_view);
       ownershipGraph__moved?(rtoc_local_receiver_400, check) } THEN
           MUTABLE rtoc_graph_16153 = typeAnalysisSession__ownership_graph(&rtoc_self_view);
-          TRY (typeAnalysisSession__emit_use_of_moved_path_error_mut(&rtoc_self_view, node, castStringListToNameCandidateList(path), ownershipGraph__get_index(rtoc_graph_16153, check)));
+          TRY (typeAnalysisSession__emit_use_of_moved_path_error_mut(&rtoc_self_view, &node, castStringListToNameCandidateList(path), ownershipGraph__get_index(rtoc_graph_16153, check)));
           BREAK;
       END
     rtoc_idx = rtoc_idx + 1;
