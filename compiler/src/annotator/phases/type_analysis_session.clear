@@ -2261,7 +2261,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = typeAnalysisSession__source_code(&rtoc_self_view);
     MUTABLE kw = {:name: name, :field: field, :cap: cap};
     MUTABLE fixes = List[];
-    IF (((src != NIL) AND TRUE) AND node.token) THEN
+    IF (((src != NIL) AND TRUE)) THEN
       MUTABLE line_num = node.token.line;
       MUTABLE line_text = (src.split("\n")[(line_num - 1)] OR_ELSE "");
       MUTABLE body = line_text.trim();
@@ -2388,7 +2388,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = typeAnalysisSession__source_code(&rtoc_self_view);
     names = names;
     MUTABLE edits = List[];
-    IF (((src != NIL) AND TRUE) AND node.token) THEN
+    IF (((src != NIL) AND TRUE)) THEN
       MUTABLE with_line = node.token.line;
       MUTABLE window_lines = (src.split("\n").substr(((with_line - 1)), ((((with_line + 8)) - ((with_line - 1))) + 1)) OR_ELSE List[]);
       FOR _ IN names DO
