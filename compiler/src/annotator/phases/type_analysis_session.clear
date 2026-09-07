@@ -2648,7 +2648,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(decl).line;
+      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (decl))).line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
       MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(decl).column - 1));
       IF semi_idx EXISTS AS semi_idx_value THEN
@@ -2688,7 +2688,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(decl).line;
+      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (decl))).line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
       MUTABLE idx: ?Int64 = line_text.indexOf(old_sigil);
       IF idx EXISTS AS idx_value THEN
@@ -4935,7 +4935,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         NIL
       END)))).reg;
       END
-      RETURN !(!(((TRUE AND (aST__node__container_borrow(reg) == TRUE)))));
+      RETURN !(!(((TRUE AND (aST__node__container_borrow(castSymbolEntryRegInputToLocatable(UNWRAP (reg))) == TRUE)))));
     END
     IF node IS_A GetIndex AS get_index THEN
       RETURN TRUE;
@@ -13038,7 +13038,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.condition IS_A IsA AND node.comptime) THEN
       TRY (typeAnalysisSession__annotate_comptime_is_a_mut(&rtoc_self_view, castLocatableToIsA__type_analysis_session(node.condition)));
     ELSE
-      IF (node.condition IS_A IsA AND TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, locatable__left(node.condition)))) THEN
+      IF (node.condition IS_A IsA AND TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, castLocatableToNodeOrType(UNWRAP (locatable__left))(node.condition)))) THEN
         TRY (typeAnalysisSession__emit_is_a_needs_comptime_fix_mut(&rtoc_self_view, &node));
       END
       typeAnalysisSession__with_if_is_a_condition(&rtoc_self_view, node.condition, %() USE(node, MUTABLE rtoc_self_view) -> {
@@ -19573,7 +19573,7 @@ PRIVATE FN typeAnalysisSession__handle_assignment_path_move_mut(MUTABLE self: Ty
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__reject_borrowed_index_assignment_move_mut(&rtoc_self_view, node));
-    MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, aST__node_value(UNWRAP (castNodeToLocatable(node)))));
+    MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode(UNWRAP (aST__node_value))(UNWRAP (castNodeToLocatable(node)))));
     IF (path.length() == 0) THEN
       RETURN;
     END

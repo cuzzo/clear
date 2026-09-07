@@ -1625,7 +1625,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(decl).line;
+      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (decl))).line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
       MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(decl).column - 1));
       IF semi_idx EXISTS AS semi_idx_value THEN
@@ -1665,7 +1665,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(decl).line;
+      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (decl))).line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
       MUTABLE idx: ?Int64 = line_text.indexOf(old_sigil);
       IF idx EXISTS AS idx_value THEN
