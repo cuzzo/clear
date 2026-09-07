@@ -34,12 +34,18 @@ module FnIoRecord
 
   # `camelCaseOwner__method` is how rtoc names a method of `CamelCaseOwner`.
   # The owner is resolved against the Ruby constants actually loaded.
+  # rtoc renders a Ruby bang as `_mut`, so `stamp_type!` arrives as
+  # `stamp_type_mut` and never matches a live method. That is most of the
+  # annotator: without the bang form the oracle only ever saw the handful of
+  # non-mutating entry points.
   def clear_name_to_ruby(name)
     owner, method = name.split('__', 2)
     return nil unless method
 
     const = owner[0].upcase + owner[1..]
-    [const, method]
+    candidates = [method]
+    candidates << "#{method.delete_suffix('_mut')}!" if method.end_with?('_mut')
+    [const, candidates]
   end
 
   def scc_functions
@@ -169,15 +175,24 @@ module FnIoRecord
     installed = 0
     names.each do |clear_name|
       pair = clear_name_to_ruby(clear_name) or next
-      short, method = pair
+      short, candidates = pair
       owner = resolve_owner(short) or next
-      target =
-        if owner.respond_to?(method, true) then owner.singleton_class
-        elsif owner.is_a?(Class) && owner.method_defined?(method) then owner
-        elsif owner.is_a?(Module) && owner.instance_methods(false).include?(method.to_sym) then owner
-        end
+      method = nil
+      target = nil
+      candidates.each do |cand|
+        t =
+          if owner.respond_to?(cand, true) then owner.singleton_class
+          elsif owner.is_a?(Class) && owner.method_defined?(cand) then owner
+          elsif owner.is_a?(Module) && owner.instance_methods(false).include?(cand.to_sym) then owner
+          end
+        next unless t
+        next unless t.method_defined?(cand) || t.private_method_defined?(cand)
+
+        method = cand
+        target = t
+        break
+      end
       next unless target
-      next unless target.method_defined?(method) || target.private_method_defined?(method)
 
       # An instance method's receiver is implicit in Ruby and explicit in CLEAR:
       # `annotationProducts__complete?(self: AnnotationProducts)`. Record it as
