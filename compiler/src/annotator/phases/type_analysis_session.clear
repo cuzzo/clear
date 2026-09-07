@@ -12957,7 +12957,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
                 IF node EXISTS AS MUTABLE node_present THEN
                   node_present.state = :moved;
                 END
-                node.move_line = lightweightSnapshot__move_line_for( UNWRAP (snap), path);
+                IF node EXISTS AS MUTABLE node_present THEN
+                  node_present.move_line = lightweightSnapshot__move_line_for( UNWRAP (snap), path);
+                END
                 node.move_col = lightweightSnapshot__move_col_for( UNWRAP (snap), path);
                 node.move_action = lightweightSnapshot__move_action_for( UNWRAP (snap), path);
               END
