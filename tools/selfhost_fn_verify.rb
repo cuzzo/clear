@@ -83,9 +83,22 @@ module SelfhostFnVerify
     items
   end
 
+  def fallible?(fn)
+    @returns ||= begin
+      map = {}
+      Dir.glob(File.join(ROOT, 'compiler', 'src', '**', '*.clear')).each do |f|
+        File.read(f).scan(/^(?:PUB |PRIVATE )?FN ([\w?!]+)\(.*?\)\s*RETURNS\s+(\S+)/m) do |name, ret|
+          map[name] ||= ret
+        end
+      end
+      map
+    end
+    @returns[fn].to_s.start_with?('!')
+  end
+
   # One replayable call: the arguments as literals, and the text the CLEAR
   # side has to print for the run to agree with Ruby.
-  Case = Struct.new(:fn, :args, :expected, :kind)
+  Case = Struct.new(:fn, :args, :expected, :kind, :ruby_class)
 
   def cases(rows)
     out = {}
@@ -102,7 +115,7 @@ module SelfhostFnVerify
         end
       next unless kind && expected
 
-      out[[row['fn'], args]] ||= Case.new(row['fn'], args, expected, kind)
+      out[[row['fn'], args]] ||= Case.new(row['fn'], args, expected, kind, row['result_class'])
     end
     out.values
   end
@@ -113,13 +126,27 @@ module SelfhostFnVerify
     # The probe restates the target under a prefixed name so it cannot collide
     # with the stub set; the replay has to call that name.
     safe = "probe__#{kase.fn.delete('?').delete('!')}"
-    call = "TRY (#{safe}(#{kase.args.join(', ')}))"
+    inner = "#{safe}(#{kase.args.join(', ')})"
+    # TRY on a non-fallible call is itself an error, so wrap only what the
+    # target's declared return type says is fallible.
+    call = fallible?(kase.fn) ? "TRY (#{inner})" : inner
     case kase.kind
     when :list
       "  verify_result = #{call};\n" \
         "  FOR verify_item IN verify_result DO\n    print(\"${verify_item}\");\n  END\n  RETURN;\n"
     else
-      "  verify_result = #{call};\n  print(\"${verify_result}\");\n  RETURN;\n"
+      # Interpolation takes String operands, so only a String result goes in
+      # directly; a Bool is branched on and anything else is converted.
+      show =
+        case kase.ruby_class
+        when 'TrueClass', 'FalseClass'
+          "  IF verify_result THEN\n    print(\"true\");\n  ELSE\n    print(\"false\");\n  END\n"
+        when 'String', 'Symbol', 'NilClass'
+          "  print(\"${verify_result}\");\n"
+        else
+          "  print(verify_result.toString());\n"
+        end
+      "  verify_result = #{call};\n#{show}  RETURN;\n"
     end
   end
 
