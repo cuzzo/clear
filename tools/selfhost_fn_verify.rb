@@ -209,7 +209,9 @@ module SelfhostFnVerify
     call = fallible?(kase.fn) ? "TRY (#{inner})" : inner
     # A Void target has no value to bind or print; Ruby recorded its nil, so an
     # empty transcript is the match.
-    return "  #{call};\n  RETURN;\n" if returns_void?(kase.fn)
+    # Only when Ruby also recorded nothing -- a stale or mis-parsed RETURNS
+    # must not silence a call whose result the oracle actually captured.
+    return "  #{call};\n  RETURN;\n" if returns_void?(kase.fn) && kase.expected.to_s.empty?
     case kase.kind
     when :list
       "  verify_result = #{call};\n" \
