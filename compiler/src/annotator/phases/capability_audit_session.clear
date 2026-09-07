@@ -3163,11 +3163,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE direct_effects = capabilityAuditSession__effect_direct_effects(rtoc_self_view);
     FOR _ IN (TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view))).keys() DO
-    MUTABLE node = fn_nodes[_];
+    MUTABLE node: ?FunctionDef = fn_nodes[_];
     IF (node == NIL) THEN
         CONTINUE;
     END
-    IF node.reentrance_kind THEN
+    IF UNWRAP (node).reentrance_kind THEN
         CONTINUE;
     END
     MUTABLE visited = Set[];
@@ -3765,7 +3765,7 @@ PRIVATE FN capabilityAuditSession__semantic_function_impurity_reason(self: Capab
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
-    MUTABLE fn = fn_nodes[callee];
+    MUTABLE fn: ?FunctionDef = fn_nodes[callee];
     IF !(fn) THEN
       RETURN NIL;
     END
