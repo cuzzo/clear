@@ -33,7 +33,10 @@ module SelfhostFnProbe
   extend self
 
   ROOT = File.expand_path('..', __dir__)
-  SRC = File.join(ROOT, 'compiler', 'src')
+  # A measurement run needs to edit the tree it probes (neutralise a blocking
+  # line to reveal the next error) without disturbing the real one, and needs
+  # to do it in parallel -- so the source root is selectable.
+  SRC = File.join(ROOT, ENV.fetch('CLEAR_PROBE_SRC', 'compiler/src'))
 
   Fn = Struct.new(:name, :file, :start, :finish, :text, :ret)
 
