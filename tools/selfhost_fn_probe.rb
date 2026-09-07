@@ -363,7 +363,10 @@ module SelfhostFnProbe
         # Stage 3 needs what the function actually produced, not just that it
         # linked.
         rout, rerr, rstatus = Open3.capture3('timeout', '60', File.join(dir, 'probe'))
-        return [rstatus.success?, rout.to_s.strip, rerr.to_s[0, 120]]
+        # `print` writes to stderr, so stage 3 was comparing an always-empty
+        # stdout against Ruby's recorded result and reporting every call as a
+        # difference.
+        return [rstatus.success?, "#{rout}#{rerr}".strip, nil]
       end
       text = "#{out}\n#{err}"
       msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|error: [^\n]*/, 0]
