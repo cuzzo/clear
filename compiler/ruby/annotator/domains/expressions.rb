@@ -137,7 +137,7 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
         TenseOperationPlanner.try_value(plan_input)
       rescue ArgumentError
-        error!(node, :UNWRAP_NON_OPTIONAL, got: raw_type)
+        error!(node, :UNWRAP_NON_OPTIONAL, got: raw_type, fn: (current_fn_ctx&.name || 'unknown'))
         nil
       end
 
@@ -516,7 +516,8 @@ module Annotator
         # Validate that the target is actually an optional type
         type = node.target.full_type!(context: "optional unwrap target")
         unless type&.optional?
-          error!(node, :UNWRAP_NON_OPTIONAL, got: node.target.resolved_type)
+          error!(node, :UNWRAP_NON_OPTIONAL, got: node.target.resolved_type,
+            fn: (current_fn_ctx&.name || 'unknown'))
         end
 
         recoverable = recoverable_result_type(node.target, context: "optional unwrap target")

@@ -2298,7 +2298,7 @@ module DiagnosticRegistry
     },
     UNWRAP_NON_OPTIONAL: {
       severity: :error, category: :type,
-      template: "Cannot unwrap non-optional type '%{got}' with '?'",
+      template: "Cannot unwrap non-optional type '%{got}' with '?' (in '%{fn}')",
       summary:  "`expr?` only applies to optional types (`?T`).",
       cause: "The `?` postfix is the optional-unwrap operator: it asserts non-NIL and yields the inner `T`. On a plain `T` it would be a no-op, but allowing it would mask later refactors that change the type — so the compiler rejects it explicitly.",
       fix_hint: "Drop the trailing `?` (the value is already non-optional). If you intended to PROPAGATE failure, use `OR_ELSE RAISE` / `OR_ELSE EXIT` / `OR <default>` on a fallible source instead.",
