@@ -5718,7 +5718,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE left_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__right_source(node.right)));
     MUTABLE rhs_type_info: !Type = aST__full_type_mut(UNWRAP (locatable__right_source(node.right)));
-    IF !(((node.right.right_source.metatype == :array) OR (IF rhs_type_info != NIL THEN
+    IF !(((UNWRAP (locatable__right_source(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node })))).metatype == :array) OR (IF rhs_type_info != NIL THEN
       type__collection?(rhs_type_info)
     ELSE
       NIL
@@ -6682,7 +6682,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_concurrent_option_values_mut(&rtoc_self_view, options));
     MUTABLE lhs_type = TRY (aST__full_type_mut(node.left));
     MUTABLE shard_node: ?ShardOp = typeAnalysisSession__prepare_concurrent_shard_context_mut(&rtoc_self_view, node, castLocatableToConcurrentOp__type_analysis_session(conc));
-    MUTABLE proxy = BinaryOp{ token: COPY node.token, left: COPY node.left, op: :SMOOTH, right: COPY conc.op, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
+    MUTABLE proxy = BinaryOp{ token: COPY locatable__token(Locatable{ BinaryOp: COPY node }), left: COPY locatable__left(node), op: :SMOOTH, right: COPY conc.op, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
     IF (conc.op() IS_A SelectOp) OR (conc.op() IS_A WhereOp) THEN
       IF TRY (typeAnalysisSession__bounded_stream_source?(&rtoc_self_view, &node.left)) THEN
         TRY (typeAnalysisSession__analyze_concurrent_bounded_select_family_op(&rtoc_self_view, &node));
@@ -18240,7 +18240,7 @@ PRIVATE FN typeAnalysisSession__recoverable_result_type(MUTABLE self: TypeAnalys
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE stored =   IF (aST__node_error_union_type(node) != NIL) THEN
-      node.error_union_type
+      locatable__error_union_type(node)
     ELSE
       NIL
     END;
@@ -18799,7 +18799,7 @@ PRIVATE FN typeAnalysisSession__visit_TenseNavigation(MUTABLE self: TypeAnalysis
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.target));
     IF (node.markers.startsWith?("!") AND TRUE) THEN
-      node.target.retain_error_channel = TRUE;
+      locatable__target(Locatable{ TenseNavigation: COPY node }).retain_error_channel = TRUE;
     END
     MUTABLE receiver_type = (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &node.target, "tense navigation receiver") OR_ELSE TRY (aST__full_type_mut(node.target)));
     IF (TRY (type__canonical_stream_result?(receiver_type)) OR receiver_type.stream?()) THEN
