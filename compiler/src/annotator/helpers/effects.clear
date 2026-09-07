@@ -231,3 +231,14 @@ PUB FN asyncStackTarget__computed_stack_tier(value: AsyncStackTarget) RETURNS ?S
   END
   RETURN NIL;
 END
+
+# The cast helper belongs with the union it builds; rtoc emitted it into
+# body_analysis.clear, which cannot see a type declared here.
+FN castAsyncBodyNodeToAsyncSpawnNode(value: AsyncBodyNode) RETURNS AsyncSpawnNode ->
+  PARTIAL MATCH value START
+    AsyncBodyNode.BgBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgBlock: COPY cast_payload };,
+    AsyncBodyNode.BgStreamBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgStreamBlock: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to AsyncSpawnNode");
+  END
+  panic("Invalid cast to AsyncSpawnNode");
+END

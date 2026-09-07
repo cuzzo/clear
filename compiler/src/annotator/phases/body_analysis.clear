@@ -129,14 +129,6 @@ FN castAsyncValidationNodeToLocatable(value: AsyncValidationNode) RETURNS ?Locat
   RETURN NIL;
 END
 
-FN castAsyncBodyNodeToAsyncSpawnNode(value: AsyncBodyNode) RETURNS AsyncSpawnNode ->
-  PARTIAL MATCH value START
-    AsyncBodyNode.BgBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgBlock: COPY cast_payload };,
-    AsyncBodyNode.BgStreamBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgStreamBlock: COPY cast_payload };,
-    DEFAULT -> panic("Invalid cast to AsyncSpawnNode");
-  END
-  panic("Invalid cast to AsyncSpawnNode");
-END
 
 FN castAssignmentNodeToLocatable(value: AssignmentNode) RETURNS Locatable ->
   PARTIAL MATCH value START
