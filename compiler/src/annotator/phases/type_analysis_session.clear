@@ -986,7 +986,7 @@ PUB FN typeAnalysisSession__scan_kept_fn_value_use_mut(MUTABLE self: TypeAnalysi
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF node IS_A Identifier AS identifier THEN kept_fns.contains?(identifier__name(identifier)) ELSE FALSE END) THEN
       MUTABLE sym: ?SymbolEntry@multiowned = aST__node__symbol(node);
-      MUTABLE shadowed = (((TRUE AND ((functionSignature__unwrap(sym.type())) == NIL)) AND !((sym.type() == NIL))) AND (sym.type().resolved() != :Any));
+      MUTABLE shadowed = (((TRUE AND ((functionSignature__unwrap(X{ Type: COPY symbolEntry__type(UNWRAP (sym)) })) == NIL)) AND !((sym.type() == NIL))) AND (sym.type().resolved() != :Any));
       IF !(shadowed) THEN
         MUTABLE param = COPY UNWRAP (kept_fns[locatable__name(node)]);
         MUTABLE contract = UNWRAP ((IF param.symbol != NIL THEN
@@ -10898,7 +10898,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE actual = TRY (aST__full_type_mut(val_node));
     IF !(TRY (type__accepts?(UNWRAP (expected_type), actual))) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ UnionVariantLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_INLINE_VARIANT_TYPE_MISMATCH }, [], CAST({:union: node.union_name, :variant: node.variant_name, :field: rtoc_each_key, :expected: type__resolved(UNWRAP (expected_type)), :got: (IF TRUE THEN
-          actual.resolved()
+          type__resolved(actual)
         ELSE
           NIL
         END)} AS {String@symbol}Any)));
@@ -12811,7 +12811,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       resolved
     END;
     MUTABLE type_schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, base));
-    IF !((((schemas__struct?(type_schema) OR schemas__resource?(type_schema))) AND ((type_schema.methods() != NIL) AND ((type_schema.methods())?).key?(node.name)))) THEN
+    IF !((((schemas__struct?(type_schema) OR schemas__resource?(type_schema))) AND ((schemaValue__methods(UNWRAP (type_schema)) != NIL) AND ((schemaValue__methods(UNWRAP (type_schema)))?).key?(node.name)))) THEN
       RETURN FALSE;
     END
     MUTABLE method_sig = type_schema.methods()[node.name];

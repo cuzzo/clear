@@ -2142,7 +2142,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((schemaValue__as_type(existing) == schemaValue__as_type(incoming))) THEN
       RETURN FALSE;
     END
-    IF !((existing.type_params() == incoming.type_params())) THEN
+    IF !((schemaValue__type_params(existing) == schemaValue__type_params(incoming))) THEN
       RETURN FALSE;
     END
     IF !(resolutionSession__equivalent_struct_fields?(&rtoc_self_view, existing.fields(), incoming.fields())) THEN
