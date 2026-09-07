@@ -18835,7 +18835,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, identifier__name(root), root.token, :next));
       END
     ELSE_IF ((plan.backend_form == TenseBackendForm.DirectMap) AND aST__container_borrow?(navigation.target)) THEN
-      member.container_borrow = TRUE;
+      locatable__set_container_borrow_mut(&member, TRUE);
     END
     RETURN COPY plan.result_type;
 }

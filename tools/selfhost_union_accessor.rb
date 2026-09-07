@@ -54,11 +54,16 @@ module SelfhostUnionAccessor
   def main(argv)
     root = File.expand_path('compiler/src', __dir__ + '/..')
     union = field = only = nil
+    setter = false
     OptionParser.new do |parser|
       parser.on('--root DIR') { |v| root = File.expand_path(v) }
       parser.on('--union NAME') { |v| union = v }
       parser.on('--field NAME') { |v| field = v }
       parser.on('--only TYPE', 'Restrict to variants whose field has this type') { |v| only = v }
+      # Ruby also WRITES these fields (`node.storage = :stack`). The reader
+      # answers respond_to? for a read; a write needs the same variant walk
+      # with the assignment in each arm.
+      parser.on('--setter', 'Emit the field writer instead of the reader') { setter = true }
     end.parse!(argv)
     abort 'usage: --union NAME --field NAME' unless union && field
 
@@ -122,6 +127,20 @@ module SelfhostUnionAccessor
     result = types.first
     result = "?#{result}" unless result.start_with?('?')
     fn = "#{union[0].downcase}#{union[1..]}__#{field}"
+    if setter
+      puts "# Ruby writes `#{field}` on whichever variant it holds. A variant either"
+      puts '# carries the field or it does not, so the write lands only where it fits.'
+      puts "PUB FN #{fn.sub("__#{field}", "__set_#{field}_mut")}(MUTABLE value: #{union}, new_value: #{result}) RETURNS Void ->"
+      puts '  PARTIAL MATCH value START'
+      carrying.each do |name, _|
+        puts "    #{union}.#{name} AS MUTABLE item -> item.#{field} = COPY new_value;,"
+      end
+      puts '    DEFAULT -> RETURN;'
+      puts '  END'
+      puts 'END'
+      warn "selfhost_union_accessor: #{carrying.length}/#{members.length} variants carry '#{field}'"
+      return 0
+    end
     puts "# Ruby asks `respond_to?(:#{field})` and then reads it. A union variant"
     puts "# either carries the field or it does not, so the question is answered here:"
     puts "# the variants that have it return it, the rest return NIL."
