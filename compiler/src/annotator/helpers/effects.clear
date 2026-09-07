@@ -242,3 +242,14 @@ FN castAsyncBodyNodeToAsyncSpawnNode(value: AsyncBodyNode) RETURNS AsyncSpawnNod
   END
   panic("Invalid cast to AsyncSpawnNode");
 END
+
+# AsyncBodyNode and AsyncStackTarget carry the same three variants -- rtoc
+# emitted two unions for one Ruby type. This is the conversion between them,
+# in the same shape as the tree's other cast helpers.
+PUB FN castAsyncBodyNodeToAsyncStackTarget(value: AsyncBodyNode) RETURNS AsyncStackTarget ->
+  MATCH value START
+    AsyncBodyNode.BgBlock AS item -> RETURN AsyncStackTarget{ BgBlock: COPY item };,
+    AsyncBodyNode.BgStreamBlock AS item -> RETURN AsyncStackTarget{ BgStreamBlock: COPY item };,
+    AsyncBodyNode.DoBranch AS item -> RETURN AsyncStackTarget{ DoBranch: COPY item };
+  END
+END

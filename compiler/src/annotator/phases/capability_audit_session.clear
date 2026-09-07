@@ -2957,16 +2957,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN capabilityAuditSession__assign_async_stack_tier_mut(MUTABLE self: CapabilityAuditSession, MUTABLE target: AsyncStackTarget, calls: [Set]String, user_size: ?String@symbol, can_smash: Bool, validation_node: AsyncValidationNode) RETURNS !Void
+PRIVATE FN capabilityAuditSession__assign_async_stack_tier_mut(MUTABLE self: CapabilityAuditSession, MUTABLE target: AsyncBodyNode, calls: [Set]String, user_size: ?String@symbol, can_smash: Bool, validation_node: AsyncValidationNode) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE raw: String@symbol = TRY (capabilityAuditSession__max_tier_for_calls(&rtoc_self_view, calls));
-    target.computed_stack_tier = IF ((raw == :unbounded)) THEN
+    asyncBodyNode__set_computed_stack_tier_mut(&target, IF ((raw == :unbounded)) THEN
       :service
     ELSE
       raw
-    END;
+END);
     TRY (capabilityAuditSession__validate_fiber_stack_mut(&rtoc_self_view, validation_node, calls, user_size, can_smash));
 }
 END
