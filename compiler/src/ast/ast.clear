@@ -9125,7 +9125,7 @@ PUB FN aST__node_mir_binding_entry(node: Locatable) RETURNS ?CleanupEntry@multio
   END
   RETURN NIL;
 END
-PUB FN aST__node_ownership_transport_plan(node: Locatable) RETURNS ?PassStateValue ->
+PUB FN aST__node_ownership_transport_plan(node: Locatable) RETURNS ?OwnershipTransportPlan ->
   PARTIAL MATCH node START
     Locatable.VarDecl AS item -> RETURN COPY item.ownership_transport_plan;,
     Locatable.BindExpr AS item -> RETURN COPY item.ownership_transport_plan;
