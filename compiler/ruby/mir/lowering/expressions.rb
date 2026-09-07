@@ -2211,7 +2211,14 @@ module MIRLoweringExpressions
                   end
                   field_alloc = mir_owned_alloc(field_value)
                   lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
-                  if expected_ft && recursive_field_copy_required?(expected_ft, field_node, field_alloc, field_sink_alloc)
+                  # A freshly constructed value has no other owner to copy
+                  # away from; for an Rc field it is CONSTRUCTED as a handle
+                  # by the carrier wrap below, and copying it structurally is
+                  # what OWNERSHIP_STRUCTURAL_RC_COPY rejects.
+                  fresh_construction = field_node.is_a?(AST::StructLit) ||
+                    field_node.is_a?(AST::UnionVariantLit)
+                  if expected_ft && !(fresh_construction && expected_ft.any_rc?) &&
+                     recursive_field_copy_required?(expected_ft, field_node, field_alloc, field_sink_alloc)
                     # An Rc/Arc field is retained, never structurally copied.
                     copy = retain_handle_for_destination(lowered, expected_ft) ||
                       MIR::DeepCopy.new(lowered, expected_ft.zig_type, nil, :full_value, field_sink_alloc)
@@ -2224,6 +2231,15 @@ module MIRLoweringExpressions
             end
           end
         end
+      end
+      # A field declaring an Rc/Arc carrier holds a handle; a freshly built
+      # value is not one yet. The declaration path composes the wrap for
+      # `x: T@multiowned = T{...}`; without the same step here the literal
+      # reaches emit as a bare payload in an Rc(T) slot -- a Zig type error
+      # with no CLEAR diagnostic. An identifier keeps its retain/KEEP handling.
+      if expected_ft&.any_rc? &&
+         (field_node.is_a?(AST::StructLit) || field_node.is_a?(AST::UnionVariantLit))
+        val = compose_capability_wrap(val, expected_ft.bare_data_type.zig_type, expected_ft, field_sink_alloc)
       end
       # Keep each field's materializations in the struct literal's enclosing
       # lexical scope. Lowering a later lazy field (for example REDUCE or

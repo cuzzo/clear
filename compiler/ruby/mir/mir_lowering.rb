@@ -1138,6 +1138,13 @@ class MIRLowering
     payload = ti.optional? ? ti.wrapped_type : ti
     return nil unless payload&.any_rc?
 
+    # A retain bumps the refcount of a handle that already exists. A freshly
+    # constructed value is not a handle yet -- retaining it emits
+    # `rcRetain(T, T{...})`, which is a Zig type error and no CLEAR
+    # diagnostic. The destination alone cannot decide this; the source has to
+    # already be one. Construction goes through the carrier wrap instead.
+    return nil if mir.is_a?(MIR::StructInit) || mir.is_a?(MIR::UnionInit)
+
     fn = payload.shared? ? "arcRetain" : "rcRetain"
     zig = rc_payload_zig_type(payload)
     return MIR::RcRetain.new(mir, zig, fn) unless ti.optional?

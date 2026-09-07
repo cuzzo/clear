@@ -1,0 +1,18 @@
+# Test: a freshly constructed value can fill an @multiowned field. It is not a
+# handle yet, so it must be CONSTRUCTED as one -- retaining it emits
+# rcRetain(T, T{...}), and copying it structurally is an ownership violation.
+# Only an existing handle is retained.
+
+STRUCT Leaf { stamp: Int64 }
+STRUCT Holder { leaf: Leaf@multiowned }
+
+FN main() RETURNS Void ->
+    h = Holder{ leaf: Leaf{ stamp: 3 } };
+    ASSERT h.leaf.stamp == 3, "the fresh literal became the field's handle";
+
+    # An existing handle still goes the retain path, and both owners see it.
+    shared: Leaf@multiowned = Leaf{ stamp: 7 };
+    kept = Holder{ leaf: KEEP shared };
+    ASSERT kept.leaf.stamp == 7, "an existing handle is retained, not rebuilt";
+    ASSERT shared.stamp == 7, "the original handle survives the store";
+END
