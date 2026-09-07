@@ -155,6 +155,7 @@ module MIRLoweringLiterals
           lower(i)
         end
         placed_item = elem_type ? place_value_for_destination(lowered_item, i, list_alloc, elem_type) : lowered_item
+        placed_item = construct_literal_carrier(placed_item, elem_type, list_alloc)
         item_value = materialize_owned_sink_value(placed_item, i, list_alloc, elem_type)
         item_alloc = mir_owned_alloc(item_value) ||
           (ast_expr_produces_heap?(i) ? :heap : placement_for_node(i))
@@ -334,6 +335,17 @@ module MIRLoweringLiterals
     non_empty_hash_literal(node, plan, capability)
   end
 
+  sig { params(placed: MIR::Node, elem_type: T.nilable(Type), alloc: Symbol).returns(MIR::Node) }
+  def construct_literal_carrier(placed, elem_type, alloc)
+    T.bind(self, MIRLowering) rescue nil
+    return placed unless placed.is_a?(MIR::StructInit)
+
+    payload = elem_type&.optional? ? elem_type.wrapped_type : elem_type
+    return placed unless payload&.any_rc?
+
+    compose_capability_wrap(placed, payload.bare_data_type.zig_type, payload, alloc)
+  end
+
   sig { params(plan: HashLiteralPlan).returns(HashLiteralCapabilityPlan) }
   def hash_literal_capability_plan(plan)
     T.bind(self, MIRLowering) rescue nil
@@ -482,6 +494,7 @@ module MIRLoweringLiterals
       # stores the inner map's entries directly in the outer one.
       lowered = value_type ? with_expected_type(value_type) { lower(val_node) } : lower(val_node)
       placed = value_type ? place_value_for_destination(lowered, val_node, plan.alloc, value_type) : lowered
+      placed = construct_literal_carrier(placed, value_type, plan.alloc)
       materialize_owned_sink_value(placed, val_node, plan.alloc, value_type)
     end
     value_mir = hoist_alloc(raw_value, val_node, err_cleanup: true)

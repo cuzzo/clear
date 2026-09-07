@@ -1143,7 +1143,7 @@ class MIRLowering
     # `rcRetain(T, T{...})`, which is a Zig type error and no CLEAR
     # diagnostic. The destination alone cannot decide this; the source has to
     # already be one. Construction goes through the carrier wrap instead.
-    return nil if mir.is_a?(MIR::StructInit) || mir.is_a?(MIR::UnionInit)
+    return nil if mir.is_a?(MIR::StructInit)
 
     fn = payload.shared? ? "arcRetain" : "rcRetain"
     zig = rc_payload_zig_type(payload)

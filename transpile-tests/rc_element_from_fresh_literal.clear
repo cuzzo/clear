@@ -1,0 +1,21 @@
+# Test: a map or list whose ELEMENT carries an Rc/Arc stores handles. A freshly
+# built element is not one yet and has no other owner to copy away from, so it
+# is CONSTRUCTED as a handle -- the same decision the declaration path and the
+# struct-field store make. Placing it bare was a Zig type error with no CLEAR
+# diagnostic.
+
+STRUCT Leaf { stamp: Int64 }
+
+FN main() RETURNS Void ->
+    by_name: {String}Leaf@multiowned = {"a": Leaf{ stamp: 3 }};
+    ASSERT by_name.length() == 1, "the map holds one handle";
+
+    listed: []Leaf@multiowned = [Leaf{ stamp: 5 }];
+    ASSERT listed.length() == 1, "the list holds one handle";
+
+    # An existing handle still takes the retain path, and the original survives.
+    shared: Leaf@multiowned = Leaf{ stamp: 7 };
+    kept: []Leaf@multiowned = [KEEP shared];
+    ASSERT kept.length() == 1, "an existing handle is retained, not rebuilt";
+    ASSERT shared.stamp == 7, "the original handle survives the store";
+END
