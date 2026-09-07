@@ -2053,7 +2053,7 @@ module DiagnosticRegistry
     # Function calls
     INTRINSIC_NO_OVERLOAD: {
       severity: :error, category: :type,
-      template: "No overload for '%{name}' matches arguments (%{args}).\nCandidates: %{candidates}",
+      template: "No overload for '%{name}' matches arguments (%{args}) in '%{fn}'.\nCandidates: %{candidates}",
       summary:  "Stdlib function has overloads but none match the call's argument types.",
     },
 

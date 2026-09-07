@@ -127,13 +127,13 @@ CONST PRIMARY_RULES: [64]ParserRule = [clearParser__rule(:KEYWORD, "IF", :parse_
 CONST PRIMARY_RULE_INDEX: {String}ParserRule = clearParser__index_rules(PRIMARY_RULES);
 CONST SUFFIX_RULES: [22]ParserRule = [clearParser__rule(:CHAR, "[", :parse_index_suffix), clearParser__rule(:DOUBLE_COLON, "::", :parse_static_call_suffix), clearParser__rule(:CHAR, ".", :parse_dot_suffix), clearParser__rule(:CHAR, "(", :parse_func_call_suffix), clearParser__rule(:CHAR, "?", :parse_optional_unwrap_suffix), clearParser__rule(:CHAR, "!", :parse_tense_navigation_suffix), clearParser__rule(:CHAR, "~", :parse_tense_navigation_suffix), clearParser__rule(:KEYWORD, "EXISTS", :parse_exists_suffix), clearParser__rule(:KEYWORD, "IS_OK", :parse_is_ok_suffix), clearParser__rule(:KEYWORD, "IS_READY", :parse_is_ready_suffix), clearParser__rule(:VAR_ID, "@multiowned", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@shared", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@node", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@locked", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@writeLocked", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@local", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@alwaysMutable", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@versioned", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@atomic", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@boxed", :parse_capability_wrap_suffix), clearParser__rule(:VAR_ID, "@indirect", :parse_capability_wrap_suffix), clearParser__rule(:CHAR, "{", :parse_inline_union_variant_suffix)];
 CONST SUFFIX_RULE_INDEX: {String}ParserRule = clearParser__index_rules(SUFFIX_RULES);
-PUB FN clearParser__element_capability_tokens() RETURNS Any EFFECTS REENTRANT ->
+PUB FN clearParser__element_capability_tokens() RETURNS [9]String EFFECTS REENTRANT ->
   RETURN ["@shared", "@multiowned", "@node", "@locked", "@writeLocked", "@alwaysMutable", "@link", "@boxed", "@indirect"];
 END
-PUB FN clearParser__element_sync_tokens() RETURNS Any EFFECTS REENTRANT ->
+PUB FN clearParser__element_sync_tokens() RETURNS [6]String EFFECTS REENTRANT ->
   RETURN ["@locked", "@writeLocked", "@alwaysMutable", "locked", "writeLocked", "alwaysMutable"];
 END
-PUB FN clearParser__capability_tokens() RETURNS Any EFFECTS REENTRANT ->
+PUB FN clearParser__capability_tokens() RETURNS [23]String EFFECTS REENTRANT ->
   RETURN ["@multiowned", "@shared", "@node", "@split", "@locked", "@writeLocked", "@alwaysMutable", "@local", "@versioned", "@atomic", "@boxed", "@indirect", "@link", "@raw", "@symbol", "@c", "@size", "@list", "@pool", "@set", "@soa", "@sharded", "@observable"];
 END
 PUB FN clearParser__sigil_attrs(dim: ?String@symbol = NIL, val: ?String@symbol = NIL, stack_size: ?String@symbol = NIL, pinned: Bool = FALSE, parallel: Bool = FALSE, arena: Bool = FALSE, can_smash: Bool = FALSE) RETURNS SigilAttrs ->

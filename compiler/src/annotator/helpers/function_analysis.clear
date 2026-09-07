@@ -12,8 +12,10 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f617267
 UNION RoutineNode { FunctionDefMultiowned: FunctionDef@multiowned, LambdaLit: LambdaLit, FunctionDef: FunctionDef }
 PUB FN routineNode__params(self: RoutineNode) RETURNS []Param ->
   PARTIAL MATCH self START
+    # LambdaLit's params are optional in the AST; the accessor's contract is a
+    # list, and Ruby's `params || []` says the same.
     RoutineNode.FunctionDefMultiowned AS item -> RETURN COPY item.params;,
-    RoutineNode.LambdaLit AS item -> RETURN COPY item.params;,
+    RoutineNode.LambdaLit AS item -> RETURN COPY (item.params OR_ELSE List[]);,
     RoutineNode.FunctionDef AS item -> RETURN COPY item.params;
   END
   RETURN List[];

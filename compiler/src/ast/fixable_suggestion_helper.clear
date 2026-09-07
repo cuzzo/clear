@@ -26,7 +26,7 @@ END
 PUB FN nameCandidate__to_s(value: NameCandidate) RETURNS String ->
   PARTIAL MATCH value START
     NameCandidate.StringValue AS item -> RETURN COPY item;,
-    NameCandidate.SymbolValue AS item -> RETURN COPY item;,
+    NameCandidate.SymbolValue AS item -> RETURN CAST(item AS String);,
   END
   RETURN "";
 END

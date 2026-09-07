@@ -536,7 +536,7 @@ module Annotator
         unless matched_def
           sigs = definitions.map(&:intrinsic_args_label).join(" or ")
           arg_types = args.map { |arg| arg.resolved_type }.join(", ")
-          error!(node, :INTRINSIC_NO_OVERLOAD, name: node.name, args: arg_types, candidates: sigs)
+          error!(node, :INTRINSIC_NO_OVERLOAD, name: node.name, args: arg_types, candidates: sigs, fn: (current_fn_ctx&.name || 'unknown'))
           return
         end
 
@@ -692,7 +692,8 @@ module Annotator
           sigs = method_overloads.map(&:intrinsic_args_label).join(" or ")
           arg_types = ufcs_args.map { |arg| arg.resolved_type }.join(", ")
           error!(node, :INTRINSIC_NO_OVERLOAD,
-            name: node.name, args: arg_types, candidates: sigs)
+            name: node.name, args: arg_types, candidates: sigs,
+            fn: (current_fn_ctx&.name || 'unknown'))
         end
 
         visit_IntrinsicFunc(node, ufcs_args, matched_def: matched_def)
