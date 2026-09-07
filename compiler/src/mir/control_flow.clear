@@ -1857,11 +1857,11 @@ PUB FN loopFrameAnalysis__expression_allocates_frame_value?(MUTABLE node: Locata
     sig_branch_value = NIL;
   END
   MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
-  IF ((sig != NIL) AND !(TRY (functionSignature__mutates_receiver?(&sig)))) THEN
-    IF placement__frame?(TRY (functionSignature__return_alloc(&sig))) THEN
+  IF ((sig != NIL) AND !(TRY (functionSignature__mutates_receiver?(sig)))) THEN
+    IF placement__frame?(TRY (functionSignature__return_alloc(sig))) THEN
       RETURN TRUE;
     END
-    IF (TRY (functionSignature__emits_allocating?(&sig)) AND placement__frame?(TRY (functionSignature__intrinsic_alloc(&sig, IntrinsicAllocationKind.Alloc)))) THEN
+    IF (TRY (functionSignature__emits_allocating?(sig)) AND placement__frame?(TRY (functionSignature__intrinsic_alloc(&sig, IntrinsicAllocationKind.Alloc)))) THEN
       RETURN TRUE;
     END
   END
@@ -1888,7 +1888,7 @@ PUB FN loopFrameAnalysis__outer_mutating_receiver_call?(node: Locatable, local_n
   MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
   IF sig EXISTS AS sig_value THEN
     MUTABLE sig_value_mutable = COPY sig_value;
-    IF !(TRY (functionSignature__mutates_receiver?(&sig_value_mutable))) THEN
+    IF !(TRY (functionSignature__mutates_receiver?(sig_value_mutable))) THEN
       RETURN FALSE;
     END
     MUTABLE receiver =     IF node IS_A MethodCall THEN
@@ -1919,7 +1919,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   IF !(sig) THEN
       RETURN;
   END
-  IF !((TRY (functionSignature__emits_allocating?(&sig)) AND TRY (functionSignature__mutates_receiver?(&sig)))) THEN
+  IF !((TRY (functionSignature__emits_allocating?(sig)) AND TRY (functionSignature__mutates_receiver?(sig)))) THEN
       RETURN;
   END
   MUTABLE root: ?Identifier = aST__root_identifier(node.object);

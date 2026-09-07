@@ -992,10 +992,10 @@ PUB FN cleanupClassifier__call_returns_heap_owned?(expr: Locatable, schema_looku
     IF (TRUE AND (functionSignature__heap_carry_return(sig_value_mutable) == TRUE)) THEN
       RETURN TRUE;
     END
-    IF TRY (functionSignature__heap_return_alloc?(&sig_value_mutable)) THEN
+    IF TRY (functionSignature__heap_return_alloc?(sig_value_mutable)) THEN
       RETURN TRUE;
     END
-    IF TRY (functionSignature__frame_return_alloc?(&sig_value_mutable)) THEN
+    IF TRY (functionSignature__frame_return_alloc?(sig_value_mutable)) THEN
       RETURN FALSE;
     END
     MUTABLE ret = TRY (type__new(TypeConstructionInput{ Type: COPY functionSignature__return_type(sig_value_mutable) }));
@@ -1008,14 +1008,14 @@ END
 PUB FN cleanupClassifier__call_returns_frame_owned?(expr: Locatable) RETURNS !Bool ->
   MUTABLE sig: ?FunctionSignature@multiowned = KEEP aST__node__matched_signature(expr);
   RETURN !(!((IF sig != NIL THEN
-    TRY (functionSignature__frame_return_alloc?(&sig))
+    TRY (functionSignature__frame_return_alloc?(sig))
   ELSE
     NIL
   END)));
 END
 PUB FN cleanupClassifier__call_returns_receiver_owned?(expr: Locatable) RETURNS !Bool ->
   MUTABLE sig: ?FunctionSignature@multiowned = KEEP aST__node__matched_signature(expr);
-  RETURN ((sig != NIL) AND (TRY (functionSignature__return_alloc(&sig)) == :receiver_storage));
+  RETURN ((sig != NIL) AND (TRY (functionSignature__return_alloc(sig)) == :receiver_storage));
 END
 PUB FN cleanupClassifier__receiver_storage_alloc(expr: MethodCall) RETURNS ?String@symbol ->
   MUTABLE receiver = COPY expr.object;

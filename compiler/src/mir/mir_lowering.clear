@@ -2798,7 +2798,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       sig_branch_value = NIL;
     END
     MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
-    RETURN ((sig != NIL) AND (TRY (functionSignature__emits_allocating?(&sig)) == TRUE));
+    RETURN ((sig != NIL) AND (TRY (functionSignature__emits_allocating?(sig)) == TRUE));
 }
 END
 FN mIRLowering__ownership_transfer_contract_relevant?(MUTABLE self: MIRLowering, MUTABLE expr: Emittable) RETURNS !Bool
@@ -2908,7 +2908,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
       IF !((IF sig != NIL THEN
-        TRY (functionSignature__emits_allocating?(&sig))
+        TRY (functionSignature__emits_allocating?(sig))
       ELSE
         NIL
       END)) THEN
@@ -4870,7 +4870,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE stdlib_def: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_stdlib_def));
     IF stdlib_def EXISTS AS stdlib_def_value THEN
       MUTABLE stdlib_def_value_mutable = COPY stdlib_def_value;
-      IF TRY (functionSignature__intrinsic_bc?(&stdlib_def_value_mutable)) THEN
+      IF TRY (functionSignature__intrinsic_bc?(stdlib_def_value_mutable)) THEN
         mir_args = node.args |> SELECT TRY (mIRLowering__hoist_alloc(&rtoc_self_view, TRY (mIRLowering__lower(&rtoc_self_view, &_)), &_));
         RETURN Emittable{ InlineBc: COPY InlineBc{ op: COPY TRY (functionSignature__intrinsic_bc_op_or(&stdlib_def_value_mutable, symbol((CAST(node.method_name AS String))))), args: COPY mir_args, stdlib_def: stdlib_def_value_mutable, suppress_try: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
@@ -5309,7 +5309,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE entry: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalLookupResultToOptionalX__mir_lowering(TRY (intrinsicRegistry__lookup(:builtin_ops, RegistryKey{ SymbolValue: COPY name }))));
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
-      IF (mIRLowering__bc_target?(&rtoc_self_view) AND TRY (functionSignature__intrinsic_bc?(&entry_value_mutable))) THEN
+      IF (mIRLowering__bc_target?(&rtoc_self_view) AND TRY (functionSignature__intrinsic_bc?(entry_value_mutable))) THEN
         RETURN MIRLoweringReturnValue{ InlineBc: COPY InlineBc{ op: COPY TRY (functionSignature__intrinsic_bc_op_or(&entry_value_mutable, name)), args: COPY args, stdlib_def: entry_value_mutable, suppress_try: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
       RETURN MIRLoweringReturnValue{ RegistryCall: COPY RegistryCall{ entry: entry_value_mutable, args: COPY args |> SELECT RegistryCallArg{ expr: COPY _, coerce_type: NIL }, reason: "builtin_${name}", ownership_contract: TRY (ownershipContract__empty()), allocs: NIL, owned_result_alloc: NIL, target_var: NIL, result_type: NIL, result_ownership_bearing: NIL, key_type: NIL, value_type: NIL, suppress_try: FALSE } };
@@ -10282,7 +10282,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       sig = (sig OR_ELSE functionSignature__unwrap(node.matched_signature));
     END
     IF (((sig != NIL) AND TRUE) AND !(((TRY (functionSignature__return_lifetime(sig))).length() == 0))) THEN
-      IF !(((functionSignature__heap_carry_return(sig) == TRUE) OR TRY (functionSignature__heap_return_alloc?(&sig)))) THEN
+      IF !(((functionSignature__heap_carry_return(sig) == TRUE) OR TRY (functionSignature__heap_return_alloc?(sig)))) THEN
         RETURN FALSE;
       END
     END
@@ -10397,7 +10397,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN TRUE;
       END
       IF sig_obj EXISTS AS MUTABLE sig_obj_value THEN
-        IF TRY (functionSignature__heap_return_alloc?(&sig_obj_value)) THEN
+        IF TRY (functionSignature__heap_return_alloc?(sig_obj_value)) THEN
         RETURN TRUE;
       END
       END
@@ -10636,7 +10636,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN Emittable{ MIRCast: COPY len_expr_value };
         END
       END
-      IF (mIRLowering__bc_target?(&rtoc_self_view) AND TRY (functionSignature__intrinsic_bc?(&entry_value_mutable))) THEN
+      IF (mIRLowering__bc_target?(&rtoc_self_view) AND TRY (functionSignature__intrinsic_bc?(entry_value_mutable))) THEN
         MUTABLE op_name = TRY (functionSignature__intrinsic_bc_op_or(&entry_value_mutable, symbol((CAST(aST__node_name(UNWRAP (castNodeToLocatable(node))) AS String)))));
         RETURN Emittable{ InlineBc: COPY InlineBc{ op: COPY op_name, args: COPY mir_args, stdlib_def: entry_value_mutable, suppress_try: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
@@ -10685,7 +10685,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         ownership_contract = TRY (ownershipContract__consume_operands(operands));
       END
-      MUTABLE receiver_mutates = (node.mutates_receiver OR TRY (functionSignature__mutates_receiver?(&entry_value_mutable)));
+      MUTABLE receiver_mutates = (node.mutates_receiver OR TRY (functionSignature__mutates_receiver?(entry_value_mutable)));
       MUTABLE target_var: ?String = NIL;
       MUTABLE first_arg = node__args(node).first();
       IF ((IF node IS_A MethodCall AS method_call THEN receiver_mutates ELSE FALSE END) AND TRUE) THEN
@@ -10870,10 +10870,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(result_ownership_bearing) THEN
       RETURN NIL;
     END
-    MUTABLE alloc: ?String@symbol = TRY (functionSignature__return_alloc(&entry));
+    MUTABLE alloc: ?String@symbol = TRY (functionSignature__return_alloc(entry));
     IF alloc EXISTS AS alloc_value THEN
       MUTABLE alloc_value_mutable = COPY alloc_value;
-      IF (TRY (functionSignature__emits_allocating?(&entry)) AND (inlineAllocMetadata__primary(alloc_metadata) != NIL)) THEN
+      IF (TRY (functionSignature__emits_allocating?(entry)) AND (inlineAllocMetadata__primary(alloc_metadata) != NIL)) THEN
         RETURN inlineAllocMetadata__primary(alloc_metadata);
       END
       IF ((alloc_value_mutable == :heap) OR (alloc_value_mutable == :frame)) THEN
@@ -18392,13 +18392,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap( (IF emittable__stdlib_def(init) EXISTS AS rtoc_wrap_18392 THEN X{ FunctionSignature: COPY rtoc_wrap_18392 } ELSE NIL END));
     IF !((IF sig != NIL THEN
-      TRY (functionSignature__emits_allocating?(&sig))
+      TRY (functionSignature__emits_allocating?(sig))
     ELSE
       NIL
     END)) THEN
       RETURN FALSE;
     END
-    IF TRY (functionSignature__heap_return_alloc?(&sig)) THEN
+    IF TRY (functionSignature__heap_return_alloc?(sig)) THEN
       RETURN TRUE;
     END
     MUTABLE metadata = emittable__allocs(init);
@@ -21089,7 +21089,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF sig EXISTS AS sig_value THEN
       MUTABLE sig_value_mutable = COPY sig_value;
       IF functionSignature__intrinsic(sig_value_mutable) THEN
-        RETURN ((functionSignature__needs_rt(sig_value_mutable) == TRUE) OR TRY (functionSignature__emits_allocating?(&sig_value_mutable)));
+        RETURN ((functionSignature__needs_rt(sig_value_mutable) == TRUE) OR TRY (functionSignature__emits_allocating?(sig_value_mutable)));
       END
       IF !(((functionSignature__needs_rt(sig_value_mutable) == TRUE) OR (functionSignature__needs_rt(sig_value_mutable) == FALSE))) THEN
         panic("callee {} missing finalized needs_rt metadata before MIR lowering");

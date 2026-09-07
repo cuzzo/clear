@@ -2003,10 +2003,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF type__resource?(ret_type) THEN
         RETURN TRUE;
       END
-      IF !(TRY (functionSignature__emits_allocating?(&sig_value_mutable))) THEN
+      IF !(TRY (functionSignature__emits_allocating?(sig_value_mutable))) THEN
         RETURN FALSE;
       END
-      IF TRY (functionSignature__heap_return_alloc?(&sig_value_mutable)) THEN
+      IF TRY (functionSignature__heap_return_alloc?(sig_value_mutable)) THEN
         RETURN TRUE;
       END
       MUTABLE metadata: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY node });
@@ -3208,7 +3208,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF sig EXISTS AS sig_value THEN
       MUTABLE sig_value_mutable = COPY sig_value;
-      RETURN ((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) == TRUE) AND type__void?(functionSignature__return_type(sig_value_mutable)));
+      RETURN ((TRY (functionSignature__emits_allocating?(sig_value_mutable)) == TRUE) AND type__void?(functionSignature__return_type(sig_value_mutable)));
     ELSE
       RETURN FALSE;
     END

@@ -414,7 +414,7 @@ PRIVATE FN hoist__collection_value_store_call?(call: MethodCall) RETURNS !Bool -
   MUTABLE store_method = FALSE;
   IF sig EXISTS AS sig_value THEN
     MUTABLE sig_mutable = KEEP sig_value;
-    store_method = (TRY (functionSignature__mutates_receiver?(&sig_mutable)) AND TRY (functionSignature__takes_ownership?(&sig_mutable)));
+    store_method = (TRY (functionSignature__mutates_receiver?(sig_mutable)) AND TRY (functionSignature__takes_ownership?(&sig_mutable)));
   END
   IF !(store_method) THEN
     store_method = TRY (intrinsicRegistry__collection_value_store_method?(Name{ StringValue: COPY call.name }, call.args.length()));

@@ -783,14 +783,17 @@ module FixableHelper
   # Ownership: `Argument i ('param') is MUTABLE, but you passed
   # immutable variable 'x'`. Same fix shape as the assignment case —
   # declare the passed variable MUTABLE at its binding site.
-  sig { params(arg_node: AST::Identifier, scope: Scope, arg_idx: Integer, param_name: String).returns(NilClass) }
-  def emit_immutable_arg_error!(arg_node, scope, arg_idx, param_name)
+  sig do
+    params(arg_node: AST::Identifier, scope: Scope, arg_idx: Integer, param_name: String,
+           callee_name: String).returns(NilClass)
+  end
+  def emit_immutable_arg_error!(arg_node, scope, arg_idx, param_name, callee_name = 'unknown')
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     fix = build_declare_mutable_fix(arg_node.name, scope)
     # Generated code carries no location on a call argument, so without the
     # enclosing function the diagnostic cannot be traced to a site.
     kw = { index: arg_idx, param: param_name, actual: arg_node.name,
-           fn: (current_fn_ctx&.name || 'unknown') }
+           callee: callee_name, fn: (current_fn_ctx&.name || 'unknown') }
     return error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw) unless fix
     fixable!(arg_node,
       code: :IMMUTABLE_ARG_PASSED_AS_MUTABLE,

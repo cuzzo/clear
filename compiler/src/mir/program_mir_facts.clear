@@ -218,7 +218,7 @@ PRIVATE FN programMIRFinalizer__ast_call_needs_runtime?(node: Node, fn_nodes: {S
     RETURN FALSE;
   END
   MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature());
-  RETURN (((signature != NIL) AND (functionSignature__needs_rt(signature) == TRUE)) OR ((signature != NIL) AND (TRY (functionSignature__emits_allocating?(&signature)) == TRUE)));
+  RETURN (((signature != NIL) AND (functionSignature__needs_rt(signature) == TRUE)) OR ((signature != NIL) AND (TRY (functionSignature__emits_allocating?(signature)) == TRUE)));
 END
 PRIVATE FN programMIRFinalizer__copy_node_lowers_through_runtime?(node: Node, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   MUTABLE type = TRY (type__success_type((TRY (type__from_node_mut(node, "COPY runtime requirement")))));

@@ -773,7 +773,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
         MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
         IF sig EXISTS AS sig_value THEN
           MUTABLE sig_value_mutable = COPY sig_value;
-          IF !((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(&sig_value_mutable)))) THEN
+          IF !((TRY (functionSignature__emits_allocating?(sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(sig_value_mutable)))) THEN
             rtoc_idx = rtoc_idx + 1;
   CONTINUE;
           END
@@ -911,7 +911,7 @@ PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETUR
       MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature);
       IF sig EXISTS AS sig_value THEN
         MUTABLE sig_value_mutable = COPY sig_value;
-        IF !((TRY (functionSignature__emits_allocating?(&sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(&sig_value_mutable)))) THEN
+        IF !((TRY (functionSignature__emits_allocating?(sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(sig_value_mutable)))) THEN
           RETURN;
         END
         MUTABLE root: ?Identifier = aST__root_identifier(node.object);
@@ -1883,7 +1883,7 @@ PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}
     IF (TRUE AND (functionSignature__heap_carry_return(sig_value_mutable) == TRUE)) THEN
       RETURN TRUE;
     END
-    IF TRY (functionSignature__heap_return_alloc?(&sig_value_mutable)) THEN
+    IF TRY (functionSignature__heap_return_alloc?(sig_value_mutable)) THEN
       RETURN TRUE;
     END
     RETURN FALSE;

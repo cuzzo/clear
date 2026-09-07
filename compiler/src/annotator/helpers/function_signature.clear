@@ -437,10 +437,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view;
 }
 END
-PUB FN functionSignature__emits_allocating?(MUTABLE self: FunctionSignature) RETURNS !Bool
+PUB FN functionSignature__emits_allocating?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).allocation).allocates;
 }
 END
@@ -455,10 +455,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PUB FN functionSignature__mutates_receiver?(MUTABLE self: FunctionSignature) RETURNS !Bool
+PUB FN functionSignature__mutates_receiver?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership).mutates_receiver;
 }
 END
@@ -469,32 +469,32 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN intrinsicOwnershipContract__takes_any?(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership));
 }
 END
-PUB FN functionSignature__return_alloc(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
+PUB FN functionSignature__return_alloc(self: FunctionSignature) RETURNS !?String@symbol
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).allocation).return_alloc;
 }
 END
-PUB FN functionSignature__intrinsic_takes_value?(MUTABLE self: FunctionSignature) RETURNS !Bool
+PUB FN functionSignature__intrinsic_takes_value?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership).takes_value;
 }
 END
-PUB FN functionSignature__intrinsic_argument_takes_indices(MUTABLE self: FunctionSignature) RETURNS ![Set]Int64
+PUB FN functionSignature__intrinsic_argument_takes_indices(self: FunctionSignature) RETURNS ![Set]Int64
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership).argument_takes_indices;
 }
 END
-PUB FN functionSignature__intrinsic_pattern(MUTABLE self: FunctionSignature) RETURNS !?FunctionSignatureReturnValue
+PUB FN functionSignature__intrinsic_pattern(self: FunctionSignature) RETURNS !?FunctionSignatureReturnValue
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).template).zig);
 }
 END
@@ -539,10 +539,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN intrinsicTemplateContract__bc_op_or(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).template), default_name);
 }
 END
-PUB FN functionSignature__intrinsic_bc?(MUTABLE self: FunctionSignature) RETURNS !Bool
+PUB FN functionSignature__intrinsic_bc?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).template).bc;
 }
 END
@@ -553,17 +553,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN intrinsicAllocationContract__placeholder(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).allocation), kind);
 }
 END
-PUB FN functionSignature__intrinsic_suspends?(MUTABLE self: FunctionSignature) RETURNS !Bool
+PUB FN functionSignature__intrinsic_suspends?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).suspends;
 }
 END
-PUB FN functionSignature__intrinsic_container_borrow?(MUTABLE self: FunctionSignature) RETURNS !Bool
+PUB FN functionSignature__intrinsic_container_borrow?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).ownership).container_borrow;
 }
 END
@@ -574,45 +574,45 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN intrinsicBehaviorContract__narrows_collection_type?(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior));
 }
 END
-PUB FN functionSignature__intrinsic_receiver_collection_narrowing?(MUTABLE self: FunctionSignature) RETURNS !Bool
+PUB FN functionSignature__intrinsic_receiver_collection_narrowing?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).narrows_receiver_collection;
 }
 END
-PUB FN functionSignature__intrinsic_reject_when(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
+PUB FN functionSignature__intrinsic_reject_when(self: FunctionSignature) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).reject_when;
 }
 END
-PUB FN functionSignature__intrinsic_reject_error(MUTABLE self: FunctionSignature) RETURNS !?String
+PUB FN functionSignature__intrinsic_reject_error(self: FunctionSignature) RETURNS !?String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).reject_error;
 }
 END
-PUB FN functionSignature__intrinsic_error_kind(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
+PUB FN functionSignature__intrinsic_error_kind(self: FunctionSignature) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).error_kind;
 }
 END
-PUB FN functionSignature__intrinsic_error_type(MUTABLE self: FunctionSignature) RETURNS !?String@symbol
+PUB FN functionSignature__intrinsic_error_type(self: FunctionSignature) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).error_type;
 }
 END
-PUB FN functionSignature__intrinsic_lifetime(MUTABLE self: FunctionSignature) RETURNS ![]String
+PUB FN functionSignature__intrinsic_lifetime(self: FunctionSignature) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN COPY ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).lifetime;
 }
 END
@@ -637,18 +637,18 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN copy;
 }
 END
-PUB FN functionSignature__heap_return_alloc?(MUTABLE self: FunctionSignature) RETURNS !Bool
+PUB FN functionSignature__heap_return_alloc?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN (TRY (functionSignature__return_alloc(&rtoc_self_view)) == :heap);
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (TRY (functionSignature__return_alloc(rtoc_self_view)) == :heap);
 }
 END
-PUB FN functionSignature__frame_return_alloc?(MUTABLE self: FunctionSignature) RETURNS !Bool
+PUB FN functionSignature__frame_return_alloc?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN (TRY (functionSignature__return_alloc(&rtoc_self_view)) == :frame);
+WITH POLYMORPHIC self AS rtoc_self_view {
+    RETURN (TRY (functionSignature__return_alloc(rtoc_self_view)) == :frame);
 }
 END
 PUB FN functionSignature__dup(self: FunctionSignature) RETURNS !FunctionSignature@multiowned

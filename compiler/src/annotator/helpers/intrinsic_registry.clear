@@ -87,7 +87,7 @@ PUB FN intrinsicRegistry__map_pair_evidence_method?(name: Name, arity: Int64) RE
     IF !((TRY (functionSignature__intrinsic_contract(found_mutable))).behavior.is_method) THEN
       RETURN FALSE;
     END
-    RETURN (TRY (functionSignature__mutates_receiver?(&found_mutable)) AND TRY (functionSignature__takes_ownership?(&found_mutable)));
+    RETURN (TRY (functionSignature__mutates_receiver?(found_mutable)) AND TRY (functionSignature__takes_ownership?(&found_mutable)));
   END
   RETURN FALSE;
 END
@@ -108,7 +108,7 @@ PUB FN intrinsicRegistry__collection_value_store_method?(name: Name, arity: Int6
       MUTABLE method_arity = (declared_arity OR_ELSE param_arity);
       IF (method_arity == arity) THEN
         IF (TRY (functionSignature__intrinsic_contract(found_mutable))).behavior.is_method THEN
-          IF (TRY (functionSignature__mutates_receiver?(&found_mutable)) AND TRY (functionSignature__takes_ownership?(&found_mutable))) THEN
+          IF (TRY (functionSignature__mutates_receiver?(found_mutable)) AND TRY (functionSignature__takes_ownership?(&found_mutable))) THEN
             RETURN TRUE;
           END
         END

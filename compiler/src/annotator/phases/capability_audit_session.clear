@@ -3212,7 +3212,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     IF (IF callLikeNode__matched_stdlib_def(node) != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_23: ?FunctionSignature@multiowned = (callLikeNode__matched_stdlib_def(node));
-    TRY (functionSignature__intrinsic_suspends?(&rtoc_mutable_receiver_23)) }
+    TRY (functionSignature__intrinsic_suspends?(rtoc_mutable_receiver_23)) }
     ELSE
       NIL
     END) THEN
@@ -3743,16 +3743,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE md = UNWRAP (capabilityAuditCall__matched_stdlib_def(call));
-    IF TRY (functionSignature__emits_allocating?(&md)) THEN
+    IF TRY (functionSignature__emits_allocating?(md)) THEN
       RETURN "allocates";
     END
     IF functionSignature__can_fail(md) THEN
       RETURN "can fail";
     END
-    IF TRY (functionSignature__intrinsic_suspends?(&md)) THEN
+    IF TRY (functionSignature__intrinsic_suspends?(md)) THEN
       RETURN "suspends";
     END
-    IF TRY (functionSignature__mutates_receiver?(&md)) THEN
+    IF TRY (functionSignature__mutates_receiver?(md)) THEN
       RETURN "mutates its receiver";
     END
     RETURN NIL;

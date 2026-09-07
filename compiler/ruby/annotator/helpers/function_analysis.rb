@@ -953,7 +953,8 @@ module FunctionAnalysis
       if language_mode == :easy
         promote_mutable_call_argument!(root)
       else
-        emit_immutable_arg_error!(root, current_scope, facts.index + 1, facts.param.name)
+        emit_immutable_arg_error!(root, current_scope, facts.index + 1, facts.param.name,
+                                  facts.site.node.name.to_s)
       end
     end
 

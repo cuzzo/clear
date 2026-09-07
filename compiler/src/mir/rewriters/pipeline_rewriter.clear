@@ -317,7 +317,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE sig0: ?FunctionSignature@multiowned = sig0_branch_value;
       IF sig0 EXISTS AS sig0_value THEN
         MUTABLE sig0_value_mutable = COPY sig0_value;
-        call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(&sig0_value_mutable)));
+        call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(sig0_value_mutable)));
       END
       RETURN Locatable{ FuncCall: COPY call };
     END
@@ -1197,7 +1197,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(std_lib, RegistryKey{ StringValue: COPY "append" })))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "append", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
     TRY (aST__stamp_synthetic_type_mut(&call, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
-    call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(&defn)));
+    call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(defn)));
     call.matched_stdlib_def = defn;
     RETURN call;
 }
@@ -1209,7 +1209,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(:set_methods, RegistryKey{ StringValue: COPY "insert" })))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "insert", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
     TRY (aST__stamp_synthetic_type_mut(&call, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
-    call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(&defn)));
+    call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(defn)));
     call.matched_stdlib_def = defn;
     RETURN call;
 }

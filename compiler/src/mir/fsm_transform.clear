@@ -192,7 +192,7 @@ PRIVATE FN fsmTransform__suspend_value?(value: Locatable) RETURNS !Bool ->
   END
   MUTABLE md: ?FunctionSignature@multiowned = locatable__matched_stdlib_def(value);
   RETURN !(!(((((md != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_9 = md;
-  TRY (functionSignature__intrinsic_suspends?(&rtoc_mutable_receiver_9)) }) AND ((TRY (functionSignature__intrinsic_contract(md))).behavior).fsm_setup_present))));
+  TRY (functionSignature__intrinsic_suspends?(rtoc_mutable_receiver_9)) }) AND ((TRY (functionSignature__intrinsic_contract(md))).behavior).fsm_setup_present))));
 END
 PUB FN fsmTransform__local_entry(name: String, type_obj: Type, is_suspend_result: Bool = FALSE) RETURNS !?PromotedLocalFact ->
   MUTABLE t_branch_value: ?Type = NIL;

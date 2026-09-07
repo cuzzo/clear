@@ -771,7 +771,7 @@ module DiagnosticRegistry
     },
     IMMUTABLE_ARG_PASSED_AS_MUTABLE: {
       severity: :error, category: :ownership,
-      template: "Argument %{index} ('%{param}') is MUTABLE, but you passed immutable variable '%{actual}' (in '%{fn}').",
+      template: "Argument %{index} ('%{param}') is MUTABLE, but you passed immutable variable '%{actual}' (calling '%{callee}' in '%{fn}').",
       summary:  "Callee's MUTABLE parameter requires a mutable binding at the call site.",
     },
     MUTABLE_ARGUMENT_REQUIRES_MARKER: {

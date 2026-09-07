@@ -8959,7 +8959,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (typeAnalysisSession__function_node_map(&rtoc_self_view));
     IF (IF callLikeNode__matched_stdlib_def(node) != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_202: ?FunctionSignature@multiowned = (callLikeNode__matched_stdlib_def(node));
-    TRY (functionSignature__intrinsic_suspends?(&rtoc_mutable_receiver_202)) }
+    TRY (functionSignature__intrinsic_suspends?(rtoc_mutable_receiver_202)) }
     ELSE
       NIL
     END) THEN
@@ -10594,7 +10594,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_242 = (TRY (functionSignature__return_def(defn_value_mutable)));
       TRY (functionReturn__resolve(rtoc_local_receiver_242, obj_type, ( { MUTABLE rtoc_empty_list_241: []Locatable = List[]; rtoc_empty_list_241 } ))) }));
-      node.container_borrow = TRY (functionSignature__intrinsic_container_borrow?(&defn_value_mutable));
+      node.container_borrow = TRY (functionSignature__intrinsic_container_borrow?(defn_value_mutable));
       MUTABLE sharded_pattern: ?FunctionSignatureReturnValue = TRY (functionSignature__intrinsic_template(defn_value_mutable, IntrinsicTemplateKind.ShardedZig));
       MUTABLE numeric_pattern: ?FunctionSignatureReturnValue = TRY (functionSignature__intrinsic_template(defn_value_mutable, IntrinsicTemplateKind.NumericZig));
       MUTABLE zig_branch_value: ?FunctionSignatureReturnValue = NIL;
@@ -10603,7 +10603,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF (TRY (type__plain_numeric_map?(obj_type)) AND (numeric_pattern != NIL)) THEN
         zig_branch_value = numeric_pattern;
       ELSE
-        zig_branch_value = TRY (functionSignature__intrinsic_pattern(&defn_value_mutable));
+        zig_branch_value = TRY (functionSignature__intrinsic_pattern(defn_value_mutable));
       END
       MUTABLE zig: ?FunctionSignatureReturnValue = zig_branch_value;
       MUTABLE alloc: ?String@symbol =     IF (((type__sharded?(obj_type) OR type__striped?(obj_type))) AND (TRY (functionSignature__intrinsic_alloc(&defn_value_mutable, IntrinsicAllocationKind.ShardedAlloc)) != NIL)) THEN
@@ -10617,10 +10617,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         node.matched_stdlib_def = resolved_defn;
         node.matched_signature = resolved_defn;
       END
-      MUTABLE defn_allocates = TRY (functionSignature__emits_allocating?(&defn_value_mutable));
+      MUTABLE defn_allocates = TRY (functionSignature__emits_allocating?(defn_value_mutable));
       node.stdlib_allocates = defn_allocates;
-      node.mutates_receiver = TRY (functionSignature__mutates_receiver?(&defn_value_mutable));
-      IF (TRY (functionSignature__mutates_receiver?(&defn_value_mutable)) OR (TRY (functionSignature__intrinsic_argument_takes_indices(&defn_value_mutable))).any?()) THEN
+      node.mutates_receiver = TRY (functionSignature__mutates_receiver?(defn_value_mutable));
+      IF (TRY (functionSignature__mutates_receiver?(defn_value_mutable)) OR (TRY (functionSignature__intrinsic_argument_takes_indices(defn_value_mutable))).any?()) THEN
         TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, TRY (typeAnalysisSession__collection_effect_signature(&rtoc_self_view, &node, obj_type, &defn_value_mutable)), ([node.object] + node.args)));
         IF ((zig != NIL) AND TRUE) THEN
           node.matched_signature = resolved_defn;
@@ -10634,8 +10634,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
       node.can_fail = (((IF node.can_fail != NIL THEN node.can_fail ELSE functionSignature__can_fail(defn_value_mutable) END) != NIL) OR defn_allocates);
-      node.error_kind = TRY (functionSignature__intrinsic_error_kind(&defn_value_mutable));
-      node.error_type = TRY (functionSignature__intrinsic_error_type(&defn_value_mutable));
+      node.error_kind = TRY (functionSignature__intrinsic_error_kind(defn_value_mutable));
+      node.error_type = TRY (functionSignature__intrinsic_error_type(defn_value_mutable));
       IF ((((element_type != NIL) AND TRY (type__node_reference?(UNWRAP (element_type)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         actual_type = TRY (aST__full_type_mut(value_arg));
@@ -10655,8 +10655,8 @@ PRIVATE FN typeAnalysisSession__collection_effect_signature(MUTABLE self: TypeAn
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE takes = (TRY (functionSignature__intrinsic_argument_takes_indices(&definition))) |> DISTINCT _;
-    MUTABLE params: []Param = [Param{ name: "receiver", type: COPY receiver_type, required: TRUE, mutable: TRY (functionSignature__mutates_receiver?(&definition)), takes: FALSE, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }];
+    MUTABLE takes = (TRY (functionSignature__intrinsic_argument_takes_indices(definition))) |> DISTINCT _;
+    MUTABLE params: []Param = [Param{ name: "receiver", type: COPY receiver_type, required: TRUE, mutable: TRY (functionSignature__mutates_receiver?(definition)), takes: FALSE, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
     &params.append(Param{ name: "arg${(rtoc_idx + 1).toString()}", type: COPY &TRY (aST__full_type_mut(UNWRAP (node.args[rtoc_idx]))), required: TRUE, mutable: FALSE, takes: takes.contains?(rtoc_idx), default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL });
@@ -10755,7 +10755,7 @@ PRIVATE FN typeAnalysisSession__narrow_receiver_collection_mut(MUTABLE self: Typ
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !(TRY (functionSignature__intrinsic_receiver_collection_narrowing?(&defn))) THEN
+    IF !(TRY (functionSignature__intrinsic_receiver_collection_narrowing?(defn))) THEN
       RETURN;
     END
     IF !((node.args.length() == 1)) THEN
@@ -11832,7 +11832,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF TRY (typeAnalysisSession__func_call_suspends?(&rtoc_self_view, castLocatableToCallLikeNode(node))) THEN
         suspend_kind = IF (IF locatable__matched_stdlib_def(node) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_280: ?FunctionSignature@multiowned = (locatable__matched_stdlib_def(node));
-        TRY (functionSignature__intrinsic_suspends?(&rtoc_mutable_receiver_280)) }
+        TRY (functionSignature__intrinsic_suspends?(rtoc_mutable_receiver_280)) }
         ELSE
           NIL
         END) THEN
@@ -12601,20 +12601,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END) OR_ELSE :Any), :got: actual} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
       END
-      node.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__type_analysis_session(TRY (functionSignature__intrinsic_pattern(&method_def_value_mutable)));
+      node.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__type_analysis_session(TRY (functionSignature__intrinsic_pattern(method_def_value_mutable)));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ StaticCall: COPY node }, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_301 = (TRY (functionSignature__return_def(method_def_value_mutable)));
       TRY (functionReturn__resolve(rtoc_local_receiver_301, NIL, node.args)) }));
       node.matched_stdlib_def = method_def_value_mutable;
       node.matched_signature = method_def_value_mutable;
-      MUTABLE method_allocates = TRY (functionSignature__emits_allocating?(&method_def_value_mutable));
+      MUTABLE method_allocates = TRY (functionSignature__emits_allocating?(method_def_value_mutable));
       node.stdlib_allocates = method_allocates;
-      node.mutates_receiver = TRY (functionSignature__mutates_receiver?(&method_def_value_mutable));
+      node.mutates_receiver = TRY (functionSignature__mutates_receiver?(method_def_value_mutable));
       node.can_fail = (IF node.can_fail != NIL THEN node.can_fail ELSE functionSignature__can_fail(method_def_value_mutable) END);
       IF (functionSignature__recoverable_result?(method_def_value_mutable) AND TRUE) THEN
         node.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ StaticCall: COPY node })) })))));
       END
-      node.error_kind = TRY (functionSignature__intrinsic_error_kind(&method_def_value_mutable));
-      node.error_type = TRY (functionSignature__intrinsic_error_type(&method_def_value_mutable));
+      node.error_kind = TRY (functionSignature__intrinsic_error_kind(method_def_value_mutable));
+      node.error_type = TRY (functionSignature__intrinsic_error_type(method_def_value_mutable));
       IF (method_allocates OR functionSignature__can_fail(method_def_value_mutable)) THEN
         IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
                 MUTABLE rtoc_mutable_receiver_302 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
@@ -12668,32 +12668,32 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(functionSignature__intrinsic_varargs?(matched_def_value_mutable)) THEN
         TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, castNodeToFunctionCallNode(node), TRY (functionSignature__intrinsic_call_validation_signature(matched_def_value_mutable)), args));
       END
-      MUTABLE reject_when: ?String@symbol = TRY (functionSignature__intrinsic_reject_when(&matched_def_value_mutable));
+      MUTABLE reject_when: ?String@symbol = TRY (functionSignature__intrinsic_reject_when(matched_def_value_mutable));
       MUTABLE first_arg: ?Locatable = COPY args.first();
       IF (((reject_when != NIL) AND (first_arg != NIL)) AND TRY (typeAnalysisSession__reject_arg_type_matches?(&rtoc_self_view, UNWRAP (first_arg), symbol(UNWRAP (reject_when))))) THEN
-        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(&matched_def_value_mutable)) OR_ELSE "${aST__node_name(castNodeToLocatable(node))}() is not valid for ${first_arg.resolved_type}");
+        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(matched_def_value_mutable)) OR_ELSE "${aST__node_name(castNodeToLocatable(node))}() is not valid for ${first_arg.resolved_type}");
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_REJECTED }, [], CAST({:detail: reason} AS {String@symbol}Any)));
         RETURN NIL;
       END
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, castNodeToLocatable__type_analysis_session(node), { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_303 = (TRY (functionSignature__return_def(matched_def_value_mutable)));
       TRY (functionReturn__resolve(rtoc_local_receiver_303, NIL, args)) }));
-      node.zig_pattern = TRY (functionSignature__intrinsic_pattern(&matched_def_value_mutable));
+      node.zig_pattern = TRY (functionSignature__intrinsic_pattern(matched_def_value_mutable));
       node.matched_stdlib_def = COPY matched_def_value_mutable;
       IF (aST__node__matched_signature(node) EXISTS) THEN
         node.matched_signature = COPY matched_def_value_mutable;
       END
-      MUTABLE matched_allocates = TRY (functionSignature__emits_allocating?(&matched_def_value_mutable));
+      MUTABLE matched_allocates = TRY (functionSignature__emits_allocating?(matched_def_value_mutable));
       node.stdlib_allocates = matched_allocates;
-      node.mutates_receiver = TRY (functionSignature__mutates_receiver?(&matched_def_value_mutable));
+      node.mutates_receiver = TRY (functionSignature__mutates_receiver?(matched_def_value_mutable));
       node.can_fail = ((aST__node__can_fail(node) OR functionSignature__can_fail(matched_def_value_mutable)) OR matched_allocates);
       IF (functionSignature__recoverable_result?(matched_def_value_mutable) AND (aST__node_error_union_type(node) EXISTS)) THEN
         node.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node)) })))));
       END
-      IF TRY (functionSignature__intrinsic_error_kind(&matched_def_value_mutable)) THEN
-        node.error_kind = TRY (functionSignature__intrinsic_error_kind(&matched_def_value_mutable));
+      IF TRY (functionSignature__intrinsic_error_kind(matched_def_value_mutable)) THEN
+        node.error_kind = TRY (functionSignature__intrinsic_error_kind(matched_def_value_mutable));
       END
-      IF TRY (functionSignature__intrinsic_error_type(&matched_def_value_mutable)) THEN
-        node.error_type = TRY (functionSignature__intrinsic_error_type(&matched_def_value_mutable));
+      IF TRY (functionSignature__intrinsic_error_type(matched_def_value_mutable)) THEN
+        node.error_type = TRY (functionSignature__intrinsic_error_type(matched_def_value_mutable));
       END
       IF ((matched_allocates OR functionSignature__can_fail(matched_def_value_mutable)) OR functionSignature__needs_rt(matched_def_value_mutable)) THEN
         IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
@@ -12701,10 +12701,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
                 functionContext__record_alloc_use_mut(&rtoc_mutable_receiver_304);
         END
       END
-      IF TRY (functionSignature__intrinsic_suspends?(&matched_def_value_mutable)) THEN
+      IF TRY (functionSignature__intrinsic_suspends?(matched_def_value_mutable)) THEN
         TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("SUSPENDS")));
       END
-      IF TRY (functionSignature__mutates_receiver?(&matched_def_value_mutable)) THEN
+      IF TRY (functionSignature__mutates_receiver?(matched_def_value_mutable)) THEN
       IF node IS_A MethodCall AS method_call THEN
         typeAnalysisSession__mark_chain_needs_mut_ref_mut(&rtoc_self_view, method_call.object);
         MUTABLE root: ?String = typeAnalysisSession__chain_root_name(&rtoc_self_view, method_call.object);
@@ -19720,7 +19720,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF matched_def EXISTS AS matched_def_value THEN
       MUTABLE matched_def_value_mutable = COPY matched_def_value;
-      MUTABLE lifetimes = TRY (functionSignature__intrinsic_lifetime(&matched_def_value_mutable));
+      MUTABLE lifetimes = TRY (functionSignature__intrinsic_lifetime(matched_def_value_mutable));
       IF !((lifetimes.length() == 0)) THEN
         IF lifetimes.contains?("self") THEN
         IF call_node IS_A MethodCall AS method_call THEN
@@ -19794,7 +19794,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TypeAnalysisCallNode.MethodCall AS item ->
         matched_def = COPY item.matched_stdlib_def;,
     END
-    IF ((matched_def != NIL) AND !(((TRY (functionSignature__intrinsic_lifetime(&matched_def))).length() == 0))) THEN
+    IF ((matched_def != NIL) AND !(((TRY (functionSignature__intrinsic_lifetime(matched_def))).length() == 0))) THEN
       RETURN TRUE;
     END
     MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, typeAnalysisCallNode__name(call_node)));
@@ -20467,8 +20467,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
           RETURN NIL;
         END
-        MUTABLE ret_alloc = TRY (functionSignature__return_alloc(&matched_def));
-        IF TRY (functionSignature__emits_allocating?(&matched_def)) THEN
+        MUTABLE ret_alloc = TRY (functionSignature__return_alloc(matched_def));
+        IF TRY (functionSignature__emits_allocating?(matched_def)) THEN
           IF (ret_alloc == NIL) THEN
             ret_alloc = TRY (functionSignature__intrinsic_alloc(&matched_def, IntrinsicAllocationKind.Alloc));
           END
