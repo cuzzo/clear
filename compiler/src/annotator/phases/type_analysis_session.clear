@@ -432,7 +432,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (FALSE) THEN
       panic("annotation stamp missing type for {}");
     END
-    node.full_type = COPY CAST(value AS SyntheticTypeInput);
+    TRY (aST__set_full_type_mut(&node, CAST(value AS SyntheticTypeInput)));
     MUTABLE stamped = TRY (aST__full_type_mut(node));
     IF type__untyped?(stamped) THEN
       panic("annotation stamp produced :Untyped for {}");

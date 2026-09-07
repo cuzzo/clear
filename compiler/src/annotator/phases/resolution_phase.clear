@@ -284,7 +284,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (FALSE) THEN
       panic("resolution stamp missing type for {}");
     END
-    node.full_type = COPY CAST(value AS SyntheticTypeInput);
+    TRY (aST__set_full_type_mut(&node, CAST(value AS SyntheticTypeInput)));
     TRY (aST__full_type_mut(node));
     RETURN COPY value;
 }
