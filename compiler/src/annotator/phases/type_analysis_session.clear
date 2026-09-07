@@ -1176,7 +1176,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__visit(MUTABLE self: TypeAnalysisSession, node: ?Locatable) RETURNS !Any@multiowned
+PRIVATE FN typeAnalysisSession__visit(MUTABLE self: TypeAnalysisSession, MUTABLE node: ?Locatable) RETURNS !Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1324,7 +1324,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (resolutionSession__new(typeAnalysisSession__active_importer(&rtoc_self_view), typeAnalysisSession__import_source_dir(&rtoc_self_view), rtoc_self_view.config.source_code, TRY (typeAnalysisSession__current_scope(&rtoc_self_view)), typeAnalysisSession__semantic_function_registry(&rtoc_self_view), FALSE));
 }
 END
-PRIVATE FN typeAnalysisSession__record_ownership_transport_fact_mut(MUTABLE self: TypeAnalysisSession, node: Locatable) RETURNS !Void
+PRIVATE FN typeAnalysisSession__record_ownership_transport_fact_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1542,7 +1542,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN UNWRAP (previous.last());
 }
 END
-PRIVATE FN typeAnalysisSession__emit_optional_field_safe_nav_finding_mut(MUTABLE self: TypeAnalysisSession, node: GetField, target_type: Type) RETURNS !Void
+PRIVATE FN typeAnalysisSession__emit_optional_field_safe_nav_finding_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: GetField, target_type: Type) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1690,7 +1690,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN typeAnalysisSession__anchor_at(&rtoc_self_view, UNWRAP (locatable__token(tgt)).line, ((UNWRAP (locatable__token(tgt)).column + (CAST(aST__node_name(tgt) AS String)).codepointCount()) + 1));
 }
 END
-PRIVATE FN typeAnalysisSession__variant_anchor_from_unionlit(MUTABLE self: TypeAnalysisSession, node: Node, variant_name: String) RETURNS ?AnchorToken
+PRIVATE FN typeAnalysisSession__variant_anchor_from_unionlit(MUTABLE self: TypeAnalysisSession, MUTABLE node: Node, variant_name: String) RETURNS ?AnchorToken
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13831,7 +13831,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(rtoc_each_items_331[rtoc_idx]), :expr: locatable__resolved_type(locatable__expr(node))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(rtoc_each_items_331[rtoc_idx]), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }

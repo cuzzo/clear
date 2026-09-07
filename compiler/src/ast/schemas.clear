@@ -766,3 +766,14 @@ PUB FN schemaValue__kind(value: SchemaValue) RETURNS ?String@symbol EFFECTS REEN
   END
   RETURN NIL;
 END
+
+# The schema constructors take their fields as the input union; a map of plain
+# StructFields is converted entry by entry, in the same shape as the tree's
+# list casts.
+PUB FN castStructFieldMapToSchemasStructSchemaFieldInputMap(values: {String}StructField) RETURNS {String}SchemasStructSchemaFieldInput ->
+  MUTABLE out: {String}SchemasStructSchemaFieldInput = {};
+  FOR key IN values.keys() DO
+    out[key] = SchemasStructSchemaFieldInput{ StructField: COPY (values[key] OR_ELSE panic("missing hash key")) };
+  END
+  RETURN out;
+END

@@ -1130,7 +1130,7 @@ PRIVATE FN resolutionSession__clone_struct_schema(self: ResolutionSession, schem
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (structSchema__new(TRY (resolutionSession__clone_struct_fields(rtoc_self_view, schema.fields)), COPY schema.type_params, ( { MUTABLE rtoc_empty_list_27: []GenericParamDecl = List[]; rtoc_empty_list_27 } ), TRY (resolutionSession__clone_struct_methods(rtoc_self_view, schema.methods)), {}, schema.visibility, schema.extern_module, schema.as_type));
+    RETURN TRY (structSchema__new(castStructFieldMapToSchemasStructSchemaFieldInputMap(TRY (resolutionSession__clone_struct_fields(rtoc_self_view, schema.fields))), COPY schema.type_params, ( { MUTABLE rtoc_empty_list_27: []GenericParamDecl = List[]; rtoc_empty_list_27 } ), TRY (resolutionSession__clone_struct_methods(rtoc_self_view, schema.methods)), {}, schema.visibility, schema.extern_module, schema.as_type));
 }
 END
 PRIVATE FN resolutionSession__clone_resource_schema(self: ResolutionSession, schema: ResourceSchema) RETURNS !ResourceSchema@multiowned
