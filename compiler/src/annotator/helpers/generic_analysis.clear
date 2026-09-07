@@ -267,3 +267,13 @@ PUB FN declarationNode__value(value: DeclarationNode) RETURNS ?Locatable@boxed -
   END
   RETURN NIL;
 END
+
+# The constructor takes its entries as the input union; a map of plain Type
+# is converted entry by entry, like the tree's list casts.
+PUB FN castTypeMapToGenericBindingMap(values: {String}Type) RETURNS {String}GenericBinding ->
+  MUTABLE out: {String}GenericBinding = {};
+  FOR key IN values.keys() DO
+    out[key] = GenericBinding{ Type: COPY (values[key] OR_ELSE panic("missing hash key")) };
+  END
+  RETURN out;
+END

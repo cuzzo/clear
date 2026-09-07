@@ -1137,7 +1137,7 @@ PRIVATE FN resolutionSession__clone_resource_schema(self: ResolutionSession, sch
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (resourceSchema__new(resolutionSession__clone_resource_close_plan(rtoc_self_view, schema.close_plan), TRY (resolutionSession__clone_static_methods(rtoc_self_view, schema.static_methods)), TRY (resolutionSession__clone_struct_fields(rtoc_self_view, schema.fields)), COPY schema.type_params, schema.extern_module, schema.as_type, schema.visibility, TRY (resolutionSession__clone_resource_methods(rtoc_self_view, schema.methods))));
+    RETURN TRY (resourceSchema__new(resolutionSession__clone_resource_close_plan(rtoc_self_view, schema.close_plan), TRY (resolutionSession__clone_static_methods(rtoc_self_view, schema.static_methods)), castStructFieldMapToSchemasResourceSchemaFieldInputMap(TRY (resolutionSession__clone_struct_fields(rtoc_self_view, schema.fields))), COPY schema.type_params, schema.extern_module, schema.as_type, schema.visibility, TRY (resolutionSession__clone_resource_methods(rtoc_self_view, schema.methods))));
 }
 END
 PRIVATE FN resolutionSession__clone_union_schema(self: ResolutionSession, schema: UnionSchema) RETURNS !UnionSchema@multiowned
@@ -1981,7 +1981,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       close_plan = resourceClosePlan__method(UNWRAP (node.close_method));
     END
-    TRY (resourceSchema__new(close_plan, {}, node.field_decls, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.from_module, node.as_type, :package, {}))
+    TRY (resourceSchema__new(close_plan, {}, node.castStructFieldMapToSchemasResourceSchemaFieldInputMap(field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.from_module, node.as_type, :package, {}))
     }
     ELSE
       TRY (structSchema__new(node.field_decls, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), ( { MUTABLE rtoc_empty_list_55: []GenericParamDecl = List[]; rtoc_empty_list_55 } ), {}, {}, :package, node.from_module, node.as_type))

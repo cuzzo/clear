@@ -777,3 +777,13 @@ PUB FN castStructFieldMapToSchemasStructSchemaFieldInputMap(values: {String}Stru
   END
   RETURN out;
 END
+
+# The constructor takes its entries as the input union; a map of plain StructField
+# is converted entry by entry, like the tree's list casts.
+PUB FN castStructFieldMapToSchemasResourceSchemaFieldInputMap(values: {String}StructField) RETURNS {String}SchemasResourceSchemaFieldInput ->
+  MUTABLE out: {String}SchemasResourceSchemaFieldInput = {};
+  FOR key IN values.keys() DO
+    out[key] = SchemasResourceSchemaFieldInput{ StructField: COPY (values[key] OR_ELSE panic("missing hash key")) };
+  END
+  RETURN out;
+END
