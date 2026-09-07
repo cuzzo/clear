@@ -1455,11 +1455,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE fix: ?Fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
-      MUTABLE token: ?Token = aST__node__token(decl);
+      MUTABLE token: ?Token = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
       IF token THEN
-        MUTABLE dline = token.line;
+        MUTABLE dline = UNWRAP (token).line;
         MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
-        MUTABLE search_offset = (token.column - 1);
+        MUTABLE search_offset = (UNWRAP (token).column - 1);
         MUTABLE ann_match: ?CompilerRegexScanner = NIL;
         IF line_text.substr(search_offset, (line_text.length() - search_offset)) != NIL THEN
           ann_match = COPY compilerRegexMatchData(((line_text.substr(search_offset, (line_text.length() - search_offset)))?), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
@@ -1621,7 +1621,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END)))).reg;
     END
-    IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
+    IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
@@ -1661,7 +1661,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END)))).reg;
     END
-    IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
+    IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN

@@ -2478,11 +2478,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE fix: ?Fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
-      MUTABLE token: ?Token = aST__node__token(decl);
+      MUTABLE token: ?Token = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
       IF token THEN
-        MUTABLE dline = token.line;
+        MUTABLE dline = UNWRAP (token).line;
         MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
-        MUTABLE search_offset = (token.column - 1);
+        MUTABLE search_offset = (UNWRAP (token).column - 1);
         MUTABLE ann_match: ?CompilerRegexScanner = NIL;
         IF line_text.substr(search_offset, (line_text.length() - search_offset)) != NIL THEN
           ann_match = COPY compilerRegexMatchData(((line_text.substr(search_offset, (line_text.length() - search_offset)))?), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
@@ -2644,7 +2644,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END)))).reg;
     END
-    IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
+    IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
@@ -2684,7 +2684,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END)))).reg;
     END
-    IF !((((decl != NIL) AND TRUE) AND aST__node__token(decl))) THEN
+    IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
@@ -2730,14 +2730,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE tok: ?Token = NIL;
       MUTABLE decl: ?SymbolEntryRegInput = COPY info_value.reg;
       IF ((decl != NIL) AND TRUE) THEN
-        tok = aST__node__token(decl);
+        tok = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
       ELSE_IF (symbolEntry__is_param(info_value) AND (COPY info_value.param_decl_token != NIL)) THEN
         tok = COPY info_value.param_decl_token;
       END
       IF !(tok) THEN
         RETURN NIL;
       END
-      IF (tok.value == "MUTABLE") THEN
+      IF (UNWRAP (tok).value == "MUTABLE") THEN
         RETURN NIL;
       END
       RETURN TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: tok.line} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
@@ -11361,7 +11361,7 @@ PRIVATE FN typeAnalysisSession__restamp_auto_function_signature_mut(MUTABLE self
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE signature = TRY (functionSignature__new(fn_value.params, castOptionalTypeToOptionalTypeTypeInput(fn_value.return_type), FunctionSignatureLifetimeInput{ ArrayValue: TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, fn_value)) |> SELECT castLifetimesReturnValueItemToFunctionSignatureLifetimeSource(_) }, fn_value.visibility, fn_value.type_params |> SELECT symbol(_), {}, functionDef__declared_plain_reentrant?(fn_value), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_255: []String@symbol = List[]; rtoc_empty_list_255 } ), NIL, ( { MUTABLE rtoc_empty_list_256: []String@symbol = List[]; rtoc_empty_list_256 } )));
+    MUTABLE signature = TRY (functionSignature__new(fn_value.params, castOptionalTypeToOptionalTypeTypeInput(fn_value.return_type), FunctionSignatureLifetimeInput{ ArrayValue: TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, fn_value)) |> SELECT castLifetimesReturnValueItemToFunctionSignatureLifetimeSource(castTypeAnalysisSessionReturnValueItemToFunctionSignatureLifetimeSource(_)) }, fn_value.visibility, fn_value.type_params |> SELECT symbol(_), {}, functionDef__declared_plain_reentrant?(fn_value), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_255: []String@symbol = List[]; rtoc_empty_list_255 } ), NIL, ( { MUTABLE rtoc_empty_list_256: []String@symbol = List[]; rtoc_empty_list_256 } )));
     TRY (functionSignature__sync_from_function_def_mut(&signature, FunctionSignatureSyncSource{ FunctionDefMultiowned: COPY fn_value }));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ FunctionDef: COPY fn_value }, signature));
     MUTABLE entry: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_257 = typeAnalysisSession__semantic_root_scope(&rtoc_self_view);
@@ -13074,7 +13074,7 @@ PRIVATE FN typeAnalysisSession__visit_IsA(MUTABLE self: TypeAnalysisSession, MUT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !(TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, castLocatableToNode(node.left)))) THEN
+    IF !(TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, castNodeToNodeOrType(castLocatableToNode)(node.left)))) THEN
       TRY (typeAnalysisSession__annotate_runtime_is_a_mut(&rtoc_self_view, &node));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ IsA: COPY node }, :Bool));
       RETURN NIL;
@@ -13243,7 +13243,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     ELSE_IF node IS_A GetField AS get_field THEN
       MUTABLE get_field_mutable = COPY get_field;
-      TRY (typeAnalysisSession__stamp_runtime_is_a_target_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(castLocatableToLocatable__type_analysis_session(get_field_mutable.target)), type_name));
+      TRY (typeAnalysisSession__stamp_runtime_is_a_target_mut(&rtoc_self_view, castLoccastNodeToNodeOrType(atableToNode__type_analysis_session)(castLocatableToLocatable__type_analysis_session(get_field_mutable.target)), type_name));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ GetField: COPY get_field_mutable }, type_name));
     ELSE_IF node IS_A Identifier AS identifier THEN
       MUTABLE identifier_mutable = COPY identifier;
@@ -16990,7 +16990,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRUE AND (aST__node__can_fail( UNWRAP (castNodeToLocatable(node))) OR_ELSE FALSE)) THEN
       RETURN TRUE;
     END
-    IF (aST__node_error_union_type(node) OR_ELSE FALSE) THEN
+    IF (aST__node_error_union_type(UNWRAP (castNodeToLocatable(node))) != NIL) THEN
       RETURN TRUE;
     END
     RETURN FALSE;
