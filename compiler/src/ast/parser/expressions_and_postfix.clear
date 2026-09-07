@@ -161,7 +161,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       order = (order $+ token__display_value(clearParser__current(rtoc_self_view)));
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, token__display_value(clearParser__current(rtoc_self_view))));
     END
-    IF !(valid_select_modifier_orders.contains?(order)) THEN
+    IF !((valid_select_modifier_orders |> ANY (_ == order))) THEN
       TRY (clearParser__error_mut(&rtoc_self_view, modifier, CodeOrMessage{ SymbolValue: :SELECT_MODIFIER_ORDER_INVALID }, [], {:order: "${order}"}));
     END
     RETURN order;

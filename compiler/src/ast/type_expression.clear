@@ -28,7 +28,7 @@ PUB UNION TypeExpressionSemanticPayload { Unset: Bool }
 PUB UNION TypeExpressionDimension { Int64Value: Int64, SymbolValue: String@symbol }
 valid_tense_orders: [12]String = ["", "!", "?", "!?", "~", "~!", "~?", "~!?", "!~", "!~!", "!~?", "!~!?"];
 PUB FN typeExpression__valid_tense_order?(order: String) RETURNS Bool ->
-  RETURN valid_tense_orders.contains?(order);
+  RETURN (valid_tense_orders |> ANY (_ == order));
 END
 PUB FN typeExpression__of(kind: TypeExpressionKind, capabilities: TypeCapabilities = typeCapabilities__new(:affine)) RETURNS TypeExpression ->
   RETURN TypeExpression{ kind: COPY kind, capabilities: COPY capabilities };

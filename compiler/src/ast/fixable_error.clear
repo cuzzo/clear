@@ -94,11 +94,11 @@ PUB STRUCT FixableFinding {
   token: ?Token
 }
 
-PUB FN fixableError__levels() RETURNS Any EFFECTS REENTRANT ->
+PUB FN fixableError__levels() RETURNS [4]String@symbol EFFECTS REENTRANT ->
   RETURN [:hint, :info, :warning, :error];
 END
 PUB FN fixableFinding__initialize(MUTABLE self: FixableFinding, level: String@symbol, message: String, token: ?Token, category: String@symbol, fixes: []Fix) RETURNS !Void ->
-  IF !(fixableError__levels().contains?(level)) THEN
+  IF !((fixableError__levels() |> ANY (_ == level))) THEN
     panic("bad level {}");
   END
   IF !((TRY (diagnosticRegistry__categories())).contains?(category)) THEN

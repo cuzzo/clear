@@ -8858,7 +8858,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     effect = typeAnalysisSession__promote_suspends_for_current_context(&rtoc_self_view, effect);
     (TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, UNWRAP (fn_ctx?.name)))).insert(COPY effect);
-    IF (typeAnalysisSession__inside_snapshot_transaction_body?(&rtoc_self_view) AND suspends_family.contains?(effect)) THEN
+    IF (typeAnalysisSession__inside_snapshot_transaction_body?(&rtoc_self_view) AND (suspends_family |> ANY (_ == effect))) THEN
       typeAnalysisSession__record_snapshot_txn_violation_mut(&rtoc_self_view, effect, fn_ctx.name);
     END
     NIL;
@@ -8971,7 +8971,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE callee: ?FunctionDef@multiowned = COPY fn_nodes[node.name()];
     IF callee EXISTS AS callee_value THEN
       MUTABLE effs = callee_value.effects;
-      RETURN !(!(((effs AND (effs |> ANY suspends_family.contains?(_))))));
+      RETURN !(!(((effs AND (effs |> ANY (suspends_family |> ANY (_ == _)))))));
     ELSE
       RETURN FALSE;
     END

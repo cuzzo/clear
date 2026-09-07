@@ -31,7 +31,7 @@ PUB FN aST__error_type_names() RETURNS ![]String ->
   RETURN (TRY (aST__error_types())).keys();
 END
 PUB FN aST__error_kind?(sym: ?String@symbol) RETURNS Bool ->
-  RETURN ruby_constant_error_kinds().contains?(sym);
+  RETURN (ruby_constant_error_kinds() |> ANY (_ == sym));
 END
 PUB FN aST__error_type?(sym: ?String@symbol) RETURNS !Bool ->
   IF sym EXISTS AS sym_value THEN

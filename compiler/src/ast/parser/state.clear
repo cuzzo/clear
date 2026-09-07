@@ -151,7 +151,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF expected_value EXISTS AS expected_text THEN
      IF prev_tok EXISTS AS prev_tok_value THEN
-      IF syntax_tokens_at_statement_end.contains?(expected_text) THEN
+      IF (syntax_tokens_at_statement_end |> ANY (_ == expected_text)) THEN
        IF (prev_tok_value.line < token.line) THEN
         RETURN TRY (clearParser__emit_syntax_insert_end_of_line_mut(&rtoc_self_view, prev_tok_value, token, expected_text));
        END

@@ -86,7 +86,7 @@ integer_types: [9]String@symbol = [:BYTE, :INT8, :INT16, :INT32, :INT64, :PREFIX
 float_types: [2]String@symbol = [:FLOAT32, :NUMBER];
 PUB FN token__text_mut(MUTABLE self: Token) RETURNS !String ->
   IF (COPY self.value) EXISTS AS payload THEN
-    IF text_types.contains?(self.type) THEN
+    IF (text_types |> ANY (_ == self.type)) THEN
       IF payload IS_A String AS string THEN
         RETURN COPY string;
       END
@@ -115,7 +115,7 @@ PUB FN token__number_as_integer(self: Token) RETURNS !Int64 ->
 END
 PUB FN token__integer_mut(MUTABLE self: Token) RETURNS !Int64 ->
   IF (COPY self.value) EXISTS AS payload THEN
-    IF integer_types.contains?(self.type) THEN
+    IF (integer_types |> ANY (_ == self.type)) THEN
       IF payload IS_A Int64 AS int64 THEN
         RETURN int64;
       END
@@ -125,7 +125,7 @@ PUB FN token__integer_mut(MUTABLE self: Token) RETURNS !Int64 ->
 END
 FN token__float_mut(MUTABLE self: Token) RETURNS !Float64 ->
   IF (COPY self.value) EXISTS AS payload THEN
-    IF float_types.contains?(self.type) THEN
+    IF (float_types |> ANY (_ == self.type)) THEN
       IF payload IS_A Float64 AS float64 THEN
         RETURN float64;
       END

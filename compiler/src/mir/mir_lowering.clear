@@ -14095,7 +14095,7 @@ PRIVATE FN mIRLowering__classify_optional_binary_comparison(MUTABLE self: MIRLow
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !(optional_comparison_ops.contains?(facts.op)) THEN
+    IF !((optional_comparison_ops |> ANY (_ == facts.op))) THEN
       RETURN NIL;
     END
     IF !((type__optional?(facts.left_type) OR type__optional?(facts.right_type))) THEN

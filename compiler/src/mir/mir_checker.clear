@@ -1502,7 +1502,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR rtoc_key IN allocs.keys() DO
     MUTABLE marks: []AllocMark = COPY UNWRAP (allocs[rtoc_key]);
     MUTABLE mark: ?AllocMark = COPY marks.first();
-    IF ((mark != NIL) AND valid_allocators.contains?(mark.alloc)) THEN
+    IF ((mark != NIL) AND (valid_allocators |> ANY (_ == mark.alloc))) THEN
         alloc_by_name[rtoc_key] = COPY mark.alloc;
     END
     END
@@ -2223,7 +2223,7 @@ PUB FN mIRChecker__check_fsm_destroy_actions_mut(actions: []FsmDestroyAction, fi
   END
 END
 PUB FN mIRChecker__check_fsm_destroy_cleanup_action_mut(action: FsmDestroyCleanup, finalize_cleanups: []String, ctx_id: Int64, source: ?Locatable) RETURNS !Void ->
-  IF !(valid_fsm_destroy_sources.contains?(action.source_kind)) THEN
+  IF !((valid_fsm_destroy_sources |> ANY (_ == action.source_kind))) THEN
     RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-DESTROY-SOURCE", "destroy cleanup '${action.name}' has unknown source ${compilerInspectValue()}.", source);
   END
   MUTABLE expected_target = "__ctx_${ctx_id.toString()}.${action.name}";
@@ -2251,7 +2251,7 @@ PUB FN mIRChecker__check_fsm_destroy_cleanup_action_mut(action: FsmDestroyCleanu
   TRY (mIRChecker__check_fsm_destroy_optional_expr_mut("allocator", action.name, action.allocator, source));
 END
 PUB FN mIRChecker__check_fsm_destroy_stmt_action_mut(action: FsmDestroyStmt, finalize_cleanups: []String, ctx_id: Int64, source: ?Locatable) RETURNS !Void ->
-  IF !(valid_fsm_destroy_sources.contains?(action.source_kind)) THEN
+  IF !((valid_fsm_destroy_sources |> ANY (_ == action.source_kind))) THEN
     RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-DESTROY-SOURCE", "destroy statement '${action.name}' has unknown source ${compilerInspectValue()}.", source);
   END
   MUTABLE expected_target = "__ctx_${ctx_id.toString()}.${action.name}";
@@ -2269,7 +2269,7 @@ PUB FN mIRChecker__check_fsm_destroy_lock_action_mut(action: FsmDestroyLockRelea
   IF !((action.guard_index >= 0)) THEN
     RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-DESTROY-LOCK-GUARD", "lock destroy action '${action.name}' uses invalid guard index ${compilerInspectValue()}.", source);
   END
-  IF !(valid_fsm_unlock_methods.contains?(action.unlock_method)) THEN
+  IF !((valid_fsm_unlock_methods |> ANY (_ == action.unlock_method))) THEN
     RAISE Input, FsmStructureError, mIRChecker__format_fsm_error("INV-FSM-DESTROY-LOCK-METHOD", "lock destroy action '${action.name}' uses unknown unlock method ${compilerInspectValue()}.", source);
   END
 END
@@ -2482,7 +2482,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE marks: []AllocMark = COPY UNWRAP (allocs[rtoc_key]);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < marks.length() DO
-      IF valid_allocators.contains?(marks[rtoc_idx]?.alloc) THEN
+      IF (valid_allocators |> ANY (_ == marks[rtoc_idx]?.alloc)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -2496,7 +2496,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < marks.length() DO
       MUTABLE rtoc_mark = UNWRAP (marks[rtoc_idx]);
       MUTABLE scope: ?String@symbol = rtoc_mark.scope;
-      IF valid_alloc_scopes.contains?(scope) THEN
+      IF (valid_alloc_scopes |> ANY (_ == scope)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -2517,7 +2517,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MIRCheckerCleanupMarksByNameValueItem.Cleanup AS item -> "Cleanup",
         MIRCheckerCleanupMarksByNameValueItem.ErrCleanup AS item -> "ErrCleanup"
       END;
-      IF valid_allocators.contains?(alloc) THEN
+      IF (valid_allocators |> ANY (_ == alloc)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -2538,7 +2538,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       FOR rtoc_alloc_key IN (UNWRAP (metadata)).slots.keys() DO
         MUTABLE alloc: String@symbol = COPY UNWRAP ((UNWRAP (metadata)).slots[rtoc_alloc_key]);
         MUTABLE alloc_key = symbol(rtoc_alloc_key);
-        IF valid_allocators.contains?(alloc) THEN
+        IF (valid_allocators |> ANY (_ == alloc)) THEN
         CONTINUE;
         END
         &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INVALID_ALLOCATOR_MARK, Name{ StringValue: COPY rtoc_label }, "allocator metadata ${alloc_key} uses ${compilerInspectValue()}; MIR allocator metadata must be :heap or :frame")));
@@ -3736,7 +3736,7 @@ PRIVATE FN mIRChecker__allocating_expr?(self: MIRChecker, expr: ?Emittable) RETU
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE effect = TRY (ownershipEffect__of(expr));
-    RETURN ((effect.produces_owned AND effect.requires_hoist) AND ((!(effect.alloc) OR valid_allocators.contains?(effect.alloc))));
+    RETURN ((effect.produces_owned AND effect.requires_hoist) AND ((!(effect.alloc) OR (valid_allocators |> ANY (_ == effect.alloc)))));
 }
 END
 PUB FN mIRChecker__new(fn_name: ?String = NIL, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS MIRChecker@multiowned ->

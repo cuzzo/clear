@@ -6,10 +6,10 @@ PUB STRUCT OwnershipEdgePlan {
   error_kind: ?String@symbol
 }
 PUB FN ownershipEdgePlanner__select(source_carrier: String@symbol, fan_out: String@symbol, at_unique_boundary: Bool = FALSE) RETURNS !OwnershipEdgePlan ->
-  IF !(carriers.contains?(source_carrier)) THEN
+  IF !((carriers |> ANY (_ == source_carrier))) THEN
     panic("unknown source carrier {}");
   END
-  IF !(fan_outs.contains?(fan_out)) THEN
+  IF !((fan_outs |> ANY (_ == fan_out))) THEN
     panic("unknown fan-out {}");
   END
   IF (fan_out == :move) THEN
