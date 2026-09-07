@@ -267,7 +267,28 @@ module FnIoRecord
     end
   end
 
+  # Marks a declared field the Ruby object never set, so the renderer writes
+  # the declared type's zero rather than dropping the field.
+  DefaultFor = Struct.new(:type)
+
+  def default_literal(type)
+    t = type.to_s.strip
+    return 'NIL' if t.start_with?('?')
+    return 'Set[]' if t.start_with?('[Set]')
+    return 'List[]' if t.start_with?('[]')
+    return '{}' if t.start_with?('{') || t.start_with?('HashMap<')
+
+    case t.sub(/@\w+\z/, '')
+    when 'Bool' then 'FALSE'
+    when 'Int64', 'Int32', 'UInt64', 'Byte' then '0'
+    when 'Float64', 'Float32' then '0.0'
+    when 'String' then '""'
+    end
+  end
+
   def clear_literal(value, depth = 0, seen = {})
+    return default_literal(value.type) if value.is_a?(DefaultFor)
+
     return nil if depth > 14
 
     case value
@@ -317,7 +338,14 @@ module FnIoRecord
       # is a "has no field" error, and the struct literal has to name every
       # declared field anyway -- so the CLEAR declaration is the authority.
       declared_fields = schema[0][value.class.name.to_s.split('::').last]
-      fields = fields.select { |f, _| declared_fields.key?(f) } if declared_fields&.any?
+      if declared_fields&.any?
+        fields = fields.select { |f, _| declared_fields.key?(f) }
+        # A struct literal must name EVERY declared field. Ruby leaves an
+        # attribute unset until it is written, so a field with no ivar yet is
+        # not absent from the type -- it just has no value, and the declared
+        # type's own zero is what the generated struct would hold.
+        (declared_fields.keys - fields.keys).each { |f| fields[f] = DefaultFor.new(declared_fields[f]) }
+      end
       owner_class = value.class.name.to_s.split('::').last
       parts = fields.map do |f, v|
         lit = clear_literal(v, depth + 1, seen)
