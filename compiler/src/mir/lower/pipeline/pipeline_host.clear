@@ -175,7 +175,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN NIL;
     END
     MUTABLE entry = cleanupEntry__build(:uniform, fact.alloc, FALSE, NIL, TRY (type__zig_type(type_info)));
-    CAST(Tuple{fact.mark, entry} AS Tuple<AllocMark, CleanupEntry>)
+    CAST(Tuple{fact.mark, COPY entry} AS Tuple<AllocMark, CleanupEntry>)
     }, next_index_name: %() USE(rtoc_self_view) -> {
     rtoc_self_view.each_idx_counter = (rtoc_self_view.each_idx_counter + 1);
     "__each_i_${rtoc_self_view.each_idx_counter.toString()}"

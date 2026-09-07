@@ -1093,7 +1093,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (clearParser__match_mut(&rtoc_self_view, :CHAR, ","));
     END
     TRY (clearParser__consume(&rtoc_self_view, :CHAR, close_value));
-    RETURN Tuple{start_token, items};
+    RETURN Tuple{start_token, COPY items};
 }
 END
 FN clearParser__parse_generic_type_params(MUTABLE self: ClearParser) RETURNS ![]GenericParamDecl

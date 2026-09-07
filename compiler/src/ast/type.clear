@@ -92,7 +92,7 @@ PUB STRUCT FunctionType {
   abi: String@symbol
 }
 PUB FN type__function_type_expression_for(signature: FunctionType) RETURNS TypeExpressionKind ->
-  RETURN TypeExpressionKind{ FunctionTypeExpression: COPY FunctionTypeExpression{ signature: COPY FunctionSignatureExpression{ params: COPY signature.params |> SELECT FunctionParamExpression{ expression: COPY _.type.shape.expression }, return_expression: COPY signature.return_type.shape.expression, reentrant: signature.reentrant, abi: COPY signature.abi, semantic_payload: NIL } } };
+  RETURN TypeExpressionKind{ FunctionTypeExpression: COPY FunctionTypeExpression{ signature: COPY FunctionSignatureExpression{ params: COPY signature.params |> SELECT FunctionParamExpression{ expression: COPY _.type.shape.expression, mutable: _.mutable }, return_expression: COPY signature.return_type.shape.expression, reentrant: signature.reentrant, abi: COPY signature.abi, semantic_payload: NIL } } };
 END
 PUB FN type__function_type_for_expression(expression: FunctionTypeExpression) RETURNS !FunctionType EFFECTS REENTRANT ->
   MUTABLE fn_params = expression.signature.params |> SELECT FunctionTypeParam{ type: COPY TRY (type__new(TypeConstructionInput{ TypeExpression: COPY _.expression })), mutable: _.mutable };

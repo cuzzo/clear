@@ -881,7 +881,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       PARTIAL MATCH rtoc_union_writeback_53 START Locatable.IfStatement AS rtoc_union_writeback_53_item -> skip_if = COPY rtoc_union_writeback_53_item;, END
       NIL;
       MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
-      RETURN (CAST(Tuple{increment, skip_if} AS Tuple<Assignment, IfStatement>) + rest);
+      RETURN (CAST(Tuple{increment, COPY skip_if} AS Tuple<Assignment, IfStatement>) + rest);
     ELSE_IF stage IS_A LimitOp AS limit_op THEN
       MUTABLE limit_op_mutable = COPY limit_op;
       MUTABLE cnt_var = pipelineRewriter__next_var(&rtoc_self_view, "__lim_cnt");
@@ -927,7 +927,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       PARTIAL MATCH rtoc_union_writeback_60 START Locatable.IfStatement AS rtoc_union_writeback_60_item -> limit_if = COPY rtoc_union_writeback_60_item;, END
       NIL;
       MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
-      RETURN (CAST(Tuple{increment, limit_if} AS Tuple<Assignment, IfStatement>) + rest);
+      RETURN (CAST(Tuple{increment, COPY limit_if} AS Tuple<Assignment, IfStatement>) + rest);
     ELSE
       RETURN TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
     END

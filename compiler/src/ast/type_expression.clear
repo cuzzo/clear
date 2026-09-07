@@ -46,7 +46,11 @@ PUB STRUCT TypeProjectionExpression {
   protocol: ?String@symbol
 }
 PUB STRUCT FunctionParamExpression {
-  expression: TypeExpression
+  expression: TypeExpression,
+  # `FN(MUTABLE T) -> R`: the callback may mutate this parameter. Ruby carries
+  # this with a `false` default; the translation dropped it, so every read of
+  # `.mutable` was an unknown field.
+  mutable: Bool
 }
 PUB STRUCT FunctionSignatureExpression {
   params: []FunctionParamExpression,
@@ -338,7 +342,7 @@ PUB FN typeExpressionTree__transform(expression: TypeExpression, visitor: FN(Typ
     rebuilt_branch_value = COPY expression;,
     TypeExpressionKind.FunctionTypeExpression AS function_type_expression ->
     MUTABLE signature = function_type_expression.signature;
-    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ FunctionTypeExpression: COPY FunctionTypeExpression{ signature: COPY FunctionSignatureExpression{ params: COPY signature.params |> SELECT FunctionParamExpression{ expression: COPY typeExpressionTree__transform(_.expression, visitor) }, return_expression: COPY typeExpressionTree__transform(signature.return_expression, visitor), reentrant: signature.reentrant, abi: COPY signature.abi, semantic_payload: NIL } } }, capabilities: COPY cap };,
+    rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ FunctionTypeExpression: COPY FunctionTypeExpression{ signature: COPY FunctionSignatureExpression{ params: COPY signature.params |> SELECT FunctionParamExpression{ expression: COPY typeExpressionTree__transform(_.expression, visitor), mutable: _.mutable }, return_expression: COPY typeExpressionTree__transform(signature.return_expression, visitor), reentrant: signature.reentrant, abi: COPY signature.abi, semantic_payload: NIL } } }, capabilities: COPY cap };,
     TypeExpressionKind.TupleTypeExpression AS tuple_type_expression ->
     rebuilt_branch_value = TypeExpression{ kind: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY tuple_type_expression.items |> SELECT typeExpressionTree__transform(_, visitor) } }, capabilities: COPY cap };,
     TypeExpressionKind.OptionalTypeExpression AS optional_type_expression ->
@@ -707,7 +711,7 @@ PRIVATE FN typeExpressionParser__split_array_suffix(source: String) RETURNS !?Tu
           dimension_branch_value = TypeExpressionDimension{ Int64Value: TRY (dimension_source.toInt()) };
         END
         MUTABLE dimension: ?TypeExpressionDimension = dimension_branch_value;
-        RETURN Tuple{item_source, dimension};
+        RETURN Tuple{item_source, COPY dimension};
       END
     END
     index = (index - 1);

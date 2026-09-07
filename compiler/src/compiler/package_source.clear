@@ -46,7 +46,7 @@ PUB FN packageSource__merge(member_paths: []String, resolve_pkg: FN(String) -> ?
       IF alias_name EXISTS AS alias_name_value THEN
           key_alias = COPY alias_name_value;
       END
-      MUTABLE key: Tuple<String, ?String> = CAST(Tuple{COPY emitted_target, key_alias} AS Tuple<String, ?String>);
+      MUTABLE key: Tuple<String, ?String> = CAST(Tuple{COPY emitted_target, COPY key_alias} AS Tuple<String, ?String>);
       IF seen_requires.contains?(key) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;

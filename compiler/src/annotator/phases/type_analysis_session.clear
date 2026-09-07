@@ -13332,7 +13332,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE narrowed_type: ?Type@multiowned = TRY (typeAnalysisSession__static_is_a_target_type(&rtoc_self_view, &is_a.right));
       IF narrowed_type EXISTS AS narrowed_type_value THEN
-        RETURN CAST(Tuple{type_param, narrowed_type_value} AS Tuple<String@symbol, Type@multiowned>);
+        RETURN CAST(Tuple{type_param, COPY narrowed_type_value} AS Tuple<String@symbol, Type@multiowned>);
       ELSE
         RETURN NIL;
       END
@@ -17718,7 +17718,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_indexed_output_433 = {};
     MUTABLE rtoc_indexed_i_432 = 0;
     WHILE rtoc_indexed_i_432 < rtoc_indexed_items_431.length() DO
-      MUTABLE rtoc_indexed_pair_434 = Tuple{UNWRAP (rtoc_indexed_items_431[rtoc_indexed_i_432]).name, rtoc_indexed_i_432};
+      MUTABLE rtoc_indexed_pair_434 = Tuple{UNWRAP (rtoc_indexed_items_431[rtoc_indexed_i_432]).name, COPY rtoc_indexed_i_432};
       rtoc_indexed_output_433[rtoc_indexed_pair_434._0] = rtoc_indexed_pair_434._1;
       rtoc_indexed_i_432 = rtoc_indexed_i_432 + 1;
     END

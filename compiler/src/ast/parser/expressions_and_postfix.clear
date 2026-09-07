@@ -594,7 +594,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE k = TRY (token__text_mut(&key_token));
     TRY (clearParser__consume(&rtoc_view, :CHAR, ":"));
     MUTABLE v = TRY (clearParser__parse_expression(&rtoc_view));
-    Tuple{COPY k, v}
+    Tuple{COPY k, COPY v}
     }));
     MUTABLE target: GetField = COPY castLocatableToGetField__expressions_and_postfix(lhs);
     MUTABLE target_ident: Identifier = COPY castLocatableToIdentifier__expressions_and_postfix(target.target);
@@ -1187,7 +1187,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE k = TRY (clearParser__parse_expression(&rtoc_view));
     TRY (clearParser__consume(&rtoc_view, :CHAR, ":"));
     MUTABLE v = TRY (clearParser__parse_expression(&rtoc_view));
-    Tuple{COPY k, v}
+    Tuple{COPY k, COPY v}
       });
       RETURN Locatable{ HashLit: COPY HashLit{ token: COPY start_token, pairs: COPY pairs, storage: COPY storage, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
     ELSE_IF TRY (clearParser__match?(&rtoc_self_view, :STRING)) THEN

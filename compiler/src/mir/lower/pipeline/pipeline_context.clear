@@ -610,7 +610,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR rtoc_pair IN pairs DO
       MUTABLE pair_key = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY rtoc_pair._0));
       MUTABLE pair_value = TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, COPY rtoc_pair._1));
-      &new_pairs.append(CAST(Tuple{pair_key, pair_value} AS Tuple<Locatable,Locatable>));
+      &new_pairs.append(CAST(Tuple{pair_key, COPY pair_value} AS Tuple<Locatable,Locatable>));
     END
     IF FALSE THEN
       RETURN COPY Locatable{ HashLit: COPY node };

@@ -5242,7 +5242,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     rtoc_idx = rtoc_idx + 1;
     END
-    RETURN CAST(Tuple{conditions, bindings} AS Tuple<[]Emittable, []Let>);
+    RETURN CAST(Tuple{conditions, COPY bindings} AS Tuple<[]Emittable, []Let>);
 }
 END
 PRIVATE FN mIRLowering__lower_macro_print(MUTABLE self: MIRLowering, MUTABLE node: FuncCall) RETURNS !Call
@@ -7750,19 +7750,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE nested: []Emittable = List[];
     MUTABLE prefix: []Emittable = ( { MUTABLE rtoc_empty_list_280: []Emittable = List[]; rtoc_empty_list_280 } );
     IF !((aST__node_expr(expr) OR_ELSE FALSE)) THEN
-      RETURN CAST(Tuple{prefix, expr} AS Tuple<[]Emittable, Emittable>);
+      RETURN CAST(Tuple{prefix, COPY expr} AS Tuple<[]Emittable, Emittable>);
     END
     IF expr IS_A Ident AS ident THEN
-      RETURN CAST(Tuple{prefix, ident} AS Tuple<[]Emittable, Emittable>);
+      RETURN CAST(Tuple{prefix, COPY ident} AS Tuple<[]Emittable, Emittable>);
     END
     IF (IF expr IS_A MIRBlockExpr AS mir_block_expr THEN (blockExpr__lazy_boundary(&mir_block_expr) != NIL) ELSE FALSE END) THEN
-      RETURN CAST(Tuple{prefix, expr} AS Tuple<[]Emittable, Emittable>);
+      RETURN CAST(Tuple{prefix, COPY expr} AS Tuple<[]Emittable, Emittable>);
     END
     IF expr IS_A IfOptional AS if_optional THEN
       MUTABLE optional_prefix, optional_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&rtoc_self_view, if_optional.optional, FALSE));
       TRY (mIRLowering__replace_mir_expr_child_mut(&rtoc_self_view, Emittable{ IfOptional: COPY if_optional }, if_optional.optional, &optional_normalized));
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, optional_prefix);
-      RETURN CAST(Tuple{prefix, if_optional} AS Tuple<[]Emittable, Emittable>);
+      RETURN CAST(Tuple{prefix, COPY if_optional} AS Tuple<[]Emittable, Emittable>);
     END
     IF (!(mIRLowering__mutating_receiver_allocator_op?(rtoc_self_view, &expr)) AND TRY (mIRLowering__mir_produces_owned_result?(&rtoc_self_view, &expr))) THEN
       MUTABLE type_info = TRY (mIRLowering__mir_alloc_mark_type_info(&rtoc_self_view, expr, NIL, "normalized MIR allocation"));
@@ -7770,18 +7770,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       nested = TRY (mIRLowering__normalize_allocating_result_expr_mut(&rtoc_self_view, &expr, transfer_on_success));
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, nested);
       IF mIRLowering__normalized_alloc_wrapper_alias?(rtoc_self_view, &expr) THEN
-        RETURN CAST(Tuple{prefix, expr} AS Tuple<[]Emittable, Emittable>);
+        RETURN CAST(Tuple{prefix, COPY expr} AS Tuple<[]Emittable, Emittable>);
       END
       hoisted, ident = TRY (mIRLowering__hoist_normalized_alloc_expr(&rtoc_self_view, &expr, transfer_on_success, CAST(type_info AS ?Type), cleanup_entry));
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, CAST(hoisted AS []Emittable));
-      RETURN CAST(Tuple{prefix, ident} AS Tuple<[]Emittable, Emittable>);
+      RETURN CAST(Tuple{prefix, COPY ident} AS Tuple<[]Emittable, Emittable>);
     END
     IF mIRLowering__mir_consumes_owned_operands?(rtoc_self_view, &expr) THEN
       nested = TRY (mIRLowering__normalize_allocating_result_expr_mut(&rtoc_self_view, &expr, transfer_on_success));
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, nested);
       hoisted, ident = mIRLowering__hoist_normalized_value_expr(&rtoc_self_view, expr);
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, CAST(hoisted AS []Emittable));
-      RETURN CAST(Tuple{prefix, ident} AS Tuple<[]Emittable, Emittable>);
+      RETURN CAST(Tuple{prefix, COPY ident} AS Tuple<[]Emittable, Emittable>);
     END
     TRY (mIRLowering__each_mir_expr_child(rtoc_self_view, &expr, %(child: Emittable) USE(expr, MUTABLE prefix, MUTABLE rtoc_self_view) -> {
     MUTABLE child_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(&rtoc_self_view, &child, mIRLowering__consumes_owned_children?(rtoc_self_view, &expr)));
@@ -7789,7 +7789,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ruby_array_concat_Emittable__mir_lowering(prefix, child_prefix);
     rubyToClearVoid__mir_lowering()
     }));
-    RETURN CAST(Tuple{prefix, expr} AS Tuple<[]Emittable, Emittable>);
+    RETURN CAST(Tuple{prefix, COPY expr} AS Tuple<[]Emittable, Emittable>);
 }
 END
 PRIVATE FN mIRLowering__normalized_alloc_wrapper_alias?(self: MIRLowering, MUTABLE expr: Emittable) RETURNS Bool
@@ -10717,7 +10717,7 @@ PRIVATE FN mIRLowering__registry_call_args(self: MIRLowering, mir_args: []Emitta
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE facts_by_index = stdlib_facts.args.to_h(%(fact: StdlibCallArgFact) -> CAST(Tuple{fact.index, fact} AS Tuple<Int64, StdlibCallArgFact>));
+    MUTABLE facts_by_index = stdlib_facts.args.to_h(%(fact: StdlibCallArgFact) -> CAST(Tuple{fact.index, COPY fact} AS Tuple<Int64, StdlibCallArgFact>));
     RETURN {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE rtoc_indexed_items_391: []Emittable = mir_args;

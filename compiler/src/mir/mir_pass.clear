@@ -619,7 +619,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE alloc_node = mIRPass__alloc_marker(rtoc_self_view, CAST(while_bind_loop_mutable.binding_name AS String), cleanupEntry__alloc(entry), item_type?);
     MUTABLE drop = Drop{ token: while_bind_loop_mutable.token, name: COPY CAST(while_bind_loop_mutable.binding_name AS String), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, cleanup_entry: NIL };
     drop.cleanup_entry = COPY entry;
-    while_bind_loop_mutable.do_branch = (CAST(Tuple{alloc_node, drop} AS Tuple<AllocMark, Drop>) + (while_bind_loop_mutable.do_branch));
+    while_bind_loop_mutable.do_branch = (CAST(Tuple{alloc_node, COPY drop} AS Tuple<AllocMark, Drop>) + (while_bind_loop_mutable.do_branch));
     rubyToClearVoid__mir_pass()
       });
     ELSE
@@ -709,7 +709,7 @@ PRIVATE FN mIRPass__insert_return_mut(MUTABLE self: MIRPass, result: []Locatable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE _: Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef> = CAST(Tuple{result, ret_node, facts, fn_node} AS Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef>);
+    MUTABLE _: Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef> = CAST(Tuple{result, ret_node, facts, COPY fn_node} AS Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef>);
     NIL;
 }
 END

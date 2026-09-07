@@ -186,7 +186,7 @@ PRIVATE FN linearResourceFacts__resource_seed_and_dependencies(type_info: Type, 
     END
     END
   END
-  RETURN CAST(Tuple{FALSE, dependencies} AS Tuple<Bool, []Type>);
+  RETURN CAST(Tuple{FALSE, COPY dependencies} AS Tuple<Bool, []Type>);
 END
 FN linearResourceFacts__new(known: {String}Bool, linear: {String}Bool) RETURNS LinearResourceFacts@multiowned ->
   MUTABLE self = LinearResourceFacts{ known: {}, linear: {} };

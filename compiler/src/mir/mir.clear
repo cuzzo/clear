@@ -12387,10 +12387,10 @@ FN ownershipEffect__from_children(children: []Emittable) RETURNS !OwnershipEffec
   RETURN TRY (ownershipEffect__from_effects(child_effects));
 END
 FN ownershipEffect__from_try_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type, fallback_is_literal: Bool, left_never_success: Bool) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  RETURN TRY (ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(left, result_type)), left}, Tuple{(left.produces_owned AND fallback_is_literal), left}, Tuple{(right.produces_owned AND left_never_success), right}]));
+  RETURN TRY (ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), COPY left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(left, result_type)), COPY left}, Tuple{(left.produces_owned AND fallback_is_literal), COPY left}, Tuple{(right.produces_owned AND left_never_success), COPY right}]));
 END
 FN ownershipEffect__from_optional_fallback(left: OwnershipEffect, right: OwnershipEffect, result_type: ?Type) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  RETURN TRY (ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(left, result_type)), left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(right, result_type)), right}]));
+  RETURN TRY (ownershipEffect__first_active_effect([Tuple{ownershipEffect__same_owned_alloc?(left, right), COPY left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(left, result_type)), COPY left}, Tuple{TRY (ownershipEffect__owned_cleanup_result?(right, result_type)), COPY right}]));
 END
 FN ownershipEffect__from_required_branch_pair(left: OwnershipEffect, right: OwnershipEffect) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   RETURN TRY (ownershipEffect__effect_when(ownershipEffect__same_owned_alloc?(left, right), left));
@@ -12442,7 +12442,7 @@ PUB FN ownershipEffect__borrowed_view_result?(node: ?Emittable) RETURNS Bool ->
   RETURN FALSE;
 END
 PRIVATE FN ownershipEffect__effect_when(active: Bool, effect: OwnershipEffect) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
-  RETURN TRY (ownershipEffect__first_active_effect([CAST(Tuple{active, effect} AS Tuple<Bool, OwnershipEffect>)]));
+  RETURN TRY (ownershipEffect__first_active_effect([CAST(Tuple{active, COPY effect} AS Tuple<Bool, OwnershipEffect>)]));
 END
 PRIVATE FN ownershipEffect__first_active_effect(candidates: []Tuple<Bool, OwnershipEffect>) RETURNS !OwnershipEffect EFFECTS REENTRANT ->
   FOR candidate IN candidates DO

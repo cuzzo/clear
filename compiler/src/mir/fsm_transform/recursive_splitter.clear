@@ -411,7 +411,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
   MUTABLE rtoc_indexed_output_19 = [];
   MUTABLE rtoc_indexed_i_18 = 0;
   WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length() DO
-    &rtoc_indexed_output_19.append(Tuple{COPY UNWRAP (rtoc_indexed_items_17[rtoc_indexed_i_18]), rtoc_indexed_i_18});
+    &rtoc_indexed_output_19.append(Tuple{COPY UNWRAP (rtoc_indexed_items_17[rtoc_indexed_i_18]), COPY rtoc_indexed_i_18});
     rtoc_indexed_i_18 = rtoc_indexed_i_18 + 1;
   END
   rtoc_indexed_output_19
@@ -422,7 +422,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
     MUTABLE rtoc_indexed_output_19 = [];
     MUTABLE rtoc_indexed_i_18 = 0;
     WHILE rtoc_indexed_i_18 < rtoc_indexed_items_17.length() DO
-      &rtoc_indexed_output_19.append(Tuple{COPY UNWRAP (rtoc_indexed_items_17[rtoc_indexed_i_18]), rtoc_indexed_i_18});
+      &rtoc_indexed_output_19.append(Tuple{COPY UNWRAP (rtoc_indexed_items_17[rtoc_indexed_i_18]), COPY rtoc_indexed_i_18});
       rtoc_indexed_i_18 = rtoc_indexed_i_18 + 1;
     END
     rtoc_indexed_output_19
@@ -459,7 +459,7 @@ PRIVATE FN fsmRecursiveSplitter__renumber_with_entry(segments: []Segment, entry:
   MUTABLE new_tail = fsmRecursiveSplitter__remap_tail(_.tail, mapping);
   Segment{ index: COPY new_idx, stmts: _.stmts, tail: new_tail }
   }) |> ORDER_BY _.index;
-  RETURN CAST(Tuple{remapped, mapping} AS Tuple<[]Segment, {Int64}Int64>);
+  RETURN CAST(Tuple{remapped, COPY mapping} AS Tuple<[]Segment, {Int64}Int64>);
 END
 PRIVATE FN fsmRecursiveSplitter__remap_tail(tail: SegmentTail, mapping: {Int64}Int64) RETURNS SegmentTail ->
   IF tail IS_A Goto AS goto THEN
