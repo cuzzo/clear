@@ -612,7 +612,7 @@ PRIVATE FN typeExpressionParser__split_legacy_capability_suffix(source: String) 
   MUTABLE marker: ?Int64 = source.indexOf("@");
   IF marker EXISTS AS marker_value THEN
     IF marker_value.zero?() THEN
-      RETURN Tuple{source, typeCapabilities__new(:affine)};
+      RETURN Tuple{COPY source, typeCapabilities__new(:affine)};
     ELSE
       MUTABLE base = COPY (source.substr(0, (marker_value - 0)));
       MUTABLE ownership: ?String@symbol = :affine;
@@ -648,7 +648,7 @@ PRIVATE FN typeExpressionParser__split_legacy_capability_suffix(source: String) 
       RETURN Tuple{base, typeCapabilities__new(ownership, FALSE, sync, layout)};
     END
   ELSE
-    RETURN Tuple{source, typeCapabilities__new(:affine)};
+    RETURN Tuple{COPY source, typeCapabilities__new(:affine)};
   END
 END
 PRIVATE FN typeExpressionParser__grouped_type?(source: String) RETURNS Bool ->
