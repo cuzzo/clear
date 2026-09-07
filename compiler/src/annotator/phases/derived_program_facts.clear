@@ -45,9 +45,9 @@ PUB FN derivedProgramFacts__empty() RETURNS DerivedProgramFacts@multiowned ->
 END
 PUB FN derivedProgramFacts__capture(nodes: {String}FunctionDef) RETURNS !DerivedProgramFacts@multiowned ->
   MUTABLE functions: {String}DerivedFunctionFacts = {};
-  (nodes |> ORDER_BY _).keys() |> EACH {
-  MUTABLE node: Any = ((nodes |> ORDER_BY _)[_] OR_ELSE panic("missing hash key"));
-  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(TRY (aST__full_type_mut(node)));
+  (nodes.keys() |> ORDER_BY _) |> EACH {
+  MUTABLE node: FunctionDef = (nodes[_] OR_ELSE panic("missing hash key"));
+  MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY TRY (aST__full_type_mut(Locatable{ FunctionDef: COPY node })) });
   IF !(signature) THEN
       panic("missing finalized function signature for {}");
   END
@@ -64,8 +64,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN derivedProgramFacts__capture_function(name: String, node: FunctionDef, signature: FunctionSignature) RETURNS !DerivedFunctionFacts ->
   MUTABLE requires: {String}[]String = {};
-  ((TRY (functionSignature__requires(signature))) |> ORDER_BY _).keys() |> EACH {
-  MUTABLE capabilities: Any = (((TRY (functionSignature__requires(signature))) |> ORDER_BY _)[_] OR_ELSE panic("missing hash key"));
+  MUTABLE required = TRY (functionSignature__requires(signature));
+  (required.keys() |> ORDER_BY _) |> EACH {
+  MUTABLE capabilities = (required[_] OR_ELSE panic("missing hash key"));
   requires[_] = (capabilities |> SELECT _.toString()) |> ORDER_BY _;
   };
   RETURN DerivedFunctionFacts{ name: COPY name, return_type_key: COPY type__semantic_type_key(functionSignature__return_type(signature)), needs_runtime: (functionSignature__needs_rt(signature) == TRUE), can_fail: (functionSignature__can_fail(signature) == TRUE), allocation_fault: (functionSignature__alloc_fault(signature) == TRUE), error_fallible: (functionSignature__error_fallible(signature) == TRUE), effects: COPY ((TRY (functionSignature__effects(signature)) OR_ELSE Set[])) |> SELECT _.toString() |> ORDER_BY _, return_strategy: COPY (IF functionSignature__return_strategy(signature) != NIL THEN
