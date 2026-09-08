@@ -2412,19 +2412,19 @@ PRIVATE FN capabilityAuditSession__inherit_effects_from_callee(self: CapabilityA
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE in_loop: ?Bool = site_ctx[:loop];
     MUTABLE in_cond: ?Bool = site_ctx[:cond];
-    FOR _ IN callee_set DO
-    IF (suspends_family |> ANY (_ == _)) THEN
-      MUTABLE has_loop = (((_ == suspends_loop)) OR in_loop);
-      MUTABLE has_cond = (((_ == suspends_conditional)) OR in_cond);
-      &caller_set.insert(suspends);
+    FOR eff IN callee_set DO
+    IF (suspendsFamily() |> ANY (_ == eff)) THEN
+      MUTABLE has_loop = ((eff == suspendsLoopEffect()) OR (in_loop OR_ELSE FALSE));
+      MUTABLE has_cond = ((eff == suspendsConditionalEffect()) OR (in_cond OR_ELSE FALSE));
+      &caller_set.insert(suspendsEffect());
       IF has_loop THEN
-        &caller_set.insert(suspends_loop);
+        &caller_set.insert(suspendsLoopEffect());
       END
       IF has_cond THEN
-        &caller_set.insert(suspends_conditional);
+        &caller_set.insert(suspendsConditionalEffect());
       END
     ELSE
-      &caller_set.insert(COPY _);
+      &caller_set.insert(COPY eff);
     END
     END
     RETURN NIL;
@@ -2840,7 +2840,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         reason = :reentrant;
     ELSE_IF effs.contains?(extern_value) THEN
         reason = :extern;
-    ELSE_IF !(effs |> ANY (suspends_family |> ANY (_ == _))) THEN
+    ELSE_IF !anySuspendsEffect(effs) THEN
         reason = :no_suspends;
     END
     fn_node.fsm_eligible = FALSE;
@@ -2997,7 +2997,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF effs.contains?(extern_value) THEN
         RETURN BgSpawnDecision{ spawn_form: :stackful, reason: :extern };
       END
-      IF effs |> ANY (suspends_family |> ANY (_ == _)) THEN
+      IF anySuspendsEffect(effs) THEN
         RETURN BgSpawnDecision{ spawn_form: :stackful, reason: :suspending_callee };
       END
       FOR _ IN (((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[name] OR_ELSE List[])) DO
@@ -3228,7 +3228,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE effs = callee.effects();
-    RETURN !(!(((effs AND (effs |> ANY (suspends_family |> ANY (_ == _)))))));
+    RETURN !(!(((effs AND anySuspendsEffect(effs)))));
 }
 END
 PRIVATE FN capabilityAuditSession__validate_fiber_stack_mut(MUTABLE self: CapabilityAuditSession, node: AsyncValidationNode, call_names: [Set]String, user_size: ?String@symbol, can_smash: Bool) RETURNS !Void

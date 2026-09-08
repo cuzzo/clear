@@ -253,3 +253,30 @@ PUB FN castAsyncBodyNodeToAsyncStackTarget(value: AsyncBodyNode) RETURNS AsyncSt
     AsyncBodyNode.DoBranch AS item -> RETURN AsyncStackTarget{ DoBranch: COPY item };
   END
 END
+
+# Module constants are not exported directly; the tree's pattern for a
+# cross-file constant is a PUB FN accessor.
+PUB FN suspendsFamily() RETURNS [3]String@symbol EFFECTS REENTRANT ->
+  RETURN [:SUSPENDS, :SUSPENDS_CONDITIONAL, :SUSPENDS_LOOP];
+END
+PUB FN suspendsEffect() RETURNS String@symbol EFFECTS REENTRANT ->
+  RETURN :SUSPENDS;
+END
+PUB FN suspendsLoopEffect() RETURNS String@symbol EFFECTS REENTRANT ->
+  RETURN :SUSPENDS_LOOP;
+END
+PUB FN suspendsConditionalEffect() RETURNS String@symbol EFFECTS REENTRANT ->
+  RETURN :SUSPENDS_CONDITIONAL;
+END
+
+# Ruby writes `effs.any? { |e| SUSPENDS_FAMILY.include?(e) }`. Nesting two
+# pipelines in CLEAR collides on the `_` placeholder, so the inner test needs a
+# named binder -- which is what this helper provides.
+PUB FN anySuspendsEffect(effs: [Set]String@symbol) RETURNS Bool ->
+  FOR eff IN effs DO
+    IF (suspendsFamily() |> ANY (_ == eff)) THEN
+      RETURN TRUE;
+    END
+  END
+  RETURN FALSE;
+END
