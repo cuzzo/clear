@@ -14016,7 +14016,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE field_type = structField__type((struct_schema.fields[UNWRAP (destructure.fields[rtoc_idx]?.name)]?));
       MUTABLE rtoc_mutable_receiver_340 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_340, UNWRAP (destructure.fields[rtoc_idx]?.name), NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(field_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-      TRY (typeAnalysisSession__og_declare(&rtoc_self_view, destructure.fields[rtoc_idx]?.name, NIL, castTypeToTypeTypeInput__type_analysis_session(field_type)));
+      TRY (typeAnalysisSession__og_declare(&rtoc_self_view, UNWRAP (destructure.fields[rtoc_idx]?.name), NIL, castTypeToTypeTypeInput__type_analysis_session(field_type)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
