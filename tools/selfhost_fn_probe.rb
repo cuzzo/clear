@@ -109,8 +109,33 @@ module SelfhostFnProbe
     # for not being recursive -- a property of the stub, not of the caller.
     head = head.gsub(/\s*EFFECTS\s+REENTRANT(?::\w+)?/, '')
     ret = fn.ret.to_s.delete_prefix('!')
-    body = ret == 'Void' ? '  RETURN;' : %(  panic("stub");)
+    body = stub_body(ret)
     "#{head}\n#{body}\nEND\n"
+  end
+
+  # `panic("stub")` is a NoReturn: assigning it to a cleanup-bearing local
+  # leaves the ownership checker with no operand provenance, so the TARGET
+  # gets blamed for a hole the stub introduced. A real value of the declared
+  # shape carries provenance and keeps the probe measuring the target.
+  STUB_VALUES = {
+    'Void' => nil, 'String' => '""', 'String@symbol' => ':stub',
+    'Int64' => '0', 'UInt64' => '0', 'Float64' => '0.0', 'Bool' => 'FALSE'
+  }.freeze
+
+  def stub_body(ret)
+    return '  RETURN;' if ret == 'Void'
+    # A String return has to be OWNED. A literal is rodata, so a caller that
+    # binds the result to a cleanup-bearing local gets an ownership error that
+    # belongs to the stub, not to the target. Interpolation allocates.
+    payload = ret.delete_prefix('?')
+    return %(  MUTABLE rtoc_stub_s = "stub${1.toString()}";\n  RETURN rtoc_stub_s;) if payload == 'String'
+    return "  RETURN #{STUB_VALUES[ret]};" if STUB_VALUES[ret]
+    return '  RETURN List[];' if payload.start_with?('[]')
+    return '  RETURN Set[];' if payload.start_with?('[Set]')
+    return '  RETURN {};' if payload.start_with?('{')
+    return '  RETURN NIL;' if ret.start_with?('?')
+
+    %(  panic("stub");)
   end
 
   def rewrite_require(line, relative)
@@ -336,6 +361,12 @@ module SelfhostFnProbe
     Dir.mktmpdir('fn-probe') do |dir|
       source = File.join(dir, 'probe.clear')
       File.write(source, source_text)
+      # A failing probe is worth reading; the temp dir is gone by the time the
+      # error is reported.
+      if ENV['CLEAR_PROBE_KEEP']
+        FileUtils.mkdir_p(ENV['CLEAR_PROBE_KEEP'])
+        FileUtils.cp(source, File.join(ENV['CLEAR_PROBE_KEEP'], 'probe.clear'))
+      end
       # Sibling .zig modules an EXTERN names live beside the CLEAR sources and
       # in the runtime tree; without both dirs the link stage reports
       # FileNotFound for alloc-profile.zig and compiler_regex.zig.

@@ -665,6 +665,10 @@ module MIRHoistLowering
 
     ti = Type.new(raw_type)
     ti = ti.success_type || ti
+    # `?T` owns exactly what `T` owns -- the same rule the lifecycle inventory
+    # states. Without looking through it, a call returning ?String reads as
+    # producing nothing owned, and its sink gets a cleanup it cannot justify.
+    ti = ti.non_optional_type if ti.optional?
     ti.string? ||
       ti.collection? ||
       ti.collection_value? ||
