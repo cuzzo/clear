@@ -1211,6 +1211,11 @@ module MIRLoweringVariables
     kept_value = kept_assignment_field_value(node)
     kept_value = hoist_alloc(kept_value, node.value, err_cleanup: true) if kept_value && mir_allocates?(kept_value)
     value = kept_value || assignment_value(node)
+    # An allocating value must be NAMED before it is stored: an unhoisted
+    # BlockExpr in assignment position has no binding to carry its AllocMark,
+    # which is exactly what UNHOISTED_ALLOC reports. The field-pre-cleanup
+    # path already hoists; a store through a view reaches here instead.
+    value = hoist_alloc(value, node.value, err_cleanup: true) if !kept_value && mir_allocates?(value)
     result = MIR::Set.new(plan.target, value)
     target_alloc = if plan.cleanup_field
       placement_for_node(root_receiver_node(T.must(plan.cleanup_field)) || T.must(plan.cleanup_field))

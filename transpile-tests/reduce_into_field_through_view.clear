@@ -1,0 +1,24 @@
+# A REDUCE whose result is stored through a POLYMORPHIC view: the accumulator
+# body hands `acc` back, so the step runs the block rather than assigning the
+# accumulator to itself. A numeric-keyed map also arrives at its readers as the
+# pointer a collection parameter is passed as.
+STRUCT TState { refs: {Int64}String }
+STRUCT Sess { traversal_state: TState }
+
+PRIVATE FN withRefs(MUTABLE self: Sess, refinements: {Int64}String) RETURNS Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+  MUTABLE previous = COPY rtoc_self_view.traversal_state.refs;
+  rtoc_self_view.traversal_state.refs = refinements.keys() |> REDUCE(COPY previous) { acc[_] = COPY (refinements[_] OR_ELSE ""); acc };
+}
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE s = Sess{ traversal_state: TState{ refs: {} } };
+  s.traversal_state.refs[9] = "seed";
+  MUTABLE more: {Int64}String = {1: "a", 2: "b"};
+  withRefs(&s, more);
+  MUTABLE refs = COPY s.traversal_state.refs;
+  print("n ${refs.length().toString()} one=${(refs[1] OR_ELSE "?")} seed=${(refs[9] OR_ELSE "?")}");
+END

@@ -389,15 +389,30 @@ class PipelineListLowerer < T::Struct
     acc_zig = self.transpile_type.call(reduce_node.full_type!)
     init_mir = self.visit_mir.call(reduce_node.initial_value)
     expr_mir = self.visit_reduce_expr.call(reduce_node.expression, "it", "acc")
+    # A body that mutates the accumulator and hands it back -- `acc[k] = v; acc`
+    # -- assigns `acc` to itself. Storing that block would leave an allocating
+    # expression in assignment position with nothing to own it; running its
+    # statements is the whole effect.
+    step = reduce_accumulator_step(expr_mir)
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("acc", init_mir, true, Type.new(acc_zig), nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Set.new(MIR::Ident.new("acc"), expr_mir),
-        ], nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", step, nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("acc")),
       ]
     end)
+  end
+
+  sig { params(expr_mir: MIR::Emittable).returns(T::Array[MIR::Node]) }
+  def reduce_accumulator_step(expr_mir)
+    if expr_mir.is_a?(MIR::BlockExpr)
+      brk = expr_mir.body.reverse.find { |stmt| stmt.is_a?(MIR::BreakStmt) }
+      if brk&.value.is_a?(MIR::Ident) && brk.value.name.to_s == "acc"
+        return expr_mir.body.reject { |stmt| stmt.equal?(brk) }
+      end
+    end
+
+    [MIR::Set.new(MIR::Ident.new("acc"), expr_mir)]
   end
 
   sig { params(site: PipelineSite, window_node: AST::WindowOp).returns(MIR::BlockExpr) }

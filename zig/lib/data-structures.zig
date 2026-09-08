@@ -568,7 +568,8 @@ pub fn bind(comptime deps: type) type {
         try map.put(alloc, owned_key, value);
     }
 
-    pub fn numericMapGet(comptime K: type, comptime V: type, map: NumericMapType(K, V), key: K) ?V {
+    pub fn numericMapGet(comptime K: type, comptime V: type, map_in: anytype, key: K) ?V {
+        const map = numericMapValue(map_in);
         return map.get(key);
     }
 
@@ -585,11 +586,15 @@ pub fn bind(comptime deps: type) type {
         }
     }
 
-    pub fn numericMapContains(comptime K: type, comptime V: type, map: NumericMapType(K, V), key: K) bool {
+    pub fn numericMapContains(comptime K: type, comptime V: type, map_in: anytype, key: K) bool {
+        comptime { _ = V; }
+        const map = numericMapValue(map_in);
         return map.contains(key);
     }
 
-    pub fn numericMapCount(comptime K: type, comptime V: type, map: NumericMapType(K, V)) i64 {
+    pub fn numericMapCount(comptime K: type, comptime V: type, map_in: anytype) i64 {
+        comptime { _ = K; _ = V; }
+        const map = numericMapValue(map_in);
         return @intCast(map.count());
     }
 
@@ -604,11 +609,19 @@ pub fn bind(comptime deps: type) type {
         map.deinit(alloc);
     }
 
+    // A numeric map reaches these helpers either by value or as the pointer a
+    // CLEAR collection parameter is passed as. Both name the same map.
+    fn numericMapValue(map: anytype) @TypeOf(if (@typeInfo(@TypeOf(map)) == .pointer) map.* else map) {
+        return if (@typeInfo(@TypeOf(map)) == .pointer) map.* else map;
+    }
+
     // Mirror mapKeys/mapValues: produce an owned ArrayListUnmanaged
     // so the caller's `K[]@list` / `V[]@list` cleanup template
     // (CheatLib.cleanup over std.ArrayListUnmanaged(T)) matches the
     // actual storage shape.
-    pub fn numericMapKeys(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) !std.ArrayListUnmanaged(K) {
+    pub fn numericMapKeys(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map_in: anytype) !std.ArrayListUnmanaged(K) {
+        comptime { _ = V; }
+        const map = numericMapValue(map_in);
         var list: std.ArrayListUnmanaged(K) = .empty;
         errdefer {
             if (comptime needsCleanup(K)) {
@@ -625,7 +638,9 @@ pub fn bind(comptime deps: type) type {
         return list;
     }
 
-    pub fn numericMapValues(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map: NumericMapType(K, V)) !std.ArrayListUnmanaged(V) {
+    pub fn numericMapValues(comptime K: type, comptime V: type, allocator: std.mem.Allocator, map_in: anytype) !std.ArrayListUnmanaged(V) {
+        comptime { _ = K; }
+        const map = numericMapValue(map_in);
         var list: std.ArrayListUnmanaged(V) = .empty;
         errdefer {
             // Error-only rollback for values already copied into the owned result.
