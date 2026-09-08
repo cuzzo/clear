@@ -721,7 +721,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_reverse_items_6: []Scope@multiowned = (resolutionSession__scope_stack_for_helper(rtoc_self_view));
     MUTABLE rtoc_reverse_i_7 = rtoc_reverse_items_6.length() - 1;
     WHILE rtoc_reverse_i_7 >= 0 DO
-      MUTABLE schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = ((rtoc_reverse_items_6[rtoc_reverse_i_7])?);
+      MUTABLE schema: ?SchemaValue = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = ((rtoc_reverse_items_6[rtoc_reverse_i_7])?);
       TRY (scope__resolve_type_definition(rtoc_local_receiver_8, base_name)) };
       IF schema THEN
           RETURN schema;
@@ -1515,7 +1515,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resolutionSession__validate_extern_return_lifetime_mut(&rtoc_self_view, node, signature));
     IF node.owner_type EXISTS AS owner_type_value THEN
       MUTABLE owner_type_value_mutable = COPY owner_type_value;
-      MUTABLE type_schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_40 = TRY (resolutionSession__current_scope(rtoc_self_view));
+      MUTABLE type_schema: ?SchemaValue = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_40 = TRY (resolutionSession__current_scope(rtoc_self_view));
       TRY (scope__resolve_type_definition(rtoc_local_receiver_40, symbol(owner_type_value_mutable))) };
       IF (schemas__struct?(type_schema) OR schemas__resource?(type_schema)) THEN
         TRY (resolutionSession__reject_duplicate_extern_method_mut(&rtoc_self_view, node, type_schema));

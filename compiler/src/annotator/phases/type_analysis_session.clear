@@ -4601,7 +4601,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (rtoc_each_items_84[rtoc_idx] == symbol("*")) THEN
           BREAK;
       END
-      MUTABLE schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_85 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
+      MUTABLE schema: ?SchemaValue = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_85 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__resolve_type_definition(rtoc_local_receiver_85, current_type_name)) };
       MUTABLE sf = (schemaValue__fields(UNWRAP (schema))[field_name] OR schemaValue__fields(UNWRAP (schema))[UNWRAP (rtoc_each_items_84[rtoc_idx])]);
       IF (sf == NIL) THEN
@@ -7216,7 +7216,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_reverse_items_168: []Scope@multiowned = (typeAnalysisSession__scope_stack_for_helper(&rtoc_self_view));
     MUTABLE rtoc_reverse_i_169 = rtoc_reverse_items_168.length() - 1;
     WHILE rtoc_reverse_i_169 >= 0 DO
-      MUTABLE schema = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_170 = ((rtoc_reverse_items_168[rtoc_reverse_i_169])?);
+      MUTABLE schema: ?SchemaValue = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_170 = ((rtoc_reverse_items_168[rtoc_reverse_i_169])?);
       TRY (scope__resolve_type_definition(rtoc_local_receiver_170, base_name)) };
       IF schema THEN
           RETURN schema;
@@ -20535,7 +20535,7 @@ PRIVATE FN typeAnalysisSession__og_declare(MUTABLE self: TypeAnalysisSession, na
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE entry = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_515 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
+    MUTABLE entry: ?SymbolEntry = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_515 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
     scope__resolve_entry(rtoc_local_receiver_515, name) });
     MUTABLE kind = TRY (typeAnalysisSession__classify_og_kind(&rtoc_self_view, type_info, (IF entry != NIL THEN
       entry.sync()
