@@ -3159,13 +3159,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE parameter_ids: Set = parameter_ids_branch_value?;
       MUTABLE transport_facts = ownershipTransportFacts__new(parameter_ids);
       IF !((typeAnalysisSession__language_mode(&rtoc_self_view) == :strict)) THEN
-          typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).ownership_transport_frames.append(KEEP transport_facts);
+          &rtoc_self_view.audit_inputs.ownership_transport_frames.append(KEEP transport_facts);
       END
       IF node IS_A FunctionDef AS node_narrowed THEN
           TRY (typeAnalysisSession__visit_pre_clauses_mut(&rtoc_self_view, node_narrowed));
       END
       DEFER IF !((typeAnalysisSession__language_mode(&rtoc_self_view) == :strict)) THEN
-          MUTABLE popped: ?OwnershipTransportFacts@multiowned = typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).ownership_transport_frames.pop();
+          MUTABLE popped: ?OwnershipTransportFacts@multiowned = rtoc_self_view.audit_inputs.ownership_transport_frames.pop();
           IF (popped == NIL) THEN
             panic("BUG: ownership transport fact frame mismatch");
           END
@@ -10232,8 +10232,8 @@ PRIVATE FN typeAnalysisSession__without_capture_moves<RESULT>(MUTABLE self: Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-  DEFER typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).capture_move_suppression_depth=((typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).capture_move_suppression_depth - 1));
-  typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).capture_move_suppression_depth=((typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).capture_move_suppression_depth + 1));
+  DEFER rtoc_self_view.audit_inputs.capture_move_suppression_depth=((typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).capture_move_suppression_depth - 1));
+  rtoc_self_view.audit_inputs.capture_move_suppression_depth=((typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).capture_move_suppression_depth + 1));
   RETURN blk();
 }
 END
@@ -10958,7 +10958,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE cap_types = CAST(((lock_capabilities |> SELECT:? capabilityTransition__lock_identity(_) |> WHERE _ != NIL) |> SELECT UNWRAP (_)) AS []String@symbol);
-    typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).lock_analysis.clause_sites.append(COPY LockClauseSite{ node: COPY node, cap_types: COPY cap_types });
+    &rtoc_self_view.audit_inputs.lock_analysis.clause_sites.append(COPY LockClauseSite{ node: COPY node, cap_types: COPY cap_types });
     NIL;
 }
 END
