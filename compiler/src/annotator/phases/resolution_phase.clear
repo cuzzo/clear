@@ -1756,7 +1756,7 @@ PRIVATE FN resolutionSession__register_protocol_declaration(MUTABLE self: Resolu
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (resolutionSession__protocol_declared?(rtoc_self_view, node.name) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_46 = TRY (resolutionSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type_entry(rtoc_local_receiver_46, symbol(node.name))) }) THEN
-      TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY node.name_token }, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], CAST({:label: "protocol", :name: node.name} AS {String@symbol}Any)));
+      TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ ProtocolRequirement: COPY DiagnosticAnchor{ TokenValue: COPY node.name_token } } }, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], CAST({:label: "protocol", :name: node.name} AS {String@symbol}Any)));
     END
     MUTABLE seen_associated: [Set]String = Set[];
     FOR _ IN node.associated_types DO
