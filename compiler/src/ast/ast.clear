@@ -17868,3 +17868,14 @@ PUB FN castStubValueToString(value: StubValue) RETURNS ?String EFFECTS REENTRANT
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:ownership_transport_plan)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__ownership_transport_plan(value: Locatable) RETURNS ?OwnershipTransportPlan ->
+  PARTIAL MATCH value START
+    Locatable.VarDecl AS item -> RETURN COPY item.ownership_transport_plan;,
+    Locatable.BindExpr AS item -> RETURN COPY item.ownership_transport_plan;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

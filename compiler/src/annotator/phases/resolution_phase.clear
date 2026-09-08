@@ -1048,7 +1048,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (rtoc_each_1 == rtoc_each_1) THEN
         CONTINUE;
     END
-    MUTABLE vis = (functionSignature__visibility(sig) OR :package);
+    MUTABLE vis = (functionSignature__visibility(UNWRAP (sig)) OR :package);
     MUTABLE importable = (((vis == :pub)) OR (((vis == :package) AND same_dir)));
     IF !(importable) THEN
         CONTINUE;
@@ -1302,7 +1302,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     member.type_params = member.generic_params |> SELECT _.name;
     member.implementation_owner = COPY resolution.owner.name;
     member.source_name = COPY source_name;
-    member.name = ImplementationRegistration.function_name(resolution.owner.name, source_name);
+    member.name = _.function_name(resolution.owner.name, source_name);
     IF member.is_method THEN
       TRY (resolutionSession__prepare_method_receiver_mut(&rtoc_self_view, member, resolution));
     END

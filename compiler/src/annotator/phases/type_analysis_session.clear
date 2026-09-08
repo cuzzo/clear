@@ -1343,7 +1343,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         RETURN;
       END
-      IF ((((node IS_A VarDecl OR node IS_A BindExpr)) AND node.ownership_transport_plan IS_A OwnershipTransportPlan) AND (node.ownership_transport_plan.action == :pending)) THEN
+      IF ((((node IS_A VarDecl OR node IS_A BindExpr)) AND locatable__ownership_transport_plan(node) IS_A OwnershipTransportPlan) AND (node.ownership_transport_plan.action == :pending)) THEN
         ownershipTransportFacts__record_alias(&facts_value_mutable, castLocatableToNode__type_analysis_session(node), ancestors);
       END
       IF node IS_A Assignment AS assignment THEN
