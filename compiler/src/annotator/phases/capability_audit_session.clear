@@ -1782,7 +1782,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE agg: {String@symbol}AutoCandidateStat = {};
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < ops.length() DO
-      MUTABLE entry: ?{String@symbol}Any@multiowned = COPY (CAST({:ADD: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :CONCAT: CAST({:default: :String, :alts: List[]} AS {String@symbol}Any@multiowned), :SUB: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :MUL: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :DIV: CAST({:default: :Float64, :alts: [:Int64], :notes: {:Int64: "integer division \u{2014} TRUNCATES toward zero"}} AS {String@symbol}Any@multiowned), symbol("MOD"): CAST({:default: :Int64, :alts: List[]} AS {String@symbol}Any@multiowned), :EQ: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :NEQ: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :LT: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :GT: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :LTE: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :GTE: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), symbol("AND"): CAST({:default: :Bool, :alts: List[]} AS {String@symbol}Any@multiowned), symbol("OR"): CAST({:default: :Bool, :alts: List[]} AS {String@symbol}Any@multiowned)} AS {String@symbol}{String@symbol}Any@multiowned))[ops[rtoc_idx]];
+      MUTABLE entry: ?{String@symbol}Any@multiowned = COPY (CAST({:ADD: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :CONCAT: CAST({:default: :String, :alts: List[]} AS {String@symbol}Any@multiowned), :SUB: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :MUL: CAST({:default: :Int64, :alts: [:Float64]} AS {String@symbol}Any@multiowned), :DIV: CAST({:default: :Float64, :alts: [:Int64], :notes: {:Int64: "integer division \u{2014} TRUNCATES toward zero"}} AS {String@symbol}Any@multiowned), symbol("MOD"): CAST({:default: :Int64, :alts: List[]} AS {String@symbol}Any@multiowned), :EQ: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :NEQ: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :LT: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :GT: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :LTE: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), :GTE: CAST({:default: :Int64, :alts: [:Float64, :String]} AS {String@symbol}Any@multiowned), symbol("AND"): CAST({:default: :Bool, :alts: List[]} AS {String@symbol}Any@multiowned), symbol("OR"): CAST({:default: :Bool, :alts: List[]} AS {String@symbol}Any@multiowned)} AS {String@symbol}{String@symbol}Any@multiowned))[UNWRAP (ops[rtoc_idx])];
       IF !(entry) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -2813,7 +2813,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE fn = fn_nodes[locatable__name(UNWRAP (_.escape_nodes[rtoc_idx]))];
+      MUTABLE fn = fn_nodes[UNWRAP (locatable__name(UNWRAP (_.escape_nodes[rtoc_idx])))];
       IF !(fn) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -3800,7 +3800,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE sync = COPY _.sync;
     MUTABLE own = COPY _.ownership;
     IF ((symbolEntry__locked_family_sync?(sync) AND !(_.mutated)) AND !(_.sharded)) THEN
-        print("\x1B[36m[Note]\x1B[0m Variable '${_.var}' is @${sync} but never mutated via WITH EXCLUSIVE. You are paying for lock acquire/release on every access. Consider @local or removing the lock.${loc}");
+        print("\x1B[36m[Note]\x1B[0m Variable '${_.var}' is @${(sync OR_ELSE "")} but never mutated via WITH EXCLUSIVE. You are paying for lock acquire/release on every access. Consider @local or removing the lock.${loc}");
     END
     IF ((own == :shared) AND !(_.captured_parallel)) THEN
         print("\x1B[36m[Note]\x1B[0m Variable '${_.var}' is @shared (Arc) but never preMirTypeCheck__leaves() the local scheduler. You are paying for atomic ref-counting but never crossing cores. Consider @multiowned or @local.${loc}");
