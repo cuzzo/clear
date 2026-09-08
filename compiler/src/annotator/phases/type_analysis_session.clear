@@ -11220,7 +11220,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.kind == :captures) THEN
       MUTABLE cap_name: ?StubValue@boxed = COPY node.value;
       MUTABLE rtoc_mutable_receiver_254 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-      TRY (scope__declare(&rtoc_mutable_receiver_254, UNWRAP (castStubValueToString(cap_name)), SymbolEntryRegInput{ StubDecl: COPY node }, SymbolEntryTypeInput{ SymbolValue: :Int64 }, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
+      TRY (scope__declare(&rtoc_mutable_receiver_254, UNWRAP (castStubValueToString(UNWRAP (cap_name))), SymbolEntryRegInput{ StubDecl: COPY node }, SymbolEntryTypeInput{ SymbolValue: :Int64 }, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__og_declare(&rtoc_self_view, cap_name, Node{ StubDecl: COPY node }, TypeTypeInput{ SymbolValue: :Int64 }));
     END
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ StubDecl: COPY node }, :Void));
@@ -11251,7 +11251,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF fn?.effects THEN
         MUTABLE has_io = (UNWRAP (fn).effects.contains?(:BLOCKING) OR UNWRAP (fn).effects.contains?(symbol("EXTERN")));
         IF has_io THEN
-          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ TestThat: COPY test_that } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STRICT_TEST_HAS_IO_EFFECTS }, [], CAST({:name: name, :effects: ((UNWRAP ((fn).effects OR_ELSE List[]) |> SELECT COPY _)).join(", ")} AS {String@symbol}Any)));
+          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ TestThat: COPY test_that } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STRICT_TEST_HAS_IO_EFFECTS }, [], CAST({:name: name, :effects: ((UNWRAP (UNWRAP ((fn)).effects OR_ELSE List[]) |> SELECT COPY _)).join(", ")} AS {String@symbol}Any)));
         END
       END
       FOR _ IN ((TRY (typeAnalysisSession__function_call_graph(&rtoc_self_view))[name] OR_ELSE List[])) DO
@@ -15763,7 +15763,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       TRY (typeAnalysisSession__mark_var_mutated(&rtoc_self_view, UNWRAP (var_name)));
       syn = (IF locatable__symbol(field_node.target) != NIL THEN
-        (locatable__symbol(field_node.target)).sync()
+        symbolEntry__sync(UNWRAP ((locatable__symbol(field_node.target))))
       ELSE
         NIL
       END);

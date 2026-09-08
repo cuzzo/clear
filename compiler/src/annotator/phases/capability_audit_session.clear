@@ -2809,7 +2809,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE fn = fn_nodes[_.escape_nodes[rtoc_idx].name()];
+      MUTABLE fn = fn_nodes[locatable__name(UNWRAP (_.escape_nodes[rtoc_idx]))];
       IF !(fn) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
