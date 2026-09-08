@@ -2886,7 +2886,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRUE AND (slot.shape != NIL)) THEN
       RETURN;
     END
-    MUTABLE type_str = typeAnalysisSession__auto_type_source_form(&rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__type_analysis_session(resolution.type));
+    MUTABLE type_str = typeAnalysisSession__auto_type_source_form(&rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__type_analysis_session(UNWRAP (castAutoConstraintCollectorObservedTypeToType(resolution.type))));
     MUTABLE label: ?String = TRY (typeAnalysisSession__auto_slot_label(&rtoc_self_view, slot));
     MUTABLE auto_tok: ?Token@multiowned = typeAnalysisSession__auto_token_for(&rtoc_self_view, slot);
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, TRY (typeAnalysisSession__build_auto_replace_fixes(&rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_TYPE, :info, FALSE, CAST({:label: label, :type: type_str} AS {String@symbol}Any)));
@@ -6934,7 +6934,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rubyToClearVoid__type_analysis_session()
     });
     locatable__set_capture_analysis_mut(&node.right, (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis));
-    TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }));
+    TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, UNWRAP (castLocatableToBinaryOp(Locatable{ BinaryOp: COPY node }))));
     MUTABLE result_type = TRY (typeAnalysisSession__concurrent_select_family_result_type(&rtoc_self_view, node, UNWRAP (item_type)));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, result_type));
     node.storage_override = :heap;
@@ -6990,7 +6990,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rubyToClearVoid__type_analysis_session()
     });
     locatable__set_capture_analysis_mut(&node.right, (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis));
-    TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }));
+    TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, UNWRAP (castLocatableToBinaryOp(Locatable{ BinaryOp: COPY node }))));
     MUTABLE result_type = TRY (typeAnalysisSession__concurrent_select_family_result_type(&rtoc_self_view, node, item_type));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ Type: COPY result_type }))));
     node.storage_override = :heap;
@@ -8507,7 +8507,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (MATCH node START DeclarationNode.VarDecl AS item -> type__multiowned?(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__multiowned?(UNWRAP (item.type)) END) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :RC_PROMISE_NEEDS_SHARED }));
     END
-    IF ((MATCH node START DeclarationNode.VarDecl AS item -> type__split?(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__split?(item.type) END) AND !((MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__split_open_stream?(item.type)), DeclarationNode.BindExpr AS item -> TRY (type__split_open_stream?(item.type)) END))) THEN
+    IF ((MATCH node START DeclarationNode.VarDecl AS item -> type__split?(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__split?(UNWRAP (item.type)) END) AND !((MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__split_open_stream?(item.type)), DeclarationNode.BindExpr AS item -> TRY (type__split_open_stream?(item.type)) END))) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :ATSPLIT_NEEDS_OPEN_STREAM }));
     END
 }
@@ -11215,7 +11215,7 @@ PRIVATE FN typeAnalysisSession__visit_StubDecl(MUTABLE self: TypeAnalysisSession
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF UNWRAP (node.value) IS_A Locatable THEN
-      TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
+      TRY (typeAnalysisSession__visit(&rtoc_self_view, UNWRAP (castStubValueToLocatable(node.value))));
     END
     IF (node.kind == :captures) THEN
       MUTABLE cap_name: ?StubValue@boxed = COPY node.value;
@@ -11465,7 +11465,7 @@ PRIVATE FN typeAnalysisSession__concrete_function_call_type_for(MUTABLE self: Ty
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A FuncCall AS func_call THEN
       MUTABLE entry: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_261 = typeAnalysisSession__semantic_root_scope(&rtoc_self_view);
-      scope__resolve_entry(rtoc_local_receiver_261, funcCall__name(func_call)) };
+      scope__resolve_entry(rtoc_local_receiver_261, UNWRAP (castCallNameToString(funcCall__name(func_call)))) };
       MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__type_analysis_session((IF entry != NIL THEN
         symbolEntry__type(entry)
       ELSE
@@ -12169,7 +12169,7 @@ PRIVATE FN typeAnalysisSession__resolve_user_protocol_function_call_mut(MUTABLE 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, node.name)) THEN
+    IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, UNWRAP (castCallNameToString(node.name)))) THEN
       RETURN FALSE;
     END
     MUTABLE matches: []Tuple<ProtocolDef, ProtocolRequirement, Type, Int64> = ( { MUTABLE rtoc_empty_list_284: []Tuple<ProtocolDef, ProtocolRequirement, Type, Int64> = List[]; rtoc_empty_list_284 } );
@@ -12764,7 +12764,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(node.name IS_A String) THEN
       RETURN;
     END
-    typeAnalysisSession__record_call_site(&rtoc_self_view, node.name);
+    typeAnalysisSession__record_call_site(&rtoc_self_view, UNWRAP (castCallNameToString(node.name)));
     IF node.args.empty?() THEN
       RETURN;
     END
@@ -14648,7 +14648,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((((wants_future OR wants_error) OR wants_optional) OR wants_error_optional)) THEN
         RETURN;
       END
-      MUTABLE value_type = TRY (type__new((MATCH node START DeclarationNode.VarDecl AS item -> TRY (aST__full_type_mut(item.value)), DeclarationNode.BindExpr AS item -> TRY (aST__full_type_mut(item.value)) END)));
+      MUTABLE value_type = TRY (type__new(TypeConstructionInput{ Type: COPY (MATCH node START DeclarationNode.VarDecl AS item -> TRY (aST__full_type_mut(item.value)), DeclarationNode.BindExpr AS item -> TRY (aST__full_type_mut(item.value)) END) }));
       MUTABLE error_type: ?Type@multiowned = TRY (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, UNWRAP (declarationNode__value(node)), "inferred wrapper binding"));
       MUTABLE payload_branch_value: ?Type = NIL;
       IF type__error_union?(value_type) THEN
@@ -17668,7 +17668,7 @@ PRIVATE FN typeAnalysisSession__validate_and_resolve_sync_policy_mut(MUTABLE sel
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE decls = program_node.statements |> WHERE _ IS_A SyncPolicyDecl;
     IF (decls.length() > 1) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, decls[1], TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_DUPLICATE }));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY decls[1] }, TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_DUPLICATE }));
     END
     IF decls.empty?() THEN
       program_node.sync_policy = TRY (typeAnalysisSession__baked_in_default_sync_policy(&rtoc_self_view));

@@ -2805,7 +2805,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !(capabilityAuditSession__function_value_reference?(&rtoc_self_view, _.escape_nodes[rtoc_idx])) THEN
+      IF !(capabilityAuditSession__function_value_reference?(&rtoc_self_view, UNWRAP (castLocatableToIdentifier(_.escape_nodes[rtoc_idx])))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

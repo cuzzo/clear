@@ -17814,3 +17814,48 @@ PUB FN locatable__set_alloc_mut(MUTABLE value: Locatable, new_value: ?String@sym
     DEFAULT -> RETURN;
   END
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToIdentifier(value: Locatable) RETURNS ?Identifier EFFECTS REENTRANT ->
+  IF value IS_A Identifier AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToBinaryOp(value: Locatable) RETURNS ?BinaryOp EFFECTS REENTRANT ->
+  IF value IS_A BinaryOp AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castStubValueToLocatable(value: StubValue) RETURNS ?Locatable EFFECTS REENTRANT ->
+  IF value IS_A Locatable AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castCallNameToString(value: CallName) RETURNS ?String EFFECTS REENTRANT ->
+  IF value IS_A String AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToIfStatement(value: Locatable) RETURNS ?IfStatement EFFECTS REENTRANT ->
+  IF value IS_A IfStatement AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

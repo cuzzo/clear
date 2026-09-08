@@ -10977,3 +10977,12 @@ FN castAutoConstraintCollectorSlotDeclNodeToLocatable(value: AutoConstraintColle
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castAutoConstraintCollectorObservedTypeToType(value: AutoConstraintCollectorObservedType) RETURNS ?Type@multiowned EFFECTS REENTRANT ->
+  IF value IS_A Type AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
