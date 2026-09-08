@@ -309,30 +309,41 @@ class PipelineListLowerer < T::Struct
   sig { params(site: PipelineSite, skip_node: AST::SkipOp).returns(MIR::BlockExpr) }
   def lower_skip(site, skip_node)
     list_node = site.list
-    label = self.next_label.call
-    source_mir = self.visit_mir.call(list_node)
-    self.set_current_label.call(label)
+    smooth_node = site.options
+    source_shape = self.source_shape.call(list_node)
+    elem_type = source_shape.element_type.resolved.to_s
+    elem_zig = self.transpile_type.call(elem_type)
+    alloc = self.pipeline_alloc.call(smooth_node)
     count_mir = self.visit_mir.call(skip_node.count)
 
-    block = MIR::BlockExpr.new(label, [
-      MIR::Let.new("__skip_src", source_mir, false, nil, nil),
-      MIR::Let.new("__skip_items",
-        MIR::ItemsAccess.new(MIR::Ident.new("__skip_src"), true), false, nil, nil),
-      MIR::Let.new("skip_requested",
-        MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
-      MIR::Let.new("skip_actual",
-        MIR::Call.new("@min", [MIR::Ident.new("skip_requested"),
-                               MIR::ListLength.new(MIR::Ident.new("__skip_items"))], false,
-          false, MIR::CallableContract.no_ownership(2)),
-        false, nil, nil),
-      MIR::BreakStmt.new(label,
-        MIR::SliceExpr.new(MIR::Ident.new("__skip_items"),
-                           MIR::Ident.new("skip_actual"), nil, nil)),
-    ])
-    # SKIP yields a borrowed sub-slice of its source, not a fresh owned list.
-    # Declare it so ownership is read from the marker, not the break node shape.
-    block.borrowed_view = true
-    block
+    # Ruby's `drop` returns a NEW array, and so must SKIP: a borrowed sub-slice
+    # keeps its source alive only as long as the source binding, which for a
+    # call result is nothing at all -- the source was bound with no cleanup and
+    # leaked. This mirrors LIMIT, which already builds an owned result.
+    self.pipeline_block.call(list_node, lambda do |items, label|
+      [
+        MIR::Let.new("skip_requested",
+          MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
+        MIR::Let.new("skip_actual",
+          MIR::Call.new("@min", [MIR::Ident.new("skip_requested"),
+                                 MIR::ListLength.new(MIR::Ident.new(items))], false,
+            false, MIR::CallableContract.no_ownership(2)),
+          false, nil, nil),
+        MIR::Let.new("skip_result",
+          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
+        MIR::ForStmt.new(
+          MIR::SliceExpr.new(MIR::Ident.new(items),
+            MIR::Ident.new("skip_actual"), nil, nil),
+          "it",
+          [
+            self.append_owned_value_stmt.call("skip_result", alloc,
+              self.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
+          ],
+          nil
+        ),
+        MIR::BreakStmt.new(label, MIR::Ident.new("skip_result")),
+      ]
+    end)
   end
 
   sig { params(site: PipelineSite, unnest_node: AST::UnnestOp).returns(MIR::BlockExpr) }

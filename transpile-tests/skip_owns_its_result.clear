@@ -1,0 +1,20 @@
+# Ruby's `drop` returns a NEW array, and so must SKIP. A borrowed sub-slice
+# keeps its source alive only as long as the source BINDING -- which for a call
+# result is nothing at all, so the source leaked.
+FN names(n: Int64) RETURNS ![]String ->
+  MUTABLE xs: []String = List[];
+  &xs.append(COPY "a");
+  &xs.append(COPY "b");
+  &xs.append(COPY "c");
+  RETURN xs;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE v: ?String = "x";
+  IF v EXISTS AS v_value THEN
+    MUTABLE rest = (TRY (names(1)) |> SKIP 1);
+    print("n ${rest.length().toString()} ${rest.join(",")}");
+  ELSE
+    RETURN;
+  END
+END

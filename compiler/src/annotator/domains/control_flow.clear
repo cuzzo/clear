@@ -45,3 +45,24 @@ PUB FN matchPayload__strip_layout_mut(MUTABLE value: MatchPayload) RETURNS !?Typ
   END
   RETURN NIL;
 END
+
+# Ruby compares two payloads with `==`. Zig has no `==` for a tagged union, so
+# the comparison asks the same question one variant at a time: same variant,
+# equal payload.
+PUB FN matchPayload__eq?(left: ?MatchPayload, right: ?MatchPayload) RETURNS !Bool EFFECTS REENTRANT ->
+  IF left EXISTS AS left_value THEN
+    IF right EXISTS AS right_value THEN
+      PARTIAL MATCH left_value START
+        MatchPayload.SymbolValue AS left_sym -> RETURN (IF right_value IS_A String@symbol AS right_sym THEN (left_sym == right_sym) ELSE FALSE END);,
+        MatchPayload.StringValue AS left_str -> RETURN (IF right_value IS_A String AS right_str THEN (left_str == right_str) ELSE FALSE END);,
+        MatchPayload.Type AS left_type -> RETURN (IF right_value IS_A Type AS right_type THEN TRY (type__equals?(left_type, TypeTypeInput{ Type: COPY right_type })) ELSE FALSE END);,
+        MatchPayload.TypeMultiowned AS left_type_mo -> RETURN (IF right_value IS_A Type AS right_type_mo THEN TRY (type__equals?(left_type_mo, TypeTypeInput{ Type: COPY right_type_mo })) ELSE FALSE END);,
+        MatchPayload.InlineStructVariantMultiowned AS left_isv -> RETURN (IF right_value IS_A InlineStructVariant AS right_isv THEN inlineStructVariant__equals?(left_isv, right_isv) ELSE FALSE END);,
+        DEFAULT -> RETURN FALSE;
+      END
+      RETURN FALSE;
+    END
+    RETURN FALSE;
+  END
+  RETURN !(right EXISTS);
+END

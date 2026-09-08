@@ -13642,7 +13642,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_330.length() DO
       MUTABLE extra_payload: ?MatchPayload = TRY (typeAnalysisSession__normalized_match_payload(&rtoc_self_view, castOptionalSchemasUnionSchemaVariantValueToOptionalMatchPayload(schema.variants[rtoc_each_items_330[rtoc_idx]]), union_subst));
-      IF (head_payload == extra_payload) THEN
+      IF TRY (matchPayload__eq?(head_payload, extra_payload)) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
