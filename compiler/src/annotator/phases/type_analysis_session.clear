@@ -3066,7 +3066,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (slot.shape == :map_key) THEN
       RETURN "key type of map `${(name OR_ELSE "")}`";
     ELSE_IF (slot.shape == :map_value) THEN
-      RETURN "value type of map `${name}`";
+      RETURN "value type of map `${(name OR_ELSE "")}`";
     ELSE
       RETURN NIL;
     END
@@ -9496,7 +9496,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF params.contains?(node.name) THEN
           RETURN;
         END
-        TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ TokenMultiowned: COPY node.token }, node.name, params, "PRE clauses may only reference function parameters. Found '${node.name}', which is not a parameter of '${(ctx_value.fn_name OR_ELSE "")}'.", "a parameter of '${ctx_value.fn_name}'", :type, TRUE));
+        TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ TokenMultiowned: COPY node.token }, node.name, params, "PRE clauses may only reference function parameters. Found '${node.name}', which is not a parameter of '${(ctx_value.fn_name OR_ELSE "")}'.", "a parameter of '${(ctx_value.fn_name OR_ELSE "")}'", :type, TRUE));
       ELSE_IF (ctx_value.kind == :post) THEN
         MUTABLE allowed = COPY ctx_value.allowed_names;
         MUTABLE rejected = COPY ctx_value.rejected_param_names;
@@ -12683,7 +12683,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE reject_when: ?String@symbol = TRY (functionSignature__intrinsic_reject_when(matched_def_value_mutable));
       MUTABLE first_arg: ?Locatable = COPY args.first();
       IF (((reject_when != NIL) AND (first_arg != NIL)) AND TRY (typeAnalysisSession__reject_arg_type_matches?(&rtoc_self_view, &first_arg, symbol(reject_when)))) THEN
-        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(matched_def_value_mutable)) OR_ELSE "${(aST__node_name(UNWRAP (castNodeToLocatable(node))) OR_ELSE "")}() is not valid for ${locatable__resolved_type(first_arg)}");
+        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(matched_def_value_mutable)) OR_ELSE "${(aST__node_name(UNWRAP (castNodeToLocatable(node))) OR_ELSE "")}() is not valid for ${(locatable__resolved_type(first_arg) OR_ELSE "")}");
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_REJECTED }, [], CAST({:detail: reason} AS {String@symbol}Any)));
         RETURN NIL;
       END
@@ -13843,7 +13843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(UNWRAP (rtoc_each_items_331[rtoc_idx])), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(rtoc_each_items_331[rtoc_idx]), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -14642,7 +14642,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF declared EXISTS AS declared_value THEN
       MUTABLE wants_future = (type__future?(declared_value) AND (type__resolved((TRY (type__tense_type(declared_value)))) == symbol("Auto")));
-      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(UNWRAP (declared_value))))) == symbol("Auto")));
+      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_optional = (type__optional?(declared_value) AND (type__resolved(UNWRAP (TRY (type__wrapped_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_error_optional = ((type__error_union?(declared_value) AND type__optional?((TRY (type__success_type(declared_value))))) AND (type__resolved(UNWRAP (TRY (type__wrapped_type((TRY (type__success_type(declared_value))))))) == symbol("Auto")));
       IF !((((wants_future OR wants_error) OR wants_optional) OR wants_error_optional)) THEN
@@ -18331,7 +18331,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRUE AND type__optional?(type)) THEN
       TRY (typeAnalysisSession__collect_implicit_type_params(&rtoc_self_view, TRY (type__wrapped_type( type)), &out, explicit));
     END
-    IF (TRUE AND type__array?( UNWRAP (type))) THEN
+    IF (TRUE AND type__array?( type)) THEN
       TRY (typeAnalysisSession__collect_implicit_type_params(&rtoc_self_view, TRY (type__element_type( UNWRAP (type))), &out, explicit));
     END
 }
