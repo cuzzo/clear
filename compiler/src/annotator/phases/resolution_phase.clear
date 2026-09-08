@@ -1947,7 +1947,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      index = resolutionSession__visit_recursive_component(rtoc_self_view, names[rtoc_idx], adjacency, index, &indices, &low, &stack, &on_stack, &result);
+      index = resolutionSession__visit_recursive_component(rtoc_self_view, UNWRAP (names[rtoc_idx]), adjacency, index, &indices, &low, &stack, &on_stack, &result);
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN result;
