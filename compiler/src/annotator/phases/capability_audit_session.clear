@@ -1511,7 +1511,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fix) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :CAN_SMASH_NOT_SUPPORTED }));
     END
-    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), :reentrance, [UNWRAP (fix)], NIL, :CAN_SMASH_NOT_SUPPORTED, :error));
+    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), :reentrance, [fix], NIL, :CAN_SMASH_NOT_SUPPORTED, :error));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_type_mismatch_assign_error_mut(MUTABLE self: CapabilityAuditSession, node: Node, target_type: TypeTypeInput, value_type: String@symbol) RETURNS !Void
@@ -3648,7 +3648,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN CAST(( { MUTABLE rtoc_empty_list_25: []Edit = List[]; rtoc_empty_list_25 } ) AS []Edit);
     END
     MUTABLE end_col = (e.column + (CAST(e.value AS String)).codepointCount());
-    RETURN CAST([edit__new(span__new(NIL, UNWRAP (s).line, UNWRAP (s).column, (end_col - UNWRAP (s).column)), replacement)] AS []Edit);
+    RETURN CAST([edit__new(span__new(NIL, s.line, UNWRAP (s).column, (end_col - UNWRAP (s).column)), replacement)] AS []Edit);
 }
 END
 PRIVATE FN capabilityAuditSession__thunk_all_self_calls_in_tail_position?(self: CapabilityAuditSession, fn_node: FunctionDef, body_facts: CapabilityAuditBodyFacts) RETURNS Bool
@@ -4337,7 +4337,7 @@ PRIVATE FN capabilityAuditSession__restamp_requires_on_signatures_mut(MUTABLE se
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE root_scope = capabilityAuditSession__whole_program_root_scope(rtoc_self_view);
     FOR rtoc_each_23 IN (TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))).keys() DO
-    MUTABLE fn_value: FunctionDef@multiowned = (TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))[rtoc_each_23] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
+    MUTABLE fn_value: FunctionDef@multiowned = TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))[rtoc_each_23];
     MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(root_scope, rtoc_each_23) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_49 = (scope__resolve_entry(root_scope, rtoc_each_23));
     symbolEntry__type(rtoc_local_receiver_49) }
