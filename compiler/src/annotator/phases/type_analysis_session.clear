@@ -1734,7 +1734,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN TRY (typeAnalysisSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, UNWRAP (move_col)));
         END
         MUTABLE type = ownershipNode__full_type(og_node);
-        MUTABLE is_shared = type__shared?(UNWRAP (castTypeTypeInputToType(TypeTypeInput{ Type: COPY type })));
+        MUTABLE is_shared = type__shared?(castTypeTypeInputToType(TypeTypeInput{ Type: COPY type }));
         MUTABLE is_multi = type__multiowned?(type);
         MUTABLE is_split = type__split?(type);
         MUTABLE use_clone = ((is_shared OR is_multi) OR is_split);
@@ -4603,7 +4603,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE schema: ?SchemaValue = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_85 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__resolve_type_definition(rtoc_local_receiver_85, current_type_name)) };
-      MUTABLE sf = (schemaValue__fields(UNWRAP (schema))[field_name] OR schemaValue__fields(UNWRAP (schema))[UNWRAP (rtoc_each_items_84[rtoc_idx])]);
+      MUTABLE sf = (schemaValue__fields(UNWRAP (schema))[field_name] OR schemaValue__fields(UNWRAP (schema))[rtoc_each_items_84[rtoc_idx]]);
       IF (sf == NIL) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :LIFETIME_NO_FIELD }, [], CAST({:type: current_type_name, :field: field_name} AS {String@symbol}Any)));
       END
@@ -11251,7 +11251,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF fn?.effects THEN
         MUTABLE has_io = (UNWRAP (fn).effects.contains?(:BLOCKING) OR UNWRAP (fn).effects.contains?(symbol("EXTERN")));
         IF has_io THEN
-          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ TestThat: COPY test_that } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STRICT_TEST_HAS_IO_EFFECTS }, [], CAST({:name: name, :effects: ((UNWRAP (UNWRAP ((fn)).effects OR_ELSE List[]) |> SELECT COPY _)).join(", ")} AS {String@symbol}Any)));
+          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ TestThat: COPY test_that } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STRICT_TEST_HAS_IO_EFFECTS }, [], CAST({:name: name, :effects: ((UNWRAP ((fn)).effects OR_ELSE List[] |> SELECT COPY _)).join(", ")} AS {String@symbol}Any)));
         END
       END
       FOR _ IN ((TRY (typeAnalysisSession__function_call_graph(&rtoc_self_view))[name] OR_ELSE List[])) DO
@@ -11955,7 +11955,7 @@ PRIVATE FN typeAnalysisSession__fn_var_call_error_fallible?(MUTABLE self: TypeAn
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_signature));
-    IF type__error_union?(UNWRAP ((IF sig != NIL THEN
+    IF type__error_union(UNWRAP ((IF sig != NIL THEN
       functionSignature__return_type(sig)
     ELSE
       NIL
@@ -11975,7 +11975,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap((IF node__matched_signature(node) EXISTS AS rtoc_wrap_11966 THEN X{ FunctionSignature: COPY rtoc_wrap_11966 } ELSE NIL END));
-    IF type__error_union?(UNWRAP ((IF signature != NIL THEN
+    IF type__error_union(UNWRAP ((IF signature != NIL THEN
       functionSignature__return_type(signature)
     ELSE
       NIL
@@ -13009,7 +13009,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     DEFER {
     rtoc_self_view.traversal_state.branch_terminated = prev_terminated;
     IF ((stream_frame != NIL) AND !((prev_stream_closed == NIL))) THEN
-      stream_frame.closed = prev_stream_closed?;
+      stream_frame.closed = prev_stream_closed;
     END
     }
     RETURN typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(&rtoc_self_view), %() USE(branch_logic, MUTABLE rtoc_self_view) -> {
@@ -13843,7 +13843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(UNWRAP (rtoc_each_items_331[rtoc_idx])), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(rtoc_each_items_331[rtoc_idx]), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -14642,7 +14642,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF declared EXISTS AS declared_value THEN
       MUTABLE wants_future = (type__future?(declared_value) AND (type__resolved((TRY (type__tense_type(declared_value)))) == symbol("Auto")));
-      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(UNWRAP (declared_value))))) == symbol("Auto")));
+      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_optional = (type__optional?(declared_value) AND (type__resolved(UNWRAP (TRY (type__wrapped_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_error_optional = ((type__error_union?(declared_value) AND type__optional?((TRY (type__success_type(declared_value))))) AND (type__resolved(UNWRAP (TRY (type__wrapped_type((TRY (type__success_type(declared_value))))))) == symbol("Auto")));
       IF !((((wants_future OR wants_error) OR wants_optional) OR wants_error_optional)) THEN
