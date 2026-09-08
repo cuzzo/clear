@@ -1207,6 +1207,29 @@ module RubyToClear
           # Ruby `matchdata[n]` is capture group n of the match.
           return "compilerRegexCapture(#{lhs}, #{visit(arg_nodes.first)})"
         end
+        # A LIST slice is not a substring. `xs[a, n]` and `xs[a..b]` build a new
+        # list, which SKIP and LIMIT spell; `substr` is String-only and would
+        # not even type-check against a list receiver.
+        list_receiver = !array_element_clear_type(
+          clear_type_for_receiver_node(node.receiver).to_s.delete_prefix("?")
+        ).nil?
+        if list_receiver && arg_nodes.length == 1 && arg_nodes.first.is_a?(Prism::RangeNode)
+          range = arg_nodes.first
+          start = range.left ? visit(range.left) : "0"
+          skipped = start == "0" ? lhs : "(#{lhs} |> SKIP #{start})"
+          if range.right
+            finish = visit(range.right)
+            if range.right.is_a?(Prism::IntegerNode) && range.right.value.negative?
+              finish = "(#{lhs}.length() - #{range.right.value.abs})"
+            end
+            length_expr = range.exclude_end? ? "(#{finish} - #{start})" : "((#{finish} - #{start}) + 1)"
+            return "(#{skipped} |> LIMIT #{length_expr})"
+          end
+          return skipped
+        end
+        if list_receiver && arg_nodes.length == 2
+          return "((#{lhs} |> SKIP #{visit(arg_nodes[0])}) |> LIMIT #{visit(arg_nodes[1])})"
+        end
         if arg_nodes.length == 1 && arg_nodes.first.is_a?(Prism::RangeNode)
           range = arg_nodes.first
           start = range.left ? visit(range.left) : "0"
@@ -1230,7 +1253,10 @@ module RubyToClear
         elsif arg_nodes.length == 2 && regex_pattern_expression?(arg_nodes.first)
           # Ruby `str[/re/, n]` is capture group n of the first match.
           "compilerRegexMatchGroup(#{lhs}, #{visit(arg_nodes.first)}, #{visit(arg_nodes[1])})"
-        elsif arg_nodes.length == 1 && string_receiver?(node.receiver)
+        elsif arg_nodes.length == 1 && string_receiver?(node.receiver) &&
+              !arg_nodes.first.is_a?(Prism::SymbolNode)
+          # A SYMBOL index is a hash key, never a character offset, whatever the
+          # receiver's inferred shape says.
           "#{lhs}.substr(#{visit(arg_nodes.first)}, 1)"
         elsif arg_nodes.length == 2
           start = visit(arg_nodes[0])

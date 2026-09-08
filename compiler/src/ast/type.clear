@@ -5127,3 +5127,25 @@ PUB FN typeTypeInput__payload_type(value: TypeTypeInput) RETURNS !?Type EFFECTS 
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:indirect?)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN typeTypeInput__indirect?(value: TypeTypeInput) RETURNS ?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN type__indirect?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:type_params)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN schema__type_params(value: Schema) RETURNS ?[]String@symbol ->
+  PARTIAL MATCH value START
+    Schema.StructSchemaMultiowned AS item -> RETURN COPY item.type_params;,
+    Schema.ResourceSchemaMultiowned AS item -> RETURN COPY item.type_params;,
+    Schema.StructSchema AS item -> RETURN COPY item.type_params;,
+    Schema.ResourceSchema AS item -> RETURN COPY item.type_params;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
