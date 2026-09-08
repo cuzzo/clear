@@ -17804,3 +17804,13 @@ PUB FN node__matched_signature(value: Node) RETURNS ?FunctionSignature@multiowne
   END
   RETURN NIL;
 END
+# Ruby writes `alloc` on whichever variant it holds. A variant either
+# carries the field or it does not, so the write lands only where it fits.
+PUB FN locatable__set_alloc_mut(MUTABLE value: Locatable, new_value: ?String@symbol) RETURNS Void ->
+  PARTIAL MATCH value START
+    Locatable.CopyNode AS MUTABLE item -> item.alloc = COPY new_value;,
+    Locatable.ReassignCleanup AS MUTABLE item -> item.alloc = COPY new_value;,
+    Locatable.FieldCleanup AS MUTABLE item -> item.alloc = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END

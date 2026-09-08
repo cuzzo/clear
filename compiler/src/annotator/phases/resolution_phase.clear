@@ -1042,7 +1042,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(sig) THEN
         CONTINUE;
     END
-    IF functionSignature__module_alias(sig) THEN
+    IF functionSignature__module_alias(UNWRAP (sig)) THEN
         CONTINUE;
     END
     IF (rtoc_each_1 == name) THEN
@@ -2145,7 +2145,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((schemaValue__type_params(existing) == schemaValue__type_params(incoming))) THEN
       RETURN FALSE;
     END
-    IF !(resolutionSession__equivalent_struct_fields?(&rtoc_self_view, schemaValue__fields(existing), incoming.fields())) THEN
+    IF !(resolutionSession__equivalent_struct_fields?(&rtoc_self_view, schemaValue__fields(existing), schemaValue__fields(incoming))) THEN
       RETURN FALSE;
     END
     IF existing IS_A ResourceSchema AS resource_schema THEN

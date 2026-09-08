@@ -1502,7 +1502,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END;
     IF tok THEN
-      fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_CAN_SMASH_WITH_SERVICE)), [edit__new(span__new(NIL, UNWRAP (tok).line, tok.column, (CAST(tok.value() AS String)).codepointCount()), "@service")], :auto));
+      fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_CAN_SMASH_WITH_SERVICE)), [edit__new(span__new(NIL, UNWRAP (tok).line, UNWRAP (tok).column, (CAST(tok.value() AS String)).codepointCount()), "@service")], :auto));
     END
     IF !(fix) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :CAN_SMASH_NOT_SUPPORTED }));
@@ -2986,7 +2986,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
       END
       &visited.insert(name);
-      MUTABLE fn = fn_nodes[name];
+      MUTABLE fn = fn_nodes[UNWRAP (name)];
       IF !(fn) THEN
         CONTINUE;
       END
@@ -3141,7 +3141,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
       END
       &visited.insert(name);
-      MUTABLE fn = fn_nodes[name];
+      MUTABLE fn = fn_nodes[UNWRAP (name)];
       IF fn EXISTS AS fn_value THEN
         IF functionSignature__stack_tier(fn_value) THEN
         IF (((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[functionSignature__stack_tier(fn)] OR_ELSE 0) > ((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[max] OR_ELSE 0)) THEN
@@ -3624,7 +3624,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (callee == start_value) THEN
         RETURN TRUE;
       END
-      queue = (queue + ((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[callee] OR_ELSE Set[])) |> SELECT COPY _));
+      queue = (queue + ((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[UNWRAP (callee)] OR_ELSE Set[])) |> SELECT COPY _));
     END
     RETURN FALSE;
 }
@@ -3886,7 +3886,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       IF adj[UNWRAP (edges[rtoc_idx]).held] == NIL THEN
-          adj[UNWRAP (UNWRAP (edges[rtoc_idx]).held)] = Set[];
+          adj[UNWRAP (edges[rtoc_idx]).held] = Set[];
         END
         IF adj[edges[rtoc_idx]?.held] EXISTS AS rtoc_map_slot_30 THEN
           &rtoc_map_slot_30.insert(edges[rtoc_idx]?.acquired);
@@ -4217,7 +4217,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          MUTABLE storage = (IF var_node.symbol != NIL THEN
+          MUTABLE storage = (IF UNWRAP (var_node).symbol != NIL THEN
             (var_node.symbol).storage()
           ELSE
             NIL
@@ -4288,7 +4288,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(signature) THEN
         CONTINUE;
     END
-    TRY ( UNWRAP (functionSignature__sync_from_function_def_mut(&signature, FunctionSignatureSyncSource{ FunctionDef: COPY rtoc_mutable_block_param_46 })));
+    TRY ( functionSignature__sync_from_function_def_mut(&signature, FunctionSignatureSyncSource{ FunctionDef: COPY rtoc_mutable_block_param_46 }));
     END
 }
 END
