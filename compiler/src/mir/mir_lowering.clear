@@ -13436,7 +13436,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE caps = TRY (fiberCtxBuilder__build(analysis, "ctx", promoted_names, alloc_var, id.value, TRY (mIRLowering__fiber_capture_source_overrides(&rtoc_self_view, analysis)), mIRLowering__mir_schema_lookup(&rtoc_self_view)));
     MUTABLE capture_fields = ((caps.specs |> SELECT mIRLowering__context_field_decl(rtoc_self_view, _.name, _.field_type_zig)) + TRY (mIRLowering__capture_moved_guard_fields(rtoc_self_view, caps.specs)));
     MUTABLE capture_inits = ([mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ SymbolValue: :stream_inner }, Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY stream_var, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }), mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ SymbolValue: :alloc }, Emittable{ Ident: COPY Ident{ name: COPY alloc_var, lowered_node_id: NIL, ownership_consumption: NIL } })] + (caps.specs |> SELECT mIRLowering__context_init_field(rtoc_self_view, MIRLoweringName{ StringValue: COPY _.name }, _.init_value_mir)));
-    MUTABLE stream_run_body: Any = NIL;
+    MUTABLE stream_run_body: ?[]Emittable = NIL;
     MUTABLE stream_emit_body: []Emittable = ( { MUTABLE rtoc_empty_list_521: []Emittable = List[]; rtoc_empty_list_521 } );
     MUTABLE stream_capture_cleanups = TRY (mIRLowering__capture_cleanup_stmts(rtoc_self_view, caps.specs, "ctx"));
     MUTABLE inherited_capture_names = (caps.specs |> SELECT:? (IF captureSpec__needs_moved_guard?(_) THEN
