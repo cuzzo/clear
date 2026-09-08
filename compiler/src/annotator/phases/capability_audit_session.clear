@@ -2541,7 +2541,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rt: ?Type = fn_node.return_type;
       ((rt != NIL AND TRUE) AND type__error_union?(rt))
     });
-    error_fallible[_] = ((TRY (capabilityAuditSession__function_raises_directly?(rtoc_self_view, _)) OR declared_fallible) OR (_ == name));
+    error_fallible[_] = ((TRY (capabilityAuditSession__function_raises_directly?(rtoc_self_view, _)) OR declared_fallible) OR (_ == entrypointName()));
     };
     FOR rtoc_each_10 IN (TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view))).keys() DO
     MUTABLE callees: [Set]String = ((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[rtoc_each_10] OR_ELSE CAST(panic("missing hash key") AS [Set]String));
@@ -4701,4 +4701,10 @@ PRIVATE FN capabilityAuditSession__cap_var_sync(self: CapabilityAuditSession, va
     RETURN sym_sync_value;
   END
   RETURN type__sync(TRY (aST__full_type_mut(var_node)));
+END
+
+# `Compiler::Entrypoint::NAME`. A module constant is not exported across CLEAR
+# files; the tree's pattern is a PUB FN reader.
+PUB FN entrypointName() RETURNS String EFFECTS REENTRANT ->
+  RETURN "main";
 END

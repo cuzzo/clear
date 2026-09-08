@@ -8317,7 +8317,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE kind = COPY expression.kind;
     MUTABLE cap = COPY expression.capabilities;
     IF (kind IS_A NamedTypeExpression) THEN
-      IF (UNWRAP (typeExpressionKind__arguments(kind)).empty?() AND subst.contains?(typeExpressionKind__name(kind))) THEN
+      IF (UNWRAP (typeExpressionKind__arguments(kind)).empty?() AND subst.contains?(UNWRAP (typeExpressionKind__name(kind)))) THEN
         MUTABLE replacement = TRY (type__new(castOptionalGenericBindingToTypeConstructionInput(subst[kind.name()])));
         IF (type__generic_payload_type_arg?(replacement) AND !(cap.polymorphic_shared)) THEN
           TRY (type__strip_runtime_capabilities_mut(&replacement));
@@ -13843,7 +13843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(UNWRAP (rtoc_each_items_331[rtoc_idx])), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(rtoc_each_items_331[rtoc_idx]), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -14008,7 +14008,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !(struct_schema.fields.contains?(destructure.fields[rtoc_idx]?.name)) THEN
+      IF !(struct_schema.fields.contains?(UNWRAP (destructure.fields[rtoc_idx]?.name))) THEN
           TRY (typeAnalysisSession__emit_unknown_destructure_field_mut(&rtoc_self_view, &node, destructure.fields[UNWRAP (rtoc_idx)]?, struct_schema, variant_name));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -14642,7 +14642,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF declared EXISTS AS declared_value THEN
       MUTABLE wants_future = (type__future?(declared_value) AND (type__resolved((TRY (type__tense_type(declared_value)))) == symbol("Auto")));
-      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(UNWRAP (declared_value))))) == symbol("Auto")));
+      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_optional = (type__optional?(declared_value) AND (type__resolved(UNWRAP (TRY (type__wrapped_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_error_optional = ((type__error_union?(declared_value) AND type__optional?((TRY (type__success_type(declared_value))))) AND (type__resolved(UNWRAP (TRY (type__wrapped_type((TRY (type__success_type(declared_value))))))) == symbol("Auto")));
       IF !((((wants_future OR wants_error) OR wants_optional) OR wants_error_optional)) THEN

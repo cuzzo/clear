@@ -1943,7 +1943,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE result: [][Set]String@symbol = ( { MUTABLE rtoc_empty_list_53: [][Set]String@symbol = List[]; rtoc_empty_list_53 } );
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < names.length() DO
-      IF indices.contains?(names[rtoc_idx]) THEN
+      IF indices.contains?(UNWRAP (names[rtoc_idx])) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
