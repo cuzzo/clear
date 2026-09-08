@@ -5136,3 +5136,12 @@ PUB FN typeTypeInput__indirect?(value: TypeTypeInput) RETURNS ?Bool EFFECTS REEN
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:resolved)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN typeTypeInput__resolved(value: TypeTypeInput) RETURNS ?String@symbol EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN type__resolved(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
