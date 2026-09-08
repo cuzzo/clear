@@ -12671,7 +12671,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE reject_when: ?String@symbol = TRY (functionSignature__intrinsic_reject_when(matched_def_value_mutable));
       MUTABLE first_arg: ?Locatable = COPY args.first();
       IF (((reject_when != NIL) AND (first_arg != NIL)) AND TRY (typeAnalysisSession__reject_arg_type_matches?(&rtoc_self_view, &first_arg, symbol(reject_when)))) THEN
-        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(matched_def_value_mutable)) OR_ELSE "${aST__node_name(castNodeToLocatable(node))}() is not valid for ${first_arg.resolved_type}");
+        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(matched_def_value_mutable)) OR_ELSE "${aST__node_name(UNWRAP (castNodeToLocatable(node)))}() is not valid for ${first_arg.resolved_type}");
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_REJECTED }, [], CAST({:detail: reason} AS {String@symbol}Any)));
         RETURN NIL;
       END
@@ -18314,7 +18314,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF ( TRUE AND type__error_union?(UNWRAP (type))) THEN
-      TRY (typeAnalysisSession__collect_implicit_type_params(&rtoc_self_view, TRY (type__payload_type(type)), &out, explicit));
+      TRY (typeAnalysisSession__collect_implicit_type_params(&rtoc_self_view, TRY (type__payload_type(type)),UNWRAP ( &out), explicit));
     END
     IF (TRUE AND type__optional?(type)) THEN
       TRY (typeAnalysisSession__collect_implicit_type_params(&rtoc_self_view, TRY (type__wrapped_type( UNWRAP (type))), &out, explicit));
