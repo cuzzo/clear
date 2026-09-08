@@ -3299,6 +3299,15 @@ class MIRLowering
 
   sig { params(name: String).returns(String) }
   def transfer_binding_name(name)
+    # An IF-bind alias that BORROWS from a named owner is that owner for
+    # ownership purposes: the AllocMark lives on the source binding, so a
+    # transfer recorded under the alias has no allocation to match. An alias
+    # that owns its own capture already has a visible AllocMark and keeps it.
+    owner = capability_state.with_alias_owner_map&.[](name.to_s)
+    if owner && !owned_binding_visible?(name.to_s)
+      return ownership_scanner.transfer_binding_name(owner)
+    end
+
     ownership_scanner.transfer_binding_name(name)
   end
 

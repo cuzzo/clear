@@ -92,8 +92,11 @@ module SelfhostFnProbe
   end
 
   def return_type(text)
-    text[/\)\s*(?:\n\s*REQUIRES[^\n]*)*\s*RETURNS\s+([\w@?!\[\]{}]+)/m, 1] ||
-      text[/RETURNS\s+([\w@?!\[\]{}]+)/, 1] || 'Void'
+    # A generic return (`[]Tuple<String, SymbolEntry@multiowned>`) has to come
+    # back WHOLE: a truncated type reads as a different one and the stub then
+    # fails its own RETURN.
+    text[/\)\s*(?:\n\s*REQUIRES[^\n]*)*\s*RETURNS\s+([\w@?!\[\]{}]+(?:<[^>\n]*>)?)/m, 1] ||
+      text[/RETURNS\s+([\w@?!\[\]{}]+(?:<[^>\n]*>)?)/, 1] || 'Void'
   end
 
   # A stub keeps the signature and drops the body. Everything the target calls

@@ -1,0 +1,16 @@
+# `IF opt EXISTS AS v` binds a VIEW of `opt`, which keeps the allocation. Moving
+# `v` into a container is therefore a transfer of `opt` -- recording it under the
+# alias leaves the ownership checker with a transfer it cannot match.
+FN maybeName(n: Int64) RETURNS ?String ->
+  MUTABLE s = "name${n.toString()}";
+  RETURN s;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE parts: []String = List[];
+  MUTABLE ownership: ?String = maybeName(1);
+  IF ownership EXISTS AS ownership_value THEN
+    &parts.append(ownership_value);
+  END
+  print("n ${parts.length().toString()} ${parts.join(",")}");
+END
