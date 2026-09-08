@@ -1502,7 +1502,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END;
     IF tok THEN
-      fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_CAN_SMASH_WITH_SERVICE)), [edit__new(span__new(NIL, tok.line, tok.column, (CAST(tok.value() AS String)).codepointCount()), "@service")], :auto));
+      fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_CAN_SMASH_WITH_SERVICE)), [edit__new(span__new(NIL, UNWRAP (tok).line, tok.column, (CAST(tok.value() AS String)).codepointCount()), "@service")], :auto));
     END
     IF !(fix) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :CAN_SMASH_NOT_SUPPORTED }));
@@ -3886,7 +3886,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       IF adj[UNWRAP (edges[rtoc_idx]).held] == NIL THEN
-          adj[UNWRAP (edges[rtoc_idx].held)] = Set[];
+          adj[UNWRAP (UNWRAP (edges[rtoc_idx]).held)] = Set[];
         END
         IF adj[edges[rtoc_idx]?.held] EXISTS AS rtoc_map_slot_30 THEN
           &rtoc_map_slot_30.insert(edges[rtoc_idx]?.acquired);
@@ -4212,7 +4212,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           NIL
         END);
-      IF (fact.capability == symbol("EXCLUSIVE")) THEN
+      IF (UNWRAP (fact).capability == symbol("EXCLUSIVE")) THEN
           IF syn THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;

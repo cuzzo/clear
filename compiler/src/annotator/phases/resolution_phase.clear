@@ -2145,7 +2145,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((schemaValue__type_params(existing) == schemaValue__type_params(incoming))) THEN
       RETURN FALSE;
     END
-    IF !(resolutionSession__equivalent_struct_fields?(&rtoc_self_view, existing.fields(), incoming.fields())) THEN
+    IF !(resolutionSession__equivalent_struct_fields?(&rtoc_self_view, schemaValue__fields(existing), incoming.fields())) THEN
       RETURN FALSE;
     END
     IF existing IS_A ResourceSchema AS resource_schema THEN
