@@ -2360,8 +2360,13 @@ class MIREmitter
         # A Zig payload capture is const. A mutable binding rebinds it into a
         # var holding the pointer, the same shape a mutable MATCH arm binding
         # has, so `&binding` is a mutable pointer at the call site.
-        capture = b[:pointer_capture] ? "*#{b[:capture]}__ptr" : b[:capture]
-        rebind = b[:pointer_capture] ? "var #{b[:capture]} = #{b[:capture]}__ptr;\n" : ""
+        # A pointer-SHAPED condition (getPtr / getAtPtrOpt) already yields a
+        # pointer as its payload. Capturing that by pointer too gives **T,
+        # which reads fine through auto-deref but is one level too many the
+        # moment the binding is handed to a callee.
+        take_address = b[:pointer_capture] && !b[:pointer_shaped]
+        capture = take_address ? "*#{b[:capture]}__ptr" : b[:capture]
+        rebind = take_address ? "var #{b[:capture]} = #{b[:capture]}__ptr;\n" : ""
         # An `anytype` parameter declared `?T` can arrive as a bare `T`, which
         # `if (x) |y|` rejects. Only a bare binding can have that shape; a call
         # result carries its own optionality. A pointer capture needs the

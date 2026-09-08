@@ -1,0 +1,16 @@
+# `IF m[k] EXISTS AS MUTABLE cur` binds the entry IN PLACE, so `cur` is already
+# the map's set. Passing it on with `&` must hand over that same binding -- not
+# the address of the binding -- or the callee receives a pointer to a pointer.
+FN addOne(MUTABLE s: [Set]String@symbol) RETURNS !Void ->
+  &s.insert(:added);
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE m: {String}[Set]String@symbol = {};
+  m["a"] = Set[];
+  IF m["a"] EXISTS AS MUTABLE cur THEN
+    TRY (addOne(&cur));
+    print("len ${cur.length().toString()}");
+  END
+  print("stored ${UNWRAP (m["a"]).length().toString()}");
+END
