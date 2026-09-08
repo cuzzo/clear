@@ -7684,7 +7684,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], CAST({:cap: "@pool", :example: "User[]@pool or User[N]@pool"} AS {String@symbol}Any)));
     END
     IF ((type__set_collection?(shape) AND !(type__array?(shape))) AND !(facts.inner_array)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], CAST({:cap: "@set", :example: "String[]@set"} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], CAST({:cap: "@set", :example: "String[]@set"} AS {String@symbol}Any)));
     END
     IF TRY (type__observable_array_without_set?(type_obj)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :OBSERVABLE_REQUIRES_SET }));
@@ -7866,7 +7866,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE nested_params = TRY (typeAnalysisSession__schema_type_params(&rtoc_self_view, nested_schema));
       IF (nested_params.length() != (TRY (type__generic_args(arg))).length()) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], CAST({:type: type__generic_base(arg), :expected: nested_params.length(), :got: (TRY (type__generic_args(arg))).length()} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], CAST({:type: type__generic_base(arg), :expected: nested_params.length(), :got: (TRY (type__generic_args(arg))).length()} AS {String@symbol}Any)));
       END
       FOR _ IN (TRY (type__generic_args(arg))) DO
       TRY (typeAnalysisSession__validate_generic_type_arg_mut(&rtoc_self_view, facts, _));
