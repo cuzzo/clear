@@ -2650,7 +2650,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF src EXISTS AS src_value THEN
       MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (decl))).line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
-      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(decl).column - 1));
+      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (decl))).column - 1));
       IF semi_idx EXISTS AS semi_idx_value THEN
         IF line_text.contains?(sigil) THEN
           RETURN NIL;
@@ -15473,7 +15473,7 @@ PRIVATE FN typeAnalysisSession__accumulate_stack_bytes(MUTABLE self: TypeAnalysi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fn_ctx: ?FunctionContext@multiowned = typeAnalysisSession__current_fn_ctx(&rtoc_self_view);
+    MUTABLE fn_ctx: FunctionContext@multiowned = UNWRAP (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
     IF !(((storage == :stack) AND (fn_ctx != NIL))) THEN
       RETURN NIL;
     END
@@ -15798,7 +15798,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN;
       END
       MUTABLE union_schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type__resolved((TRY (type__value_payload_type(target))))));
-      MUTABLE value_node: ?Locatable = aST__node_value(UNWRAP (castNodeToLocatable(node)));
+      MUTABLE value_node: Locatable = UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))));
       IF TRY (unionPayloadCompatibility__unique_variant(target, CAST(value AS Type), union_schema)) THEN
         locatable__set_coerced_type_object_mut(&value_node, target);
         RETURN;
@@ -17866,7 +17866,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__resolve_error_registration_mut(&rtoc_self_view, Node{ Raise: COPY node }, node.kind, node.error_name, node.token));
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-        MUTABLE rtoc_mutable_receiver_435: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+        MUTABLE rtoc_mutable_receiver_435: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
         functionContext__mark_runtime_used_mut(&rtoc_mutable_receiver_435);
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, :NoReturn));
@@ -18233,7 +18233,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__resolve_error_registration_mut(&rtoc_self_view, Node{ OrElseExit: COPY node }, node.kind, node.error_name, node.token));
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-        MUTABLE rtoc_mutable_receiver_443: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+        MUTABLE rtoc_mutable_receiver_443: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
         functionContext__mark_runtime_used_mut(&rtoc_mutable_receiver_443);
     END
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, :Void));
@@ -19436,7 +19436,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF TRUE THEN
       IF TRY (type__any_rc?(type_value)) THEN
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-            MUTABLE rtoc_mutable_receiver_473: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+            MUTABLE rtoc_mutable_receiver_473: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
             functionContext__mark_runtime_used_mut(&rtoc_mutable_receiver_473);
       END
     END
@@ -19497,7 +19497,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-        MUTABLE rtoc_mutable_receiver_477: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+        MUTABLE rtoc_mutable_receiver_477: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
         functionContext__record_heap_use_mut(&rtoc_mutable_receiver_477);
     END
     TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("HEAP")));

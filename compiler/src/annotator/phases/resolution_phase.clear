@@ -1021,7 +1021,7 @@ PRIVATE FN resolutionSession__visit_RequireNode(MUTABLE self: ResolutionSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE importer: ?ModuleImporter@multiowned = resolutionSession__active_importer(rtoc_self_view);
+    MUTABLE importer: ModuleImporter@multiowned = UNWRAP (resolutionSession__active_importer(rtoc_self_view));
     IF !(importer) THEN
       TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ RequireNode: COPY node } }, ResolutionCodeOrMessage{ SymbolValue: :REQUIRE_NEEDS_IMPORTER }));
     END
