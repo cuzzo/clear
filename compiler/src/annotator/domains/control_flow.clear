@@ -66,13 +66,3 @@ PUB FN matchPayload__eq?(left: ?MatchPayload, right: ?MatchPayload) RETURNS !Boo
   END
   RETURN !(right EXISTS);
 END
-# Ruby asks `respond_to?(:indirect?)` and then calls it. The variants that
-# can answer compute it; the rest do not respond.
-PUB FN matchPayload__indirect?(value: MatchPayload) RETURNS ?Bool EFFECTS REENTRANT ->
-  PARTIAL MATCH value START
-    MatchPayload.TypeMultiowned AS item -> RETURN type__indirect?(item);,
-    MatchPayload.Type AS item -> RETURN type__indirect?(item);,
-    DEFAULT -> RETURN NIL;
-  END
-  RETURN NIL;
-END

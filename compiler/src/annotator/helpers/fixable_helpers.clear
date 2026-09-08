@@ -32,7 +32,7 @@ END
 STRUCT CapabilityFixCandidate {
   sigil: String,
   description_code: String@symbol,
-  description_params: {String@symbol}DiagnosticKwValue
+  description_params: {String@symbol}String
 }
 STRUCT AutoCandidate {
   type_sym: String@symbol,

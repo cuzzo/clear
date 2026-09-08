@@ -1209,7 +1209,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (code == :MATCH_NEEDS_ENUM_OR_UNION) THEN
       TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:type: (kwargs[:type] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue)));
     ELSE_IF (code == :MATCH_NON_EXHAUSTIVE) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:kind: (kwargs[:kind] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :name: (kwargs[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :missing: (kwargs[:missing] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:kind: kwargs.substr(:kind, 1), :name: kwargs.substr(:name, 1), :missing: kwargs.substr(:missing, 1)} AS {String@symbol}Any)));
     ELSE
       panic("unsupported MATCH partial fix diagnostic: {}");
     END
@@ -1307,7 +1307,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE alias_name = "${name}_view";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(name)}\\s*(?=\\[)"), alias_name);
         MUTABLE replacement = "${indent}WITH UNSAFE VIEW ${name} LENGTH ${length} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (line_num), 1, (body).length()), replacement)], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, 1, (body).length()), replacement)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -1450,10 +1450,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
-    IF scope EXISTS AS scope_value THEN
-      IF scope__resolve_entry(scope_value, name) EXISTS AS decl_entry THEN
-        decl = COPY decl_entry.reg;
-      END
+    IF (IF scope != NIL THEN
+      scope__resolve_entry(scope, name)
+    ELSE
+      NIL
+    END) != NIL THEN
+      decl = UNWRAP (COPY (((IF scope != NIL THEN
+      scope__resolve_entry(scope, name)
+    ELSE
+      NIL
+    END)))).reg;
     END
     MUTABLE fix: ?Fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
@@ -1612,10 +1618,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
-    IF scope EXISTS AS scope_value THEN
-      IF scope__resolve_entry(scope_value, name) EXISTS AS decl_entry THEN
-        decl = COPY decl_entry.reg;
-      END
+    IF (IF scope != NIL THEN
+      scope__resolve_entry(scope, name)
+    ELSE
+      NIL
+    END) != NIL THEN
+      decl = UNWRAP (COPY (((IF scope != NIL THEN
+      scope__resolve_entry(scope, name)
+    ELSE
+      NIL
+    END)))).reg;
     END
     IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;
@@ -1646,10 +1658,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
-    IF scope EXISTS AS scope_value THEN
-      IF scope__resolve_entry(scope_value, name) EXISTS AS decl_entry THEN
-        decl = COPY decl_entry.reg;
-      END
+    IF (IF scope != NIL THEN
+      scope__resolve_entry(scope, name)
+    ELSE
+      NIL
+    END) != NIL THEN
+      decl = UNWRAP (COPY (((IF scope != NIL THEN
+      scope__resolve_entry(scope, name)
+    ELSE
+      NIL
+    END)))).reg;
     END
     IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;
@@ -1678,11 +1696,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned__capability_audit_session(kw)));
     END
     IF (code == :WITH_EXCLUSIVE_NEEDS_LOCK) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:got: (kw[:got] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:got: kw.substr(:got, 1)} AS {String@symbol}Any)));
     ELSE_IF (code == :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC) OR (code == :WITH_ATOMIC_NEEDS_SHARED_ATOMIC) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :actual: (kw[:actual] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: kw.substr(:name, 1), :actual: kw.substr(:actual, 1)} AS {String@symbol}Any)));
     ELSE_IF (code == :WITH_NEEDS_MULTIOWNED) OR (code == :WITH_NEEDS_SHARED) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: kw.substr(:name, 1)} AS {String@symbol}Any)));
     ELSE
       panic("unsupported WITH capability mismatch diagnostic: {}");
     END
