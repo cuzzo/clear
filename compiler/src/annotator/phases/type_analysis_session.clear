@@ -1756,7 +1756,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE prefix = COPY (move_text.substr(0, (UNWRAP (move_col) - 1)));
           MUTABLE give_prefix: ?CompilerRegexScanner = compilerRegexMatchData(prefix, compilerRegexCompile("GIVE\\s+\\z"));
           IF give_prefix EXISTS AS give_prefix_value THEN
-            replacement_col = (give_prefix_value.begin(0) + 1);
+            replacement_col = ((compilerRegexPosition(give_prefix_value) - compilerRegexCapture(give_prefix_value, 0).codepointCount()) + 1);
             replacement_length = (replacement_length + compilerRegexCapture(give_prefix_value, 0).codepointCount());
           END
         END
@@ -2488,7 +2488,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           ann_match = COPY compilerRegexMatchData(((line_text.substr(search_offset, (line_text.length() - search_offset)))?), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
         END
         IF ((ann_match != NIL) AND !(line_text.contains?("~"))) THEN
-          MUTABLE type_col = ((search_offset + ann_match.begin(1)) + 1);
+          MUTABLE type_col = ((search_offset + (compilerRegexPosition(ann_match) - compilerRegexCapture(ann_match, 1).codepointCount())) + 1);
           fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :PREFIX_TENSE_TYPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, dline, type_col, 0), "~")], :interactive));
         END
       END
@@ -2775,7 +2775,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             match = COPY compilerRegexMatchData(((src_line.substr(search_offset, (src_line.length() - search_offset)))?), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));
           END
           IF match EXISTS AS match_value THEN
-            MUTABLE start_col = ((search_offset + match_value.begin(0)) + 1);
+            MUTABLE start_col = ((search_offset + (compilerRegexPosition(match_value) - compilerRegexCapture(match_value, 0).codepointCount())) + 1);
             RETURN TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :MIGRATE_ATOMIC_ESCAPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY source_name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, start_col, compilerRegexCapture(match_value, 0).codepointCount()), "@shared:locked")], :interactive));
           ELSE
             RETURN NIL;
@@ -14129,11 +14129,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plan = TRY (typeAnalysisSession__match_subject_plan(&rtoc_self_view, &node));
     TRY (typeAnalysisSession__consume_match_subject_if_takes_mut(&rtoc_self_view, &node, plan));
     MUTABLE branches: FN() -> []Any@multiowned = ( { MUTABLE rtoc_empty_list_341: FN() -> []Any@multiowned = List[]; rtoc_empty_list_341 } );
-    FOR _ IN node.cases DO
-    &branches.append(%() USE(node, plan, _, MUTABLE rtoc_self_view) -> {
-    TRY (typeAnalysisSession__analyze_match_case_mut(&rtoc_self_view, &node, &_, plan));
-    typeAnalysisSession__with_conditional_context(&rtoc_self_view, %() USE(_, MUTABLE rtoc_self_view) -> {
-      rtoc_lambda_result_342 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, TRY (matchCase__body(_))));
+    FOR MUTABLE rtoc_for_item_14131 IN node.cases DO
+    &branches.append(%() USE(node, plan, rtoc_for_item_14131, MUTABLE rtoc_self_view) -> {
+    TRY (typeAnalysisSession__analyze_match_case_mut(&rtoc_self_view, &node, &rtoc_for_item_14131, plan));
+    typeAnalysisSession__with_conditional_context(&rtoc_self_view, %() USE(rtoc_for_item_14131, MUTABLE rtoc_self_view) -> {
+      rtoc_lambda_result_342 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, TRY (matchCase__body(rtoc_for_item_14131))));
       rtoc_lambda_result_342
     });
     TRY (typeAnalysisSession__collect_scope_drops(&rtoc_self_view, node))
