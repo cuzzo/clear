@@ -3898,8 +3898,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         IF adj[UNWRAP (edges[rtoc_idx]?.held)] EXISTS AS rtoc_map_slot_30 THEN
           &rtoc_map_slot_30.insert(UNWRAP (edges[rtoc_idx]).acquired);
         END
-      &nodes.insert(edges[rtoc_idx]?.held);
-      &nodes.insert(edges[rtoc_idx]?.acquired);
+      &nodes.insert(UNWRAP (edges[rtoc_idx]).held);
+      &nodes.insert(UNWRAP (edges[rtoc_idx]).acquired);
       &live.append(COPY edges[rtoc_idx]?);
     rtoc_idx = rtoc_idx + 1;
     END
