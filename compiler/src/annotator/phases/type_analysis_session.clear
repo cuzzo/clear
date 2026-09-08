@@ -11254,7 +11254,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ TestThat: COPY test_that } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STRICT_TEST_HAS_IO_EFFECTS }, [], CAST({:name: name, :effects: ((UNWRAP ((fn)).effects OR_ELSE List[] |> SELECT COPY _)).join(", ")} AS {String@symbol}Any)));
         END
       END
-      FOR _ IN ((TRY (typeAnalysisSession__function_call_graph(&rtoc_self_view))[UNWRAP (name)] OR_ELSE List[])) DO
+      FOR _ IN (TRY (typeAnalysisSession__function_call_graph(&rtoc_self_view))[UNWRAP (name)]) DO
       &queue.append(COPY _);
       END
     END
@@ -12683,7 +12683,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE reject_when: ?String@symbol = TRY (functionSignature__intrinsic_reject_when(matched_def_value_mutable));
       MUTABLE first_arg: ?Locatable = COPY args.first();
       IF (((reject_when != NIL) AND (first_arg != NIL)) AND TRY (typeAnalysisSession__reject_arg_type_matches?(&rtoc_self_view, &first_arg, symbol(reject_when)))) THEN
-        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(matched_def_value_mutable)) OR_ELSE "${(aST__node_name(UNWRAP (castNodeToLocatable(node))) OR_ELSE "")}() is not valid for ${first_arg.resolved_type}");
+        MUTABLE reason = (TRY (functionSignature__intrinsic_reject_error(matched_def_value_mutable)) OR_ELSE "${(aST__node_name(UNWRAP (castNodeToLocatable(node))) OR_ELSE "")}() is not valid for ${locatable__resolved_type(first_arg)}");
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_REJECTED }, [], CAST({:detail: reason} AS {String@symbol}Any)));
         RETURN NIL;
       END
@@ -13843,7 +13843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(rtoc_each_items_331[rtoc_idx]), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(UNWRAP (rtoc_each_items_331[rtoc_idx])), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -13929,7 +13929,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF (IF payload IS_A Type AS type THEN type__indirect?(type) ELSE FALSE END) THEN
       MUTABLE inner_type = COPY payload;
-      matchPayload__strip_layout_mut(inner_type);
+      matchPayload__strip_layout_mut(&inner_type);
       match_case.indirect_payload_as = TRUE;
       RETURN CAST(TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castMatchPayloadToTypeTypeInput(inner_type), plan.union_subst)) AS Type);
     END
@@ -14642,7 +14642,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF declared EXISTS AS declared_value THEN
       MUTABLE wants_future = (type__future?(declared_value) AND (type__resolved((TRY (type__tense_type(declared_value)))) == symbol("Auto")));
-      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(declared_value)))) == symbol("Auto")));
+      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(UNWRAP (declared_value))))) == symbol("Auto")));
       MUTABLE wants_optional = (type__optional?(declared_value) AND (type__resolved(UNWRAP (TRY (type__wrapped_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_error_optional = ((type__error_union?(declared_value) AND type__optional?((TRY (type__success_type(declared_value))))) AND (type__resolved(UNWRAP (TRY (type__wrapped_type((TRY (type__success_type(declared_value))))))) == symbol("Auto")));
       IF !((((wants_future OR wants_error) OR wants_optional) OR wants_error_optional)) THEN
@@ -18326,7 +18326,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF ( TRUE AND type__error_union?(type)) THEN
-      TRY (typeAnalysisSession__collect_implicit_type_params(&rtoc_self_view, TRY (type__payload_type(type)),UNWRAP ( out), explicit));
+      TRY (typeAnalysisSession__collect_implicit_type_params(&rtoc_self_view, TRY (type__payload_type(type)),out, explicit));
     END
     IF (TRUE AND type__optional?(type)) THEN
       TRY (typeAnalysisSession__collect_implicit_type_params(&rtoc_self_view, TRY (type__wrapped_type( UNWRAP (type))), &out, explicit));

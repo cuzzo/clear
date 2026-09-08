@@ -2186,7 +2186,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE field_type_info = field_type;
     MUTABLE field = COPY CAST(field_name AS String);
     IF typeTypeInput__indirect?(field_type_info) THEN
-      RETURN &entries.append(inlineStructDeinitEntry__indirect(field, TRY (type__zig_type((TRY (type__new(typeTypeInput__resolved(field_type_info))))))));
+      RETURN &entries.append(inlineStructDeinitEntry__indirect(field, TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY UNWRAP (typeTypeInput__resolved(field_type_info)) })))))));
     ELSE_IF (TRY (type__string?(field_type_info)) OR type__collection?(field_type_info)) THEN
       RETURN &entries.append(inlineStructDeinitEntry__uniform(field, TRY (type__zig_type(field_type_info))));
     ELSE_IF (type__array?(field_type_info) AND !(TRY (type__string?(field_type_info)))) THEN
