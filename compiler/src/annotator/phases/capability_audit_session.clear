@@ -4218,7 +4218,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
           END
           MUTABLE storage = (IF locatable__symbol(UNWRAP (var_node)) != NIL THEN
-            (UNWRAP (var_node).symbol).storage()
+            (locatable__symbol(UNWRAP (var_node))).storage()
           ELSE
             NIL
           END);

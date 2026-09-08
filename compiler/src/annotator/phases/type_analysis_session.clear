@@ -986,7 +986,7 @@ PUB FN typeAnalysisSession__scan_kept_fn_value_use_mut(MUTABLE self: TypeAnalysi
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF node IS_A Identifier AS identifier THEN kept_fns.contains?(identifier__name(identifier)) ELSE FALSE END) THEN
       MUTABLE sym: ?SymbolEntry@multiowned = aST__node__symbol(node);
-      MUTABLE shadowed = (((TRUE AND ((functionSignature__unwrap(X{ Type: COPY symbolEntry__type(UNWRAP (sym)) })) == NIL)) AND !((FALSE))) AND (symbolEntry__type(UNWRAP (sym)).resolved() != :Any));
+      MUTABLE shadowed = (((TRUE AND ((functionSignature__unwrap(X{ Type: COPY symbolEntry__type(UNWRAP (sym)) })) == NIL)) AND !((FALSE))) AND (type__resolved(symbolEntry__type(UNWRAP (sym))) != :Any));
       IF !(shadowed) THEN
         MUTABLE param = COPY UNWRAP (kept_fns[locatable__name(node)]);
         MUTABLE contract = UNWRAP ((IF param.symbol != NIL THEN
@@ -4085,7 +4085,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     locatable__set_was_moved_mut(&facts.inner_node, TRUE);
     locatable__set_was_moved_mut(&facts.arg_node, TRUE);
     IF (aST__node_was_moved( UNWRAP (current_arg)) EXISTS) THEN
-      current_arg.was_moved = TRUE;
+      IF current_arg EXISTS AS MUTABLE current_arg_present THEN
+        current_arg_present.was_moved = TRUE;
+      END
     END
 }
 END
