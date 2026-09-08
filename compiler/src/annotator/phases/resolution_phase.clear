@@ -925,7 +925,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE names = ((TRY (type__generic_args(declaration.protocol_type))) |> SELECT:? {
     MUTABLE kind = COPY _.shape.expression.kind;
     (    IF ((kind IS_A NamedTypeExpression AND UNWRAP (typeExpressionKind__arguments(kind)).empty?()) AND !(resolutionSession__builtin_type_parameter_names().contains?(typeExpressionKind__name(kind)))) THEN
-          CAST(kind.name() AS String)
+          CAST(typeExpressionKind__name(kind) AS String)
         ELSE
           NIL
         END)
@@ -1038,7 +1038,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (scope__visible_entries(rtoc_local_receiver_21)) }).keys() DO
     MUTABLE entry: Any = (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = CAST(mod_value.global_scope AS Scope);
     TRY (scope__visible_entries(rtoc_local_receiver_21)) })[rtoc_each_1] OR_ELSE panic("missing hash key"));
-    MUTABLE sig = symbolEntry__fn_signature(entry);
+    MUTABLE sig: ?FunctionSignature@multiowned = symbolEntry__fn_signature(entry);
     IF !(sig) THEN
         CONTINUE;
     END

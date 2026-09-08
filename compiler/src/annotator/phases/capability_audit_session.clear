@@ -1236,7 +1236,7 @@ PRIVATE FN capabilityAuditSession__emit_cap_field_needs_with_mut(MUTABLE self: C
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
-    MUTABLE kw = {:name: name, :field: field, :cap: cap};
+    MUTABLE kw: {String@symbol}DiagnosticKwValue = {:name: DiagnosticKwValue{ StringValue: COPY castNameCandidateToString__capability_audit_session(name) }, :field: DiagnosticKwValue{ StringValue: COPY field }, :cap: DiagnosticKwValue{ StringValue: COPY cap }};
     MUTABLE fixes = List[];
     IF (((src != NIL) AND TRUE)) THEN
       MUTABLE line_num = node.token.line;
@@ -1496,7 +1496,7 @@ PRIVATE FN capabilityAuditSession__emit_can_smash_unsupported_error_mut(MUTABLE 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fix: ?Fix = NIL;
-    MUTABLE tok = IF (asyncValidationNode__can_smash_token(node) != NIL) THEN
+    MUTABLE tok: ?Token = IF (asyncValidationNode__can_smash_token(node) != NIL) THEN
       asyncValidationNode__can_smash_token(node)
     ELSE
       NIL
@@ -2979,9 +2979,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN BgSpawnDecision{ spawn_form: :stackful, reason: :fn_pointer };
     END
     MUTABLE visited = Set[];
-    MUTABLE queue = COPY (callee_names |> SELECT COPY _);
+    MUTABLE queue: []String = COPY (callee_names |> SELECT COPY _);
     WHILE !(queue.empty?()) DO
-      MUTABLE name = &queue.shift();
+      MUTABLE name: ?String = &queue.shift();
       IF visited.contains?(name) THEN
         CONTINUE;
       END
@@ -3134,9 +3134,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE visited = Set[];
     MUTABLE max: String@symbol = :micro;
-    MUTABLE queue = COPY (fn_names |> SELECT COPY _);
+    MUTABLE queue: []String = COPY (fn_names |> SELECT COPY _);
     WHILE !(queue.empty?()) DO
-      MUTABLE name = &queue.shift();
+      MUTABLE name: ?String = &queue.shift();
       IF visited.contains?(name) THEN
         CONTINUE;
       END
@@ -3171,9 +3171,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
     END
     MUTABLE visited = Set[];
-    MUTABLE queue = ((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[_] OR_ELSE Set[])) |> SELECT COPY _);
+    MUTABLE queue: []String = ((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[_] OR_ELSE Set[])) |> SELECT COPY _);
     WHILE !(queue.empty?()) DO
-        MUTABLE callee = &queue.shift();
+        MUTABLE callee: ?String = &queue.shift();
         IF visited.contains?(callee) THEN
           CONTINUE;
         END
@@ -3614,9 +3614,9 @@ PRIVATE FN capabilityAuditSession__reachable_from_self?(MUTABLE self: Capability
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE visited = Set[];
-    MUTABLE queue = ((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[start_value] OR_ELSE Set[])) |> SELECT COPY _);
+    MUTABLE queue: []String = ((((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[start_value] OR_ELSE Set[])) |> SELECT COPY _);
     WHILE !(queue.empty?()) DO
-      MUTABLE callee = &queue.shift();
+      MUTABLE callee: ?String = &queue.shift();
       IF visited.contains?(callee) THEN
         CONTINUE;
       END
@@ -4207,7 +4207,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_45.length() DO
       MUTABLE fact = COPY rtoc_each_items_45[rtoc_idx]?.fact;
       MUTABLE var_node = COPY fact?.var_node;
-      MUTABLE syn = (IF locatable__symbol(UNWRAP (var_node)) != NIL THEN
+      MUTABLE syn: ?String = (IF locatable__symbol(UNWRAP (var_node)) != NIL THEN
           symbolEntry__sync(UNWRAP ((locatable__symbol(UNWRAP (var_node)))))
         ELSE
           NIL
@@ -4288,7 +4288,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(signature) THEN
         CONTINUE;
     END
-    TRY ( UNWRAP (functionSignature__sync_from_function_def_mut(&signature, rtoc_mutable_block_param_46)));
+    TRY ( UNWRAP (functionSignature__sync_from_function_def_mut(&signature, FunctionSignatureSyncSource{ FunctionDef: COPY rtoc_mutable_block_param_46 })));
     END
 }
 END
