@@ -3776,7 +3776,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(fn) THEN
       RETURN NIL;
     END
-    IF functionSignature__can_fail(fn) THEN
+    IF (fn.can_fail OR_ELSE FALSE) THEN
       RETURN "can fail";
     END
     MUTABLE effects = (fn.effects() OR_ELSE Set[]);
@@ -3797,7 +3797,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         loc = "";
       END
-    MUTABLE sync = COPY _.sync;
+    MUTABLE sync: ?String@symbol = COPY _.sync;
     MUTABLE own = COPY _.ownership;
     IF ((symbolEntry__locked_family_sync?(sync) AND !(_.mutated)) AND !(_.sharded)) THEN
         print("\x1B[36m[Note]\x1B[0m Variable '${_.var}' is @${(sync OR_ELSE "")} but never mutated via WITH EXCLUSIVE. You are paying for lock acquire/release on every access. Consider @local or removing the lock.${loc}");
@@ -3896,7 +3896,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           adj[UNWRAP (edges[rtoc_idx]).held] = Set[];
         END
         IF adj[UNWRAP (edges[rtoc_idx]?.held)] EXISTS AS rtoc_map_slot_30 THEN
-          &rtoc_map_slot_30.insert(edges[rtoc_idx]?.acquired);
+          &rtoc_map_slot_30.insert(UNWRAP (edges[rtoc_idx]).acquired);
         END
       &nodes.insert(edges[rtoc_idx]?.held);
       &nodes.insert(edges[rtoc_idx]?.acquired);
