@@ -5127,3 +5127,12 @@ PUB FN typeTypeInput__payload_type(value: TypeTypeInput) RETURNS !?Type EFFECTS 
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:indirect?)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN typeTypeInput__indirect?(value: TypeTypeInput) RETURNS ?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN type__indirect?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

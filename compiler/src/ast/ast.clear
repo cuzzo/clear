@@ -17879,3 +17879,21 @@ PUB FN locatable__ownership_transport_plan(value: Locatable) RETURNS ?OwnershipT
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:smooth?)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN locatable__smooth?(value: Locatable) RETURNS ?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    Locatable.BinaryOp AS item -> RETURN binaryOp__smooth?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:true_boolean?)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN locatable__true_boolean?(value: Locatable) RETURNS ?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    Locatable.Literal AS item -> RETURN literal__true_boolean?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

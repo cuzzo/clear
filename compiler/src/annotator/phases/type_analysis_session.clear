@@ -1734,7 +1734,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN TRY (typeAnalysisSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, UNWRAP (move_col)));
         END
         MUTABLE type = ownershipNode__full_type(og_node);
-        MUTABLE is_shared = type__shared?(UNWRAP (castTypeTypeInputToType(castTypeTypeInputToType(TypeTypeInput{ Type: COPY castTypeTypeInputToType(TypeTypeInput{ Type: COPY type }) }))));
+        MUTABLE is_shared = type__shared?(UNWRAP (castTypeTypeInputToType(castTypeTypeInputToType(TypeTypeInput{ Type: COPY castTypeTypeInputToType(TypeTypeInput{ Type: COPY TypeTypeInput{ Type: COPY type } }) }))));
         MUTABLE is_multi = type__multiowned?(type);
         MUTABLE is_split = type__split?(type);
         MUTABLE use_clone = ((is_shared OR is_multi) OR is_split);
@@ -12175,7 +12175,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE matches: []Tuple<ProtocolDef, ProtocolRequirement, Type, Int64> = ( { MUTABLE rtoc_empty_list_284: []Tuple<ProtocolDef, ProtocolRequirement, Type, Int64> = List[]; rtoc_empty_list_284 } );
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
-      MUTABLE receiver = &UNWRAP (node.args[rtoc_idx]).full_type_mut({:context: "protocol function dispatch"});
+      MUTABLE receiver = &UNWRAP aST__full_type_mut((node.args[rtoc_idx]), {:context: "protocol function dispatch"});
       MUTABLE rtoc_each_items_285 = TRY (typeAnalysisSession__user_protocol_names_for_receiver(&rtoc_self_view, receiver));
       MUTABLE rtoc_idx_n5 = 0;
       WHILE rtoc_idx_n5 < rtoc_each_items_285.length() DO
@@ -13843,7 +13843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(rtoc_each_items_331[rtoc_idx]), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(UNWRAP (rtoc_each_items_331[rtoc_idx])), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -14253,7 +14253,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (locatable__resolved_type(UNWRAP (locatable__condition( Locatable{ WhileLoop: COPY node }))) != :Bool) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WhileLoop: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONDITION_NEEDS_BOOL }, [], CAST({:got: locatable__resolved_type(node.condition)} AS {String@symbol}Any)));
     END
-    IF (((node.condition IS_A Identifier AND (aST__node_name(node.condition) == "TRUE"))) OR ((node.condition IS_A Literal AND node.condition.true_boolean?()))) THEN
+    IF (((node.condition IS_A Identifier AND (aST__node_name(node.condition) == "TRUE"))) OR ((node.condition IS_A Literal AND locatable__true_boolean?(node.condition)))) THEN
       TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("LOOP_UNBOUND")));
     END
     MUTABLE pre_loop_states = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_354 = typeAnalysisSession__ownership_graph(&rtoc_self_view);
@@ -14446,7 +14446,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       DeclarationNode.BindExpr AS item ->
         pipe = COPY item.value;,
     END
-    IF !((UNWRAP (pipe) IS_A BinaryOp AND UNWRAP (pipe).smooth?())) THEN
+    IF !((UNWRAP (pipe) IS_A BinaryOp AND UNWRAP locatable__smooth?((pipe)))) THEN
       RETURN NIL;
     END
     IF !(type__observable_terminal(pipe)) THEN
@@ -14642,7 +14642,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF declared EXISTS AS declared_value THEN
       MUTABLE wants_future = (type__future?(declared_value) AND (type__resolved((TRY (type__tense_type(declared_value)))) == symbol("Auto")));
-      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(declared_value)))) == symbol("Auto")));
+      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(UNWRAP (declared_value))))) == symbol("Auto")));
       MUTABLE wants_optional = (type__optional?(declared_value) AND (type__resolved(UNWRAP (TRY (type__wrapped_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_error_optional = ((type__error_union?(declared_value) AND type__optional?((TRY (type__success_type(declared_value))))) AND (type__resolved(UNWRAP (TRY (type__wrapped_type((TRY (type__success_type(declared_value))))))) == symbol("Auto")));
       IF !((((wants_future OR wants_error) OR wants_optional) OR wants_error_optional)) THEN
@@ -14867,7 +14867,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       DeclarationNode.BindExpr AS item ->
         pipe = COPY item.value;,
     END
-    MUTABLE ok = ((UNWRAP (pipe) IS_A BinaryOp AND UNWRAP (pipe).smooth?()) AND pipe.observable_dest);
+    MUTABLE ok = ((UNWRAP (pipe) IS_A BinaryOp AND UNWRAP locatable__smooth?((pipe))) AND pipe.observable_dest);
     IF ok THEN
       RETURN TRUE;
     END

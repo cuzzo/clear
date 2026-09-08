@@ -1307,7 +1307,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE alias_name = "${name}_view";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(name)}\\s*(?=\\[)"), alias_name);
         MUTABLE replacement = "${indent}WITH UNSAFE VIEW ${name} LENGTH ${length} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, 1, (body).length()), replacement)], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (line_num), 1, (body).length()), replacement)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -4700,7 +4700,7 @@ END
 PRIVATE FN capabilityAuditSession__cap_var_sync(self: CapabilityAuditSession, var_node: Locatable) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
-  MUTABLE sym_sync = (IF locatable__symbol(var_node) EXISTS AS sym THEN symbolEntry__sync(sym) ELSE NIL END);
+  MUTABLE sym_sync: ?String = (IF locatable__symbol(var_node) EXISTS AS sym THEN symbolEntry__sync(sym) ELSE NIL END);
   IF sym_sync EXISTS AS sym_sync_value THEN
     RETURN sym_sync_value;
   END
