@@ -1,0 +1,12 @@
+# A REDUCE body that mutates its accumulator and hands it back assigns the
+# binding to ITSELF. Dropping the old value first would free the very map being
+# stored, so the reassignment keeps the side effects and skips the cleanup.
+FN main() RETURNS !Void ->
+  MUTABLE more: {String}String = {};
+  more["k"] = "a";
+  more["j"] = "b";
+  MUTABLE previous: {String}String = {};
+  previous["seed"] = "s";
+  MUTABLE out = more.keys() |> REDUCE(COPY previous) { acc[_] = COPY (more[_] OR_ELSE ""); acc };
+  print("n ${out.length().toString()} k=${(out["k"] OR_ELSE "?")} seed=${(out["seed"] OR_ELSE "?")}");
+END

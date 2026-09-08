@@ -1006,9 +1006,18 @@ module MIRLoweringVariables
       assign_alloc ||= mir_owned_alloc(value)
       value = copy_container_borrow_if_needed(value, node.value)
       stamp_allocating_result_target!(value, target_name, alloc: assign_alloc) if assign_alloc && value
+      # Ask BEFORE hoisting: the hoist replaces the value with an Ident naming
+      # a fresh temp, which hides that the value was the binding itself.
+      self_reassign = reassign_value_is_target?(value, target_name)
       value = hoist_alloc(value, node.value, err_cleanup: true) if value && mir_allocates?(value) &&
         !fallible_self_fallback_reassign?(target_name, value)
-      result = if rp
+      # `acc = { ...; acc }` -- a REDUCE body that mutates its accumulator and
+      # hands it back -- assigns the binding to ITSELF. Dropping the old value
+      # first frees the very value being stored, so the reassignment keeps the
+      # side effects and skips the cleanup.
+      result = if self_reassign
+        MIR::Set.new(MIR::Ident.new(target_name), value)
+      elsif rp
         plan = rp.lifecycle_plan
         raise "reassignment cleanup lacks annotation lifecycle plan for #{target_name}" unless plan&.needs_drop?
         MIR::ReassignWithCleanup.new(target_name, value, rp.zig_type!, alloc_from_sym(rp.alloc!))
@@ -1680,6 +1689,29 @@ module MIRLoweringVariables
   sig { params(op: FunctionSignature, alloc_key: IntrinsicAllocationKind).returns(T.nilable(Symbol)) }
   def indexed_assignment_registry_alloc(op, alloc_key)
     op.intrinsic_alloc(alloc_key)
+  end
+
+  # Does this lowered value evaluate to the very binding being reassigned?
+  # A block expression counts: its side effects still run, and its result is
+  # the binding.
+  sig { params(value: T.nilable(MIR::Node), target_name: String).returns(T::Boolean) }
+  def reassign_value_is_target?(value, target_name)
+    seen = 0
+    node = value
+    while node && seen < 8
+      seen += 1
+      case node
+      when MIR::Ident then return node.name.to_s == target_name
+      when MIR::Cast, MIR::TryExpr, MIR::TryOptional then node = node.expr
+      when MIR::BlockExpr
+        brk = node.body.reverse.find { |stmt| stmt.is_a?(MIR::BreakStmt) }
+        return false unless brk
+
+        node = brk.value
+      else return false
+      end
+    end
+    false
   end
 
   sig { params(node: AST::Assignment).returns(MIR::ScopeBlock) }
