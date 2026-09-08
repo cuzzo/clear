@@ -1070,3 +1070,13 @@ PUB FN typeExpressionKind__arguments(value: TypeExpressionKind) RETURNS ?[]TypeE
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:name)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN typeExpressionKind__name(value: TypeExpressionKind) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    TypeExpressionKind.NamedTypeExpression AS item -> RETURN COPY item.name;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

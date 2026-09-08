@@ -5397,7 +5397,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))));
       rubyToClearVoid__type_analysis_session()
         });
-        node.right.capture_analysis = (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), FALSE, FALSE)) OR_ELSE analysis);
+        locatable__set_capture_analysis_mut(&node.right, (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), FALSE, FALSE)) OR_ELSE analysis));
     ELSE
         TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))));
     END
@@ -6921,7 +6921,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     rubyToClearVoid__type_analysis_session()
     });
-    node.right.capture_analysis = (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis);
+    locatable__set_capture_analysis_mut(&node.right, (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis));
     TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }));
     MUTABLE result_type = TRY (typeAnalysisSession__concurrent_select_family_result_type(&rtoc_self_view, node, UNWRAP (item_type)));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, result_type));
@@ -6953,7 +6953,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     rubyToClearVoid__type_analysis_session()
     });
-    node.right.capture_analysis = (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis);
+    locatable__set_capture_analysis_mut(&node.right, (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, :Void));
     node.storage_override = :stack;
     RETURN :stack;
@@ -6977,7 +6977,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     rubyToClearVoid__type_analysis_session()
     });
-    node.right.capture_analysis = (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis);
+    locatable__set_capture_analysis_mut(&node.right, (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis));
     TRY (typeAnalysisSession__validate_concurrent_where_expression_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }));
     MUTABLE result_type = TRY (typeAnalysisSession__concurrent_select_family_result_type(&rtoc_self_view, node, item_type));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ Type: COPY result_type }))));
@@ -7043,7 +7043,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     rubyToClearVoid__type_analysis_session()
     });
-    node.right.capture_analysis = (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis);
+    locatable__set_capture_analysis_mut(&node.right, (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), &is_parallel, FALSE)) OR_ELSE analysis));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, :Void));
     node.storage_override = :stack;
     RETURN :stack;
@@ -8305,7 +8305,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE kind = COPY expression.kind;
     MUTABLE cap = COPY expression.capabilities;
     IF (kind IS_A NamedTypeExpression) THEN
-      IF (UNWRAP (typeExpressionKind__arguments(kind)).empty?() AND subst.contains?(kind.name)) THEN
+      IF (UNWRAP (typeExpressionKind__arguments(kind)).empty?() AND subst.contains?(typeExpressionKind__name(kind))) THEN
         MUTABLE replacement = TRY (type__new(castOptionalGenericBindingToTypeConstructionInput(subst[kind.name()])));
         IF (type__generic_payload_type_arg?(replacement) AND !(cap.polymorphic_shared)) THEN
           TRY (type__strip_runtime_capabilities_mut(&replacement));
@@ -11962,7 +11962,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (aST__node_error_union_type( UNWRAP (castNodeToLocatable(node))) != NIL) THEN
       RETURN TRUE;
     END
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature);
+    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(node__matched_signature(node));
     IF type__error_union?((IF signature != NIL THEN
       functionSignature__return_type(signature)
     ELSE
@@ -13755,7 +13755,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE graph_node: ?OwnershipNode = COPY ownershipGraph__get_index(rtoc_graph_13664, UNWRAP (source_name));
     IF graph_node EXISTS AS graph_node_value THEN
       IF (graph_node_value.kind != :borrowed) THEN
-        expr.was_moved = TRUE;
+        locatable__set_was_moved_mut(&expr, TRUE);
         TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, source_name, expr.token(), :takes));
       ELSE
         RETURN;
@@ -15702,7 +15702,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND assignment_node.value IS_A Identifier) AND !(TRY (type__implicitly_copyable?((TRY (aST__full_type_mut(assignment_node.value))), %(name: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, name)))))) THEN
-      assignment_node.value.ownership_pending_transfer = TRUE;
+      locatable__set_ownership_pending_transfer_mut(&assignment_node.value, TRUE);
     END
     TRY (typeAnalysisSession__validate_assignment_type(&rtoc_self_view, Node{ Assignment: COPY assignment_node }, castTypeToOptionalTypeTypeInput__type_analysis_session(assign_type), assignment_node.value.resolved_type));
     IF protocol_map THEN
