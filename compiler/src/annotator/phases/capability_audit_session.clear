@@ -757,11 +757,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           ELSE
             FALSE
           END));
-          MUTABLE param_admits_multi = ((pt != NIL) AND (IF (typeTypeInput__multiowned?(pt) != NIL) THEN
-            typeTypeInput__multiowned?(pt)
-          ELSE
-            FALSE
-          END));
+          MUTABLE param_admits_multi = ((pt != NIL) AND (typeTypeInput__multiowned?(pt) OR_ELSE FALSE));
           IF (((pt != NIL) AND !(param_admits_shared)) AND !(param_admits_multi)) THEN
             &candidate_caps.delete("@shared");
             &candidate_caps.delete("@multiowned");
