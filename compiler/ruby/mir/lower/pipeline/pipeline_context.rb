@@ -334,6 +334,10 @@ class PipelinePlaceholderRewriter
     new_assign = AST::Assignment.new(node.token, new_name, new_value)
     new_assign.auto_lock = node.auto_lock
     new_assign.field_pre_cleanup = node.field_pre_cleanup
+    # The cleanup decision and the plan that authorizes it are ONE contract:
+    # carrying the decision alone leaves lowering with a pre-cleanup it cannot
+    # justify, and it raises rather than emitting the drop.
+    new_assign.field_lifecycle_plan = node.field_lifecycle_plan
     copy_type_info(node, new_assign)
     new_assign
   end
