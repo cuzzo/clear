@@ -1335,7 +1335,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE facts: ?OwnershipTransportFacts@multiowned = COPY fact_frames.last();
     IF facts EXISTS AS facts_value THEN
       MUTABLE facts_value_mutable = COPY facts_value;
-      MUTABLE ancestors = (rtoc_self_view.traversal_state.annotation_ancestors.substr(0, ((rtoc_self_view.traversal_state.annotation_ancestors.length() - 1) - 0)) OR_ELSE List[]);
+      MUTABLE ancestors = (rtoc_self_view.traversal_state.annotation_ancestors |> LIMIT (rtoc_self_view.traversal_state.annotation_ancestors.length() - 1));
       IF node IS_A Identifier AS identifier THEN
         MUTABLE identifier_mutable = COPY identifier;
         FOR MUTABLE rtoc_mutable_block_param_22 IN fact_frames DO
@@ -2390,7 +2390,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE edits = List[];
     IF (((src != NIL) AND TRUE)) THEN
       MUTABLE with_line = node.token.line;
-      MUTABLE window_lines = (src.split("\n").substr(((with_line - 1)), ((((with_line + 8)) - ((with_line - 1))) + 1)) OR_ELSE List[]);
+      MUTABLE window_lines = ((src.split("\n") |> SKIP (with_line - 1)) |> LIMIT ((((with_line + 8)) - ((with_line - 1))) + 1));
       FOR _ IN names DO
     MUTABLE pat = compilerRegexCompile("\\bMUTABLE\\s+${compilerRegexEscape(_)}\\b");
     MUTABLE off = 0;
@@ -3054,7 +3054,7 @@ PRIVATE FN typeAnalysisSession__auto_shape_slot_label(MUTABLE self: TypeAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE name: Any = NIL;
+    MUTABLE name: ?String = NIL;
     MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__type_analysis_session(slot.decl_node) START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
         name = COPY item.name;,
@@ -3062,7 +3062,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         name = COPY item.name;,
     END
     IF (slot.shape == :list_element) THEN
-      RETURN "element type of list `${name.toString()}`";
+      RETURN "element type of list `${(name OR_ELSE "")}`";
     ELSE_IF (slot.shape == :map_key) THEN
       RETURN "key type of map `${name}`";
     ELSE_IF (slot.shape == :map_value) THEN

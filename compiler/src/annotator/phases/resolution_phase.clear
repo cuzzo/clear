@@ -1615,7 +1615,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN "nullable scalar values are not C pointers; use an explicit status/out contract";
     END
-    IF ((!((type__layout(type) == NIL)) OR !((CAST(Tuple{NIL, :affine} AS Tuple<Void, String@symbol>)).contains?(type__ownership(type)))) OR type__any_sync?(type)) THEN
+    IF ((!((type__layout(type) == NIL)) OR !(((type__ownership(type) == NIL) OR (type__ownership(type) == :affine)))) OR type__any_sync?(type)) THEN
       RETURN "ownership, synchronization, and boxed wrappers change the declared C layout";
     END
     RETURN NIL;
@@ -1646,7 +1646,7 @@ PRIVATE FN resolutionSession__reject_duplicate_seen_signature_mut(MUTABLE self: 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE key: String = "";
     IF (IF node IS_A ExternFnDecl AS extern_fn_decl THEN (extern_fn_decl.owner_type != NIL) ELSE FALSE END) THEN
-      key = "${UNWRAP (node__owner_type(node)).toString()}.${aST__node_name(UNWRAP (castNodeToLocatable(node)))}";
+      key = "${type__to_s(UNWRAP (node__owner_type(node)))}.${aST__node_name(UNWRAP (castNodeToLocatable(node)))}";
     ELSE
       key = aST__node_name(UNWRAP (castNodeToLocatable(node)));
     END

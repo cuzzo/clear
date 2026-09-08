@@ -1367,7 +1367,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE edits = List[];
     IF (((src != NIL) AND TRUE)) THEN
       MUTABLE with_line = node.token.line;
-      MUTABLE window_lines = (src.split("\n").substr(((with_line - 1)), ((((with_line + 8)) - ((with_line - 1))) + 1)) OR_ELSE List[]);
+      MUTABLE window_lines = ((src.split("\n") |> SKIP (with_line - 1)) |> LIMIT ((((with_line + 8)) - ((with_line - 1))) + 1));
       FOR _ IN names DO
     MUTABLE pat = compilerRegexCompile("\\bMUTABLE\\s+${compilerRegexEscape(_)}\\b");
     MUTABLE off = 0;
@@ -3722,15 +3722,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF capabilityAuditCall__extern_call(call) THEN
       RETURN "is an extern call";
     END
-    MUTABLE extern_effects: Any = NIL;
+    MUTABLE extern_effects: ?PassStateValue = NIL;
     MATCH call START
       CapabilityAuditCall.FuncCall AS item ->
         extern_effects = COPY item.extern_effects;,
       CapabilityAuditCall.MethodCall AS item ->
         extern_effects = COPY item.extern_effects;,
     END
-    IF (extern_effects AND !(extern_effects.empty?())) THEN
-      RETURN "has extern effects";
+    IF extern_effects EXISTS AS extern_effects_value THEN
+      IF !(extern_effects_value.empty?()) THEN
+        RETURN "has extern effects";
+      END
     END
     IF capabilityAuditCall__can_fail(call) THEN
       RETURN "can fail";
