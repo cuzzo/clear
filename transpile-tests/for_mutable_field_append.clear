@@ -1,0 +1,16 @@
+# `FOR MUTABLE it IN items` binds a VIEW of the element; the list keeps the
+# allocation. A structural write through `it` is therefore attributed to the
+# list, which is what owns the memory being grown.
+STRUCT Item { stack: []String, id: Int64 }
+
+FN main() RETURNS !Void ->
+  MUTABLE items: []Item = List[];
+  &items.append(Item{ stack: List[], id: 1 });
+  &items.append(Item{ stack: List[], id: 2 });
+  FOR MUTABLE it IN items DO
+    &it.stack.append(COPY "x${it.id.toString()}");
+  END
+  MUTABLE first = COPY UNWRAP (items[0]).stack;
+  MUTABLE second = COPY UNWRAP (items[1]).stack;
+  print("a=${first.join(",")} b=${second.join(",")}");
+END

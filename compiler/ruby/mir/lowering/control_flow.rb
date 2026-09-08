@@ -621,10 +621,19 @@ module MIRLoweringControlFlow
 
     previous = capture_state.current_lambda_pointer_params
     capture_state.current_lambda_pointer_params = previous | [var]
+    # `FOR MUTABLE it IN items` binds a VIEW of the element; the collection
+    # keeps the allocation. Structural writes through `it` therefore belong to
+    # `items`, the same way an IF-bind alias resolves to what it borrows from.
+    prev_owner = capability_state.with_alias_owner_map
+    owner = extract_root_var_name(node.collection)
+    if owner
+      capability_state.with_alias_owner_map = (prev_owner || {}).merge(var => owner)
+    end
     begin
       blk.call
     ensure
       capture_state.current_lambda_pointer_params = previous
+      capability_state.with_alias_owner_map = prev_owner
     end
   end
 
