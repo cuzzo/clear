@@ -341,12 +341,31 @@ module MIRLoweringExpressions
       !ast_expr_produces_heap?(field_node) && field_alloc != field_sink_alloc)
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def optional_operand?(node)
+    ti = Type.from_node!(node, context: "NOT operand")
+    return false unless ti.optional?
+
+    # A `?Bool` is the ambiguous case the annotator already rejects; anything
+    # else optional is a presence question.
+    T.must(ti.wrapped_type).resolved != :Bool
+  end
+  private :optional_operand?
+
   sig { params(node: AST::UnaryOp).returns(MIR::Node) }
   def lower_unary_op(node)
     T.bind(self, MIRLowering) rescue nil
     right = lower(node.right)
     case node.op
-    when :NOT, "!" then MIR::UnaryOp.new("!", right)
+    when :NOT, "!"
+      # `!x` on an OPTIONAL asks whether it is absent. Zig has no truthiness,
+      # so negating the optional itself is a type error; the presence test is
+      # what the author wrote.
+      if optional_operand?(node.right)
+        MIR::BinOp.new("==", right, MIR::Lit.new("null"))
+      else
+        MIR::UnaryOp.new("!", right)
+      end
     when :EXISTS
       if Type.from_node!(node.right).stream_step?
         MIR::MethodCall.new(right, "isItem", [], false, MIR::CallableContract.no_ownership(0))

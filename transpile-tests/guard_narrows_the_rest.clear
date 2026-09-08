@@ -1,0 +1,31 @@
+# A GUARD proves something about the rest of the block: after
+# `IF !(x) THEN RETURN ... END` every later statement runs with x present.
+# `!x` on an optional is that presence test -- Zig has no truthiness, so
+# negating the optional itself would not even compile.
+FN pick(n: Int64) RETURNS ?String ->
+  IF n > 0 THEN
+    MUTABLE s = "v${n.toString()}";
+    RETURN s;
+  END
+  RETURN NIL;
+END
+
+FN use(n: Int64) RETURNS String ->
+  v:?String = pick(n);
+  IF ! (v) THEN
+    RETURN "absent";
+  END
+  RETURN v;
+END
+
+FN countOf(n: Int64) RETURNS Int64 ->
+  v:?String = pick(n);
+  IF v.nil?() THEN
+    RETURN 0;
+  END
+  RETURN v.length();
+END
+
+FN main() RETURNS !Void ->
+  print("${use(1)} ${use(0)} ${countOf(1).toString()} ${countOf(0).toString()}");
+END

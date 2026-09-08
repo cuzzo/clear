@@ -276,6 +276,10 @@ module Annotator
           return {}
         end
 
+        # A bare truthiness test on an optional IS a presence test: `IF x THEN`
+        # reaches its body only when x is there. (`?Bool` is rejected earlier as
+        # ambiguous, so this cannot confuse presence with payload.)
+        return identifier_non_nil_refinement(node) if truthy && node.is_a?(AST::Identifier)
         return {} unless node.is_a?(AST::BinaryOp)
 
         if (node.op == :AND && truthy) || (node.op == :OR && !truthy)

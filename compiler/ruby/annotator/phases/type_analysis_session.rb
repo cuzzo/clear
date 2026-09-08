@@ -1200,10 +1200,57 @@ private
   # Visit a statement body.
   sig { params(stmts: T::Array[AST::Node]).void }
   def visit_stmts(stmts)
-    stmts.each do |stmt|
+    stmts.each_with_index do |stmt, index|
       visit(stmt)
+      # A GUARD proves something about the rest of the block: after
+      # `IF !(x) THEN RETURN ... END` every later statement runs with x
+      # present. Rust's `let ... else`, Swift's `guard let` and TypeScript's
+      # narrowing all say this; without it the author repeats an UNWRAP on
+      # every use of a value the compiler has already seen proven.
+      refinements = guard_exit_refinements(stmt)
+      next if refinements.empty?
+
+      rest = stmts[(index + 1)..] || []
+      next if rest.empty?
+
+      with_value_type_refinements(refinements) { visit_stmts(rest) }
+      break
     end
   end
+
+  # The non-nil facts a statement leaves behind for its successors: an IF whose
+  # THEN branch always exits and which has no ELSE.
+  sig { params(stmt: T.untyped).returns(T::Hash[String, Type]) }
+  def guard_exit_refinements(stmt)
+    return {} unless stmt.is_a?(AST::IfStatement)
+    return {} unless stmt.else_branch.nil? || stmt.else_branch.empty?
+    return {} unless branch_always_exits?(stmt.then_branch)
+
+    short_circuit_non_nil_refinements(stmt.condition, truthy: false)
+  end
+  private :guard_exit_refinements
+
+  sig { params(body: T.untyped).returns(T::Boolean) }
+  def branch_always_exits?(body)
+    stmts = Array(body)
+    return false if stmts.empty?
+
+    last = stmts.last
+    case last
+    when AST::ReturnNode, AST::BreakNode, AST::ContinueNode then true
+    when AST::IfStatement
+      !(last.else_branch.nil? || last.else_branch.empty?) &&
+        branch_always_exits?(last.then_branch) && branch_always_exits?(last.else_branch)
+    else panic_call?(last)
+    end
+  end
+  private :branch_always_exits?
+
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def panic_call?(node)
+    node.is_a?(AST::FuncCall) && node.name.to_s == "panic"
+  end
+  private :panic_call?
 
   # AST node types that DON'T propagate a BG handle's tied lifetime
   # to their enclosing expression. Their own lifetime semantics are
