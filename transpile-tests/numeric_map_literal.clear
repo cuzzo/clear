@@ -1,0 +1,8 @@
+# A numeric-keyed map is a NumericMapType: it exposes no allocator field and
+# its put takes ONE allocator. The empty-literal path already knew that; the
+# non-empty one initialized `.alloc` and passed two.
+FN main() RETURNS !Void ->
+  MUTABLE m: {Int64}String = {1: "a", 2: "b"};
+  m[3] = "c";
+  print("n ${m.length().toString()} two=${(m[2] OR_ELSE "?")} three=${(m[3] OR_ELSE "?")}");
+END

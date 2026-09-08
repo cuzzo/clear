@@ -424,6 +424,14 @@ module MIRLoweringLiterals
     MIR::ContainerInit.new(zig_type, strategy, plan.alloc, nil)
   end
 
+  # NumericMapType.put takes ONE allocator; every other map representation
+  # takes a key allocator and a bucket allocator. Passing two to the numeric
+  # map is an arity error the emitter cannot see.
+  sig { params(zig_type: String).returns(T::Boolean) }
+  def hash_literal_put_single_alloc?(zig_type)
+    zig_type.include?("NumericMapType")
+  end
+
   sig { params(zig_type: String).returns(T::Boolean) }
   def hash_literal_empty_needs_alloc?(zig_type)
     !zig_type.include?("PartitionedStringMap") &&
@@ -441,7 +449,12 @@ module MIRLoweringLiterals
     label = "__hm_blk_#{literal_id}"
     hm_name = "__hm_#{literal_id}"
     alloc_expr = hash_literal_allocator_expr(plan)
-    items << MIR::Let.new(hm_name, capability.init_value || hash_literal_init_struct(capability.zig_type, plan.alloc, true), true, nil, nil)
+    # The empty path already knows which map representations expose an
+    # allocator field; the non-empty one asked for it unconditionally, so a
+    # numeric-keyed literal initialized `.alloc` on a type that has no such
+    # field.
+    needs_alloc = hash_literal_empty_needs_alloc?(capability.zig_type)
+    items << MIR::Let.new(hm_name, capability.init_value || hash_literal_init_struct(capability.zig_type, plan.alloc, needs_alloc), true, nil, nil)
     node.pairs.each do |key_node, val_node|
       # Each pair's hoisted temps belong to the pair, not to the enclosing
       # statement. Draining them at statement level leaves every pair's
@@ -500,14 +513,16 @@ module MIRLoweringLiterals
     value_mir = hoist_alloc(raw_value, val_node, err_cleanup: true)
     operands = ownership_operands_for_value(key_mir, key_node, "hash literal key", plan.alloc) +
       ownership_operands_for_value(value_mir, val_node, "hash literal value", plan.alloc)
-    base_contract = MIR::CallableContract.no_ownership(4)
+    allocs = hash_literal_put_single_alloc?(plan.zig_type) ? [alloc_expr] : [alloc_expr, alloc_expr]
+    arity = allocs.length + 2
+    base_contract = MIR::CallableContract.no_ownership(arity)
     put_contract = MIR::CallableContract.new(
       base_contract.signature,
       MIR::OwnershipContract.consume_operands(operands),
-      4,
+      arity,
     )
     MIR::ExprStmt.new(
-      MIR::MethodCall.new(MIR::Ident.new(hm_name), "put", [alloc_expr, alloc_expr, key_mir, value_mir], true, put_contract),
+      MIR::MethodCall.new(MIR::Ident.new(hm_name), "put", allocs + [key_mir, value_mir], true, put_contract),
       false,
     )
   end
