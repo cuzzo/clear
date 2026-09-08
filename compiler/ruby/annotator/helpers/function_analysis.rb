@@ -1072,8 +1072,12 @@ module FunctionAnalysis
     match = true if basic_argument_match?(facts)
     return if match
 
+    # `fn` names the CALLEE. It used to carry the ARGUMENT's name, so the
+    # message read "Function 'node' argument 2" for a call to something else
+    # entirely -- unusable for finding the site it is complaining about.
     error!(facts.arg_node, :ARGUMENT_TYPE_ERROR,
-      fn: argument_name(facts.arg_node, fallback: "Expression"),
+      fn: facts.site.name,
+      param: facts.param.name,
       index: facts.index + 1,
       expected: Type.coercion_surface_name(facts.expected_type),
       got: Type.coercion_surface_name(facts.actual_type))

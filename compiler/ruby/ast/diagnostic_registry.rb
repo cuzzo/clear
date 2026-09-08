@@ -756,7 +756,7 @@ module DiagnosticRegistry
     },
     ARGUMENT_TYPE_ERROR: {
       severity: :error, category: :type,
-      template: "Type Error: Function '%{fn}' argument %{index} expects %{expected}, got %{got}",
+      template: "Type Error: Function '%{fn}' argument %{index} expects %{expected}, got %{got} (parameter '%{param}')",
       summary:  "Argument value's type doesn't match the parameter's declared type.",
       cause: "The argument's type doesn't match the parameter's declared type. Coercion was tried (slice widening, primitive autocast, generic substitution) and failed.",
       fix_hint: "Check the argument and the parameter's declared type — the message gives both. Either change the argument, change the parameter's type, or use CAST.",

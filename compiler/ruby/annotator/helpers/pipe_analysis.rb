@@ -1061,7 +1061,7 @@ module PipeAnalysis
 
       # Type.accepts? handles slice coercion (Number[3] -> Number[])
       unless is_safe_autocast?(actual, expected)
-        error!(node.left, :ARGUMENT_TYPE_ERROR, fn: "Pipe Input '#{param.name}'", index: 1, expected: expected, got: actual)
+        error!(node.left, :ARGUMENT_TYPE_ERROR, fn: 'Pipe Input', param: param.name, index: 1, expected: expected, got: actual)
       end
     end
 
