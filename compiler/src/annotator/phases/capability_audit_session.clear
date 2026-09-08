@@ -711,7 +711,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN TRY (capabilityAuditSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, UNWRAP (move_col)));
         END
         MUTABLE type = ownershipNode__full_type(og_node);
-        MUTABLE is_shared = type__shared?(type);
+        MUTABLE is_shared = type__shared?(castTypeTypeInputToType(TypeTypeInput{ Type: COPY type }));
         MUTABLE is_multi = type__multiowned?(type);
         MUTABLE is_split = type__split?(type);
         MUTABLE use_clone = ((is_shared OR is_multi) OR is_split);
@@ -738,7 +738,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         MUTABLE fixes = List[];
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, consumer_description_code, CAST({:line: ruby_wrap_optional_Int64_DiagnosticKwValue__capability_audit_session(og_node.move_line)} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, move_line_value, UNWRAP (replacement_col), replacement_length), "(${consumer_keyword} ${name})")], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, consumer_description_code, CAST({:line: (ruby_wrap_optional_Int64_DiagnosticKwValue__capability_audit_session(og_node.move_line) OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, move_line_value, UNWRAP (replacement_col), replacement_length), "(${consumer_keyword} ${name})")], :interactive)));
         MUTABLE candidate_caps = List[];
         IF !((is_multi OR is_split)) THEN
           &candidate_caps.append("@multiowned");
@@ -753,7 +753,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             pt = castTypeToTypeTypeInput__capability_audit_session(TRY (type__new(castTypeTypeInputToTypeConstructionInput__capability_audit_session(pt))));
           END
           MUTABLE param_admits_shared = ((pt != NIL) AND (IF (typeTypeInput__shared?(pt) != NIL) THEN
-            type__shared?(pt)
+            type__shared?(castTypeTypeInputToType(pt))
           ELSE
             FALSE
           END));
@@ -1209,7 +1209,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (code == :MATCH_NEEDS_ENUM_OR_UNION) THEN
       TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:type: (kwargs[:type] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue)));
     ELSE_IF (code == :MATCH_NON_EXHAUSTIVE) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:kind: kwargs.substr(:kind, 1), :name: kwargs.substr(:name, 1), :missing: kwargs.substr(:missing, 1)} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:kind: (kwargs[:kind] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :name: (kwargs[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :missing: (kwargs[:missing] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE
       panic("unsupported MATCH partial fix diagnostic: {}");
     END
@@ -1605,7 +1605,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(text_length) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, CAST({:type: castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(target_name)} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (tok).line, UNWRAP (tok).column, 0), "CAST("), edit__new(span__new(NIL, UNWRAP (tok).line, (UNWRAP (tok).column + text_length), 0), " AS ${castTypeTypeInputToString__capability_audit_session(target_name)})")], :interactive));
+      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, CAST({:type: (castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(target_name) OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (tok).line, UNWRAP (tok).column, 0), "CAST("), edit__new(span__new(NIL, UNWRAP (tok).line, (UNWRAP (tok).column + text_length), 0), " AS ${castTypeTypeInputToString__capability_audit_session(target_name)})")], :interactive));
     ELSE
       RETURN NIL;
     END
@@ -1696,11 +1696,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned__capability_audit_session(kw)));
     END
     IF (code == :WITH_EXCLUSIVE_NEEDS_LOCK) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:got: kw.substr(:got, 1)} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:got: (kw[:got] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE_IF (code == :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC) OR (code == :WITH_ATOMIC_NEEDS_SHARED_ATOMIC) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: kw.substr(:name, 1), :actual: kw.substr(:actual, 1)} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :actual: (kw[:actual] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE_IF (code == :WITH_NEEDS_MULTIOWNED) OR (code == :WITH_NEEDS_SHARED) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: kw.substr(:name, 1)} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE
       panic("unsupported WITH capability mismatch diagnostic: {}");
     END
@@ -1826,7 +1826,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
     IF auto_tok EXISTS AS auto_tok_value THEN
       MUTABLE type_str = COPY CAST(type_sym AS String);
-      RETURN TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :PIN_AUTO_SLOT, CAST({:position: DiagnosticKwValue{ Int64Value: position }, :label: ruby_wrap_optional_String_DiagnosticKwValue__capability_audit_session(capabilityAuditSession__auto_slot_label(rtoc_self_view, slot)), :type: DiagnosticKwValue{ StringValue: COPY type_str }, :note: DiagnosticKwValue{ StringValue: COPY IF note != NIL THEN
+      RETURN TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :PIN_AUTO_SLOT, CAST({:position: DiagnosticKwValue{ Int64Value: position }, :label: (ruby_wrap_optional_String_DiagnosticKwValue__capability_audit_session(capabilityAuditSession__auto_slot_label(rtoc_self_view, slot)) OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :type: DiagnosticKwValue{ StringValue: COPY type_str }, :note: DiagnosticKwValue{ StringValue: COPY IF note != NIL THEN
         " ${note}"
       ELSE
         ""
@@ -4426,7 +4426,7 @@ FN castDiagnosticKwValueToAnyMultiowned__capability_audit_session(value: Diagnos
   END
   RETURN panic("Invalid cast to Any@multiowned");
 END
-FN castNameCandidateToOptionalDiagnosticKwValue__capability_audit_session(value: NameCandidate) RETURNS ?DiagnosticKwValue ->
+FN castNameCandidateToOptionalDiagnosticKwValue__capability_audit_session(value: NameCandidate) RETURNS DiagnosticKwValue ->
   PARTIAL MATCH value START
     NameCandidate.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     NameCandidate.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,
@@ -4452,7 +4452,7 @@ END
 FN castTypeToTypeTypeInput__capability_audit_session(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
-FN castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(value: TypeTypeInput) RETURNS ?DiagnosticKwValue ->
+FN castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(value: TypeTypeInput) RETURNS DiagnosticKwValue ->
   PARTIAL MATCH value START
     TypeTypeInput.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     TypeTypeInput.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,

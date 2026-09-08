@@ -2230,9 +2230,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueMapToAnyMap__type_analysis_session(kwargs)));
     END
     IF (code == :MATCH_NEEDS_ENUM_OR_UNION) THEN
-      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:type: kwargs.substr(:type, 1)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:type: (kwargs[:type] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE_IF (code == :MATCH_NON_EXHAUSTIVE) THEN
-      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:kind: kwargs.substr(:kind, 1), :name: kwargs.substr(:name, 1), :missing: kwargs.substr(:missing, 1)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:kind: (kwargs[:kind] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :name: (kwargs[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :missing: (kwargs[:missing] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE
       panic("unsupported MATCH partial fix diagnostic: {}");
     END
@@ -2711,11 +2711,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned__type_analysis_session(kw)));
     END
     IF (code == :WITH_EXCLUSIVE_NEEDS_LOCK) THEN
-      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:got: kw.substr(:got, 1)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:got: (kw[:got] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE_IF (code == :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC) OR (code == :WITH_ATOMIC_NEEDS_SHARED_ATOMIC) THEN
-      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: kw.substr(:name, 1), :actual: kw.substr(:actual, 1)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :actual: (kw[:actual] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE_IF (code == :WITH_NEEDS_MULTIOWNED) OR (code == :WITH_NEEDS_SHARED) THEN
-      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: kw.substr(:name, 1)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE
       panic("unsupported WITH capability mismatch diagnostic: {}");
     END
@@ -21713,7 +21713,7 @@ FN castMatchSchemaToStructSchemaMultiowned(value: MatchSchema) RETURNS StructSch
   END
   RETURN panic("Invalid cast to StructSchema@multiowned");
 END
-FN castNameCandidateToOptionalDiagnosticKwValue__type_analysis_session(value: NameCandidate) RETURNS ?DiagnosticKwValue ->
+FN castNameCandidateToOptionalDiagnosticKwValue__type_analysis_session(value: NameCandidate) RETURNS DiagnosticKwValue ->
   PARTIAL MATCH value START
     NameCandidate.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     NameCandidate.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,
@@ -22457,7 +22457,7 @@ END
 FN castTypeToTypeTypeInput__type_analysis_session(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
-FN castTypeTypeInputToOptionalDiagnosticKwValue__type_analysis_session(value: TypeTypeInput) RETURNS ?DiagnosticKwValue ->
+FN castTypeTypeInputToOptionalDiagnosticKwValue__type_analysis_session(value: TypeTypeInput) RETURNS DiagnosticKwValue ->
   PARTIAL MATCH value START
     TypeTypeInput.StringValue AS cast_payload -> RETURN DiagnosticKwValue{ StringValue: COPY cast_payload };,
     TypeTypeInput.SymbolValue AS cast_payload -> RETURN DiagnosticKwValue{ SymbolValue: COPY cast_payload };,
