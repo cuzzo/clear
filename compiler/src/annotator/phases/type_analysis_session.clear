@@ -990,7 +990,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(shadowed) THEN
         MUTABLE param = COPY UNWRAP (kept_fns[UNWRAP (locatable__name(node))]);
         MUTABLE contract = UNWRAP ((IF param.symbol != NIL THEN
-          symbolEntry__kept_identity(param.symbol)
+          symbolEntry__kept_identity(UNWRAP (param.symbol))
         ELSE
           NIL
         END));
@@ -8507,7 +8507,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (MATCH node START DeclarationNode.VarDecl AS item -> type__multiowned?(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__multiowned?(UNWRAP (item.type)) END) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :RC_PROMISE_NEEDS_SHARED }));
     END
-    IF ((MATCH node START DeclarationNode.VarDecl AS item -> type__split?(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__split?(UNWRAP (item.type)) END) AND !((MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))), DeclarationNode.BindExpr AS item -> TRY (type__split_open_stream?(item.type)) END))) THEN
+    IF ((MATCH node START DeclarationNode.VarDecl AS item -> type__split?(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__split?(UNWRAP (item.type)) END) AND !((MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))), DeclarationNode.BindExpr AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))) END))) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :ATSPLIT_NEEDS_OPEN_STREAM }));
     END
 }
@@ -11220,7 +11220,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.kind == :captures) THEN
       MUTABLE cap_name: ?StubValue@boxed = COPY node.value;
       MUTABLE rtoc_mutable_receiver_254 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-      TRY (scope__declare(&rtoc_mutable_receiver_254, cap_name, SymbolEntryRegInput{ StubDecl: COPY node }, SymbolEntryTypeInput{ SymbolValue: :Int64 }, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
+      TRY (scope__declare(&rtoc_mutable_receiver_254, UNWRAP (castStubValueToString(cap_name)), SymbolEntryRegInput{ StubDecl: COPY node }, SymbolEntryTypeInput{ SymbolValue: :Int64 }, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__og_declare(&rtoc_self_view, cap_name, Node{ StubDecl: COPY node }, TypeTypeInput{ SymbolValue: :Int64 }));
     END
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ StubDecl: COPY node }, :Void));
@@ -13843,7 +13843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(rtoc_each_items_331[rtoc_idx]), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(UNWRAP (rtoc_each_items_331[rtoc_idx])), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -14795,7 +14795,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :CONSUME_FUTURE_WITH_NEXT)), [edit__new(span__new(NIL, UNWRAP (value_token).line, UNWRAP (value_token).column, 0), "NEXT ")], :auto)));
     ELSE
       MUTABLE value_range: ?SourceRange = (MATCH node START DeclarationNode.VarDecl AS item -> locatable__source_range(item.value), DeclarationNode.BindExpr AS item -> locatable__source_range(item.value) END);
-      &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :CONSUME_STREAM_WITH_COLLECT)), [edit__new(span__new(value_range.file, span__end_line(value_range), value_range.end_column, 0), " |> COLLECT")], :auto)));
+      &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :CONSUME_STREAM_WITH_COLLECT)), [edit__new(span__new(UNWRAP (value_range).file, span__end_line(value_range), value_range.end_column, 0), " |> COLLECT")], :auto)));
     END
     IF node IS_A BindExpr AS bind_expr THEN
       &fixes.append(TRY (fix__new(typeAnalysisSession__fix_description(rtoc_self_view, :RETAIN_ASYNC_WRAPPER, CAST({:kind: DiagnosticKwValue{ StringValue: COPY IF stream THEN
@@ -15763,7 +15763,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       TRY (typeAnalysisSession__mark_var_mutated(&rtoc_self_view, UNWRAP (var_name)));
       syn = (IF locatable__symbol(field_node.target) != NIL THEN
-        (field_node.target.symbol).sync()
+        (locatable__symbol(field_node.target)).sync()
       ELSE
         NIL
       END);
