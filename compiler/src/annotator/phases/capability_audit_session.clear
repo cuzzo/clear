@@ -711,7 +711,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN TRY (capabilityAuditSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, UNWRAP (move_col)));
         END
         MUTABLE type = ownershipNode__full_type(og_node);
-        MUTABLE is_shared = type__shared?(UNWRAP (castTypeTypeInputToType(TypeTypeInput{ Type: COPY castTypeTypeInputToType(TypeTypeInput{ Type: COPY type }) })));
+        MUTABLE is_shared = type__shared?(castTypeTypeInputToType(TypeTypeInput{ Type: COPY castTypeTypeInputToType(TypeTypeInput{ Type: COPY type }) }));
         MUTABLE is_multi = type__multiowned?(type);
         MUTABLE is_split = type__split?(type);
         MUTABLE use_clone = ((is_shared OR is_multi) OR is_split);
@@ -3336,7 +3336,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE open_brace_token: ?Token = bg_block.open_brace_token;
       IF open_brace_token THEN
-        RETURN CAST(TRY (capabilityAuditSession__insert_service_after_open_brace_fix(rtoc_self_view, open_brace_token)) AS ?Fix);
+        RETURN CAST(TRY (capabilityAuditSession__insert_service_after_open_brace_fix(rtoc_self_view, UNWRAP (open_brace_token))) AS ?Fix);
       END
       RETURN NIL;
     ELSE
