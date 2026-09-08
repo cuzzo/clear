@@ -2323,7 +2323,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        MUTABLE before = UNWRAP (current).size;
+        MUTABLE before = UNWRAP (current).length();
         MUTABLE site_ctx = capabilityAuditSession__effect_call_site_context_for(&rtoc_self_view, rtoc_each_7, callees[rtoc_idx]);
         MUTABLE resolved_callee = TRY (capabilityAuditSession__resolve_maybe_effects(&rtoc_self_view, callee_effs, rtoc_each_7, callees[rtoc_idx]));
         TRY (capabilityAuditSession__inherit_effects_from_callee(rtoc_self_view, &current, resolved_callee, site_ctx));
