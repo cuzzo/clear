@@ -2673,7 +2673,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fn_node.error_fallible) THEN
       CONTINUE;
     END
-    IF (rtoc_each_14 == name) THEN
+    IF (rtoc_each_14 == rtoc_each_14) THEN
         CONTINUE;
     END
     MUTABLE has_catch = capabilityAuditSession__function_has_catch_clauses?(rtoc_self_view, fn_node);

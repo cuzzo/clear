@@ -10699,7 +10699,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((takes_count == 1)) THEN
         RETURN;
       END
-      MUTABLE value_index = (takes_indices.first() - 1);
+      MUTABLE value_index = (signature_param.first() - 1);
       IF value_index.negative?() THEN
         RETURN;
       END
@@ -17253,7 +17253,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF clause.retries EXISTS AS retries_value THEN
       MUTABLE non_transient = matched |> WHERE !((TRY (aST__kind_of_type(_)) == :Transient));
       IF !((non_transient.length() == 0)) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (COPY clause.token OR_ELSE node), TypeAnalysisCodeOrMessage{ SymbolValue: :RETRY_ONLY_TRANSIENT }, [], CAST({:types: non_transient.join(", ")} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF clause.token EXISTS AS rtoc_anchor_tok_17255 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_anchor_tok_17255 } ELSE DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY node } } END), TypeAnalysisCodeOrMessage{ SymbolValue: :RETRY_ONLY_TRANSIENT }, [], CAST({:types: non_transient.join(", ")} AS {String@symbol}Any)));
       END
     END
     MUTABLE overlap = ruby_set_intersection_Any_set(matched, possible);
