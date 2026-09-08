@@ -11221,7 +11221,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE cap_name: ?StubValue@boxed = COPY node.value;
       MUTABLE rtoc_mutable_receiver_254 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_254, UNWRAP (castStubValueToString(UNWRAP (cap_name))), SymbolEntryRegInput{ StubDecl: COPY node }, SymbolEntryTypeInput{ SymbolValue: :Int64 }, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
-      TRY (typeAnalysisSession__og_declare(&rtoc_self_view, UNWRAP (castStubValueToString(cap_name)), Node{ StubDecl: COPY node }, TypeTypeInput{ SymbolValue: :Int64 }));
+      TRY (typeAnalysisSession__og_declare(&rtoc_self_view, UNWRAP (castStubValueToString(UNWRAP (cap_name))), Node{ StubDecl: COPY node }, TypeTypeInput{ SymbolValue: :Int64 }));
     END
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ StubDecl: COPY node }, :Void));
 }
