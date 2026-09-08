@@ -2551,7 +2551,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, callees[rtoc_idx]));
+      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, UNWRAP (callees[rtoc_idx])));
       IF !(scope) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
