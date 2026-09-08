@@ -11575,7 +11575,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE identity = COPY identity_input;
     IF (identity.body_id == unassigned_body_id) THEN
       MUTABLE ordinal = typeAnalysisSession__phase_traversal_state(&rtoc_self_view).next_synthetic_body_ordinal;
-      typeAnalysisSession__phase_traversal_state(&rtoc_self_view).next_synthetic_body_ordinal=((typeAnalysisSession__phase_traversal_state(&rtoc_self_view).next_synthetic_body_ordinal - 1));
+      rtoc_self_view.traversal_state.next_synthetic_body_ordinal=((typeAnalysisSession__phase_traversal_state(&rtoc_self_view).next_synthetic_body_ordinal - 1));
       identity = BodyIdentity{ definition_id: COPY DefId{ value: ordinal }, body_id: COPY BodyId{ value: ordinal } };
     END
     MUTABLE frame = bodyFactFrame__for_identity(identity);
@@ -16741,8 +16741,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         &fn_node_value.semantic_with_blocks.append(COPY node);
       END
     END
-    typeAnalysisSession__phase_traversal_state(&rtoc_self_view).with_block_depth=((typeAnalysisSession__phase_traversal_state(&rtoc_self_view).with_block_depth + 1));
-    DEFER typeAnalysisSession__phase_traversal_state(&rtoc_self_view).with_block_depth=((typeAnalysisSession__phase_traversal_state(&rtoc_self_view).with_block_depth - 1));
+    rtoc_self_view.traversal_state.with_block_depth=((typeAnalysisSession__phase_traversal_state(&rtoc_self_view).with_block_depth + 1));
+    DEFER rtoc_self_view.traversal_state.with_block_depth=((typeAnalysisSession__phase_traversal_state(&rtoc_self_view).with_block_depth - 1));
     MUTABLE capability_expansion = WithCapabilityPlan{ all: List[] };
     FOR MUTABLE rtoc_mutable_block_param_411 IN node.capabilities DO
     TRY (typeAnalysisSession__acquire_capability_mut(&rtoc_self_view, &node, &rtoc_mutable_block_param_411, &capability_expansion));
