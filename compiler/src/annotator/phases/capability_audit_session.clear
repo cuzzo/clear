@@ -620,7 +620,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END;
     MUTABLE fixes = List[];
     IF best EXISTS AS best_value THEN
-      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, CAST({:name: castNameCandidateToOptionalDiagnosticKwValue__capability_audit_session(name), :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }} AS {String}?DiagnosticKwValue))), [edit__new(span__new(NIL, token.line, token.column, (CAST(name AS String)).codepointCount()), best_value)], :auto)));
+      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, CAST({:name: castNameCandidateToOptionalDiagnosticKwValue__capability_audit_session(name), :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }} AS {String}DiagnosticKwValue))), [edit__new(span__new(NIL, token.line, token.column, (CAST(name AS String)).codepointCount()), best_value)], :auto)));
     END
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY token }, CapabilityAuditCodeOrMessage{ SymbolValue: :REGISTRY_MISMATCH_REJECTED }, [], CAST({:detail: message} AS {String@symbol}Any)));
@@ -641,7 +641,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END;
     MUTABLE fixes = List[];
     IF best EXISTS AS best_value THEN
-      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, token_line, token_column, name.codepointCount()), best_value)], :auto)));
+      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, token_line, token_column, name.codepointCount()), best_value)], :auto)));
     END
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, typoToken__anchor(token), CapabilityAuditCodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], CAST({:detail: message} AS {String@symbol}Any)));
@@ -684,7 +684,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE best: ?String = TRY (capabilityAuditSession__closest_name(rtoc_self_view, NameCandidate{ StringValue: COPY name }, candidates));
     MUTABLE fixes = List[];
     IF best EXISTS AS best_value THEN
-      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, anchor.line, anchor.column, name.codepointCount()), best_value)], :auto)));
+      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_IDENTIFIER_WITH_CANDIDATE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :best: DiagnosticKwValue{ StringValue: COPY best_value }, :label: DiagnosticKwValue{ StringValue: COPY fix_label }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, anchor.line, anchor.column, name.codepointCount()), best_value)], :auto)));
     END
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ AnchorTokenValue: COPY anchor }, CapabilityAuditCodeOrMessage{ SymbolValue: :TYPO_SUGGESTION_REJECTED }, [], CAST({:detail: message} AS {String@symbol}Any)));
@@ -711,7 +711,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN TRY (capabilityAuditSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, UNWRAP (move_col)));
         END
         MUTABLE type = ownershipNode__full_type(og_node);
-        MUTABLE is_shared = type__shared?(castTypeTypeInputToType(TypeTypeInput{ Type: COPY castTypeTypeInputToType(TypeTypeInput{ Type: COPY type }) }));
+        MUTABLE is_shared = type__shared?(type);
         MUTABLE is_multi = type__multiowned?(type);
         MUTABLE is_split = type__split?(type);
         MUTABLE use_clone = ((is_shared OR is_multi) OR is_split);
@@ -738,7 +738,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         MUTABLE fixes = List[];
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, consumer_description_code, CAST({:line: ruby_wrap_optional_Int64_DiagnosticKwValue__capability_audit_session(og_node.move_line)} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, move_line_value, UNWRAP (replacement_col), replacement_length), "(${consumer_keyword} ${name})")], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, consumer_description_code, CAST({:line: ruby_wrap_optional_Int64_DiagnosticKwValue__capability_audit_session(og_node.move_line)} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, move_line_value, UNWRAP (replacement_col), replacement_length), "(${consumer_keyword} ${name})")], :interactive)));
         MUTABLE candidate_caps = List[];
         IF !((is_multi OR is_split)) THEN
           &candidate_caps.append("@multiowned");
@@ -792,7 +792,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (_ == "@multiowned") THEN
                 reason = "single-scheduler Rc; automatic clone on move";
     END
-    &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CHANGE_BINDING_CAPABILITY_FOR_MOVE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :cap: _, :reason: DiagnosticKwValue{ StringValue: COPY reason }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, dline, insert_col, 0), " ${_}")], :interactive)));
+    &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CHANGE_BINDING_CAPABILITY_FOR_MOVE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :cap: _, :reason: DiagnosticKwValue{ StringValue: COPY reason }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, dline, insert_col, 0), " ${_}")], :interactive)));
             END
           END
         END
@@ -826,7 +826,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       consumer_clause = "it is consumed (line ${move_line.toString()})";
     END
     MUTABLE msg = "`${name}` is used again after ${consumer_clause}. `${name}` is a carrier-polymorphic parameter; choose how the additional owner is created: wrap the first consuming use as KEEP to preserve the caller's ownership model. If both consumers require independent identity, constrain the parameter as UNIQUE and use COPY.";
-    MUTABLE fixes = [TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_CONSUMER_WITH_KEEP, CAST({:line: DiagnosticKwValue{ Int64Value: move_line }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, move_line, move_col, name.codepointCount()), "(KEEP ${name})")], :interactive))];
+    MUTABLE fixes = [TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_CONSUMER_WITH_KEEP, CAST({:line: DiagnosticKwValue{ Int64Value: move_line }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, move_line, move_col, name.codepointCount()), "(KEEP ${name})")], :interactive))];
     TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY use_node } }, :ownership, fixes, NIL, :CARRIER_POLYMORPHIC_FANOUT, :error, TRUE, CAST({:detail: msg} AS {String@symbol}Any)));
 }
 END
@@ -1014,7 +1014,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ann_col EXISTS AS ann_col_value THEN
         MUTABLE new_type = COPY CAST(best_value AS String);
         IF (new_type != target_name) THEN
-          MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WIDEN_INT_ANNOTATION, CAST({:old_type: DiagnosticKwValue{ StringValue: COPY target_name }, :new_type: DiagnosticKwValue{ StringValue: COPY new_type }, :value: DiagnosticKwValue{ Int64Value: val }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, ann_col_value, target_name.codepointCount()), new_type)], :auto));
+          MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WIDEN_INT_ANNOTATION, CAST({:old_type: DiagnosticKwValue{ StringValue: COPY target_name }, :new_type: DiagnosticKwValue{ StringValue: COPY new_type }, :value: DiagnosticKwValue{ Int64Value: val }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, ann_col_value, target_name.codepointCount()), new_type)], :auto));
           RETURN TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Literal: COPY node } }, :type, [fix], NIL, :INT_LITERAL_OVERFLOW, :error, TRUE, CAST({:val: val, :type: target_type, :min: min_value, :max: max_value} AS {String@symbol}Any)));
         END
       END
@@ -1028,7 +1028,7 @@ PRIVATE FN capabilityAuditSession__emit_overflow_suffix_fix_mut(MUTABLE self: Ca
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WIDEN_INT_SUFFIX, CAST({:old_suffix: DiagnosticKwValue{ StringValue: COPY old_suffix }, :new_suffix: DiagnosticKwValue{ StringValue: COPY new_suffix }, :value: DiagnosticKwValue{ Int64Value: val }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, suffix_col, old_suffix.codepointCount()), new_suffix)], :auto));
+    MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WIDEN_INT_SUFFIX, CAST({:old_suffix: DiagnosticKwValue{ StringValue: COPY old_suffix }, :new_suffix: DiagnosticKwValue{ StringValue: COPY new_suffix }, :value: DiagnosticKwValue{ Int64Value: val }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, suffix_col, old_suffix.codepointCount()), new_suffix)], :auto));
     TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, :type, [fix], NIL, :INT_LITERAL_OVERFLOW, :error, TRUE, CAST({:val: val, :type: target_type, :min: min_value, :max: max_value} AS {String@symbol}Any)));
 }
 END
@@ -1056,7 +1056,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END;
         MUTABLE start_col = ((idx_value + 1) - lead);
         MUTABLE length = ((6 + lead) + trail);
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_LOCAL_CAPABILITY, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, line, start_col, length), "")], :auto)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_LOCAL_CAPABILITY, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, line, start_col, length), "")], :auto)));
       END
     END
     MUTABLE anchor_branch_value: ?AnchorToken = NIL;
@@ -1106,7 +1106,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (scope__is_immutable?(scope, root_value.name) AND (mutable_fix != NIL)) THEN
         edits = ruby_array_concat_Edit__capability_audit_session(edits, mutable_fix.edits);
       END
-      MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :INSERT_MUTABLE_ARGUMENT_MARKER, CAST({:name: DiagnosticKwValue{ StringValue: COPY root_value.name }, :param: DiagnosticKwValue{ StringValue: COPY facts.param.name }} AS {String@symbol}?DiagnosticKwValue))), edits, :auto));
+      MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :INSERT_MUTABLE_ARGUMENT_MARKER, CAST({:name: DiagnosticKwValue{ StringValue: COPY root_value.name }, :param: DiagnosticKwValue{ StringValue: COPY facts.param.name }} AS {String@symbol}DiagnosticKwValue))), edits, :auto));
       TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY root_value } }, :mutability, [fix], NIL, :MUTABLE_ARGUMENT_REQUIRES_MARKER, :error, FALSE, CAST({:index: (facts.index + 1), :param: facts.param.name, :actual: root_value.name} AS {String@symbol}Any)));
     ELSE
       RETURN;
@@ -1119,7 +1119,7 @@ PRIVATE FN capabilityAuditSession__emit_unexpected_mutable_argument_error_mut(MU
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE token: ?Token@multiowned = COPY facts.mutable_marker_token;
     IF token EXISTS AS token_value THEN
-      MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_ARGUMENT_MARKER, CAST({:param: DiagnosticKwValue{ StringValue: COPY facts.param.name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, token_value.line, token_value.column, 1), "")], :auto));
+      MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REMOVE_MUTABLE_ARGUMENT_MARKER, CAST({:param: DiagnosticKwValue{ StringValue: COPY facts.param.name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, token_value.line, token_value.column, 1), "")], :auto));
       TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY token_value }, :mutability, [fix], NIL, :MUTABLE_MARKER_ON_IMMUTABLE_PARAM, :error, FALSE, CAST({:index: (facts.index + 1), :param: facts.param.name} AS {String@symbol}Any)));
     ELSE
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, CapabilityAuditCodeOrMessage{ SymbolValue: :MUTABLE_MARKER_ON_IMMUTABLE_PARAM }, [], CAST({:index: (facts.index + 1), :param: facts.param.name} AS {String@symbol}Any)));
@@ -1207,9 +1207,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueMapToAnyMap__capability_audit_session(kwargs)));
     END
     IF (code == :MATCH_NEEDS_ENUM_OR_UNION) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:type: kwargs.substr(:type, 1)} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:type: (kwargs[:type] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue)));
     ELSE_IF (code == :MATCH_NON_EXHAUSTIVE) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:kind: kwargs.substr(:kind, 1), :name: kwargs.substr(:name, 1), :missing: kwargs.substr(:missing, 1)} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:kind: kwargs.substr(:kind, 1), :name: kwargs.substr(:name, 1), :missing: kwargs.substr(:missing, 1)} AS {String@symbol}Any)));
     ELSE
       panic("unsupported MATCH partial fix diagnostic: {}");
     END
@@ -1248,7 +1248,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE alias_name = "${castNameCandidateToString__capability_audit_session(name)}_v";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(CAST(name AS String))}\\.(?=\\w)"), "${alias_name}.");
         MUTABLE new_line = "${indent}WITH ${perm} ${castNameCandidateToString__capability_audit_session(name)} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_CAPABILITY_ACCESS, CAST({:permission: DiagnosticKwValue{ StringValue: COPY perm }, :name: castNameCandidateToOptionalDiagnosticKwValue__capability_audit_session(name), :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }, :capability: DiagnosticKwValue{ StringValue: COPY cap }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, 1, (body).length()), new_line)], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_CAPABILITY_ACCESS, CAST({:permission: DiagnosticKwValue{ StringValue: COPY perm }, :name: castNameCandidateToOptionalDiagnosticKwValue__capability_audit_session(name), :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }, :capability: DiagnosticKwValue{ StringValue: COPY cap }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, 1, (body).length()), new_line)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -1266,7 +1266,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE as_token: ?Token = COPY capability__as_token(fact.source);
     IF view_token EXISTS AS view_token_value THEN
       IF as_token EXISTS AS as_token_value THEN
-        MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CONVERT_FOREIGN_VIEW_TO_UNSAFE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, view_token_value.line, view_token_value.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token_value.line, UNWRAP (as_token).column, 0), "LENGTH 0 ")], :interactive));
+        MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CONVERT_FOREIGN_VIEW_TO_UNSAFE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, view_token_value.line, view_token_value.column, "VIEW".codepointCount()), "UNSAFE VIEW"), edit__new(span__new(NIL, as_token_value.line, UNWRAP (as_token).column, 0), "LENGTH 0 ")], :interactive));
         TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, [fix], NIL, :WITH_VIEW_FOREIGN_NEEDS_UNSAFE, :error, TRUE, CAST({:name: name} AS {String@symbol}Any)));
       ELSE
         RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_VIEW_FOREIGN_NEEDS_UNSAFE }, [], CAST({:name: name} AS {String@symbol}Any)));
@@ -1289,17 +1289,25 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE indent = (compilerRegexFirstMatch(body, compilerRegexCompile("\\A\\s*")) OR_ELSE "");
       MUTABLE inner = body.trimStart();
       MUTABLE index = COPY node.index;
-      MUTABLE length: String = "";
-      IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (index.value >= 0)) THEN
-        length = COPY CAST(((index.value() + 1)) AS String);
-      ELSE
-        length = "0";
+      MUTABLE index_int: ?Int64 = NIL;
+      IF index IS_A Literal AS literal THEN
+        IF literal.value EXISTS AS literal_value THEN
+          IF literal_value IS_A Int64 AS literal_int THEN
+            index_int = literal_int;
+          END
+        END
+      END
+      MUTABLE length: String = "0";
+      IF index_int EXISTS AS index_int_value THEN
+        IF (index_int_value >= 0) THEN
+          length = COPY CAST(((index_int_value + 1)) AS String);
+        END
       END
       IF !(inner.empty?()) THEN
         MUTABLE alias_name = "${name}_view";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(name)}\\s*(?=\\[)"), alias_name);
         MUTABLE replacement = "${indent}WITH UNSAFE VIEW ${name} LENGTH ${length} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, 1, (body).length()), replacement)], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, 1, (body).length()), replacement)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -1324,7 +1332,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE alias_name = "${name}_view";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(name)}\\b"), alias_name);
         MUTABLE replacement = "${indent}WITH ${permission} ${name} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_DIRECT_VIEW_ACCESS, CAST({:permission: DiagnosticKwValue{ StringValue: COPY permission }, :name: DiagnosticKwValue{ StringValue: COPY name }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, 1, (body).length()), replacement)], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_DIRECT_VIEW_ACCESS, CAST({:permission: DiagnosticKwValue{ StringValue: COPY permission }, :name: DiagnosticKwValue{ StringValue: COPY name }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, 1, (body).length()), replacement)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -1373,11 +1381,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE off = 0;
     MUTABLE found: Bool = FALSE;
     WHILE ((off < window_lines.length()) AND !(found)) DO
-          MUTABLE line = window_lines[off];
-          MUTABLE idx = compilerRegexMatch(line, pat);
-          IF idx THEN
+          line = window_lines[off];
+          MUTABLE hit: ?String = compilerRegexFirstMatch(line, pat);
+          IF hit EXISTS AS hit_value THEN
             MUTABLE line_no = (with_line + off);
-            MUTABLE mut_col = (idx + 1);
+            MUTABLE mut_col = (UNWRAP (line.indexOf(hit_value)) + 1);
             &edits.append(edit__new(span__new(NIL, line_no, mut_col, "MUTABLE ".codepointCount()), ""));
             found = TRUE;
           END
@@ -1396,7 +1404,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       target = "each guarded alias";
     END
-    MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DROP_WITH_GUARD_MUTABLE, CAST({:target: DiagnosticKwValue{ StringValue: COPY target }} AS {String@symbol}?DiagnosticKwValue))), edits, :interactive));
+    MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DROP_WITH_GUARD_MUTABLE, CAST({:target: DiagnosticKwValue{ StringValue: COPY target }} AS {String@symbol}DiagnosticKwValue))), edits, :interactive));
     TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, [fix], NIL, :WITH_GUARD_MUTABLE_MUTATED, :error, TRUE, kw));
 }
 END
@@ -1407,9 +1415,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE syn: ?String@symbol = TRY (capabilityAuditSession__cap_var_sync(rtoc_self_view, var_node));
     MUTABLE fix_branch_value: ?Fix@multiowned = NIL;
     IF (syn == :locked) THEN
-      fix_branch_value = TRY (capabilityAuditSession__build_decl_cap_replace_fix(&rtoc_self_view, name, "@locked", "@writeLocked", :REPLACE_LOCKED_WITH_WRITE_LOCKED, {}, :auto));
+      fix_branch_value = TRY (capabilityAuditSession__build_decl_cap_replace_fix(&rtoc_self_view, name, "@locked", "@writeLocked", :REPLACE_LOCKED_WITH_WRITE_LOCKED, CAST({} AS {String}DiagnosticKwValue), :auto));
     ELSE
-      fix_branch_value = TRY (capabilityAuditSession__build_decl_cap_insert_fix(&rtoc_self_view, name, "@writeLocked", :WITH_ADD_WRITE_LOCKED, CAST({:reader: DiagnosticKwValue{ StringValue: COPY "via `WITH READ`" }} AS {String@symbol}?DiagnosticKwValue), :auto));
+      fix_branch_value = TRY (capabilityAuditSession__build_decl_cap_insert_fix(&rtoc_self_view, name, "@writeLocked", :WITH_ADD_WRITE_LOCKED, CAST({:reader: DiagnosticKwValue{ StringValue: COPY "via `WITH READ`" }} AS {String@symbol}DiagnosticKwValue), :auto));
     END
     MUTABLE fix: ?Fix@multiowned = fix_branch_value;
     IF fix EXISTS AS fix_value THEN
@@ -1466,7 +1474,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         IF ((ann_match != NIL) AND !(line_text.contains?("~"))) THEN
           MUTABLE type_col = ((search_offset + (compilerRegexPosition(ann_match) - compilerRegexCapture(ann_match, 1).codepointCount())) + 1);
-          fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :PREFIX_TENSE_TYPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, dline, type_col, 0), "~")], :interactive));
+          fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :PREFIX_TENSE_TYPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, dline, type_col, 0), "~")], :interactive));
         END
       END
     END
@@ -1597,7 +1605,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(text_length) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, CAST({:type: castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(target_name)} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (tok).line, UNWRAP (tok).column, 0), "CAST("), edit__new(span__new(NIL, UNWRAP (tok).line, (UNWRAP (tok).column + text_length), 0), " AS ${castTypeTypeInputToString__capability_audit_session(target_name)})")], :interactive));
+      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, CAST({:type: castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(target_name)} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (tok).line, UNWRAP (tok).column, 0), "CAST("), edit__new(span__new(NIL, UNWRAP (tok).line, (UNWRAP (tok).column + text_length), 0), " AS ${castTypeTypeInputToString__capability_audit_session(target_name)})")], :interactive));
     ELSE
       RETURN NIL;
     END
@@ -1717,7 +1725,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (token__text_is?(UNWRAP (tok), "MUTABLE")) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: UNWRAP (tok).line} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
+      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: UNWRAP (tok).line} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
     ELSE
       RETURN NIL;
     END
@@ -1753,7 +1761,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
           IF match EXISTS AS match_value THEN
             MUTABLE start_col = ((search_offset + (compilerRegexPosition(match_value) - compilerRegexCapture(match_value, 0).codepointCount())) + 1);
-            RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :MIGRATE_ATOMIC_ESCAPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY source_name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (line_num), start_col, compilerRegexCapture(match_value, 0).codepointCount()), "@shared:locked")], :interactive));
+            RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :MIGRATE_ATOMIC_ESCAPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY source_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (line_num), start_col, compilerRegexCapture(match_value, 0).codepointCount()), "@shared:locked")], :interactive));
           ELSE
             RETURN NIL;
           END
@@ -1822,7 +1830,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         " ${note}"
       ELSE
         ""
-      END }} AS {String@symbol}?DiagnosticKwValue)), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :interactive));
+      END }} AS {String@symbol}DiagnosticKwValue)), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :interactive));
     ELSE
       RETURN NIL;
     END
@@ -1906,7 +1914,7 @@ PRIVATE FN capabilityAuditSession__build_auto_replace_fixes(self: CapabilityAudi
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF auto_tok EXISTS AS auto_tok_value THEN
-      RETURN CAST([TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_AUTO_WITH_INFERRED, CAST({:type: DiagnosticKwValue{ StringValue: COPY type_str }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :auto))] AS []Fix);
+      RETURN CAST([TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_AUTO_WITH_INFERRED, CAST({:type: DiagnosticKwValue{ StringValue: COPY type_str }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :auto))] AS []Fix);
     ELSE
       RETURN CAST(( { MUTABLE rtoc_empty_list_4: []Fix = List[]; rtoc_empty_list_4 } ) AS []Fix);
     END
@@ -3402,7 +3410,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fixes = List[];
     MUTABLE drop_edits: []Edit@multiowned = TRY (capabilityAuditSession__effects_clause_edits(rtoc_self_view, fn_node, "EFFECTS REENTRANT"));
     IF drop_edits |> ANY rtoc_each_19 THEN
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DROP_MAX_DEPTH_MUTUAL, CAST({:max_depth: fn_node.max_depth_n} AS {String@symbol}?DiagnosticKwValue))), drop_edits, :auto)));
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DROP_MAX_DEPTH_MUTUAL, CAST({:max_depth: fn_node.max_depth_n} AS {String@symbol}DiagnosticKwValue))), drop_edits, :auto)));
     END
     IF (fixes.length() == 0) THEN
         TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :reentrance, fixes, NIL, :REENTRANT_MAX_DEPTH_MUTUAL_DEMOTED, :warning, FALSE, CAST({:fn: rtoc_each_19, :max_depth: fn_node.max_depth_n, :cycle: cycle_members.join(", ")} AS {String@symbol}Any)));
@@ -3561,7 +3569,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
     END
     IF md_ok THEN
-      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MAX_DEPTH_CYCLE, CAST({:depth: DiagnosticKwValue{ Int64Value: default_n }} AS {String@symbol}?DiagnosticKwValue))), edits_md, :interactive)));
+      &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MAX_DEPTH_CYCLE, CAST({:depth: DiagnosticKwValue{ Int64Value: default_n }} AS {String@symbol}DiagnosticKwValue))), edits_md, :interactive)));
     END
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :REENTRANT_MUTUAL_THUNK_UNSUPPORTED }, [], CAST({:name: name, :cycle: (cycle_names |> ORDER_BY _).join(", ")} AS {String@symbol}Any)));

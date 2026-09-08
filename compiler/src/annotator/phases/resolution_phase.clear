@@ -1831,7 +1831,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       FOR _ IN choices DO
-      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: _._1, :edge: DiagnosticKwValue{ StringValue: COPY "${edges[rtoc_idx]?.owner}.${edges[rtoc_idx]?.field_name}" }, :capability: _._0} AS {String@symbol}?DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
+      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: _._1, :edge: DiagnosticKwValue{ StringValue: COPY "${edges[rtoc_idx]?.owner}.${edges[rtoc_idx]?.field_name}" }, :capability: _._0} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
       END
     rtoc_idx = rtoc_idx + 1;
       END
