@@ -13843,7 +13843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(UNWRAP (rtoc_each_items_331[rtoc_idx])), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(UNWRAP (rtoc_each_items_331[rtoc_idx])), :expr: locatable__resolved_type(UNWRAP (locatable__expr(Locatable{ MatchStatement: COPY node })))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -14013,7 +14013,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE field_type = structField__type((struct_schema.fields[UNWRAP (destructure.fields[rtoc_idx]?.name)]?));
+      MUTABLE field_type = structField__type((struct_schema.fields[destructure.fields[rtoc_idx]?.name]?));
       MUTABLE rtoc_mutable_receiver_340 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_340, destructure.fields[rtoc_idx]?.name, NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(field_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__og_declare(&rtoc_self_view, destructure.fields[rtoc_idx]?.name, NIL, castTypeToTypeTypeInput__type_analysis_session(field_type)));
