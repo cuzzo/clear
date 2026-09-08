@@ -1208,7 +1208,11 @@ POOL_METHODS = T.let({
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type
-      unless arg_type == :Any || arg_type == elem.resolved || Type.new(elem.resolved).accepts?(Type.new(arg_type))
+      # An OPTIONAL receiver (`m[k].insert(...)`) has no element type. That is a
+      # user error, not an inventory bug -- say so rather than crashing on nil.
+      if elem.nil?
+        error_fn.call(node, "Pool.insert: receiver #{obj_type.resolved} is not a pool with a known element type")
+      elsif !(arg_type == :Any || arg_type == elem.resolved || Type.new(elem.resolved).accepts?(Type.new(arg_type)))
         error_fn.call(node, "Pool.insert: argument type #{arg_type} does not match pool element type #{elem.resolved}")
       end
     },
@@ -1353,7 +1357,11 @@ SET_METHODS = T.let({
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type
-      unless arg_type == :Any || arg_type == elem.resolved || Type.new(elem.resolved).accepts?(Type.new(arg_type))
+      # An OPTIONAL receiver (`m[k].insert(...)`) has no element type. That is a
+      # user error, not an inventory bug -- say so rather than crashing on nil.
+      if elem.nil?
+        error_fn.call(node, "Set.insert: receiver #{obj_type.resolved} is not a set with a known element type")
+      elsif !(arg_type == :Any || arg_type == elem.resolved || Type.new(elem.resolved).accepts?(Type.new(arg_type)))
         error_fn.call(node, "Set.insert: argument type #{arg_type} does not match set element type #{elem.resolved}")
       end
     },

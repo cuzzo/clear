@@ -1,0 +1,11 @@
+# `m[k].insert(...)` reaches for the set through the map's bounds optional,
+# which has no element type. That is a user error with a message, not a crash
+# in the intrinsic's own validator.
+FN main() RETURNS !Void ->
+  MUTABLE m: {String}[Set]String@symbol = {};
+  m["a"] = Set[];
+  IF m["a"] EXISTS AS MUTABLE entry THEN
+    &entry.insert(:seed);
+  END
+  print("stored ${UNWRAP (m["a"]).length().toString()}");
+END
