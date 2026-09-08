@@ -7888,7 +7888,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE params_hint = (type_params |> SELECT _.toString()).join(", ");
-    TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MISSING_TYPE_ARGS }, [], CAST({:type: type__resolved(arg), :type2: type__resolved(arg), :hint: params_hint} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MISSING_TYPE_ARGS }, [], CAST({:type: type__resolved(arg), :type2: type__resolved(arg), :hint: params_hint} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN typeAnalysisSession__validate_plain_type_annotation_mut(MUTABLE self: TypeAnalysisSession, facts: TypeAnnotationFacts) RETURNS !Void
