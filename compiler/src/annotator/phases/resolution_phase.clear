@@ -2534,3 +2534,14 @@ FN ruby_wrap_optional_string_to_symbol__resolution_phase(value: ?String) RETURNS
   END
   NIL;
 END
+
+# The diagnostic entry points take their kwargs as {String@symbol}Any; the
+# callers hold a map of DiagnosticKwValue. The single-value cast cannot convert
+# a map, so this converts entry by entry.
+FN castDiagnosticKwValueMapToAnyMap__resolution_phase(values: {String@symbol}DiagnosticKwValue) RETURNS {String@symbol}Any ->
+  MUTABLE out: {String@symbol}Any = {};
+  FOR key IN values.keys() DO
+    out[key] = castDiagnosticKwValueToAnyMultiowned__resolution_phase((values[key] OR_ELSE panic("missing hash key")));
+  END
+  RETURN out;
+END

@@ -2227,7 +2227,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :REPLACE_MATCH_WITH_PARTIAL)), [edit__new(span__new(NIL, tok.line, tok.column, 0), "PARTIAL ")], :auto));
     END
     IF !(fix) THEN
-      RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned__type_analysis_session(kwargs)));
+      RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueMapToAnyMap__type_analysis_session(kwargs)));
     END
     IF (code == :MATCH_NEEDS_ENUM_OR_UNION) THEN
       TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:type: kwargs.substr(:type, 1)} AS {String@symbol}Any)));
@@ -22872,4 +22872,15 @@ PRIVATE FN typeAnalysisSession__pop_body_fact_frame_mut(MUTABLE self: TypeAnalys
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN &rtoc_self_view.traversal_state.body_fact_frames.pop();
 }
+END
+
+# The diagnostic entry points take their kwargs as {String@symbol}Any; the
+# callers hold a map of DiagnosticKwValue. The single-value cast cannot convert
+# a map, so this converts entry by entry.
+FN castDiagnosticKwValueMapToAnyMap__type_analysis_session(values: {String@symbol}DiagnosticKwValue) RETURNS {String@symbol}Any ->
+  MUTABLE out: {String@symbol}Any = {};
+  FOR key IN values.keys() DO
+    out[key] = castDiagnosticKwValueToAnyMultiowned__type_analysis_session((values[key] OR_ELSE panic("missing hash key")));
+  END
+  RETURN out;
 END
