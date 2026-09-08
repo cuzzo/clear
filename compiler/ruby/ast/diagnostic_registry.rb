@@ -1565,6 +1565,11 @@ module DiagnosticRegistry
       template: "Cannot %{op} non-list type %{got}",
       summary:  "Generic 'this pipeline op needs a list' — message names which op.",
     },
+    PIPE_SOURCE_OPTIONAL: {
+      severity: :error, category: :type,
+      template: "Cannot %{op} the optional %{got} - say what an absent source means with `OR_ELSE` or UNWRAP it",
+      summary:  "A pipeline source must be a collection, not an optional one.",
+    },
     CONCURRENT_EACH_BAD_INPUT: {
       severity: :error, category: :type,
       template: "CONCURRENT EACH input must be a finite stream or collection, got %{got}",

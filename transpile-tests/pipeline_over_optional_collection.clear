@@ -1,0 +1,23 @@
+# A pipeline source must be a collection, not an optional one: `h?.items` says
+# nothing about what an absent source means. Spelling that with OR_ELSE keeps
+# the element type -- `_` is an Item, not Any.
+STRUCT Item { form: String@symbol, rank: Int64 }
+STRUCT Holder { items: []Item }
+
+FN main() RETURNS Void ->
+  h: ?Holder = Holder{ items: [Item{ form: :type, rank: 3 }, Item{ form: :name, rank: 9 }] };
+  found: ?Item = (h?.items OR_ELSE List[]) |> FIND (_.form == :name);
+  IF found EXISTS AS found_value THEN
+    print("found ${found_value.rank.toString()}");
+  ELSE
+    print("missing");
+  END
+
+  empty: ?Holder = NIL;
+  none: ?Item = (empty?.items OR_ELSE List[]) |> FIND (_.form == :name);
+  IF none EXISTS AS none_value THEN
+    print("unexpected ${none_value.rank.toString()}");
+  ELSE
+    print("none");
+  END
+END

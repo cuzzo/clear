@@ -659,6 +659,11 @@ module MIRLoweringControlFlow
     if for_each_owned_collection_source?(coll)
       source_name = "__for_src_#{lowering_counters.next_tmp_id}"
       source_alloc = for_each_owned_collection_source_alloc(coll, ct)
+      # An OR_ELSE source owns its value on ONE branch only: `h?.items OR_ELSE
+      # List[]` hands out a borrow when the payload is present and a fresh list
+      # when it is not. One cleanup cannot cover both, so normalize the branches
+      # to a single owner the way a declaration does before binding the source.
+      coll = place_owned_branch_value_for_destination(coll, ct, source_alloc) if coll.is_a?(MIR::Orelse)
       entry = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false, zig_type: ct.zig_type)
       collection_setup.concat(MIR::BindingMaterialization.new(
         name: source_name,

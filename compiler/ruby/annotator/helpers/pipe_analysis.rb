@@ -2072,6 +2072,12 @@ module PipeAnalysis
   def require_array_input!(node, op_name, allow_range: false, allow_stream: false)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     lhs_type = node.left.full_type!(context: "pipeline left")
+    # `h?.items |> ...` pipes an OPTIONAL collection. metatype sees through the
+    # optional, so the source passed and `_` silently became Any. Rust makes the
+    # caller say what an absent source means (`unwrap_or_default`); so does CLEAR.
+    if lhs_type&.optional?
+      error!(node.left, :PIPE_SOURCE_OPTIONAL, op: op_name, got: node.left.resolved_type)
+    end
     return if node.left.metatype == :array
     return if lhs_type&.collection?
     return if allow_range && node.left.is_a?(AST::RangeLit)
