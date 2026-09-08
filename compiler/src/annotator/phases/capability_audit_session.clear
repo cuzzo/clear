@@ -711,7 +711,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN TRY (capabilityAuditSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, UNWRAP (move_col)));
         END
         MUTABLE type = ownershipNode__full_type(og_node);
-        MUTABLE is_shared = type__shared?(type);
+        MUTABLE is_shared = type__shared?(UNWRAP (castTypeTypeInputToType(TypeTypeInput{ Type: COPY type })));
         MUTABLE is_multi = type__multiowned?(type);
         MUTABLE is_split = type__split?(type);
         MUTABLE use_clone = ((is_shared OR is_multi) OR is_split);
@@ -1753,7 +1753,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
           IF match EXISTS AS match_value THEN
             MUTABLE start_col = ((search_offset + (compilerRegexPosition(match_value) - compilerRegexCapture(match_value, 0).codepointCount())) + 1);
-            RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :MIGRATE_ATOMIC_ESCAPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY source_name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, start_col, compilerRegexCapture(match_value, 0).codepointCount()), "@shared:locked")], :interactive));
+            RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :MIGRATE_ATOMIC_ESCAPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY source_name }} AS {String@symbol}?DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (line_num), start_col, compilerRegexCapture(match_value, 0).codepointCount()), "@shared:locked")], :interactive));
           ELSE
             RETURN NIL;
           END
