@@ -130,10 +130,15 @@ module SelfhostFnProbe
     payload = ret.delete_prefix('?')
     return %(  MUTABLE rtoc_stub_s = "stub${1.toString()}";\n  RETURN rtoc_stub_s;) if payload == 'String'
     return "  RETURN #{STUB_VALUES[ret]};" if STUB_VALUES[ret]
-    return '  RETURN List[];' if payload.start_with?('[]')
-    return '  RETURN Set[];' if payload.start_with?('[Set]')
-    return '  RETURN {};' if payload.start_with?('{')
     return '  RETURN NIL;' if ret.start_with?('?')
+
+    # A bare `Set[]` is a Set of Any and fails the declared return type, so the
+    # empty collection is named before it is returned.
+    empty = if payload.start_with?('[Set]') then 'Set[]'
+            elsif payload.start_with?('[]') then 'List[]'
+            elsif payload.start_with?('{') then '{}'
+            end
+    return %(  MUTABLE rtoc_stub_v: #{payload} = #{empty};\n  RETURN rtoc_stub_v;) if empty
 
     %(  panic("stub");)
   end
