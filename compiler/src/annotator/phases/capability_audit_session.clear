@@ -1804,7 +1804,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     rtoc_idx = rtoc_idx + 1;
     END
-    MUTABLE n_ops = ops.size();
+    MUTABLE n_ops = ops.length();
     MUTABLE intersection = agg |> WHERE (_._1.count == n_ops);
     MUTABLE ordered = intersection |> ORDER_BY _._1.rank_sum;
     RETURN ordered.keys() |> SELECT AutoCandidate{ type_sym: COPY CAST(_ AS String@symbol), note: COPY ((UNWRAP (ordered[_])).notes |> DISTINCT _).first() };

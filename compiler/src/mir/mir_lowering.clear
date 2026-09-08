@@ -9158,7 +9158,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       snap_types = Set[];
     END
     MUTABLE snapshot_type_branch_value: ?Type = NIL;
-    IF (snap_types.size() == 1) THEN
+    IF (snap_types.length() == 1) THEN
       snapshot_type_branch_value = TRY (type__new(snap_types.first()));
     ELSE
       snapshot_type_branch_value = NIL;
