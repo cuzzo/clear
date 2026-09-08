@@ -17,6 +17,12 @@ module Annotator
         implicit_safe_nav = target_type_info.optional? && node.target.respond_to?(:safe_nav_chain) &&
           node.target.safe_nav_chain == true
         target_type_info = T.must(target_type_info.wrapped_type) if implicit_safe_nav
+        # An indexed read of an OPTIONAL collection has no element type. Ruby
+        # raises on nil here, so the author has to say what absent means --
+        # reporting that beats crashing inside the return-type resolver.
+        if target_type_info.optional? && !target_type_info.map?
+          error!(node, :INDEX_TARGET_OPTIONAL, got: Type.surface_name(target_type_info))
+        end
 
         if target_type_info.c_array_view?
           root = AST.root_identifier(node.target)

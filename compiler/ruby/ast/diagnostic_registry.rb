@@ -1565,6 +1565,11 @@ module DiagnosticRegistry
       template: "Cannot %{op} non-list type %{got}",
       summary:  "Generic 'this pipeline op needs a list' — message names which op.",
     },
+    INDEX_TARGET_OPTIONAL: {
+      severity: :error, category: :type,
+      template: "Cannot index the optional %{got} - UNWRAP it or spell the absent case with `OR_ELSE`",
+      summary:  "An indexed read needs the collection, not an optional one.",
+    },
     PIPE_SOURCE_OPTIONAL: {
       severity: :error, category: :type,
       template: "Cannot %{op} the optional %{got} - say what an absent source means with `OR_ELSE` or UNWRAP it",

@@ -1,0 +1,15 @@
+# Indexing an OPTIONAL collection has no element type to give: Ruby raises on
+# nil there, so the author says what absent means. UNWRAP is one answer.
+FN pick(n: Int64) RETURNS ?[]String ->
+  IF n > 0 THEN
+    MUTABLE xs: []String = List[];
+    &xs.append(COPY "a");
+    RETURN xs;
+  END
+  RETURN NIL;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE first: ?String = UNWRAP (pick(1))[0];
+  print("first=${(first OR_ELSE "?")}");
+END
