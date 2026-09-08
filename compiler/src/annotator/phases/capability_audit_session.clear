@@ -1340,7 +1340,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE edits = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < missing_caps.length() DO
-      MUTABLE vn = COPY missing_caps[rtoc_idx]?.var_node;
+      MUTABLE vn: ?Locatable = COPY missing_caps[rtoc_idx]?.var_node;
       IF !(((IF UNWRAP (vn) IS_A Identifier AS identifier THEN TRUE ELSE FALSE END) AND locatable__token(UNWRAP (vn)))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -1869,7 +1869,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE type_str = capabilityAuditSession__auto_type_source_form(rtoc_self_view, resolution.type);
     MUTABLE label: ?String = TRY (capabilityAuditSession__auto_slot_label(rtoc_self_view, slot));
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
-    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, TRY (capabilityAuditSession__build_auto_replace_fixes(rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_TYPE, :info, FALSE, CAST({:label: label, :type: type_str} AS {String@symbol}Any)));
+    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, (IF auto_tok EXISTS AS auto_tok_value THEN DiagnosticAnchor{ TokenValue: COPY auto_tok_value } ELSE DiagnosticAnchor{ Locatable: COPY UNWRAP (castAutoConstraintCollectorSlotDeclNodeToLocatable(slot.decl_node)) } END), :type, TRY (capabilityAuditSession__build_auto_replace_fixes(rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_TYPE, :info, FALSE, CAST({:label: label, :type: type_str} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_auto_shape_resolved_finding_mut(MUTABLE self: CapabilityAuditSession, decl: AutoConstraintCollectorSlotDeclNode, slot: Slot) RETURNS !Void
@@ -1898,7 +1898,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       name = "<binding>";
     END
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
-    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE decl), :type, TRY (capabilityAuditSession__build_auto_replace_fixes(rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_BINDING_TYPE, :info, FALSE, CAST({:name: name, :type: type_str} AS {String@symbol}Any)));
+    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, (IF auto_tok EXISTS AS auto_tok_value THEN DiagnosticAnchor{ TokenValue: COPY auto_tok_value } ELSE DiagnosticAnchor{ Locatable: COPY UNWRAP (castAutoConstraintCollectorSlotDeclNodeToLocatable(decl)) } END), :type, TRY (capabilityAuditSession__build_auto_replace_fixes(rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_BINDING_TYPE, :info, FALSE, CAST({:name: name, :type: type_str} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN capabilityAuditSession__build_auto_replace_fixes(self: CapabilityAuditSession, auto_tok: ?Token, type_str: String) RETURNS ![]Fix
@@ -1922,7 +1922,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE observed_strs = observed |> SELECT capabilityAuditSession__auto_type_source_form(rtoc_self_view, _);
     MUTABLE message = TRY (capabilityAuditSession__build_auto_ambiguity_message(rtoc_self_view, label?, observed_strs, slot));
     MUTABLE slot_id: ?AutoSlotId@multiowned = capabilityAuditSession__slot_id_for(rtoc_self_view, slot);
-    MUTABLE ops: [Set]Any = Set[];
+    MUTABLE ops: [Set]String@symbol = Set[];
     IF slot_id EXISTS AS slot_id_value THEN
       ops = ((op_evidence[slot_id_value] OR_ELSE Set[]));
     ELSE
@@ -1935,14 +1935,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fixes = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < candidates.length() DO
-      MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_auto_candidate_fix(rtoc_self_view, slot, candidates[rtoc_idx]?.type_sym, candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
+      MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_auto_candidate_fix(rtoc_self_view, slot, UNWRAP (candidates[rtoc_idx]?.type_sym), candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
       IF fix EXISTS AS fix_value THEN
           &fixes.append(fix_value);
       END
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
-    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, fixes, NIL, :AUTO_AMBIGUOUS_TYPE, :error, FALSE, CAST({:detail: message} AS {String@symbol}Any)));
+    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, (IF auto_tok EXISTS AS auto_tok_value THEN DiagnosticAnchor{ TokenValue: COPY auto_tok_value } ELSE DiagnosticAnchor{ Locatable: COPY UNWRAP (castAutoConstraintCollectorSlotDeclNodeToLocatable(slot.decl_node)) } END), :type, fixes, NIL, :AUTO_AMBIGUOUS_TYPE, :error, FALSE, CAST({:detail: message} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_auto_unresolved_finding_mut(MUTABLE self: CapabilityAuditSession, slot: Slot, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS !Void
@@ -1952,7 +1952,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE label: ?String = TRY (capabilityAuditSession__auto_slot_label(rtoc_self_view, slot));
     MUTABLE base_msg = "Cannot infer type for ${(label OR_ELSE "")} \u{2014} no observed uses to drive inference.";
     MUTABLE slot_id: ?AutoSlotId@multiowned = capabilityAuditSession__slot_id_for(rtoc_self_view, slot);
-    MUTABLE ops: [Set]Any = Set[];
+    MUTABLE ops: [Set]String@symbol = Set[];
     IF slot_id EXISTS AS slot_id_value THEN
       ops = ((op_evidence[slot_id_value] OR_ELSE Set[]));
     ELSE
@@ -1968,14 +1968,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fixes = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < candidates.length() DO
-      MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_auto_candidate_fix(rtoc_self_view, slot, candidates[rtoc_idx]?.type_sym, candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
+      MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__build_auto_candidate_fix(rtoc_self_view, slot, UNWRAP (candidates[rtoc_idx]?.type_sym), candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
       IF fix EXISTS AS fix_value THEN
           &fixes.append(fix_value);
       END
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
-    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, fixes, NIL, :AUTO_UNRESOLVED_TYPE, :error, FALSE, CAST({:detail: message} AS {String@symbol}Any)));
+    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, (IF auto_tok EXISTS AS auto_tok_value THEN DiagnosticAnchor{ TokenValue: COPY auto_tok_value } ELSE DiagnosticAnchor{ Locatable: COPY UNWRAP (castAutoConstraintCollectorSlotDeclNodeToLocatable(slot.decl_node)) } END), :type, fixes, NIL, :AUTO_UNRESOLVED_TYPE, :error, FALSE, CAST({:detail: message} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN capabilityAuditSession__slot_id_for(self: CapabilityAuditSession, slot: Slot) RETURNS ?AutoSlotId@multiowned
@@ -2291,7 +2291,7 @@ PRIVATE FN capabilityAuditSession__compute_effects_mut(MUTABLE self: CapabilityA
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE direct_effects = capabilityAuditSession__effect_direct_effects(rtoc_self_view);
-    MUTABLE resolved = {};
+    MUTABLE resolved: {String}[Set]String@symbol = {};
     direct_effects.keys() |> EACH {
     MUTABLE effs: [Set]String@symbol = (direct_effects[_] OR_ELSE CAST(panic("missing hash key") AS [Set]String@symbol));
     resolved[_] = COPY effs;
@@ -2318,14 +2318,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE current: ?Any = COPY resolved[rtoc_each_7];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < callees.length() DO
-        MUTABLE callee_effs: ?Any = COPY resolved[UNWRAP (callees[rtoc_idx])];
+        MUTABLE callee_effs: ?[Set]String@symbol = COPY resolved[UNWRAP (callees[rtoc_idx])];
         IF !(callee_effs) THEN
               rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
         MUTABLE before = UNWRAP (current).length();
-        MUTABLE site_ctx = capabilityAuditSession__effect_call_site_context_for(&rtoc_self_view, rtoc_each_7, callees[rtoc_idx]);
-        MUTABLE resolved_callee = TRY (capabilityAuditSession__resolve_maybe_effects(&rtoc_self_view, callee_effs, rtoc_each_7, callees[rtoc_idx]));
+        MUTABLE site_ctx = capabilityAuditSession__effect_call_site_context_for(&rtoc_self_view, rtoc_each_7, UNWRAP (callees[rtoc_idx]));
+        MUTABLE resolved_callee = TRY (capabilityAuditSession__resolve_maybe_effects(&rtoc_self_view, UNWRAP (callee_effs), rtoc_each_7, UNWRAP (callees[rtoc_idx])));
         TRY (capabilityAuditSession__inherit_effects_from_callee(rtoc_self_view, &current, resolved_callee, site_ctx));
         IF (current.size > before) THEN
               changed = TRUE;
@@ -2360,22 +2360,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN call_sites DO
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < _.length() DO
-      IF (FALSE OR _[rtoc_idx]?.empty?()) THEN
+      IF (FALSE OR (_[rtoc_idx]?.empty?() OR_ELSE FALSE)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (_[rtoc_idx]?.size > 1) THEN
+      IF (UNWRAP (_[rtoc_idx]).length() > 1) THEN
           any_polymorphic_arg = TRUE;
           IF _[rtoc_idx]?.contains?(:LOCKED) THEN
             any_concrete_lockable = TRUE;
           END
           any_concrete_sync = TRUE;
       ELSE
-          MUTABLE fam = _[rtoc_idx]?.first();
-          IF (fam == :LOCKED) THEN
+          MUTABLE fam_set = UNWRAP (_[rtoc_idx]);
+          IF fam_set.contains?(:LOCKED) THEN
             any_concrete_lockable = TRUE;
           END
-          IF ([:LOCKED, :ATOMIC, :VERSIONED]).contains?(fam) THEN
+          IF ((fam_set.contains?(:LOCKED) OR fam_set.contains?(:ATOMIC)) OR fam_set.contains?(:VERSIONED)) THEN
             any_concrete_sync = TRUE;
           END
       END
@@ -2385,22 +2385,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE result = COPY callee_set;
     IF has_block_maybe THEN
       IF (any_concrete_lockable AND !(any_polymorphic_arg)) THEN
-        &result.insert(blocking);
-        &result.delete(blocking_maybe);
+        &result.insert(blockingEffect());
+        &result.remove(blockingMaybeEffect());
       ELSE_IF ((!(any_concrete_lockable) AND !(any_polymorphic_arg)) AND any_concrete_sync) THEN
-        &result.delete(blocking_maybe);
+        &result.remove(blockingMaybeEffect());
       ELSE_IF any_polymorphic_arg THEN
     
       END
     END
     IF has_cont_maybe THEN
       IF (any_concrete_sync AND !(any_polymorphic_arg)) THEN
-        &result.insert(contention);
-        &result.delete(contention_maybe);
+        &result.insert(contentionEffect());
+        &result.remove(contentionMaybeEffect());
       ELSE_IF any_polymorphic_arg THEN
     
       ELSE
-        &result.delete(contention_maybe);
+        &result.remove(contentionMaybeEffect());
       END
     END
     RETURN result;
@@ -2478,16 +2478,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE callees: [Set]String = ((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[rtoc_each_8] OR_ELSE CAST(panic("missing hash key") AS [Set]String));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < callees.length() DO
-      IF needs_rt.contains?(callees[rtoc_idx]) THEN
+      IF needs_rt.contains?(UNWRAP (callees[rtoc_idx])) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, callees[rtoc_idx]));
+      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, UNWRAP (callees[rtoc_idx])));
       IF !(scope) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, callees[rtoc_idx]) != NIL THEN
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(UNWRAP (scope), UNWRAP (callees[rtoc_idx])) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_15 = (scope__resolve_entry(scope, callees[rtoc_idx]));
       symbolEntry__type(rtoc_local_receiver_15) }
         ELSE
@@ -2515,7 +2515,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF needs_rt[rtoc_each_9] THEN
       CONTINUE;
     END
-    IF callees |> ANY needs_rt[rtoc_each_9] THEN
+    IF callees |> ANY (needs_rt[rtoc_each_9] OR_ELSE FALSE) THEN
           needs_rt[rtoc_each_9] = TRUE;
           changed = TRUE;
     END

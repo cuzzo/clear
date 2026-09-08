@@ -280,3 +280,16 @@ PUB FN anySuspendsEffect(effs: [Set]String@symbol) RETURNS Bool ->
   END
   RETURN FALSE;
 END
+
+PUB FN blockingEffect() RETURNS String@symbol EFFECTS REENTRANT ->
+  RETURN :BLOCKING;
+END
+PUB FN blockingMaybeEffect() RETURNS String@symbol EFFECTS REENTRANT ->
+  RETURN :BLOCKING_MAYBE;
+END
+PUB FN contentionEffect() RETURNS String@symbol EFFECTS REENTRANT ->
+  RETURN :CONTENTION;
+END
+PUB FN contentionMaybeEffect() RETURNS String@symbol EFFECTS REENTRANT ->
+  RETURN :CONTENTION_MAYBE;
+END
