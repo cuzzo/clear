@@ -2313,7 +2313,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE inner = body.trimStart();
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
-      IF ((IF index IS_A Literal AS literal THEN literal.value IS_A Int64 ELSE FALSE END) AND (index.value() >= 0)) THEN
+      IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (index.value() >= 0)) THEN
         length = COPY CAST(((index.value() + 1)) AS String);
       ELSE
         length = "0";
@@ -3654,19 +3654,24 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(((functionSignature__extern_source(signature) != NIL) AND (((functionSignature__extern_source(signature))?).abi == :c))) THEN
       RETURN;
     END
-    (TRY (functionSignature__params(signature))).zip(args).keys() |> EACH {
-    MUTABLE arg: Any = ((TRY (functionSignature__params(signature))).zip(args)[_] OR_ELSE panic("missing hash key"));
-    IF !((IF _ != NIL THEN
-        _.mutable()
+    MUTABLE rtoc_zip_params = TRY (functionSignature__params(signature));
+    MUTABLE rtoc_zip_i = 0;
+    WHILE rtoc_zip_i < rtoc_zip_params.length() DO
+    MUTABLE param: ?Param = rtoc_zip_params[rtoc_zip_i];
+    MUTABLE arg: ?Locatable = args[rtoc_zip_i];
+    IF !((IF param != NIL THEN
+        param.mutable
       ELSE
-        NIL
+        FALSE
       END)) THEN
+      rtoc_zip_i = rtoc_zip_i + 1;
       CONTINUE;
     END
-    IF !(arg IS_A Identifier) THEN
+    IF !(UNWRAP (arg) IS_A Identifier) THEN
+        rtoc_zip_i = rtoc_zip_i + 1;
         CONTINUE;
     END
-    MUTABLE param_type = TRY (type__new(_.type));
+    MUTABLE param_type = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (param).type }));
     MUTABLE payload_branch_value: ?Type = NIL;
       IF type__optional?(param_type) THEN
         payload_branch_value = TRY (type__wrapped_type(param_type));
@@ -3675,17 +3680,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     MUTABLE payload: ?Type = payload_branch_value;
     IF !(payload) THEN
+        rtoc_zip_i = rtoc_zip_i + 1;
         CONTINUE;
     END
-    MUTABLE schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type__resolved( UNWRAP (payload))));
-    IF !(schema IS_A ResourceSchema) THEN
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type__resolved( UNWRAP (payload))));
+    IF !((IF schema EXISTS AS schema_value THEN schema_value IS_A ResourceSchema ELSE FALSE END)) THEN
+        rtoc_zip_i = rtoc_zip_i + 1;
         CONTINUE;
     END
-    MUTABLE symbol = arg.symbol;
-    IF symbol THEN
-        symbolEntry__set_foreign_out_owner(&symbol, TRUE);
+    MUTABLE symbol: ?SymbolEntry@multiowned = locatable__symbol(UNWRAP (arg));
+    IF symbol EXISTS AS MUTABLE symbol_value THEN
+        symbolEntry__set_foreign_out_owner(&symbol_value, TRUE);
     END
-    };
+    rtoc_zip_i = rtoc_zip_i + 1;
+    END
 }
 END
 PRIVATE FN typeAnalysisSession__receiver_container_alloc(MUTABLE self: TypeAnalysisSession, node: FunctionCallNode) RETURNS ?String@symbol
