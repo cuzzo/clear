@@ -17897,3 +17897,13 @@ PUB FN locatable__true_boolean?(value: Locatable) RETURNS ?Bool EFFECTS REENTRAN
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:observable_dest)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__observable_dest(value: Locatable) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    Locatable.BinaryOp AS item -> RETURN COPY item.observable_dest;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

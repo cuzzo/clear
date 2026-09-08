@@ -9213,7 +9213,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN CAST(( { MUTABLE rtoc_empty_list_205: []Edit = List[]; rtoc_empty_list_205 } ) AS []Edit);
     END
     MUTABLE end_col = (e.column + (CAST(e.value AS String)).codepointCount());
-    RETURN CAST([edit__new(span__new(NIL, s.line, s.column, (end_col - UNWRAP (s).column)), replacement)] AS []Edit);
+    RETURN CAST([edit__new(span__new(NIL, s.line, s.column, (end_col - s.column)), replacement)] AS []Edit);
 }
 END
 PRIVATE FN typeAnalysisSession__thunk_all_self_calls_in_tail_position?(self: TypeAnalysisSession, fn_node: FunctionDef, body_facts: TypeAnalysisBodyFacts) RETURNS Bool
@@ -13843,7 +13843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(rtoc_each_items_331[rtoc_idx]), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_CASE_TYPE_MISMATCH }, [], CAST({:case: locatable__resolved_type(UNWRAP (rtoc_each_items_331[rtoc_idx])), :expr: locatable__resolved_type(locatable__expr(Locatable{ MatchStatement: COPY node }))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -14642,7 +14642,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF declared EXISTS AS declared_value THEN
       MUTABLE wants_future = (type__future?(declared_value) AND (type__resolved((TRY (type__tense_type(declared_value)))) == symbol("Auto")));
-      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(declared_value)))) == symbol("Auto")));
+      MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(UNWRAP (declared_value))))) == symbol("Auto")));
       MUTABLE wants_optional = (type__optional?(declared_value) AND (type__resolved(UNWRAP (TRY (type__wrapped_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_error_optional = ((type__error_union?(declared_value) AND type__optional?((TRY (type__success_type(declared_value))))) AND (type__resolved(UNWRAP (TRY (type__wrapped_type((TRY (type__success_type(declared_value))))))) == symbol("Auto")));
       IF !((((wants_future OR wants_error) OR wants_optional) OR wants_error_optional)) THEN
@@ -14867,7 +14867,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       DeclarationNode.BindExpr AS item ->
         pipe = COPY item.value;,
     END
-    MUTABLE ok = ((UNWRAP (pipe) IS_A BinaryOp AND UNWRAP locatable__smooth?(UNWRAP ((pipe)))) AND UNWRAP (pipe).observable_dest);
+    MUTABLE ok = ((UNWRAP (pipe) IS_A BinaryOp AND UNWRAP locatable__smooth?(UNWRAP ((pipe)))) AND UNWRAP locatable__observable_dest((pipe)));
     IF ok THEN
       RETURN TRUE;
     END
@@ -19478,7 +19478,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       :multiowned
     ELSE_IF type__shared?(type) THEN
       :shared
-    ELSE_IF (((!(TRY (type__any_rc?( type))) AND !(TRY (type__split_open_stream?( type)))) AND !(type__shared_promise?( type))) AND !(type__split?( UNWRAP (type)))) THEN
+    ELSE_IF (((!(TRY (type__any_rc?( type))) AND !(TRY (type__split_open_stream?( type)))) AND !(type__shared_promise?( type))) AND !(type__split?( type))) THEN
       :plain
     ELSE
       NIL
@@ -19868,7 +19868,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           TRY (typeAnalysisSession__classify_ownership_mut(&rtoc_self_view, &info));
       END
       IF (symbolEntry__ownership_kind( info) == :resource) THEN
-          &drops.append(TRY (typeAnalysisSession__deferred_drop_for(&rtoc_self_view, UNWRAP (rtoc_each_items_486[rtoc_idx]), UNWRAP (info), TRUE)));
+          &drops.append(TRY (typeAnalysisSession__deferred_drop_for(&rtoc_self_view, UNWRAP (rtoc_each_items_486[rtoc_idx]), info, TRUE)));
           TRY (typeAnalysisSession__og_drop(&rtoc_self_view, UNWRAP (rtoc_each_items_486[rtoc_idx])));
       ELSE_IF (symbolEntry__ownership_kind( UNWRAP (info)) == :affine) THEN
           MUTABLE t = TRY (type__new(TypeConstructionInput{ Type: COPY symbolEntry__type( UNWRAP (info)) }));
