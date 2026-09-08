@@ -1519,7 +1519,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (scope__resolve_type_definition(rtoc_local_receiver_40, symbol(owner_type_value_mutable))) };
       IF (schemas__struct?(type_schema) OR schemas__resource?(type_schema)) THEN
         TRY (resolutionSession__reject_duplicate_extern_method_mut(&rtoc_self_view, node, UNWRAP (type_schema)));
-        MUTABLE rtoc_index_receiver_41 = schemaValue__methods(UNWRAP (type_schema));
+        MUTABLE rtoc_index_receiver_41: ?{String@symbol}FunctionSignature@multiowned = schemaValue__methods(UNWRAP (type_schema));
         rtoc_index_receiver_41[node.name] = signature;
       END
     ELSE
