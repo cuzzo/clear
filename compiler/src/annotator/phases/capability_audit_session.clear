@@ -708,7 +708,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         scope__resolve_entry(rtoc_local_receiver_2, name) };
         END
         IF (((fanout_entry != NIL) AND symbolEntry__is_param(fanout_entry)) AND (symbolEntry__carrier_contract(fanout_entry) == :polymorphic)) THEN
-          RETURN TRY (capabilityAuditSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, UNWRAP (move_col)));
+          RETURN TRY (capabilityAuditSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, move_col));
         END
         MUTABLE type = ownershipNode__full_type(og_node);
         MUTABLE is_shared = type__shared?(castTypeTypeInputToType(TypeTypeInput{ Type: COPY type }));
@@ -730,7 +730,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE replacement_length = name.codepointCount();
         IF src EXISTS AS src_value THEN
           MUTABLE move_text = COPY (src_value.split("\n")[(move_line_value - 1)] OR_ELSE "");
-          MUTABLE prefix = COPY (move_text.substr(0, (UNWRAP (move_col) - 1)));
+          MUTABLE prefix = COPY (move_text.substr(0, (move_col - 1)));
           MUTABLE give_prefix: ?CompilerRegexScanner = compilerRegexMatchData(prefix, compilerRegexCompile("GIVE\\s+\\z"));
           IF give_prefix EXISTS AS give_prefix_value THEN
             replacement_col = ((compilerRegexPosition(give_prefix_value) - compilerRegexCapture(give_prefix_value, 0).codepointCount()) + 1);
@@ -993,7 +993,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE best: ?String@symbol = capabilityAuditSession__smallest_fitting_int_type(rtoc_self_view, val);
     IF best EXISTS AS best_value THEN
-      MUTABLE line_text = (UNWRAP (src).split("\n")[(tok.line - 1)] OR_ELSE "");
+      MUTABLE line_text = (src.split("\n")[(tok.line - 1)] OR_ELSE "");
       MUTABLE snippet = line_text.substr(((tok.column - 1)), (line_text.length() - ((tok.column - 1))));
       MUTABLE m: ?CompilerRegexScanner = compilerRegexMatchData(snippet, compilerRegexCompile("\\A(\\d[\\d_]*)_([a-z]\\d+)"));
       IF m EXISTS AS m_value THEN
@@ -1159,7 +1159,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fix) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], CAST({:name: fn_node.name} AS {String@symbol}Any)));
     END
-    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :reentrance, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:name: fn_node.name} AS {String@symbol}Any)));
+    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :reentrance, [fix], NIL, code, :error, FALSE, CAST({:name: fn_node.name} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_capture_immutable_as_mutable_error_mut(MUTABLE self: CapabilityAuditSession, node: FunctionDef, cap_name: String, owner_scope: Scope) RETURNS !Void
@@ -1187,7 +1187,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fix) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :AMBIGUOUS_RETURN }, [], CAST({:types: return_types} AS {String@symbol}Any)));
     END
-    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :type, [UNWRAP (fix)], NIL, :AMBIGUOUS_RETURN, :error, FALSE, CAST({:types: return_types} AS {String@symbol}Any)));
+    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :type, [fix], NIL, :AMBIGUOUS_RETURN, :error, FALSE, CAST({:types: return_types} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_match_partial_fix_mut(MUTABLE self: CapabilityAuditSession, match_node: MatchStatement, code: String@symbol, kwargs: {String@symbol}DiagnosticKwValue = {}) RETURNS !Void
@@ -1203,9 +1203,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueMapToAnyMap__capability_audit_session(kwargs)));
     END
     IF (code == :MATCH_NEEDS_ENUM_OR_UNION) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:type: (kwargs[:type] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:type: (kwargs[:type] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue)));
     ELSE_IF (code == :MATCH_NON_EXHAUSTIVE) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [UNWRAP (fix)], NIL, code, :error, FALSE, CAST({:kind: (kwargs[:kind] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :name: (kwargs[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :missing: (kwargs[:missing] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:kind: (kwargs[:kind] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :name: (kwargs[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :missing: (kwargs[:missing] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE
       panic("unsupported MATCH partial fix diagnostic: {}");
     END
@@ -1224,7 +1224,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fix) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, CapabilityAuditCodeOrMessage{ SymbolValue: :RETURN_BORROWED_NO_COPY_OR_LIFETIME }, [], kw));
     END
-    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, :lifetime, [UNWRAP (fix)], NIL, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, :error, FALSE, kw));
+    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, :lifetime, [fix], NIL, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, :error, FALSE, kw));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_cap_field_needs_with_mut(MUTABLE self: CapabilityAuditSession, node: GetField, code: String@symbol, name: NameCandidate, field: String, cap: String, perm: String) RETURNS !Void
@@ -1461,9 +1461,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((decl != NIL) AND (src != NIL)) THEN
       MUTABLE token: ?Token = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
       IF token THEN
-        MUTABLE dline = UNWRAP (token).line;
+        MUTABLE dline = token.line;
         MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
-        MUTABLE search_offset = (UNWRAP (token).column - 1);
+        MUTABLE search_offset = (token.column - 1);
         MUTABLE ann_match: ?CompilerRegexScanner = NIL;
         IF (search_offset < line_text.length()) THEN
           ann_match = COPY compilerRegexMatchData(line_text.substr(search_offset, (line_text.length() - search_offset)), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
@@ -1506,7 +1506,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END;
     IF tok THEN
-      fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_CAN_SMASH_WITH_SERVICE)), [edit__new(span__new(NIL, UNWRAP (tok).line, UNWRAP (tok).column, (CAST(UNWRAP (tok).value AS String)).codepointCount()), "@service")], :auto));
+      fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_CAN_SMASH_WITH_SERVICE)), [edit__new(span__new(NIL, tok.line, tok.column, (CAST(tok.value AS String)).codepointCount()), "@service")], :auto));
     END
     IF !(fix) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :CAN_SMASH_NOT_SUPPORTED }));
@@ -1629,9 +1629,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (decl))).line;
+      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
-      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (decl))).column - 1));
+      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(castSymbolEntryRegInputToLocatable(decl)).column - 1));
       IF semi_idx EXISTS AS semi_idx_value THEN
         IF line_text.contains?(sigil) THEN
           RETURN NIL;
@@ -1669,7 +1669,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (decl))).line;
+      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
       MUTABLE idx: ?Int64 = line_text.indexOf(old_sigil);
       IF idx EXISTS AS idx_value THEN
@@ -1718,10 +1718,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(tok) THEN
         RETURN NIL;
       END
-      IF (token__text_is?(UNWRAP (tok), "MUTABLE")) THEN
+      IF (token__text_is?(tok, "MUTABLE")) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: UNWRAP (tok).line} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
+      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: tok.line} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
     ELSE
       RETURN NIL;
     END
@@ -1749,7 +1749,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF !(line_num) THEN
             RETURN NIL;
           END
-          MUTABLE src_line = (src_value.split("\n")[(UNWRAP (line_num) - 1)] OR_ELSE "");
+          MUTABLE src_line = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
           MUTABLE search_offset = (UNWRAP (symbolEntryRegInput__token(reg_value)).column - 1);
           MUTABLE match: ?CompilerRegexScanner = NIL;
           IF (search_offset < src_line.length()) THEN
@@ -1757,7 +1757,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
           IF match EXISTS AS match_value THEN
             MUTABLE start_col = ((search_offset + (compilerRegexPosition(match_value) - compilerRegexCapture(match_value, 0).codepointCount())) + 1);
-            RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :MIGRATE_ATOMIC_ESCAPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY source_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (line_num), start_col, compilerRegexCapture(match_value, 0).codepointCount()), "@shared:locked")], :interactive));
+            RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :MIGRATE_ATOMIC_ESCAPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY source_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, start_col, compilerRegexCapture(match_value, 0).codepointCount()), "@shared:locked")], :interactive));
           ELSE
             RETURN NIL;
           END
@@ -2329,7 +2329,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         MUTABLE before = current.length();
         MUTABLE site_ctx = capabilityAuditSession__effect_call_site_context_for(&rtoc_self_view, rtoc_each_7, UNWRAP (callees[rtoc_idx]));
-        MUTABLE resolved_callee = TRY (capabilityAuditSession__resolve_maybe_effects(&rtoc_self_view, UNWRAP (callee_effs), rtoc_each_7, UNWRAP (callees[rtoc_idx])));
+        MUTABLE resolved_callee = TRY (capabilityAuditSession__resolve_maybe_effects(&rtoc_self_view, callee_effs, rtoc_each_7, UNWRAP (callees[rtoc_idx])));
         TRY (capabilityAuditSession__inherit_effects_from_callee(rtoc_self_view, &current, resolved_callee, site_ctx));
         IF (current.length() > before) THEN
               changed = TRUE;
@@ -2492,8 +2492,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(UNWRAP (scope), UNWRAP (callees[rtoc_idx])) != NIL THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_15 = (scope__resolve_entry(UNWRAP (scope), UNWRAP (callees[rtoc_idx])));
+      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, UNWRAP (callees[rtoc_idx])) != NIL THEN
+          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_15 = (scope__resolve_entry(scope, UNWRAP (callees[rtoc_idx])));
       symbolEntry__type(rtoc_local_receiver_15) }
         ELSE
           NIL
@@ -3092,7 +3092,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fn) THEN
           CONTINUE;
     END
-    IF (fn?.stack_tier == :unbounded) THEN
+    IF (fn.stack_tier == :unbounded) THEN
           CONTINUE;
     END
     IF callees |> ANY ((fn_nodes[rtoc_each_17] != NIL) AND (((fn_nodes[rtoc_each_17])?).stack_tier == :unbounded)) THEN
@@ -3172,7 +3172,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node == NIL) THEN
         CONTINUE;
     END
-    IF UNWRAP (node).reentrance_kind THEN
+    IF node.reentrance_kind THEN
         CONTINUE;
     END
     MUTABLE visited = Set[];
@@ -3340,7 +3340,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE open_brace_token: ?Token = bg_block.open_brace_token;
       IF open_brace_token THEN
-        RETURN CAST(TRY (capabilityAuditSession__insert_service_after_open_brace_fix(rtoc_self_view, UNWRAP (open_brace_token))) AS ?Fix);
+        RETURN CAST(TRY (capabilityAuditSession__insert_service_after_open_brace_fix(rtoc_self_view, open_brace_token)) AS ?Fix);
       END
       RETURN NIL;
     ELSE
@@ -3642,9 +3642,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(span) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_24: []Edit = List[]; rtoc_empty_list_24 } ) AS []Edit);
     END
-    MUTABLE s = span?.start_token;
-    MUTABLE e = UNWRAP (span).end_token;
-    IF (UNWRAP (s).line != e.line) THEN
+    MUTABLE s = span.start_token;
+    MUTABLE e = span.end_token;
+    IF (s.line != e.line) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_25: []Edit = List[]; rtoc_empty_list_25 } ) AS []Edit);
     END
     MUTABLE end_col = (e.column + (CAST(e.value AS String)).codepointCount());

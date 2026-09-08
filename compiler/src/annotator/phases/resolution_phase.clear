@@ -438,7 +438,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE expected_name = type__resolved((TRY (resolutionSession__to_type( rtoc_self_view, castTypeToTypeTypeInput__resolution_phase( UNWRAP (requirement.params[rtoc_idx]?.type))))));
-      MUTABLE actual_name = type__resolved((TRY (resolutionSession__to_type(rtoc_self_view, castTypeToTypeTypeInput__resolution_phase(UNWRAP (actual).type)))));
+      MUTABLE actual_name = type__resolved((TRY (resolutionSession__to_type(rtoc_self_view, castTypeToTypeTypeInput__resolution_phase(actual.type)))));
       IF (((expected_name == actual_name) OR (expected_name == :Any)) OR (actual_name == :Any)) THEN
               rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -1042,13 +1042,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(sig) THEN
         CONTINUE;
     END
-    IF functionSignature__module_alias(UNWRAP (sig)) THEN
+    IF functionSignature__module_alias(sig) THEN
         CONTINUE;
     END
     IF (rtoc_each_1 == rtoc_each_1) THEN
         CONTINUE;
     END
-    MUTABLE vis = (functionSignature__visibility(UNWRAP (sig)) OR :package);
+    MUTABLE vis = (functionSignature__visibility(sig) OR :package);
     MUTABLE importable = (((vis == :pub)) OR (((vis == :package) AND same_dir)));
     IF !(importable) THEN
         CONTINUE;
@@ -1850,7 +1850,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(match) THEN
       RETURN NIL;
     END
-    insert_offset: Int64 = compilerRegexPosition(UNWRAP (match));
+    insert_offset: Int64 = compilerRegexPosition(match);
     MUTABLE prefix = source.substr(0, (insert_offset - 0));
     MUTABLE line = (compilerCountOccurrences(prefix, "\n") + 1);
     MUTABLE last_newline = compilerLastIndex(prefix, "\n");
@@ -2455,7 +2455,7 @@ FN castOptionalSchemasUnionSchemaVariantValueToOptionalSchemasUnionSchemaVariant
   IF value == NIL THEN
     panic("Invalid cast to ?SchemasUnionSchemaVariantInput");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     SchemasUnionSchemaVariantValue.FunctionType AS cast_payload -> RETURN SchemasUnionSchemaVariantInput{ FunctionType: COPY cast_payload };,
     SchemasUnionSchemaVariantValue.StringValue AS cast_payload -> RETURN SchemasUnionSchemaVariantInput{ StringValue: COPY cast_payload };,
     SchemasUnionSchemaVariantValue.SymbolValue AS cast_payload -> RETURN SchemasUnionSchemaVariantInput{ SymbolValue: COPY cast_payload };,
