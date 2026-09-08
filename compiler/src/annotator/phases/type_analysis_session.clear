@@ -7681,7 +7681,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castAnnotationNodeToLocatable(facts.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], CAST({:cap: "@list", :example: "User[]@list or User[N]@list"} AS {String@symbol}Any)));
     END
     IF ((type__pool?(shape) AND !(type__array?(shape))) AND !(facts.inner_array)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], CAST({:cap: "@pool", :example: "User[]@pool or User[N]@pool"} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], CAST({:cap: "@pool", :example: "User[]@pool or User[N]@pool"} AS {String@symbol}Any)));
     END
     IF ((type__set_collection?(shape) AND !(type__array?(shape))) AND !(facts.inner_array)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :COLLECTION_NEEDS_ARRAY_TYPE }, [], CAST({:cap: "@set", :example: "String[]@set"} AS {String@symbol}Any)));
@@ -7768,7 +7768,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castAnnotationNodeToLocatable(facts.node)), TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_NEEDS_2_PLUS }, [], CAST({:got: shard_count} AS {String@symbol}Any)));
     END
     IF (type__pool?(type_obj) AND !(type__fixed?(type_obj))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :POOL_NEEDS_FIXED_CAPACITY }, [], CAST({:element: (IF TRY (type__element_type(type_obj)) != NIL THEN
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :POOL_NEEDS_FIXED_CAPACITY }, [], CAST({:element: (IF TRY (type__element_type(type_obj)) != NIL THEN
         type__resolved( UNWRAP ((TRY (type__element_type( type_obj)))))
       ELSE
         NIL
@@ -7862,7 +7862,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE nested_schema: ?SchemaValue = CAST(TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type__generic_base(arg))) AS ?SchemaValue);
       IF (nested_schema == NIL) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_TYPE_ARG }, [], CAST({:type: type__resolved(arg)} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_TYPE_ARG }, [], CAST({:type: type__resolved(arg)} AS {String@symbol}Any)));
       END
       MUTABLE nested_params = TRY (typeAnalysisSession__schema_type_params(&rtoc_self_view, nested_schema));
       IF (nested_params.length() != (TRY (type__generic_args(arg))).length()) THEN
