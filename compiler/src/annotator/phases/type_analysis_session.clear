@@ -5570,7 +5570,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, UNWRAP (locatable__size(node.right))));
     MUTABLE size_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__size(node.right)));
     IF !(([:Int64, :Float64]).contains?(size_type)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right.length(), TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (locatable__size(node.right)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
     END
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_118 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
@@ -5619,7 +5619,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF opts["size"] THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, opts["size"]));
-      MUTABLE size_type = opts["size"].resolved_type;
+      MUTABLE size_type: ?String@symbol = locatable__resolved_type(UNWRAP (opts["size"]));
       IF !(([:Int64, :Float64]).contains?(size_type)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, opts["size"], TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
       END
@@ -5852,7 +5852,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_132 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_132, "_", NIL, item_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+    TRY (scope__declare(&rtoc_mutable_receiver_132, "_", NIL, SymbolEntryTypeInput{ SymbolValue: COPY item_type }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, node.right.expression()))
     });
     MUTABLE expr_type = TRY (type__new(node.right.expression().full_type_mut({:context: "pipeline op expression"})));
@@ -5964,7 +5964,7 @@ PRIVATE FN typeAnalysisSession__analyze_pipe_to_identifier(MUTABLE self: TypeAna
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
     MUTABLE t = TRY (aST__full_type_mut(node.right));
-    MUTABLE sig = ( X{ Type: COPY functionSignature__unwrap(X{ Type: COPY t }) OR_ELSE t });
+    MUTABLE sig = (functionSignature__unwrap(X{ Type: COPY t }) OR_ELSE X{ Type: COPY t });
     MUTABLE func_name = node.right.name();
     IF sig IS_A FunctionSignature@multiowned THEN
       TRY (typeAnalysisSession__analyze_pipe_to_named_function(&rtoc_self_view, &node, sig, func_name));
@@ -6306,7 +6306,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE conc = castLocatableToConcurrentOp__type_analysis_session(COPY node.right);
     MUTABLE each_op: ?ClearParserConcurrentPipelineOp = conc.op;
     MUTABLE ti = TRY (aST__full_type_mut( UNWRAP (shard_node.target_map)));
-    MUTABLE key_type: String@symbol = (IF (type__numeric_map?(ti) AND (TRY (type__key_type(ti)) != NIL)) THEN type__resolved(UNWRAP (TRY (type__key_type(ti)))) ELSE :String END);
+    MUTABLE key_type: String@symbol = (IF type__numeric_map?(ti) THEN type__resolved(TRY (type__key_type(ti))) ELSE :String END);
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(each_op, key_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_148 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_148, "_", NIL, key_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
