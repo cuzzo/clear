@@ -1761,7 +1761,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         MUTABLE fixes = List[];
-        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, consumer_description_code, CAST({:line: ruby_wrap_optional_Int64_DiagnosticKwValue__type_analysis_session(og_node.move_line)} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, move_line_value, UNWRAP (replacement_col), replacement_length), "(${consumer_keyword} ${name})")], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, consumer_description_code, CAST({:line: (ruby_wrap_optional_Int64_DiagnosticKwValue__type_analysis_session(og_node.move_line) OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, move_line_value, UNWRAP (replacement_col), replacement_length), "(${consumer_keyword} ${name})")], :interactive)));
         MUTABLE candidate_caps = List[];
         IF !((is_multi OR is_split)) THEN
           &candidate_caps.append("@multiowned");
@@ -6368,7 +6368,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END) != NIL THEN
         sc = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_150 = (((IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_149: ?Scope = (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)));
-    scope__resolve_entry(rtoc_local_receiver_149, _) }
+    scope__resolve_entry(UNWRAP (rtoc_local_receiver_149), _) }
       ELSE
         NIL
       END))?);

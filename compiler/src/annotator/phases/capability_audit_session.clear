@@ -2494,7 +2494,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, UNWRAP (callees[rtoc_idx])) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_15: ?SymbolEntry = (scope__resolve_entry(scope, UNWRAP (callees[rtoc_idx])));
-      symbolEntry__type(rtoc_local_receiver_15) }
+      symbolEntry__type(UNWRAP (rtoc_local_receiver_15)) }
         ELSE
           NIL
         END)));
@@ -2558,7 +2558,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, UNWRAP (callees[rtoc_idx])) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_16: ?SymbolEntry = (scope__resolve_entry(scope, UNWRAP (callees[rtoc_idx])));
-      symbolEntry__type(rtoc_local_receiver_16) }
+      symbolEntry__type(UNWRAP (rtoc_local_receiver_16)) }
         ELSE
           NIL
         END)));
@@ -4340,7 +4340,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_value: FunctionDef@multiowned = TRY (capabilityAuditSession__whole_program_fn_nodes(rtoc_self_view))[rtoc_each_23];
     MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(root_scope, rtoc_each_23) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_49: ?SymbolEntry = (scope__resolve_entry(root_scope, rtoc_each_23));
-    symbolEntry__type(rtoc_local_receiver_49) }
+    symbolEntry__type(UNWRAP (rtoc_local_receiver_49)) }
       ELSE
         NIL
       END)));
