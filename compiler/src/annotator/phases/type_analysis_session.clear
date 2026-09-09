@@ -5361,7 +5361,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN :heap;
     ELSE
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF inner THEN
-        inner.resolved()
+        type__resolved(inner)
       ELSE
         :Any
       END));
@@ -7677,7 +7677,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     rtoc_ternary_value_174? };
     IF (((TRUE) AND type__indirect?(payload)) AND type__primitive?(payload)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], CAST({:type: type__resolved(payload)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], CAST({:type: type__resolved(payload)} AS {String@symbol}Any)));
     END
     IF (type__sharded?(type_obj) AND ((payload != NIL) AND UNWRAP (payload).multiowned?())) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_ELEMENT_REQUIRES_SHARED }, [], {:got: CAST(payload AS String)}));
