@@ -48,9 +48,10 @@ PUB STRUCT Decision {
   alias_fact: Alias,
   plan: OwnershipTransportPlan
 }
+PUB UNION OwnershipTransportSlot { Int64Value: Int64, StringValue: String }
 PUB STRUCT Transfer {
   container: Locatable,
-  slot: Any@multiowned,
+  slot: OwnershipTransportSlot,
   source: Identifier,
   source_id: Int64,
   ordinal: Int64
@@ -174,7 +175,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN ownershipTransportFacts__record_transfer(MUTABLE self: OwnershipTransportFacts, container: Locatable, slot: Slot, source: Identifier) RETURNS Void
+PUB FN ownershipTransportFacts__record_transfer(MUTABLE self: OwnershipTransportFacts, container: Locatable, slot: OwnershipTransportSlot, source: Identifier) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
