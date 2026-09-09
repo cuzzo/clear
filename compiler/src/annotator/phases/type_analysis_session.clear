@@ -9571,7 +9571,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE expr: ?ContractClauseValue = _[:expr];
     typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :pre, with_node: NIL, fn_node: COPY fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_208: []String = List[]; rtoc_empty_list_208 } ), param_names: COPY param_names, allowed_names: ( { MUTABLE rtoc_empty_list_209: []String = List[]; rtoc_empty_list_209 } ), rejected_param_names: COPY Set[], fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, castContractClauseValueToLocatable(UNWRAP (expr))));
-      MUTABLE pred_type = TRY (aST__full_type_mut(expr));
+      MUTABLE pred_type = TRY (aST__full_type_mut(castContractClauseValueToLocatable(UNWRAP (expr))));
       IF !((pred_type AND (pred_type.resolved() == :Bool))) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :PRE_EXPR_MUST_BE_BOOL }, [], CAST({:got: (pred_type OR_ELSE "Unknown")} AS {String@symbol}Any)));
       END
@@ -9620,7 +9620,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE expr: ?ContractClauseValue = _[:expr];
       typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :post, with_node: NIL, fn_node: fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_213: []String = List[]; rtoc_empty_list_213 } ), param_names: ( { MUTABLE rtoc_empty_list_214: []String = List[]; rtoc_empty_list_214 } ), allowed_names: COPY allowed_names, rejected_param_names: COPY rejected, fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
         TRY (typeAnalysisSession__visit(&rtoc_self_view, castContractClauseValueToLocatable(UNWRAP (expr))));
-        MUTABLE pred_type = TRY (aST__full_type_mut(expr));
+        MUTABLE pred_type = TRY (aST__full_type_mut(castContractClauseValueToLocatable(UNWRAP (expr))));
         IF !((pred_type AND (pred_type.resolved() == :Bool))) THEN
             TRY (typeAnalysisSession__error_mut(&rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :DEBUG_POST_EXPR_MUST_BE_BOOL }, [], CAST({:got: (pred_type OR_ELSE "Unknown")} AS {String@symbol}Any)));
         END
@@ -18619,7 +18619,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF !(type__optional?(full_type)) THEN
             RETURN {};
           END
-          RETURN CAST({entry.binding_id: TRY (type__wrapped_type(full_type))} AS {Int64}Type);
+          RETURN CAST({entry.binding_id: UNWRAP (TRY (type__wrapped_type(full_type)))} AS {Int64}Type);
         ELSE
           RETURN {};
         END
