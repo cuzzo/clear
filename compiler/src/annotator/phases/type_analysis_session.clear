@@ -8241,7 +8241,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, _.type, a_param.type(), type_params, &subst));
           };
-          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, UNWRAP (param_fn_value).return_type, actual_fn.return_type, type_params, &subst));
+          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, param_fn_value.return_type, actual_fn.return_type, type_params, &subst));
         ELSE
           RETURN;
         END
@@ -8326,14 +8326,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             projected = TRY (type__key_type(concrete));
           END
         ELSE_IF (typeExpressionKind__member(kind) == :Value) THEN
-          IF ((((typeExpressionKind__protocol(kind) == NIL) OR (kind.protocol == :Map))) AND type__map?(concrete)) THEN
+          IF ((((typeExpressionKind__protocol(kind) == NIL) OR (typeExpressionKind__protocol(kind) == :Map))) AND type__map?(concrete)) THEN
             projected = TRY (type__value_type(concrete));
           END
         END
         IF (((projected == NIL) AND typeExpressionKind__protocol(kind)) AND (typeExpressionKind__protocol(kind) != :Map)) THEN
           MUTABLE match: ?ConformanceMatch = TRY (typeAnalysisSession__conformance_match(&rtoc_self_view, CAST(typeExpressionKind__protocol(kind) AS String), concrete));
           IF match EXISTS AS match_value THEN
-            MUTABLE associated: ?Type = COPY match_value.resolution.associated_types[kind.member];
+            MUTABLE associated: ?Type = COPY match_value.resolution.associated_types[typeExpressionKind__member(kind)];
             IF associated EXISTS AS associated_value THEN
               projected = CAST(TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(associated_value), match_value.substitutions)) AS ?Type);
             END
@@ -9759,9 +9759,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE fields = schemaValue__fields(UNWRAP (schema));
       FOR rtoc_each_key IN fields.keys() DO
     MUTABLE ignored_1 = COPY UNWRAP (fields[rtoc_each_key]);
-    (TRY (typeAnalysisSession__visit(&rtoc_self_view, Locatable{ GetField: COPY field_node })));
-    MUTABLE expanded_cap = Capability{ capability: COPY capability__capability(cap), var_node: Locatable{ GetField: COPY field_node }, old_scope: COPY capability__old_scope(cap), resolved_type: CAST(COPY TRY (aST__full_type_mut(field_node)) AS Type), alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
-    withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(&rtoc_self_view, expanded_cap)));
+    (TRY (typeAnalysisSession__visit(&rtoc_self_view, Locatable{ GetField: COPY rtoc_each_key })));
+    MUTABLE expanded_cap = Capability{ capability: COPY capability__capability(cap), var_node: Locatable{ GetField: COPY rtoc_each_key }, old_scope: COPY capability__old_scope(cap), resolved_type: CAST(COPY TRY (aST__full_type_mut(rtoc_each_key)) AS Type), alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
+    withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(&rtoc_self_view, rtoc_each_key)));
       END
       MUTABLE base_t = aST__full_type_mut(UNWRAP (locatable__target(var_node)), {:context: "WITH wildcard base"});
       MUTABLE rtoc_each_key = Capability{ capability: COPY capability__capability(cap), var_node: COPY UNWRAP (locatable__target(var_node)), old_scope: COPY capability__old_scope(cap), resolved_type: COPY rtoc_each_key, alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
@@ -15065,7 +15065,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_377 = (TRY (ownershipTransportFacts__decisions(facts)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_377.length() DO
-      MUTABLE node: BindingNode = COPY KEEP (rtoc_each_items_377[rtoc_idx]?.alias_fact).declaration;
+      MUTABLE node: ?Any = COPY KEEP (rtoc_each_items_377[rtoc_idx]?.alias_fact).declaration;
       node?.ownership_transport_plan = COPY rtoc_each_items_377[rtoc_idx]?.plan;
       IF ((rtoc_each_items_377[rtoc_idx]?.plan).action == :move) THEN
           TRY (typeAnalysisSession__handle_assign_move(&rtoc_self_view, node));
