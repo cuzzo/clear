@@ -1,0 +1,21 @@
+# A CAST reinterprets a value; it does not change who owns it. Reassigning from
+# `CAST(<union payload view> AS T)` used to report "no operand provenance",
+# because the cast hid the root the provenance is keyed on. Now the cast is
+# transparent, the view stays a borrow through it, and COPY is what makes the
+# reassignment own its value.
+UNION Payload { SymbolValue: String@symbol, ArrayValue: []String }
+
+FN sources_of(p: ?Payload) RETURNS []String ->
+  MUTABLE sources: []String = List[];
+  IF p EXISTS AS pv THEN
+    IF pv IS_A ArrayValue AS items THEN
+      sources = COPY CAST(items AS []String);
+    END
+  END
+  RETURN sources;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE p: ?Payload = Payload{ ArrayValue: COPY ["a", "b"] };
+  print("${sources_of(p).length().toString()}\n");
+END

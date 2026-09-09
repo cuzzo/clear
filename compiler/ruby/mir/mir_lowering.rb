@@ -3085,6 +3085,20 @@ class MIRLowering
     ).returns(T::Array[MIR::OwnershipOperandFact])
   end
   def ownership_operands_for_sink_value(value_mir, ast_value, ti, source, target_alloc, require_visible_owned:)
+    # A CAST reinterprets a value; it does not change who owns it. Ask the
+    # question of what it wraps, so a `x = CAST(owned AS T)` reassignment
+    # records the same provenance the bare value would.
+    if ast_value.is_a?(AST::Cast) && value_mir.is_a?(MIR::Cast)
+      inner = ownership_operands_for_sink_value(value_mir.expr, ast_value.value, ti, source,
+        target_alloc, require_visible_owned: require_visible_owned)
+      # Casting does not make a borrow an owner. A name the function does not
+      # own -- a union payload view, for one -- stays a borrow through the cast.
+      return inner.map do |operand|
+        next operand if operand.borrowed || operand.name.nil?
+        next operand if owned_binding_visible?(T.must(operand.name))
+        MIR::OwnershipOperandFact.borrowed_access(operand.name, operand.type_info, operand.source, target_alloc)
+      end
+    end
     # NodeRef is a copyable generation handle. The store owns and moves the
     # payload; assigning or capturing the handle never transfers that payload.
     return [MIR::OwnershipOperandFact.non_owning(ti, source)] if ti.node_reference?
@@ -3216,6 +3230,11 @@ class MIRLowering
   def ownership_root_name(node)
     current = T.let(node, T.nilable(AST::Node))
     current = current.value if current.is_a?(AST::MoveNode) || current.is_a?(AST::CopyNode) || current.is_a?(AST::KeepNode)
+    # A CAST reinterprets the value; it does not change who owns it. The MIR
+    # side already looks through MIR::Cast for the same reason, and without
+    # this the root of `x = CAST(owned AS T)` was invisible, so a reassignment
+    # with cleanup recorded no operand provenance at all.
+    current = current.value while current.is_a?(AST::Cast)
     current = current.target while current.is_a?(AST::GetField) || current.is_a?(AST::GetIndex)
     return current.name.to_s if current.is_a?(AST::Identifier)
     nil
