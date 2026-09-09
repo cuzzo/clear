@@ -9002,7 +9002,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE rtoc_fn_slot2 = UNWRAP (fn_node); locatable__set_tight_reentrance_mut(&rtoc_fn_slot2, FALSE);
           END
       END
-      TRY (typeAnalysisSession__validate_requires_clauses_mut(&rtoc_self_view, fn_node));
+      TRY (typeAnalysisSession__validate_requires_clauses_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node)))));
       TRY (typeAnalysisSession__validate_not_logical_return_mut(&rtoc_self_view, fn_node));
       TRY (typeAnalysisSession__offer_unconstrained_fn_param_fix_mut(&rtoc_self_view, fn_node));
     rtoc_idx = rtoc_idx + 1;
@@ -9538,7 +9538,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE own = COPY _.alias_name;
     MUTABLE siblings = (aliases |> WHERE (_ != own));
     MUTABLE guard_expr = COPY UNWRAP (_.guard_expr);
-    typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :guard, with_node: node, fn_node: NIL, pred_expr: COPY guard_expr, guard_alias: COPY own, sibling_aliases: COPY siblings, param_names: ( { MUTABLE rtoc_empty_list_206: []String = List[]; rtoc_empty_list_206 } ), allowed_names: ( { MUTABLE rtoc_empty_list_207: []String = List[]; rtoc_empty_list_207 } ), rejected_param_names: COPY Set[], fn_name: NIL }, %() USE(MUTABLE guard_expr, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :guard, with_node: COPY node, fn_node: NIL, pred_expr: COPY guard_expr, guard_alias: COPY own, sibling_aliases: COPY siblings, param_names: ( { MUTABLE rtoc_empty_list_206: []String = List[]; rtoc_empty_list_206 } ), allowed_names: ( { MUTABLE rtoc_empty_list_207: []String = List[]; rtoc_empty_list_207 } ), rejected_param_names: COPY Set[], fn_name: NIL }, %() USE(MUTABLE guard_expr, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, guard_expr));
       MUTABLE guard_type = TRY (aST__full_type_mut(guard_expr));
       IF !((guard_type AND (guard_type.resolved() == :Bool))) THEN
@@ -10816,7 +10816,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRUE;
     END
     IF (schemaValue__kind(UNWRAP (schema)) == :union) THEN
-      IF !(schemaValue__variants(UNWRAP (schema)).key?(node.field)) THEN
+      IF !(schemaValue__variants(UNWRAP (schema)).contains?(node.field)) THEN
         TRY (typeAnalysisSession__emit_variant_typo_mut(&rtoc_self_view, UNWRAP (typeAnalysisSession__variant_anchor_from_getfield(&rtoc_self_view, node)), node.field, schemaValue__variants(UNWRAP (schema)).keys(), "Type Error: Union '${type_name}' has no variant '${node.field}'.", "variant of union ${type_name}", TRUE));
       END
       MUTABLE var_data = schemaValue__variants(UNWRAP (schema))[node.field];
@@ -12804,7 +12804,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       resolved
     END;
     MUTABLE type_schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, base));
-    IF !((((schemas__struct?(type_schema) OR schemas__resource?(type_schema))) AND ((schemaValue__methods(UNWRAP (type_schema)) != NIL) AND ((schemaValue__methods(UNWRAP (type_schema)))?).key?(node.name)))) THEN
+    IF !((((schemas__struct?(type_schema) OR schemas__resource?(type_schema))) AND ((schemaValue__methods(UNWRAP (type_schema)) != NIL) AND ((schemaValue__methods(UNWRAP (type_schema)))?).contains?(node.name)))) THEN
       RETURN FALSE;
     END
     MUTABLE method_sig = schemaValue__methods(UNWRAP (type_schema))[node.name];
@@ -13522,7 +13522,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       IF schema EXISTS AS schema_value THEN
-          IF !(scopeScopeTypeSchema__fields(schema_value).key?(pat.fields[rtoc_idx]?.name)) THEN
+          IF !(scopeScopeTypeSchema__fields(schema_value).contains?(pat.fields[rtoc_idx]?.name)) THEN
             MUTABLE name_tok: ?Token@multiowned = COPY pat.fields[rtoc_idx]?.name_token;
             IF name_tok EXISTS AS name_tok_value THEN
               MUTABLE valid_fields = schemaValue__fields(UNWRAP (schema)).keys() |> WHERE !((CAST(_ AS String)).startsWith?("_"));
@@ -13533,7 +13533,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
       END
       IF patternField__bind?(pat.fields[rtoc_idx]?) THEN
-          IF (TRUE AND schemaValue__fields(UNWRAP (schema)).key?(pat.fields[rtoc_idx]?.name)) THEN
+          IF (TRUE AND schemaValue__fields(UNWRAP (schema)).contains?(pat.fields[rtoc_idx]?.name)) THEN
             MUTABLE field_def = schemaValue__fields(UNWRAP (schema))[pat.fields[rtoc_idx]?.name];
             MUTABLE field_type = field_def.type();
             MUTABLE rtoc_mutable_receiver_328 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
@@ -16379,7 +16379,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE union_subst = TRY (typeAnalysisSession__literal_type_substitution_mut(&rtoc_self_view, &node, schema));
       MUTABLE variant_name, val_node = node.fields.first();
-      IF !(schemaValue__variants(UNWRAP (schema)).key?(variant_name)) THEN
+      IF !(schemaValue__variants(UNWRAP (schema)).contains?(variant_name)) THEN
         MUTABLE anchor: ?AnchorToken = typeAnalysisSession__variant_anchor_from_unionlit(&rtoc_self_view, Node{ StructLit: COPY node }, variant_name);
         IF anchor EXISTS AS anchor_value THEN
           TRY (typeAnalysisSession__emit_variant_typo_mut(&rtoc_self_view, anchor_value, variant_name, schemaValue__variants(UNWRAP (schema)).keys(), "Type Error: Union '${node.name}' has no variant '${variant_name}'.", "variant of union ${node.name}", TRUE));
