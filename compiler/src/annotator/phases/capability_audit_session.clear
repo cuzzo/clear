@@ -1686,7 +1686,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (code == :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC) OR (code == :WITH_ATOMIC_NEEDS_SHARED_ATOMIC) THEN
       TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, (fixes |> SELECT _), NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :actual: (kw[:actual] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE_IF (code == :WITH_NEEDS_MULTIOWNED) OR (code == :WITH_NEEDS_SHARED) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, (fixes |> SELECT UNWRAP (_)), NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, (fixes |> SELECT _), NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE
       panic("unsupported WITH capability mismatch diagnostic: {}");
     END

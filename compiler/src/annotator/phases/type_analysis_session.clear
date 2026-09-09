@@ -7001,7 +7001,7 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE op: ConcurrentOp = castLocatableToConcurrentOp__type_analysis_session(node.right);
+    MUTABLE op: ClearParserConcurrentPipelineOp = castLocatableToConcurrentOp__type_analysis_session(node.right);
     IF Locatable{ ConcurrentOp: COPY op } IS_A SelectOp THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, UNWRAP (clearParserConcurrentPipelineOp__expression(op))));
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, &op, effect));
@@ -16037,11 +16037,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.container_borrow = TRUE;
       RETURN NIL;
     END
-    IF type__tuple?( UNWRAP (target_type_info)) THEN
+    IF type__tuple?( target_type_info) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetIndex: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :TUPLE_INDEX_SYNTAX }));
     END
-    IF TRY (typeAnalysisSession__map_requires_protocol_lowering?(&rtoc_self_view, UNWRAP (target_type_info))) THEN
-      TRY (typeAnalysisSession__require_generic_map_access_scope_mut(&rtoc_self_view, node.target, UNWRAP (target_type_info)));
+    IF TRY (typeAnalysisSession__map_requires_protocol_lowering?(&rtoc_self_view, target_type_info)) THEN
+      TRY (typeAnalysisSession__require_generic_map_access_scope_mut(&rtoc_self_view, node.target, target_type_info));
       MUTABLE key_type = TRY (typeAnalysisSession__protocol_map_associated_type(&rtoc_self_view, UNWRAP (target_type_info), :Key));
       MUTABLE index_type = TRY (aST__full_type_mut(node.index));
       IF !(TRY (type__accepts?(key_type, index_type))) THEN
