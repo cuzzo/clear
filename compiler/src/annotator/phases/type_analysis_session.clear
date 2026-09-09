@@ -9149,28 +9149,37 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE existing = (fn_node.requires_clauses OR_ELSE {});
-    MUTABLE candidates = fn_node.params |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = COPY _.name; (IF existing.contains?(name) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE type = COPY _.type; (IF !((TRUE AND type__fn_type?(type))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE raw_branch_value: ?TypeShapeRaw = NIL;
-    IF TRUE THEN
-      raw_branch_value = type__raw(type);
-    ELSE
-      raw_branch_value = NIL;
+    MUTABLE candidates: []String = List[];
+    FOR _ IN fn_node.params DO
+      MUTABLE name = COPY _.name;
+      IF existing.contains?(name) THEN
+        CONTINUE;
+      END
+      MUTABLE type = COPY _.type;
+      IF !(type__fn_type?(type)) THEN
+        CONTINUE;
+      END
+      MUTABLE raw: ?TypeShapeRaw = type__raw(type);
+      IF (IF raw EXISTS AS rtoc_raw_v THEN (IF rtoc_raw_v IS_A FunctionType AS rtoc_fn_shape THEN (rtoc_fn_shape.reentrant == TRUE) ELSE FALSE END) ELSE FALSE END) THEN
+        CONTINUE;
+      END
+      &candidates.append(COPY name);
     END
-    MUTABLE raw: ?TypeShapeRaw = raw_branch_value; (IF ((raw != NIL) AND (IF raw IS_A FunctionType AS rtoc_fn_shape THEN (rtoc_fn_shape.reentrant == TRUE) ELSE FALSE END)) THEN NIL ELSE name END) } END) } END) } |> WHERE _ != NIL;
     IF (candidates.length() == 0) THEN
       RETURN;
     END
-    MUTABLE arrow = COPY fn_node.arrow_token;
-    MUTABLE requires_insert = (candidates |> SELECT "REQUIRES ${(_ OR_ELSE "")}: NON_REENTRANT ").join("");
-    MUTABLE requires_desc = (candidates |> SELECT "REQUIRES ${(_ OR_ELSE "")}: NON_REENTRANT").join(" + ");
+    MUTABLE arrow: Token = COPY fn_node.arrow_token;
+    MUTABLE requires_insert = (candidates |> SELECT "REQUIRES ${_}: NON_REENTRANT ").join("");
+    MUTABLE requires_desc = (candidates |> SELECT "REQUIRES ${_}: NON_REENTRANT").join(" + ");
     MUTABLE constrain_fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :ADD_NON_REENTRANT_REQUIRES, CAST({:requires: DiagnosticKwValue{ StringValue: COPY requires_desc }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, arrow.line, arrow.column, 2), "${requires_insert}->")], :auto));
-    MUTABLE propagate_fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :DECLARE_FN_REENTRANT, {:fn: DiagnosticKwValue{ StringValue: CAST(fn_node.name AS String) }})), [edit__new(span__new(NIL, arrow.line, arrow.column, 2), "EFFECTS REENTRANT ->")], :interactive));
+    MUTABLE propagate_fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :DECLARE_FN_REENTRANT, {:fn: DiagnosticKwValue{ StringValue: COPY CAST(fn_node.name AS String) }})), [edit__new(span__new(NIL, arrow.line, arrow.column, 2), "EFFECTS REENTRANT ->")], :interactive));
     MUTABLE msg_subject: String = "";
     IF (candidates.length() == 1) THEN
       msg_subject = "an unconstrained FN-typed parameter";
     ELSE
       msg_subject = "unconstrained FN-typed parameters";
     END
-    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, arrow, :lint, [constrain_fix, propagate_fix], NIL, :UNCONSTRAINED_FN_PARAM_REENTRANCE, :warning, FALSE, CAST({:fn: fn_node.name, :subject: msg_subject, :candidates: candidates.join(", ")} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY arrow }, :lint, [constrain_fix, propagate_fix], NIL, :UNCONSTRAINED_FN_PARAM_REENTRANCE, :warning, FALSE, CAST({:fn: COPY fn_node.name, :subject: msg_subject, :candidates: candidates.join(", ")} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN typeAnalysisSession__validate_requires_clauses_mut(MUTABLE self: TypeAnalysisSession, fn_node: FunctionDef) RETURNS !Void
@@ -12934,7 +12943,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__analyze_control_flow_branches(MUTABLE self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool = TRUE) RETURNS !?[]DeferredDrop
+PRIVATE FN typeAnalysisSession__analyze_control_flow_branches(MUTABLE self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool = TRUE) RETURNS ![]?[]DeferredDrop
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
