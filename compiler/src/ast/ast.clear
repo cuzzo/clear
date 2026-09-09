@@ -18094,3 +18094,12 @@ PUB FN aST__metatype(self: Locatable) RETURNS ?String@symbol EFFECTS REENTRANT -
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToDeferStmt(value: Locatable) RETURNS ?DeferStmt EFFECTS REENTRANT ->
+  IF value IS_A DeferStmt AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

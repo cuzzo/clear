@@ -2581,23 +2581,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE decl_alloc = ({
       MUTABLE rtoc_value_block_marker = 0;
       MUTABLE rt: ?Type = fn_node.return_type;
-      (IF rt THEN
-        (IF rt.error_union?() THEN
-        (type__collection?(rt) OR TRY (type__string?(rt)))
+      (IF rt EXISTS AS rt_value THEN
+        (IF type__error_union?(rt_value) THEN
+        (type__collection?(rt_value) OR TRY (type__string?(rt_value)))
       ELSE
-        ((((TRUE AND TRY (type__needs_escape_promotion?(rt)))) OR type__collection?(rt)) OR TRY (type__string?(rt)))
+        ((((TRUE AND TRY (type__needs_escape_promotion?(rt_value)))) OR type__collection?(rt_value)) OR TRY (type__string?(rt_value)))
       END)
       ELSE
         FALSE
       END)
-    } OR_ELSE FALSE);
+    });
     alloc_fault[_] = (direct_alloc OR decl_alloc);
     };
     FOR rtoc_each_12 IN (TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view))).keys() DO
     MUTABLE callees: [Set]String = ((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[rtoc_each_12] OR_ELSE CAST(panic("missing hash key") AS [Set]String));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < callees.length() DO
-      IF alloc_fault.contains?(callees[rtoc_idx]) THEN
+      IF alloc_fault.contains?(UNWRAP (callees[rtoc_idx])) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -2674,15 +2674,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(ret) THEN
         CONTINUE;
     END
-    MUTABLE ret_t = ret;
-    IF ret_t.error_union?() THEN
+    MUTABLE ret_t: Type = ret;
+    IF type__error_union?(ret_t) THEN
         CONTINUE;
     END
     IF (TRUE AND type__tense?(ret_t)) THEN
         CONTINUE;
     END
     MUTABLE hint = TRY (capabilityAuditSession__fallibility_hint_for(&rtoc_self_view, rtoc_each_14));
-    MUTABLE return_type = ret_t.resolved();
+    MUTABLE return_type = type__resolved(ret_t);
     MUTABLE tok = IF TRUE THEN
         fn_node.return_type_token
       ELSE
@@ -3210,7 +3210,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF node IS_A FuncCall AS func_call THEN func_call.fn_var_call ELSE FALSE END) THEN
       RETURN FALSE;
     END
-    MUTABLE callee = fn_nodes[callLikeNode__name(node)];
+    MUTABLE callee = fn_nodes[UNWRAP (callLikeNode__name(node))];
     IF !(callee) THEN
       RETURN FALSE;
     END
@@ -4217,7 +4217,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, KEEP rtoc_each_items_45[rtoc_idx]?.node, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_READ_NEEDS_WRITE_LOCK_NAME }, [], CAST({:name: UNWRAP (fact).target_label} AS {String@symbol}Any)));
+          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY UNWRAP (KEEP rtoc_each_items_45[rtoc_idx]?.node) } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_READ_NEEDS_WRITE_LOCK_NAME }, [], CAST({:name: UNWRAP (fact).target_label} AS {String@symbol}Any)));
       ELSE_IF (fact.capability == :ATOMIC) THEN
           IF (syn == :atomic) THEN
             rtoc_idx = rtoc_idx + 1;
