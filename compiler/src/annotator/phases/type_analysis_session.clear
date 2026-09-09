@@ -14118,7 +14118,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       type_label = "union";
     END
-    TRY (typeAnalysisSession__emit_match_partial_fix_mut(&rtoc_self_view, node, :MATCH_NON_EXHAUSTIVE, CAST({:kind: DiagnosticKwValue{ StringValue: COPY type_label }, :name: DiagnosticKwValue{ SymbolValue: COPY plan.type_name }, :missing: (missing |> ORDER_BY _).join(", ")} AS {String@symbol}DiagnosticKwValue)));
+    TRY (typeAnalysisSession__emit_match_partial_fix_mut(&rtoc_self_view, node, :MATCH_NON_EXHAUSTIVE, CAST({:kind: DiagnosticKwValue{ StringValue: COPY type_label }, :name: DiagnosticKwValue{ SymbolValue: COPY plan.type_name }, :missing: DiagnosticKwValue{ StringValue: COPY (missing |> ORDER_BY _).join(", ") }} AS {String@symbol}DiagnosticKwValue)));
 }
 END
 PRIVATE FN typeAnalysisSession__visit_PassStmt(MUTABLE self: TypeAnalysisSession, MUTABLE node: PassStmt) RETURNS !String@symbol
@@ -15930,7 +15930,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       value_count_branch_value = type__capacity(value_type);
     END
     MUTABLE value_count: ?TypeArrayCapacity = value_count_branch_value;
-    IF (value_count != node.targets.length()) THEN
+    IF (type__capacity_text(value_count) != node.targets.length().toString()) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ DestructuringAssignment: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :DESTRUCTURE_ARITY_MISMATCH }, [], CAST({:targets: node.targets.length(), :values: value_count} AS {String@symbol}Any)));
     END
 }
@@ -15967,14 +15967,15 @@ PRIVATE FN typeAnalysisSession__finalize_destructure_declaration_target_mut(MUTA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF target.type EXISTS AS type_value THEN
+    IF target.type EXISTS AS MUTABLE type_value THEN
       TRY (typeAnalysisSession__validate_type_annotation_mut(&rtoc_self_view, AnnotationNode{ DestructureTarget: COPY target }, &type_value));
     END
     MUTABLE final_type: ?Type = COPY target.type;
     TRY (typeAnalysisSession__validate_destructure_target_type_mut(&rtoc_self_view, &node, castTypeToTypeTypeInput__type_analysis_session( UNWRAP (final_type)), value_type));
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &target, final_type));
+    MUTABLE rtoc_target_loc = Locatable{ DestructureTarget: COPY target };
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &rtoc_target_loc, final_type));
     MUTABLE rtoc_mutable_receiver_394 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_394, target.name, SymbolEntryRegInput{ DestructureTarget: COPY target }, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session( UNWRAP (final_type)), &target.mutable, FALSE));
+    TRY (scope__declare(&rtoc_mutable_receiver_394, target.name, SymbolEntryRegInput{ DestructureTarget: COPY target }, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session( UNWRAP (final_type)), ScopeMutabilityInput{ BoolValue: (target.mutable OR_ELSE FALSE) }, FALSE));
     typeAnalysisSession__record_capture_local_mut(&rtoc_self_view, CAST(target.name AS String));
     target.symbol = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_395 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
     scope__local_entry_mut(&rtoc_local_receiver_395, target.name) };
@@ -15999,12 +16000,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ DestructuringAssignment: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :ASSIGN_VAR_IMMUTABLE }, [], CAST({:name: target.name} AS {String@symbol}Any)));
       END
     END
-    IF target.type EXISTS AS type_value THEN
+    IF target.type EXISTS AS MUTABLE type_value THEN
       TRY (typeAnalysisSession__validate_type_annotation_mut(&rtoc_self_view, AnnotationNode{ DestructureTarget: COPY target }, &type_value));
     END
     MUTABLE target_type = TRY (scope__resolve_type(scope, target.name));
     TRY (typeAnalysisSession__validate_destructure_target_type_mut(&rtoc_self_view, &node, TypeTypeInput{ Type: COPY target_type }, value_type));
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &target, target_type));
+    MUTABLE rtoc_target_loc = Locatable{ DestructureTarget: COPY target };
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &rtoc_target_loc, target_type));
     target.symbol = scope__entry_for_write(&scope, target.name);
     TRY (typeAnalysisSession__mark_var_mutated(&rtoc_self_view, target.name));
     typeAnalysisSession__og_set_live(&rtoc_self_view, target.name);
