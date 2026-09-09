@@ -10679,7 +10679,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_stdlib_def));
-    signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(node__matched_signature(node))));
+    signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(node__matched_signature(Node{ MethodCall: COPY node }))));
     IF signature EXISTS AS signature_value THEN
       MUTABLE signature_params: []Param = TRY (functionSignature__params(signature_value));
       MUTABLE takes_count = 0;
@@ -11966,7 +11966,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (aST__node_error_union_type( UNWRAP (castNodeToLocatable(node))) != NIL) THEN
       RETURN TRUE;
     END
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap((IF node__matched_signature(node) EXISTS AS rtoc_wrap_11966 THEN X{ FunctionSignature: COPY rtoc_wrap_11966 } ELSE NIL END));
+    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap((IF node__matched_signature(Node{ MethodCall: COPY node }) EXISTS AS rtoc_wrap_11966 THEN X{ FunctionSignature: COPY rtoc_wrap_11966 } ELSE NIL END));
     IF ((signature != NIL) AND type__error_union?(functionSignature__return_type(signature))) THEN
       RETURN TRUE;
     END
@@ -12672,7 +12672,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (functionReturn__resolve(rtoc_local_receiver_303, NIL, args)) }));
       node__set_zig_pattern_mut(&node, TRY (functionSignature__intrinsic_pattern(matched_def_value_mutable)));
       node.matched_stdlib_def = COPY matched_def_value_mutable;
-      IF (aST__node__matched_signature(node) EXISTS) THEN
+      IF (aST__node__matched_signature(Node{ MethodCall: COPY node }) EXISTS) THEN
         node.matched_signature = COPY matched_def_value_mutable;
       END
       MUTABLE matched_allocates = TRY (functionSignature__emits_allocating?(matched_def_value_mutable));
