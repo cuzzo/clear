@@ -3688,7 +3688,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_26.length() DO
       MUTABLE call = COPY KEEP rtoc_each_items_26[rtoc_idx]?.call;
       MUTABLE callee = COPY rtoc_each_items_26[rtoc_idx]?.callee;
-      MUTABLE reason: ?String = TRY (capabilityAuditSession__predicate_impurity_reason(rtoc_self_view, call, callee));
+      MUTABLE reason: ?String = TRY (capabilityAuditSession__predicate_impurity_reason(rtoc_self_view, UNWRAP (castPredicateCallToCapabilityAuditCall(UNWRAP (call))), callee));
       IF !(reason) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -3730,7 +3730,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF capabilityAuditCall__extern_call(call) THEN
       RETURN "is an extern call";
     END
-    MUTABLE extern_effects: ?PassStateValue = NIL;
+    MUTABLE extern_effects: ?{String@symbol}ExternEffectValue = NIL;
     MATCH call START
       CapabilityAuditCall.FuncCall AS item ->
         extern_effects = COPY item.extern_effects;,
@@ -3738,7 +3738,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         extern_effects = COPY item.extern_effects;,
     END
     IF extern_effects EXISTS AS extern_effects_value THEN
-      IF !(extern_effects_value.empty?()) THEN
+      IF !((extern_effects_value.length() == 0)) THEN
         RETURN "has extern effects";
       END
     END

@@ -164,3 +164,11 @@ PUB FN captureSiteNode__value(value: CaptureSiteNode) RETURNS ?Locatable@boxed -
   END
   RETURN NIL;
 END
+FN castPredicateCallToCapabilityAuditCall(value: PredicateCall) RETURNS ?CapabilityAuditCall ->
+  PARTIAL MATCH value START
+    PredicateCall.FuncCall AS item -> RETURN CapabilityAuditCall{ FuncCall: COPY item };,
+    PredicateCall.MethodCall AS item -> RETURN CapabilityAuditCall{ MethodCall: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
