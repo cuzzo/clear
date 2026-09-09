@@ -1734,7 +1734,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN TRY (typeAnalysisSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, move_col));
         END
         MUTABLE type = ownershipNode__full_type(og_node);
-        MUTABLE is_shared = type__shared?(UNWRAP (castTypeTypeInputToType(castTypeTypeInputToType(TypeTypeInput{ Type: COPY castTypeTypeInputToType(TypeTypeInput{ Type: COPY TypeTypeInput{ Type: COPY type } }) }))));
+        MUTABLE is_shared = type__shared?(UNWRAP (castTypeTypeInputToType(TypeTypeInput{ Type: COPY castTypeTypeInputToType(TypeTypeInput{ Type: COPY type }) })));
         MUTABLE is_multi = type__multiowned?(type);
         MUTABLE is_split = type__split?(type);
         MUTABLE use_clone = ((is_shared OR is_multi) OR is_split);
@@ -11768,7 +11768,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE suspends = TRY (typeAnalysisSession__with_block_suspends?(&rtoc_self_view, node));
       MUTABLE summary = COPY frame_value.summary;
       &summary.with_blocks.append(node);
-      summary.with_scope_nodes[aST__node_identity(Locatable{ WithBlock: COPY Locatable{ WithBlock: COPY Locatable{ WithBlock: COPY Locatable{ WithBlock: COPY node } } } })] = (summary.with_scope_nodes[aST__node_identity( Locatable{ WithBlock: COPY node })] OR_ELSE List[]);
+      summary.with_scope_nodes[aST__node_identity(Locatable{ WithBlock: COPY node })] = (summary.with_scope_nodes[aST__node_identity( Locatable{ WithBlock: COPY node })] OR_ELSE List[]);
       IF suspends THEN
         &summary.suspend_points.append(COPY SuspendPointFact{ id: COPY SuspendPointId{ value: summary.suspend_points.length() }, kind: :lock, node: Locatable{ WithBlock: COPY node } });
       END

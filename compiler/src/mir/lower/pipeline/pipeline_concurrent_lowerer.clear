@@ -658,7 +658,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_list_select(self: Pipelin
 END
 PRIVATE FN pipelineConcurrentLowerer__concurrent_select_result_type(self: PipelineConcurrentLowerer, inner: SelectOp) RETURNS !Type ->
   MUTABLE expression = COPY inner.expression;
-  IF (((((locatable__effect_mode(Locatable{ SelectOp: COPY Locatable{ SelectOp: COPY inner } }) == :fallible) OR (locatable__effect_mode(inner) == :fallible_optional))) AND (aST__node_error_union_type(expression) EXISTS)) AND locatable__error_union_type( Locatable{ SelectOp: COPY expression })) THEN
+  IF (((((locatable__effect_mode(Locatable{ SelectOp: COPY inner }) == :fallible) OR (locatable__effect_mode(inner) == :fallible_optional))) AND (aST__node_error_union_type(expression) EXISTS)) AND locatable__error_union_type( Locatable{ SelectOp: COPY expression })) THEN
     RETURN TRY (type__new(expression.error_union_type));
   END
   RETURN TRY (aST__full_type_mut(expression));
@@ -842,7 +842,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__callback_body(self: PipelineConcurrentLowerer, conc_op: ConcurrentOp, body_kind: PipelineConcurrentCallbackBodyKind, ret_type: Type, capture_map: {String}String, capture_symbols: {String}SymbolEntry) RETURNS ![]Emittable ->
   IF (body_kind == PipelineConcurrentCallbackBodyKind.Expr) THEN
     MUTABLE expr_node: ?Locatable = TRY (pipelineConcurrentLowerer__callback_expression(self, conc_op));
-    MUTABLE expr_mir = pipelineConcurrentLowerer__callback_expr_mir_call(self, UNWRAP (UNWRAP (expr_node)), "__item", capture_map, capture_symbols, "__rt");
+    MUTABLE expr_mir = pipelineConcurrentLowerer__callback_expr_mir_call(self, UNWRAP (expr_node), "__item", capture_map, capture_symbols, "__rt");
     IF (expr_mir IS_A Call OR expr_mir IS_A MIRMethodCall) THEN
       emittable__set_try_wrap_mut(&expr_mir, FALSE);    END
     MUTABLE expr_type = TRY (aST__full_type_mut(expr_node));
