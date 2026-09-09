@@ -8241,7 +8241,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, _.type, a_param.type(), type_params, &subst));
           };
-          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, param_fn_value.return_type, actual_fn.return_type, type_params, &subst));
+          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, UNWRAP (param_fn_value).return_type, actual_fn.return_type, type_params, &subst));
         ELSE
           RETURN;
         END
@@ -8322,16 +8322,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE concrete = TRY (type__new(castGenericBindingToTypeConstructionInput(binding_value)));
         MUTABLE projected: ?Type = NIL;
         IF (typeExpressionKind__member(kind) == :Key) THEN
-          IF ((((typeExpressionKind__protocol(kind) == NIL) OR (kind.protocol == :Map))) AND type__map?(concrete)) THEN
+          IF ((((typeExpressionKind__protocol(kind) == NIL) OR (typeExpressionKind__protocol(kind) == :Map))) AND type__map?(concrete)) THEN
             projected = TRY (type__key_type(concrete));
           END
         ELSE_IF (typeExpressionKind__member(kind) == :Value) THEN
-          IF ((((kind.protocol == NIL) OR (kind.protocol == :Map))) AND type__map?(concrete)) THEN
+          IF ((((typeExpressionKind__protocol(kind) == NIL) OR (kind.protocol == :Map))) AND type__map?(concrete)) THEN
             projected = TRY (type__value_type(concrete));
           END
         END
         IF (((projected == NIL) AND typeExpressionKind__protocol(kind)) AND (typeExpressionKind__protocol(kind) != :Map)) THEN
-          MUTABLE match: ?ConformanceMatch = TRY (typeAnalysisSession__conformance_match(&rtoc_self_view, CAST(kind.protocol AS String), concrete));
+          MUTABLE match: ?ConformanceMatch = TRY (typeAnalysisSession__conformance_match(&rtoc_self_view, CAST(typeExpressionKind__protocol(kind) AS String), concrete));
           IF match EXISTS AS match_value THEN
             MUTABLE associated: ?Type = COPY match_value.resolution.associated_types[kind.member];
             IF associated EXISTS AS associated_value THEN
@@ -9755,7 +9755,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF (IF var_node IS_A GetField AS get_field THEN getField__wildcard?(get_field) ELSE FALSE END) THEN
       MUTABLE target_type = UNWRAP locatable__resolved_type(UNWRAP ((locatable__target(var_node))));
-      MUTABLE schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, target_type));
+      MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, target_type));
       MUTABLE fields = schemaValue__fields(UNWRAP (schema));
       FOR rtoc_each_key IN fields.keys() DO
     MUTABLE ignored_1 = COPY UNWRAP (fields[rtoc_each_key]);
@@ -15065,7 +15065,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_377 = (TRY (ownershipTransportFacts__decisions(facts)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_377.length() DO
-      MUTABLE node: ?Any = COPY KEEP (rtoc_each_items_377[rtoc_idx]?.alias_fact).declaration;
+      MUTABLE node: BindingNode = COPY KEEP (rtoc_each_items_377[rtoc_idx]?.alias_fact).declaration;
       node?.ownership_transport_plan = COPY rtoc_each_items_377[rtoc_idx]?.plan;
       IF ((rtoc_each_items_377[rtoc_idx]?.plan).action == :move) THEN
           TRY (typeAnalysisSession__handle_assign_move(&rtoc_self_view, node));
