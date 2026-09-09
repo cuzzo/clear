@@ -139,3 +139,10 @@ PUB FN diagnosticAnchor__token(value: ?DiagnosticAnchor) RETURNS ?Token ->
   RETURN NIL;
 END
 
+FN castDiagnosticAnchorToLocatable(value: DiagnosticAnchor) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

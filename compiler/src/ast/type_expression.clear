@@ -1080,3 +1080,12 @@ PUB FN typeExpressionKind__name(value: TypeExpressionKind) RETURNS ?String@symbo
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castTypeExpressionKindToFunctionTypeExpression(value: TypeExpressionKind) RETURNS ?FunctionTypeExpression EFFECTS REENTRANT ->
+  IF value IS_A FunctionTypeExpression AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

@@ -793,7 +793,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           msg = "USE AFTER MOVE: You can't use `${name}` \u{2014} it ${phrase} (line ${move_line_value.toString()}).";
         END
-        TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY use_node } }, :ownership, fixes, NIL, :USE_OF_MOVED_VALUE, :error, TRUE, CAST({:detail: msg} AS {String@symbol}Any)));
+        TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY use_node } }, :ownership, fixes, NIL, :USE_OF_MOVED_VALUE, :error, TRUE, CAST({:detail: _} AS {String@symbol}Any)));
       ELSE
         MUTABLE msg = "USE AFTER MOVE: You can't use `${name}`.";
         RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY use_node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :USE_OF_MOVED_VALUE }, [], CAST({:detail: msg} AS {String@symbol}Any)));
@@ -2727,7 +2727,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(TRY (capabilityAuditSession__fallible_call_site_fact?(rtoc_self_view, _))) THEN
           CONTINUE;
     END
-    MUTABLE range = (COPY _.node).source_range;
+    MUTABLE range = locatable__source_range((COPY _.node));
     IF ((token__start_line(range) <= 0) OR (span__end_line(range) <= 0)) THEN
           CONTINUE;
     END
@@ -3475,8 +3475,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plans: {String}MutualPlan = {};
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < concrete_cycle_fns.length() DO
-      MUTABLE partners = (cycle_names - [emittable__name(UNWRAP (concrete_cycle_fns[rtoc_idx]))]);
-      MUTABLE mp: ?MutualPlan = recursiveSplitter__split_mutual(concrete_cycle_fns[rtoc_idx]?.body, emittable__name(UNWRAP (concrete_cycle_fns[rtoc_idx])), partners);
+      MUTABLE partners = (cycle_names - [(UNWRAP (concrete_cycle_fns[rtoc_idx])).name]);
+      MUTABLE mp: ?MutualPlan = recursiveSplitter__split_mutual(concrete_cycle_fns[rtoc_idx]?.body, (UNWRAP (concrete_cycle_fns[rtoc_idx])).name, partners);
       IF (mp == NIL) THEN
           RETURN FALSE;
       END
@@ -4313,10 +4313,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (bgCaptureClassifier__classify_all_mut(fn_nodes, %(type: String) USE(rtoc_self_view) -> (TRY (capabilityAuditSession__lookup_type_schema(rtoc_self_view, symbol(type))))));
     TRY (effectInference__analyze_mut(fn_nodes));
     MUTABLE error_handler = %(node: Locatable, message: String) USE(MUTABLE rtoc_self_view) -> TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, CapabilityAuditCodeOrMessage{ SymbolValue: :EFFECT_INFERENCE_VIOLATION }, [], CAST({:detail: message} AS {String@symbol}Any)));
-    MUTABLE warning_handler = %(node: Locatable, message: String) USE(MUTABLE rtoc_self_view) -> capabilityAuditSession__note_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, message);
+    MUTABLE warning_handler = %(node: Locatable, message: String) USE(MUTABLE rtoc_self_view) -> capabilityAuditSession__note_mut(&rtoc_self_view, UNWRAP (castDiagnosticAnchorToLocatable(DiagnosticAnchor{ Locatable: COPY node })), message);
     MUTABLE root_scope = capabilityAuditSession__whole_program_root_scope(rtoc_self_view);
     MUTABLE signature_lookup = %(name) USE(root_scope) -> (IF scope__resolve_entry(root_scope, name) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_47 = (scope__resolve_entry(root_scope, name));
+      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_47: ?SymbolEntry@multiowned = (scope__resolve_entry(root_scope, name));
     symbolEntry__type(rtoc_local_receiver_47) }
     ELSE
       NIL

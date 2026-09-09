@@ -318,3 +318,11 @@ FN castLocatableToAsyncSpawnNode(value: Locatable) RETURNS ?AsyncSpawnNode ->
   END
   RETURN NIL;
 END
+FN castAsyncSpawnNodeToLocatable(value: AsyncSpawnNode) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    AsyncSpawnNode.BgBlock AS item -> RETURN Locatable{ BgBlock: COPY item };,
+    AsyncSpawnNode.BgStreamBlock AS item -> RETURN Locatable{ BgStreamBlock: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
