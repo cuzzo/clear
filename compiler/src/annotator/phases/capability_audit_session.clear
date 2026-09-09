@@ -3131,7 +3131,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE fn: ?FunctionDef = fn_nodes[UNWRAP (name)];
       IF fn EXISTS AS fn_value THEN
         IF fn_value.stack_tier THEN
-        IF (((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[fn.stack_tier] OR_ELSE 0) > ((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[max] OR_ELSE 0)) THEN
+        IF (((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[UNWRAP (fn).stack_tier] OR_ELSE 0) > ((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[max] OR_ELSE 0)) THEN
           max = fn.stack_tier;
         END
       END
