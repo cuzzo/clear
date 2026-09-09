@@ -3459,11 +3459,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               node = FunctionCallNode{ FuncCall: item_mutable };,
             FunctionCallNode.MethodCall AS item ->
               MUTABLE item_mutable = COPY item;
-              item_mutable.extern_source = functionSignature__extern_source(signature);
+              item_mutable.extern_source = functionSignature__extern_source(UNWRAP (signature));
               node = FunctionCallNode{ MethodCall: item_mutable };,
           END
           TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("EXTERN")));
-          MUTABLE alloc_kind = (TRY (functionSignature__extern_effects(signature)))[:alloc];
+          MUTABLE alloc_kind = (TRY (functionSignature__extern_effects(UNWRAP (signature))))[:alloc];
           MUTABLE fn_ctx: ?FunctionContext@multiowned = typeAnalysisSession__current_fn_ctx(&rtoc_self_view);
           IF (alloc_kind AND (fn_ctx != NIL)) THEN
             IF (alloc_kind == :heap) THEN
@@ -8057,7 +8057,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF active.contains?(key) THEN
       RETURN NIL;
     END
-    MUTABLE next_active: Void = (COPY active).insert(key);
+    MUTABLE next_active: [Set]String = (COPY active).insert(key);
     MUTABLE rtoc_each_items_181 = (TRY (typeAnalysisSession__semantic_conformance_resolutions(&rtoc_self_view)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_181.length() DO
@@ -8519,10 +8519,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         DeclarationNode.BindExpr AS item ->
           stream = COPY item.value;,
       END
-      IF TRY (typeAnalysisSession__stream_body_contains_close?(&rtoc_self_view, stream.body)) THEN
+      IF TRY (typeAnalysisSession__stream_body_contains_close?(&rtoc_self_view, UNWRAP (locatable__body(UNWRAP (stream))))) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BgStreamBlock: COPY stream } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INFINITE_STREAM_CLOSE }));
       END
-      IF TRY (typeAnalysisSession__stream_body_may_fall_through?(&rtoc_self_view, stream.body)) THEN
+      IF TRY (typeAnalysisSession__stream_body_may_fall_through?(&rtoc_self_view, locatable__body(UNWRAP (stream)))) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BgStreamBlock: COPY stream } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INFINITE_STREAM_FALLTHROUGH }));
       END
     END
@@ -8692,7 +8692,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         DeclarationNode.BindExpr AS item ->
           value_node = COPY item.value;,
       END
-      IF (aST__node__container_borrow(value_node) EXISTS) THEN
+      IF (aST__node__container_borrow(UNWRAP (value_node)) EXISTS) THEN
         value_node.container_borrow = TRUE;
       END
       IF TRUE THEN
@@ -9004,7 +9004,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       TRY (typeAnalysisSession__validate_requires_clauses_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node)))));
       TRY (typeAnalysisSession__validate_not_logical_return_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node)))));
-      TRY (typeAnalysisSession__offer_unconstrained_fn_param_fix_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(fn_node))));
+      TRY (typeAnalysisSession__offer_unconstrained_fn_param_fix_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node)))));
     rtoc_idx = rtoc_idx + 1;
     END
 }
