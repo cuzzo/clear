@@ -324,7 +324,7 @@ PUB STRUCT FunctionDef {
   storage_override: ?String@symbol,
   symbol: ?SymbolEntry@multiowned,
   tense_plan: ?TensePlanValue,
-  thunk_plan: ?MutualThunkPlan,
+  thunk_plan: ?Plan,
   type_object: ?Type,
   uses_alloc: ?Bool,
   uses_heap: ?Bool,

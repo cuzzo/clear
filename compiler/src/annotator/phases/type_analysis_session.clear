@@ -3301,14 +3301,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__validate_type_annotation_mut(&rtoc_self_view, AnnotationNode{ FunctionDefMultiowned: COPY node }, &rtoc_for_item_3301.type, TRUE));
     END
     END
-    IF node.return_type EXISTS AS return_type_value THEN
+    IF node.return_type EXISTS AS MUTABLE return_type_value THEN
       TRY (typeAnalysisSession__validate_type_annotation_mut(&rtoc_self_view, AnnotationNode{ FunctionDefMultiowned: COPY node }, &return_type_value));
     END
     MUTABLE signature = TRY (functionSignature__new(node.params |> SELECT Param{ name: COPY _.name, type: COPY _.type, required: (_.default == NIL), default: _.default, mutable: _.mutable, takes: _.takes, sync: IF type__any_sync?(_.type) THEN
       type__sync(_.type)
     ELSE
       NIL
-    END, carrier_contract: COPY _.carrier_contract, comptime: NIL, name_token: NIL, symbol: NIL }, TRY (functionDef__annotation_return_type(node)), FunctionSignatureLifetimeInput{ ArrayValue: lifetime_paths |> SELECT castLifetimesReturnValueItemToFunctionSignatureLifetimeSource(_) }, node.visibility, fn_type_params, node.generic_params |> REDUCE({}) {
+    END, carrier_contract: COPY _.carrier_contract, comptime: NIL, name_token: NIL, symbol: NIL }, TypeTypeInput{ Type: COPY TRY (functionDef__annotation_return_type(node)) }, FunctionSignatureLifetimeInput{ ArrayValue: lifetime_paths |> SELECT castLifetimesReturnValueItemToFunctionSignatureLifetimeSource(castTypeAnalysisSessionReturnValueItemToFunctionSignatureLifetimeSource(_)) }, node.visibility, fn_type_params, node.generic_params |> REDUCE({}) {
     acc[symbol(_.name)] = ( { MUTABLE rtoc_map_results = CAST([] AS []Type); _.bounds |> EACH { &rtoc_map_results.append(COPY _.type); }; rtoc_map_results } );
     acc
     }, functionDef__declared_plain_reentrant?(node), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_58: []String@symbol = List[]; rtoc_empty_list_58 } ), NIL, ( { MUTABLE rtoc_empty_list_59: []String@symbol = List[]; rtoc_empty_list_59 } ), FALSE, NIL, NIL, NIL, NIL, NIL, NIL, NIL, node.requires));
@@ -3319,10 +3319,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_identity = TRY (typeAnalysisSession__body_identity_for_function(&rtoc_self_view, node.name));
     node.semantic_with_blocks = ( { MUTABLE rtoc_empty_list_61: []WithBlock = List[]; rtoc_empty_list_61 } );
     MUTABLE final_return_type: ?String@symbol = NIL;
-    MUTABLE body_scan = typeAnalysisSession__with_body_fact_frame(&rtoc_self_view, body_identity, %() USE(declared_return, is_implicit_return, node, MUTABLE rtoc_self_view) -> {
-    final_return_type = TRY (typeAnalysisSession__analyze_routine(&rtoc_self_view, RoutineNode{ FunctionDefMultiowned: COPY node }, RoutineBody{ ArrayValue: node.body |> SELECT castLocatableToNode__type_analysis_session(_) }, declared_return, is_implicit_return));
+    MUTABLE body_scan: BodyScanSummary = TRY (typeAnalysisSession__with_body_fact_frame(&rtoc_self_view, body_identity, %() USE(declared_return, is_implicit_return, node, MUTABLE final_return_type, MUTABLE rtoc_self_view) -> {
+    final_return_type = COPY TRY (typeAnalysisSession__analyze_routine(&rtoc_self_view, RoutineNode{ FunctionDefMultiowned: COPY node }, RoutineBody{ ArrayValue: node.body |> SELECT castLocatableToNode__type_analysis_session(_) }, TypeTypeInput{ Type: COPY declared_return }, is_implicit_return));
     rubyToClearVoid__type_analysis_session()
-    });
+    }));
     MUTABLE called_names = COPY body_scan.callees;
     MUTABLE has_fnptr = body_scan.has_fnptr_call;
     MUTABLE unabsorbed_calls = COPY body_scan.propagating_callees;
@@ -3355,9 +3355,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   
     END
     MUTABLE resolved_return_type = final_return_type?;
-    IF ((is_implicit_return OR (declared_return == :Any))) THEN
-      node.return_type = Type{ SymbolValue: COPY resolved_return_type };
-      TRY (functionSignature__replace_return_type_mut(&signature, TypeTypeInput{ SymbolValue: COPY resolved_return_type }));
+    IF ((is_implicit_return OR (type__resolved(declared_return) == :Any))) THEN
+      node.return_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(resolved_return_type) }));
+      TRY (functionSignature__replace_return_type_mut(&signature, TypeTypeInput{ SymbolValue: COPY symbol(resolved_return_type) }));
     END
     functionSignature__replace_return_strategy_mut(&signature, TRY (typeAnalysisSession__get_return_strategy(&rtoc_self_view, TypeTypeInput{ Type: COPY functionSignature__return_type(signature) })));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ FunctionDef: COPY node }, signature));
@@ -3368,7 +3368,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.uses_rt = ctx.uses_rt;
     node.stack_vars_bytes = ctx.stack_vars_bytes;
     MUTABLE raises_directly = ((functionDef__reentrance_guard_required?(node) OR typeAnalysisSession__function_has_pre_clauses?(&rtoc_self_view, node)) OR (raises_in_body == TRUE));
-    typeAnalysisSession__record_function_body_summary_mut(&rtoc_self_view, FunctionBodySummary{ name: COPY node.name, definition_id: COPY body_identity.definition_id, body_id: COPY body_identity.body_id, callees: COPY (called_names - [node.name]), propagating_callees: COPY ((unabsorbed_calls) - [node.name]), has_fnptr_call: has_fnptr, raises_directly: raises_directly, call_site_facts: COPY body_scan.call_site_facts, local_facts: COPY body_scan.local_facts, return_nodes: COPY body_scan.return_nodes, binding_nodes: COPY body_scan.binding_nodes, assignment_nodes: COPY body_scan.assignment_nodes, escape_nodes: COPY body_scan.escape_nodes, with_scope_nodes: COPY body_scan.with_scope_nodes, lambda_body_identifier_refs: COPY body_scan.lambda_body_identifier_refs, with_blocks: body_scan.with_blocks, suspend_points: COPY body_scan.suspend_points });
+    typeAnalysisSession__record_function_body_summary_mut(&rtoc_self_view, FunctionBodySummary{ name: COPY node.name, definition_id: COPY body_identity.definition_id, body_id: COPY body_identity.body_id, callees: COPY called_names.difference(([node.name] |> DISTINCT _)), propagating_callees: COPY unabsorbed_calls.difference(([node.name] |> DISTINCT _)), has_fnptr_call: has_fnptr, raises_directly: raises_directly, call_site_facts: COPY body_scan.call_site_facts, local_facts: COPY body_scan.local_facts, return_nodes: COPY body_scan.return_nodes, binding_nodes: COPY body_scan.binding_nodes, assignment_nodes: COPY body_scan.assignment_nodes, escape_nodes: COPY body_scan.escape_nodes, with_scope_nodes: COPY body_scan.with_scope_nodes, lambda_body_identifier_refs: COPY body_scan.lambda_body_identifier_refs, with_blocks: body_scan.with_blocks, suspend_points: COPY body_scan.suspend_points });
     IF typeAnalysisSession__runtime_error_clause?(&rtoc_self_view, node) THEN
       functionContext__mark_runtime_used_mut(&fn_ctx);
     END
@@ -3377,22 +3377,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE snap_types: [Set]String = Set[];
       MUTABLE all_catch_bodies = node.catch_clauses |> SELECT _.body;
       IF typeAnalysisSession__function_has_default_catch?(&rtoc_self_view, node) THEN
-        &all_catch_bodies.append(node.default_catch);
+        &all_catch_bodies.append(COPY node.default_catch);
       END
-      MUTABLE catch_body_scan = typeAnalysisSession__with_body_fact_frame(&rtoc_self_view, bodyIdentity__unassigned(), %() USE(all_catch_bodies, candidate_snap_types, MUTABLE rtoc_self_view) -> {
-    FOR _ IN (all_catch_bodies |> WHERE _ != NIL) DO
-    typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(candidate_snap_types, _, MUTABLE rtoc_self_view, MUTABLE params) -> {
+      MUTABLE catch_body_scan: BodyScanSummary = TRY (typeAnalysisSession__with_body_fact_frame(&rtoc_self_view, bodyIdentity__unassigned(), %() USE(all_catch_bodies, candidate_snap_types, MUTABLE rtoc_self_view) -> {
+    FOR _ IN all_catch_bodies DO
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(candidate_snap_types, _, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_62 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_62, "__error", NIL, SymbolEntryTypeInput{ SymbolValue: :ErrorContext }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       IF (candidate_snap_types.length() == 1) THEN
             MUTABLE rtoc_mutable_receiver_63 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-            TRY (scope__declare(&rtoc_mutable_receiver_63, "snapshot", NIL, SymbolEntryTypeInput{ SymbolValue: COPY type__to_sym(candidate_snap_types.first()) }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+            TRY (scope__declare(&rtoc_mutable_receiver_63, "snapshot", NIL, SymbolEntryTypeInput{ SymbolValue: COPY symbol(UNWRAP ((candidate_snap_types |> SELECT COPY _).first())) }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       END
       TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, _))
     });
     END
     rubyToClearVoid__type_analysis_session()
-      });
+      }));
       IF catch_body_scan.references_snapshot THEN
         &snap_types.merge(candidate_snap_types);
       END
@@ -8710,7 +8710,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
       IF TRUE THEN
-        node.storage = :borrow;
+        declarationNode__set_storage_override_mut(&node, :borrow);
       END
       RETURN TRUE;
     ELSE

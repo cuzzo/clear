@@ -195,7 +195,7 @@ PRIVATE FN emit__find_cycle_member(cf: FunctionDef, name: String) RETURNS !Funct
   END
 END
 PRIVATE FN emit__thunk_plan_mut(fn_node: FunctionDef) RETURNS !Plan ->
-  MUTABLE plan: ?Plan = COPY CAST(fn_node.thunk_plan AS ?Plan);
+  MUTABLE plan: ?Plan = COPY fn_node.thunk_plan;
   IF plan EXISTS AS plan_value THEN
     RETURN plan_value;
   ELSE

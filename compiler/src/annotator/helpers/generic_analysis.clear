@@ -222,6 +222,15 @@ END
 # Ruby asks `respond_to?(:name)` and then reads it. A union variant
 # either carries the field or it does not, so the question is answered here:
 # the variants that have it return it, the rest return NIL.
+# Ruby writes `storage_override` on whichever variant it holds. A variant either
+# carries the field or it does not, so the write lands only where it fits.
+PUB FN declarationNode__set_storage_override_mut(MUTABLE value: DeclarationNode, new_value: ?String@symbol) RETURNS Void ->
+  PARTIAL MATCH value START
+    DeclarationNode.VarDecl AS MUTABLE item -> item.storage_override = COPY new_value;,
+    DeclarationNode.BindExpr AS MUTABLE item -> item.storage_override = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END
 PUB FN declarationNode__name(value: DeclarationNode) RETURNS ?String ->
   PARTIAL MATCH value START
     DeclarationNode.VarDecl AS item -> RETURN COPY item.name;,
