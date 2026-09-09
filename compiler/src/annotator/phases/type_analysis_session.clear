@@ -5875,7 +5875,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE nested_element_type = type__resolved(UNWRAP (TRY (type__element_type(expr_type))));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${nested_element_type}[]") }))));
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, node.right.expression().full_type_mut({:context: "pipeline op expression"})));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, node.right, TRY (aST__full_type_mut(UNWRAP (locatable__expression(node.right))))));
     node.storage_override = :frame;
     IF inner_bind_name THEN
       RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_133 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
@@ -7114,7 +7114,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN;
       END
       MUTABLE ratio = (CAST(accessed_value.length() AS Float64) / total);
-      IF (ratio < soa_threshold) THEN
+      IF (ratio < 0.5) THEN
         MUTABLE fields_str = ((accessed_value |> SELECT COPY _) |> ORDER_BY _).join(", ");
         typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, "Pipeline accesses ${accessed_value.length()} of ${total} fields (${fields_str}). Consider @soa for better cache performance on '${castTypeToString(item_type)}'.");
       END
@@ -7936,7 +7936,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE param_type = COPY rtoc_each_items_177[rtoc_idx]?.type;
+      MUTABLE param_type: ?Type = COPY rtoc_each_items_177[rtoc_idx]?.type;
       MUTABLE actual_type = TRY (aST__full_type_mut( arg));
       TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, UNWRAP (param_type), actual_type, type_params, &subst));
     rtoc_idx = rtoc_idx + 1;
@@ -9565,7 +9565,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE param_names = fn_node.params |> SELECT _.name;
     FOR _ IN pre_clauses DO
-    MUTABLE expr = _[:expr];
+    MUTABLE expr: ?Locatable = _[:expr];
     typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :pre, with_node: NIL, fn_node: fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_208: []String = List[]; rtoc_empty_list_208 } ), param_names: COPY param_names, allowed_names: ( { MUTABLE rtoc_empty_list_209: []String = List[]; rtoc_empty_list_209 } ), rejected_param_names: COPY Set[], fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, expr));
       MUTABLE pred_type = TRY (aST__full_type_mut(expr));
@@ -9614,7 +9614,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE allowed_names = (param_names + ["result"]);
     FOR _ IN post_clauses DO
-      MUTABLE expr = _[:expr];
+      MUTABLE expr: ?Locatable = _[:expr];
       typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :post, with_node: NIL, fn_node: fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_213: []String = List[]; rtoc_empty_list_213 } ), param_names: ( { MUTABLE rtoc_empty_list_214: []String = List[]; rtoc_empty_list_214 } ), allowed_names: COPY allowed_names, rejected_param_names: COPY rejected, fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
         TRY (typeAnalysisSession__visit(&rtoc_self_view, expr));
         MUTABLE pred_type = TRY (aST__full_type_mut(expr));
@@ -10105,7 +10105,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE info: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_231 = (KEEP ctx_value.outer_scope);
       scope__resolve_entry(rtoc_local_receiver_231, name) };
-      MUTABLE resolved_sym = (IF info != NIL THEN info ELSE node.symbol END);
+      MUTABLE resolved_sym: ?SymbolEntry@multiowned = (IF info != NIL THEN info ELSE node.symbol END);
       IF typeAnalysisSession__non_escaping_fiber_capture?(&rtoc_self_view, resolved_sym) THEN
         ctx_value.analysis.has_non_escaping_capture = TRUE;
       END

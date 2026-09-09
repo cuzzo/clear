@@ -2803,7 +2803,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE fn = fn_nodes[UNWRAP (locatable__name(UNWRAP (_.escape_nodes[rtoc_idx])))];
+      MUTABLE fn: ?FunctionDef@multiowned = fn_nodes[UNWRAP (locatable__name(UNWRAP (_.escape_nodes[rtoc_idx])))];
       IF !(fn) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -3138,9 +3138,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &visited.insert(name);
       MUTABLE fn: ?FunctionDef = fn_nodes[UNWRAP (name)];
       IF fn EXISTS AS fn_value THEN
-        IF fn_value.stack_tier THEN
-        IF (((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[UNWRAP (fn).stack_tier] OR_ELSE 0) > ((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[UNWRAP (max)] OR_ELSE 0)) THEN
-          max = fn.stack_tier;
+        IF (fn_value.stack_tier != NIL) THEN
+        IF (((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[UNWRAP (fn_value.stack_tier)] OR_ELSE 0) > ((CAST({:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5} AS {String@symbol}Int64))[(max OR_ELSE :micro)] OR_ELSE 0)) THEN
+          max = fn_value.stack_tier;
         END
       END
       END
@@ -4021,7 +4021,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE full = capabilityAuditSession__build_lock_graph(rtoc_self_view, TRUE);
     MUTABLE types_in_cycle: [Set]String@symbol = Set[];
-    MUTABLE types_with_self = Set[];
+    MUTABLE types_with_self: [Set]String@symbol = Set[];
     FOR _ IN TRY (capabilityAuditSession__tarjan_scc(rtoc_self_view, full.nodes, full.adj)) DO
     IF (_.length() >= 2) THEN
       FOR _ IN _ DO
