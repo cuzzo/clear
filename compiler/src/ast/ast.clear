@@ -18239,3 +18239,24 @@ PUB FN node__set_kind_mut(MUTABLE value: Node, new_value: ?String@symbol) RETURN
     DEFAULT -> RETURN;
   END
 END
+# Ruby asks `respond_to?(:type)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__type(value: Locatable) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    Locatable.Literal AS item -> RETURN COPY item.type;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:max_depth_n)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__max_depth_n(value: Locatable) RETURNS ?Int64 ->
+  PARTIAL MATCH value START
+    Locatable.ProtocolRequirement AS item -> RETURN COPY item.max_depth_n;,
+    Locatable.FunctionDef AS item -> RETURN COPY item.max_depth_n;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

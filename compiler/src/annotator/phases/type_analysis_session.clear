@@ -5186,7 +5186,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.observable_terminal = TRUE;
     node.observable_dest = TRUE;
     IF node.left IS_A Identifier THEN
-      node.left.was_moved = TRUE;
+      locatable__set_was_moved_mut(&node.left, TRUE);
       TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, node.left.name(), node.left.token(), :takes));
     END
     RETURN TRUE;
@@ -7085,7 +7085,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (op_name == "SELECT") THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node.left }, TypeAnalysisCodeOrMessage{ SymbolValue: :SELECT_NEEDS_LIST }, [], CAST({:got: locatable__resolved_type(node.left)} AS {String@symbol}Any)));
     ELSE
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.left, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_OP_NEEDS_LIST }, [], CAST({:op: op_name, :got: node.left.resolved_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.left, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_OP_NEEDS_LIST }, [], CAST({:op: op_name, :got: locatable__resolved_type(node.left)} AS {String@symbol}Any)));
     END
 }
 END
@@ -7506,7 +7506,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(UNWRAP (lit) IS_A Literal) THEN
       RETURN NIL;
     END
-    IF !(((UNWRAP (lit).type == :INT64) OR (UNWRAP (lit).type == :PREFIXED_INT))) THEN
+    IF !(((UNWRAP locatable__type((lit)) == :INT64) OR (UNWRAP (lit).type == :PREFIXED_INT))) THEN
       RETURN NIL;
     END
     RETURN (-aST__node_value( UNWRAP (lit)));
@@ -8993,7 +8993,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     
       ELSE_IF (kind == :reentrant_max_depth) THEN
           MUTABLE budget = symbol("RECURSION_YIELD_BUDGET");
-          IF (((UNWRAP (fn_node).max_depth_n OR_ELSE 0)) <= budget) THEN
+          IF (((UNWRAP locatable__max_depth_n((fn_node)) OR_ELSE 0)) <= budget) THEN
             fn_node.tight_reentrance = TRUE;
           ELSE
             fn_node.tight_reentrance = FALSE;
