@@ -2870,7 +2870,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node IS_A BgStreamBlock) THEN
         MUTABLE rtoc_open_0 = castAsyncBodyNodeToAsyncSpawnNode(node);
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, &rtoc_open_0, body_scan));
-        TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), FALSE, node));
+        TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), FALSE, UNWRAP (castAsyncBodyNodeToAsyncValidationNode(node))));
     ELSE_IF (node IS_A DoBranch) THEN
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, node.stack_size, node.can_smash, _.validation_node));
     END

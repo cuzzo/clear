@@ -18526,3 +18526,12 @@ PUB FN castLocatableToShardOp(value: Locatable) RETURNS ?ShardOp EFFECTS REENTRA
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:safe_navigation?)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN locatable__safe_navigation?(value: Locatable) RETURNS ?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    Locatable.OptionalUnwrap AS item -> RETURN optionalUnwrap__safe_navigation?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
