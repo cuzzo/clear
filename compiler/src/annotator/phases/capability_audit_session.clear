@@ -2728,7 +2728,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           CONTINUE;
     END
     MUTABLE range: ?SourceRange = locatable__source_range((COPY _.node));
-    IF ((token__start_line(range) <= 0) OR (span__end_line(range) <= 0)) THEN
+    IF (((UNWRAP (range)).start_line <= 0) OR (span__end_line(range) <= 0)) THEN
           CONTINUE;
     END
     &acc.append(edit__new(span__new(range.file, token__start_line(range), token__start_column(range), 0), "TRY ("));
@@ -4323,11 +4323,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END);
     MUTABLE policy_handlers: ?Any = COPY capabilityAuditSession__whole_program_node(rtoc_self_view)?.sync_policy;
     FOR MUTABLE rtoc_mutable_block_param_48 IN fn_nodes.values() DO
-    TRY (withMatchCheck__check_function_mut(&rtoc_mutable_block_param_48, body_summaries[rtoc_mutable_block_param_48.name]?.with_blocks, error_handler, warning_handler, policy_handlers));
+    TRY (withMatchCheck__check_function_mut(&rtoc_mutable_block_param_48, UNWRAP (body_summaries[rtoc_mutable_block_param_48.name]?.with_blocks), error_handler, warning_handler, policy_handlers));
     END
     TRY (capabilityAuditSession__restamp_requires_on_signatures_mut(&rtoc_self_view));
     FOR _ IN fn_nodes.values() DO
-    TRY (withMatchCheck__check_call_sites_mut(body_summaries[_.name]?.call_site_facts, signature_lookup, error_handler));
+    TRY (withMatchCheck__check_call_sites_mut(UNWRAP (body_summaries[_.name]?.call_site_facts), signature_lookup, error_handler));
     END
     TRY (concurrencyChecks__check_all_mut(fn_nodes, signature_lookup, error_handler, body_summaries, TRY (capabilityAuditSession__whole_program_lock_type_ranks(rtoc_self_view))));
 }

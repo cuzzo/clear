@@ -19258,3 +19258,13 @@ PUB FN node__set_error_type_mut(MUTABLE value: Node, new_value: ?String@symbol) 
     DEFAULT -> RETURN;
   END
 END
+# Ruby asks `respond_to?(:sync)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__sync(value: Locatable) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    Locatable.CapabilityWrap AS item -> RETURN COPY item.sync;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
