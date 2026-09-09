@@ -1702,7 +1702,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (token__text_is?(tok, "MUTABLE")) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: tok.line} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
+      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: DiagnosticKwValue{ Int64Value: COPY tok.line }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
     ELSE
       RETURN NIL;
     END
@@ -1734,7 +1734,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           MUTABLE search_offset = (UNWRAP (symbolEntryRegInput__token(reg_value)).column - 1);
           MUTABLE match: ?CompilerRegexScanner = NIL;
           IF (search_offset < src_line.length()) THEN
-            match = COPY compilerRegexMatchData(src_line.substr(search_offset, (src_line.length() - search_offset)), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));
+            match = compilerRegexMatchData(src_line.substr(search_offset, (src_line.length() - search_offset)), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));
           END
           IF match EXISTS AS match_value THEN
             MUTABLE start_col = ((search_offset + (compilerRegexPosition(match_value) - compilerRegexCapture(match_value, 0).codepointCount())) + 1);
@@ -1832,7 +1832,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (idx == 0) THEN
         label = "(recommended)";
       END
-      MUTABLE line = "    ${(idx + 1).toString()}. ${label.ljust(15)} ${type_sym}";
+      MUTABLE line = "    ${(idx + 1).toString()}. ${padRight(label, 15)} ${type_sym}";
       IF note EXISTS AS note_value THEN
         line = (line $+ "  -- ${note_value}");
       END

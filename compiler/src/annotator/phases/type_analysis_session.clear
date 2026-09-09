@@ -2848,7 +2848,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (idx == 0) THEN
         label = "(recommended)";
       END
-      MUTABLE line = "    ${(idx + 1).toString()}. ${label.ljust(15)} ${type_sym}";
+      MUTABLE line = "    ${(idx + 1).toString()}. ${padRight(label, 15)} ${type_sym}";
       IF note EXISTS AS note_value THEN
         line = (line $+ "  -- ${note_value}");
       END

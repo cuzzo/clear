@@ -710,3 +710,14 @@ FN ruby_array_concat_Token(left: []Token, right: []Token) RETURNS []Token ->
   END
   RETURN result;
 END
+
+# Ruby's String#ljust: pad on the right to a width, never truncate.
+PUB FN padRight(value: String, width: Int64) RETURNS String ->
+  MUTABLE out = COPY value;
+  MUTABLE i = out.codepointCount();
+  WHILE i < width DO
+    out = (out $+ " ");
+    i = (i + 1);
+  END
+  RETURN out;
+END
