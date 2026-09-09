@@ -13580,11 +13580,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             ELSE
               NIL
             END);
-            MUTABLE field_type = IF ft IS_A Type THEN
-              type__resolved(UNWRAP (ft))
-            ELSE
-              ft
-            END;
+            MUTABLE field_type: ?String@symbol = NIL;
+            IF ft EXISTS AS rtoc_ft_v THEN
+              field_type = type__resolved(rtoc_ft_v);
+            END
+
+
+
+
             MUTABLE val_type: ?String@symbol = locatable__resolved_type(UNWRAP (field_expr));
             MUTABLE is_numeric_promo = (((val_type == :Int64) AND (((field_type == :Float64) OR (field_type == :Float64)))));
             IF !(((((val_type == field_type) OR (val_type == :Any)) OR (field_type == :Any)) OR is_numeric_promo)) THEN
@@ -14942,29 +14945,33 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       DeclarationNode.BindExpr AS item ->
         declared = COPY item.type;,
     END
-    MUTABLE value_node: ?AsyncSpawnNode = NIL;
+    MUTABLE value_node: ?Locatable@boxed = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
-        value_node = UNWRAP (castLocatableToAsyncSpawnNode(COPY item.value));,
+        value_node = COPY item.value;,
       DeclarationNode.BindExpr AS item ->
-        value_node = UNWRAP (castLocatableToAsyncSpawnNode(COPY item.value));,
+        value_node = COPY item.value;,
     END
-    IF (value_node IS_A BgBlock AND ((declared != NIL) AND TRY (type__single_future?(UNWRAP (declared))))) THEN
-      MUTABLE payload = TRY (type__tense_type(declared));
-      IF (((payload AND !(type__dynamic?(payload))) AND !(type__auto?(payload))) AND !(([symbol("Auto"), :Any]).contains?(type__resolved(payload)))) THEN
-        value_node.declared_async_payload = payload;
+    IF value_node EXISTS AS MUTABLE rtoc_vn THEN
+      IF (rtoc_vn IS_A BgBlock AND ((declared != NIL) AND TRY (type__single_future?(declared)))) THEN
+        MUTABLE payload = TRY (type__tense_type(declared));
+        IF ((TRUE AND !(type__dynamic?(payload))) AND !(type__auto?(payload))) THEN
+          IF !(([symbol("Auto"), :Any]).contains?(type__resolved(payload))) THEN
+            locatable__set_declared_async_payload_mut(&rtoc_vn, payload);
+          END
+        END
       END
+      IF (rtoc_vn IS_A ListLit AND ((declarationNode__type(node) != NIL) AND type__fixed?(UNWRAP (declarationNode__type(node))))) THEN
+        locatable__set_storage_override_mut(&rtoc_vn, :stack);
+      END
+      IF (rtoc_vn IS_A ListLit AND ((declarationNode__type(node) != NIL) AND type__tuple?(UNWRAP (declarationNode__type(node))))) THEN
+        locatable__set_coerced_type_object_mut(&rtoc_vn, declarationNode__type(node));
+      END
+      IF (rtoc_vn IS_A HashLit AND ((declarationNode__type(node) != NIL) AND type__map?(UNWRAP (declarationNode__type(node))))) THEN
+        locatable__set_coerced_type_object_mut(&rtoc_vn, declarationNode__type(node));
+      END
+      TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_vn));
     END
-    IF (value_node IS_A ListLit AND ((declarationNode__type(node) != NIL) AND type__fixed?(((declarationNode__type(node))?)))) THEN
-      value_node.storage = :stack;
-    END
-    IF (value_node IS_A ListLit AND ((declarationNode__type(node) != NIL) AND type__tuple?(((declarationNode__type(node))?)))) THEN
-      locatable__set_coerced_type_object_mut(&value_node, declarationNode__type(node));
-    END
-    IF (value_node IS_A HashLit AND ((declarationNode__type(node) != NIL) AND type__map?(((declarationNode__type(node))?)))) THEN
-      locatable__set_coerced_type_object_mut(&value_node, declarationNode__type(node));
-    END
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, UNWRAP (castAsyncSpawnNodeToLocatable(UNWRAP (value_node)))));
 }
 END
 PRIVATE FN typeAnalysisSession__prepare_implicit_ownership_transport_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode) RETURNS !Void
@@ -17463,7 +17470,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rubyToClearVoid__type_analysis_session()
     });
     MUTABLE analysis_result = full_analysis?;
-    MUTABLE declared_payload: ?Type = COPY CAST(node.declared_async_payload AS ?Type);
+    MUTABLE declared_payload: ?Type = COPY node.declared_async_payload;
     IF declared_payload EXISTS AS declared_payload_value THEN
       last_type = declared_payload?;
     END

@@ -3794,7 +3794,7 @@ PUB STRUCT BgBlock {
   collection_return: ?Type,
   computed_stack_tier: ?String@symbol,
   container_borrow: ?Bool,
-  declared_async_payload: ?Bool,
+  declared_async_payload: ?Type,
   error_kind: ?String@symbol,
   error_type: ?String@symbol,
   fsm_ineligible_reason: ?String@symbol,
@@ -8418,6 +8418,14 @@ PUB FN locatable__set_storage_override_mut(MUTABLE value: Locatable, new_value: 
     Locatable.Return AS MUTABLE item -> item.storage_override = COPY new_value;,
     Locatable.ReassignCleanup AS MUTABLE item -> item.storage_override = COPY new_value;,
     Locatable.FieldCleanup AS MUTABLE item -> item.storage_override = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END
+# Ruby writes `declared_async_payload` on whichever variant it holds. A variant either
+# carries the field or it does not, so the write lands only where it fits.
+PUB FN locatable__set_declared_async_payload_mut(MUTABLE value: Locatable, new_value: ?Type) RETURNS Void ->
+  PARTIAL MATCH value START
+    Locatable.BgBlock AS MUTABLE item -> item.declared_async_payload = COPY new_value;,
     DEFAULT -> RETURN;
   END
 END
