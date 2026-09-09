@@ -5900,7 +5900,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     MUTABLE key_type: !Type = aST__full_type_mut(UNWRAP (locatable__expression(node.right)));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, TRY (key_type)));
-    MUTABLE bounded_n =   IF (IF lhs_type != NIL THEN
+    MUTABLE bounded_n =   IF (IF TRUE THEN
       lhs_type.bounded_stream?()
     ELSE
       NIL
@@ -6597,7 +6597,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((((TRUE) AND type__sharded?(TRY (target_info))) AND FALSE)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (locatable__target_map(shard_op)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARD_MAP_NOT_SHARDED }, [], CAST({} AS {String@symbol}Any)));
     END
-    MUTABLE map_key = (IF target_info != NIL THEN
+    MUTABLE map_key = (IF TRUE THEN
       TRY (type__key_type(target_info))
     ELSE
       NIL
@@ -10286,7 +10286,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         NIL
       END);
-      MUTABLE column = (IF aST__node__token(node) != NIL THEN
+      MUTABLE column: ?Int64 = (IF TRUE THEN
         (aST__node__token(node)).column
       ELSE
         NIL
@@ -12059,7 +12059,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN "${requirement.name}: expected ${expected_kind}, found ${actual_kind}";
     END
     IF (requirement.params.length() != member.params.length()) THEN
-      RETURN "${requirement.name}: expected ${requirement.params.length().toString()} parameter(s), found ${member.params.length()}";
+      RETURN "${requirement.name}: expected ${requirement.params.length().toString()} parameter(s), found ${member.params.length().toString()}";
     END
     MUTABLE substitutions: {String@symbol}GenericBinding = {:Self: resolution.declaration.owner_type}.keys() |> REDUCE(COPY resolution.associated_types) { acc[_] = COPY ({:Self: resolution.declaration.owner_type}[_] OR_ELSE panic("missing hash key")); acc };
     MUTABLE rtoc_idx = 0;
