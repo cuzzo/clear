@@ -3144,7 +3144,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
       END
-      FOR _ IN (((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[name] OR_ELSE List[])) DO
+      FOR _ IN (((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[UNWRAP (name)] OR_ELSE List[])) DO
       &queue.append(COPY _);
       END
     END

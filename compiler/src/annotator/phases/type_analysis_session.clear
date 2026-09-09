@@ -5320,7 +5320,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node.right IS_A CollectOp) THEN
       TRY (typeAnalysisSession__analyze_collect_op(&rtoc_self_view, &node));
     END
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, node.right, TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node }))));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node }))));
 }
 END
 PRIVATE FN typeAnalysisSession__annotate_pipeline_expression_mut(MUTABLE self: TypeAnalysisSession, parent: Locatable, MUTABLE expression: Locatable) RETURNS !Void
@@ -5876,7 +5876,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE nested_element_type = type__resolved(UNWRAP (TRY (type__element_type(expr_type))));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${nested_element_type}[]") }))));
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, node.right, TRY (aST__full_type_mut(UNWRAP (locatable__expression(node.right))))));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, TRY (aST__full_type_mut(UNWRAP (locatable__expression(node.right))))));
     node.storage_override = :frame;
     IF inner_bind_name THEN
       RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_133 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
@@ -9117,7 +9117,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < all_self_calls.length() DO
-      IF blessed_ids.contains?(aST__node_identity(all_self_calls[rtoc_idx])) THEN
+      IF blessed_ids.contains?(aST__node_identity(UNWRAP (all_self_calls[rtoc_idx]))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -10108,7 +10108,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       scope__resolve_entry(rtoc_local_receiver_231, name) };
       MUTABLE resolved_sym: ?SymbolEntry@multiowned = (IF info != NIL THEN info ELSE node.symbol END);
       IF typeAnalysisSession__non_escaping_fiber_capture?(&rtoc_self_view, resolved_sym) THEN
-        ctx_value.analysis.has_non_escaping_capture = TRUE;
+        MUTABLE rtoc_ctx_analysis = COPY ctx_value.analysis; rtoc_ctx_analysis.has_non_escaping_capture = TRUE;
       END
       IF info EXISTS AS info_value THEN
         TRY (typeAnalysisSession__record_capture_info_mut(&rtoc_self_view, ctx_value, name, info_value, &node));
@@ -10765,7 +10765,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(((TRY (type__element_type(obj_type)) != NIL) AND (type__resolved((UNWRAP (TRY (type__element_type(obj_type))))) == :Any))) THEN
       RETURN;
     END
-    MUTABLE val_type = locatable__resolved_type((UNWRAP ((locatable__args( Locatable{ MethodCall: COPY node }) OR_ELSE List[])[0])));
+    MUTABLE val_type: ?String@symbol = locatable__resolved_type((UNWRAP ((locatable__args( Locatable{ MethodCall: COPY node }) OR_ELSE List[])[0])));
     MUTABLE new_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${val_type}[]") }, NIL, NIL, NIL, NIL, type__collection(obj_type)));
     type__copy_placement_from_mut(&new_type, obj_type, FALSE);
     TRY (type__copy_collection_shape_from_mut(&new_type, obj_type));
@@ -10968,9 +10968,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE escape: ?DeadlockEscape = COPY node.deadlock_escape;
       IF (escape AND (escape.kind == :deadlock)) THEN
           typeAnalysisSession__note_mut(&rtoc_self_view, lock_capabilities[rtoc_idx]?.var_node, "POSSIBLE_DEADLOCK accepted: '${(vn OR_ELSE "")}' already held by an enclosing WITH (outer line ${(IF outer_tok != NIL THEN
-            outer_tok.line
+            UNWRAP (outer_tok).line.toString()
           ELSE
-            NIL
+            "?"
           END)}). Reviewer: verify this cannot actually self-acquire at runtime (distinct instances, sorted acquire, etc.).");
       ELSE
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, lock_capabilities[rtoc_idx]?.var_node, TypeAnalysisCodeOrMessage{ SymbolValue: :LOCK_NESTED_REACQUIRE }, [], CAST({:name: vn, :outer_line: (IF outer_tok != NIL THEN
