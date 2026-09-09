@@ -3290,9 +3290,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_implicit_return = functionDef__implicit_return_type?(node);
     node.type_params = TRY (typeAnalysisSession__infer_implicit_type_params(&rtoc_self_view, node));
     MUTABLE declared_return = TRY (functionDef__annotation_return_type(node));
-    MUTABLE lifetime_paths: []FunctionContextLifetimeSource = TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, node));
+    MUTABLE lifetime_paths: []TypeAnalysisSessionReturnValueItem = TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, node));
     MUTABLE fn_type_params = node.type_params |> SELECT symbol(_);
-    MUTABLE fn_ctx = TRY (functionContext__new(node.name, TypeTypeInput{ Type: COPY TRY (functionDef__annotation_return_type(node)) }, lifetime_paths, fn_type_params, node.generic_params));
+    MUTABLE fn_ctx = TRY (functionContext__new(node.name, TypeTypeInput{ Type: COPY TRY (functionDef__annotation_return_type(node)) }, (lifetime_paths |> SELECT UNWRAP (castTypeAnalysisSessionReturnValueItemToFunctionContextLifetimeSource(_))), fn_type_params, node.generic_params));
     typeAnalysisSession__push_function_context_mut(&rtoc_self_view, fn_ctx);
     DEFER typeAnalysisSession__pop_function_context_mut(&rtoc_self_view);
     TRY (typeAnalysisSession__verify_lifetime_mut(&rtoc_self_view, node));
@@ -13251,7 +13251,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE identifier_mutable = COPY identifier;
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ Identifier: COPY identifier_mutable }, :Type));
     ELSE
-      TRY (typeAnalysisSession__visit(&rtoc_self_view, castNodeToOptionalLocatable__type_analysis_session(node)));
+      TRY (typeAnalysisSession__visit(&rtoc_self_view, castNodeToOptionalLocatable__type_analysis_session(UNWRAP (castNodeOrTypeToNode(node)))));
     END
 }
 END
@@ -14726,13 +14726,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE error_success_type_branch_value: ?Type = NIL;
     IF error_type EXISTS AS error_type_value THEN
       IF type__error_union?(error_type_value) THEN
-      error_success_type_branch_value = TRY (type__success_type(error_type));
+      error_success_type_branch_value = TRY (type__success_type(UNWRAP (error_type)));
     ELSE
       error_success_type_branch_value = NIL;
     END
     END
     MUTABLE error_success_type: ?Type = error_success_type_branch_value;
-    MUTABLE value_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(value)) }));
+    MUTABLE value_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (value))) }));
     MUTABLE asynchronous = (((type__future?(value_type) OR TRY (type__stream?(value_type))) OR type__future?( UNWRAP (error_success_type))) OR TRY (type__stream?( UNWRAP (error_success_type))));
     IF asynchronous THEN
       TRY (typeAnalysisSession__emit_inferred_async_binding_mut(&rtoc_self_view, &node, value_type, CAST(error_type AS ?Type)));
@@ -14746,7 +14746,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(type__optional?(value_type)) THEN
       RETURN;
     END
-    IF ((aST__node_safe_nav_chain(value) EXISTS) AND (locatable__safe_nav_chain(UNWRAP (value)) == TRUE)) THEN
+    IF ((aST__node_safe_nav_chain(UNWRAP (value)) EXISTS) AND (locatable__safe_nav_chain(UNWRAP (value)) == TRUE)) THEN
       RETURN;
     END
     TRY (typeAnalysisSession__emit_inferred_wrapper_binding_mut(&rtoc_self_view, &node, :INFERRED_OPTIONAL_BINDING, "UNWRAP ", "?"));
@@ -16374,12 +16374,12 @@ PRIVATE FN typeAnalysisSession__visit_StructLit(MUTABLE self: TypeAnalysisSessio
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE display_name = COPY node.name;
-    MUTABLE schema: TypeAnalysisSchema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(display_name)));
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(display_name)));
     IF schemas__union?(schema) THEN
       IF (node.fields.length() != 1) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_LITERAL_VARIANT_COUNT }, [], CAST({:name: node.name, :got: node.fields.length()} AS {String@symbol}Any)));
       END
-      MUTABLE union_subst = TRY (typeAnalysisSession__literal_type_substitution_mut(&rtoc_self_view, &node, schema));
+      MUTABLE union_subst = TRY (typeAnalysisSession__literal_type_substitution_mut(&rtoc_self_view, &node, UNWRAP (castSchemaValueToTypeAnalysisSchema(UNWRAP (schema)))));
       MUTABLE variant_name, val_node = node.fields.first();
       IF !(schemaValue__variants(UNWRAP (schema)).contains?(variant_name)) THEN
         MUTABLE anchor: ?AnchorToken = typeAnalysisSession__variant_anchor_from_unionlit(&rtoc_self_view, Node{ StructLit: COPY node }, variant_name);
@@ -19682,8 +19682,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A FuncCall OR UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A MethodCall)) THEN
       RETURN;
     END
-    MUTABLE call_node: Locatable = UNWRAP (castLocatableToTypeAnalysisCallNode(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))));
-    IF aST__collection_method_call?( call_node) THEN
+    MUTABLE call_node: TypeAnalysisCallNode = UNWRAP (castLocatableToTypeAnalysisCallNode(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))));
+    IF aST__collection_method_call?( UNWRAP (castTypeAnalysisCallNodeToLocatable(call_node))) THEN
       RETURN;
     END
     MUTABLE actual_arg: ?Locatable = TRY (typeAnalysisSession__resolve_borrow_source(&rtoc_self_view, call_node));
@@ -23073,6 +23073,22 @@ END
 PUB FN castFinalTypeToType(value: FinalType) RETURNS ?Type EFFECTS REENTRANT ->
   IF value IS_A Type AS item THEN
     RETURN item;
+  END
+  RETURN NIL;
+END
+FN castTypeAnalysisSessionReturnValueItemToFunctionContextLifetimeSource(value: TypeAnalysisSessionReturnValueItem) RETURNS ?FunctionContextLifetimeSource ->
+  PARTIAL MATCH value START
+    TypeAnalysisSessionReturnValueItem.StringValue AS item -> RETURN FunctionContextLifetimeSource{ StringValue: COPY item };,
+    TypeAnalysisSessionReturnValueItem.SymbolValue AS item -> RETURN FunctionContextLifetimeSource{ SymbolValue: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+FN castTypeAnalysisCallNodeToLocatable(value: TypeAnalysisCallNode) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    TypeAnalysisCallNode.FuncCall AS item -> RETURN Locatable{ FuncCall: COPY item };,
+    TypeAnalysisCallNode.MethodCall AS item -> RETURN Locatable{ MethodCall: COPY item };,
+    DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
 END

@@ -18444,3 +18444,10 @@ PUB FN castLocatableToFunctionDef(value: Locatable) RETURNS ?FunctionDef EFFECTS
   END
   RETURN NIL;
 END
+FN castIsARightToNode(value: IsARight) RETURNS ?Node ->
+  PARTIAL MATCH value START
+
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

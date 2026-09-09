@@ -875,3 +875,12 @@ PUB FN schemaValue__kind(value: SchemaValue) RETURNS ?String@symbol EFFECTS REEN
   END
   RETURN NIL;
 END
+FN castSchemaValueToTypeAnalysisSchema(value: SchemaValue) RETURNS ?TypeAnalysisSchema ->
+  PARTIAL MATCH value START
+    SchemaValue.StructSchemaMultiowned AS item -> RETURN TypeAnalysisSchema{ StructSchemaMultiowned: COPY item };,
+    SchemaValue.UnionSchemaMultiowned AS item -> RETURN TypeAnalysisSchema{ UnionSchemaMultiowned: COPY item };,
+    SchemaValue.ResourceSchemaMultiowned AS item -> RETURN TypeAnalysisSchema{ ResourceSchemaMultiowned: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
