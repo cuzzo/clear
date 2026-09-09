@@ -5231,7 +5231,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF TRY (type__dynamic_stream?(source_type)) THEN
       MUTABLE item: ?Type = (IF TRY (type__canonical_stream_item_type(source_type)) != NIL THEN TRY (type__canonical_stream_item_type(source_type)) ELSE UNWRAP (TRY (type__element_type((TRY (type__tense_type(source_type)))))) END);
-      RETURN PipelineSourceFact{ kind: :dynamic_stream, item_type: COPY item };
+      RETURN PipelineSourceFact{ kind: :dynamic_stream, item_type: COPY UNWRAP (item)};
     END
     IF TRY (type__bounded_stream?(source_type)) THEN
       MUTABLE item = (IF TRY (type__canonical_stream_item_type(source_type)) != NIL THEN TRY (type__canonical_stream_item_type(source_type)) ELSE UNWRAP (TRY (type__element_type((TRY (type__tense_type(source_type)))))) END);
@@ -8983,7 +8983,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE fn_node: ?Locatable = program_node.statements[rtoc_idx];
       MUTABLE kind: ?String@symbol = typeAnalysisSession__canonical_reentrance_kind(rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node))));
       IF fn_node EXISTS AS MUTABLE fn_node_present THEN
-        fn_node_present.reentrance_kind = kind;
+        locatable__set_reentrance_kind_mut(&fn_node_present, kind);
       END
       IF (kind == :reentrant_tail_call) THEN
           fn_node.tail_call = TRUE;
@@ -15773,7 +15773,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF type__multiowned?(assignment_field_type) THEN
       MUTABLE owner = (type__resolved((TRY (aST__full_type_mut(field_node.target)))));
-      TRY (typeAnalysisSession__keep_param_identity_mut(&rtoc_self_view, assignment_node.value, CAST(assignment_field_type AS Type), "${(owner OR_ELSE "field")}.${field_node.field}"));
+      TRY (typeAnalysisSession__keep_param_identity_mut(&rtoc_self_view, assignment_node.value, CAST(assignment_field_type AS Type), "${owner}.${field_node.field}"));
     END
     TRY (typeAnalysisSession__validate_assignment_type(&rtoc_self_view, Node{ Assignment: COPY assignment_node }, TypeTypeInput{ Type: COPY assignment_field_type }, TRY (aST__full_type_mut(assignment_node.value))));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ Assignment: COPY assignment_node }, :Void));

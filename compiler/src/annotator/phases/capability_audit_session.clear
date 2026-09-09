@@ -4166,7 +4166,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (capabilityAuditSession__error_mut(&rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.arg_node, CapabilityAuditCodeOrMessage{ SymbolValue: :COPY_RETAINED_NEEDS_UNIQUE }, [], CAST({:name: (UNWRAP (rtoc_each_items_42[rtoc_idx])).name, :carrier: rtoc_each_items_42[rtoc_idx]?.carrier} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (rtoc_each_items_42[rtoc_idx]?.arg_node) }, CapabilityAuditCodeOrMessage{ SymbolValue: :COPY_RETAINED_NEEDS_UNIQUE }, [], CAST({:name: (UNWRAP (rtoc_each_items_42[rtoc_idx])).name, :carrier: rtoc_each_items_42[rtoc_idx]?.carrier} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
     capabilityAuditSession__clear_deferred_copy_retained_validations_mut(&rtoc_self_view);
