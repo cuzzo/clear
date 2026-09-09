@@ -2309,7 +2309,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
       IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
-        length = COPY CAST(((tokenValue__to_f(UNWRAP (castLocatableToLiteral(index))) + 1.0)) AS String);
+        length = COPY CAST(((tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(index)).value)) + 1.0)) AS String);
       ELSE
         length = "0";
       END
@@ -5880,7 +5880,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.storage_override = :frame;
     IF inner_bind_name THEN
       RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_133 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-      TRY (scope__declare(&rtoc_mutable_receiver_133, UNWRAP (inner_bind_name), NIL, SymbolEntryTypeInput{ StringValue: COPY CAST(nested_element_type AS String) }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack)) };
+      TRY (scope__declare(&rtoc_mutable_receiver_133, (inner_bind_name OR_ELSE "_"), NIL, SymbolEntryTypeInput{ StringValue: COPY CAST(nested_element_type AS String) }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack)) };
     END
 }
 END
@@ -9122,7 +9122,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, all_self_calls[rtoc_idx], TypeAnalysisCodeOrMessage{ SymbolValue: :TAIL_CALL_NOT_TAIL_POSITION }, [], CAST({:fn: fn_name} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (all_self_calls[rtoc_idx]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :TAIL_CALL_NOT_TAIL_POSITION }, [], CAST({:fn: fn_name} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -10113,7 +10113,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF info EXISTS AS info_value THEN
         TRY (typeAnalysisSession__record_capture_info_mut(&rtoc_self_view, ctx_value, name, info_value, &node));
-        TRY (typeAnalysisSession__record_capture_move_mut(&rtoc_self_view, ctx_value, name, &info_value, &node));
+        MUTABLE rtoc_info_slot = COPY info_value;
+        TRY (typeAnalysisSession__record_capture_move_mut(&rtoc_self_view, ctx_value, name, &rtoc_info_slot, &node));
       ELSE
       IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, name)) THEN
           ctx_value.analysis.has_outer_ref = TRUE;
