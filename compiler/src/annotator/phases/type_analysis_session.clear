@@ -5428,7 +5428,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node.right IS_A IndexOp) THEN
       MUTABLE key_type = node.right.expression().resolved_type;
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${castTypeToString(item_type)}[]>") }))));
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, node.right, key_type));
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, TRY (key_type)));
     ELSE_IF (node.right IS_A OrderByOp) THEN
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${castTypeToString(item_type)}[]") }))));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, node.right, node.right.expression().resolved_type));
@@ -5899,7 +5899,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))
     });
     MUTABLE key_type: !Type = aST__full_type_mut(UNWRAP (locatable__expression(node.right)));
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, node.right, key_type));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, TRY (key_type)));
     MUTABLE bounded_n =   IF (IF lhs_type != NIL THEN
       lhs_type.bounded_stream?()
     ELSE
@@ -6595,7 +6595,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END;
     IF !((((TRUE) AND type__sharded?(TRY (target_info))) AND FALSE)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, shard_op.target_map, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARD_TARGET_BAD }, [], CAST({:remediation: "SHARD routes items to owning schedulers \u{2014} :locked maps don't have ownership."} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (locatable__target_map(shard_op)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARD_MAP_NOT_SHARDED }, [], CAST({} AS {String@symbol}Any)));
     END
     MUTABLE map_key = (IF target_info != NIL THEN
       TRY (type__key_type(target_info))
@@ -8691,7 +8691,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         DeclarationNode.BindExpr AS item ->
           value_node = COPY item.value;,
       END
-      IF (aST__node__container_borrow(UNWRAP (value_node)) EXISTS) THEN
+      IF (aST__node__container_borrow(value_node) EXISTS) THEN
         value_node.container_borrow = TRUE;
       END
       IF TRUE THEN
@@ -10280,7 +10280,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN NIL;
       END
       MUTABLE key = typeAnalysisSession__capability_audit_key(&rtoc_self_view, fn_name, var_name);
-      MUTABLE line = (IF TRUE THEN
+      MUTABLE line: ?Int64 = (IF TRUE THEN
         (aST__node__token(node)).line
       ELSE
         NIL
@@ -12176,16 +12176,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
           END
           MUTABLE protocol: ?ProtocolDef = typeAnalysisSession__semantic_protocol(&rtoc_self_view, rtoc_each_items_285[rtoc_idx_n5]?);
-          MUTABLE requirement = protocol?.requirements |> FIND ((!(_.is_method) AND (_.name == node.name)) AND (((IF _.params[rtoc_idx] != NIL THEN
-              (_.params[rtoc_idx]).type()
-            ELSE
-              NIL
-            END) != NIL) AND ((((IF _.params[rtoc_idx] != NIL THEN
-              (_.params[rtoc_idx]).type()
-            ELSE
-              NIL
-            END))?).resolved() == :Self)));
-          IF ((protocol != NIL) AND requirement) THEN
+          MUTABLE requirement = ((protocol?.requirements OR_ELSE List[]) |> FIND (((!(_.is_method) AND (_.name == node.name)) AND (_.params[rtoc_idx] != NIL)) AND (type__resolved(param__type(UNWRAP (_.params[rtoc_idx]))) == :Self)));
+          IF ((protocol != NIL) AND (requirement != NIL)) THEN
               &matches.append([protocol, requirement, receiver, rtoc_idx_n5]);
           END
         rtoc_idx_n5 = rtoc_idx_n5 + 1;
