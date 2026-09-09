@@ -18470,3 +18470,23 @@ PUB FN castLocatableToMatchStatement(value: Locatable) RETURNS ?MatchStatement E
   END
   RETURN NIL;
 END
+FN castLocatableToClearParserConcurrentPipelineOp(value: Locatable) RETURNS ?ClearParserConcurrentPipelineOp ->
+  PARTIAL MATCH value START
+    Locatable.SelectOp AS item -> RETURN ClearParserConcurrentPipelineOp{ SelectOp: COPY item };,
+    Locatable.WhereOp AS item -> RETURN ClearParserConcurrentPipelineOp{ WhereOp: COPY item };,
+    Locatable.EachOp AS item -> RETURN ClearParserConcurrentPipelineOp{ EachOp: COPY item };,
+    Locatable.CountOp AS item -> RETURN ClearParserConcurrentPipelineOp{ CountOp: COPY item };,
+    Locatable.SumOp AS item -> RETURN ClearParserConcurrentPipelineOp{ SumOp: COPY item };,
+    Locatable.AverageOp AS item -> RETURN ClearParserConcurrentPipelineOp{ AverageOp: COPY item };,
+    Locatable.MinOp AS item -> RETURN ClearParserConcurrentPipelineOp{ MinOp: COPY item };,
+    Locatable.MaxOp AS item -> RETURN ClearParserConcurrentPipelineOp{ MaxOp: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby reads the token: an OptionalUnwrap written with `?` is safe navigation,
+# one written with `!` is not.
+PUB FN optionalUnwrap__safe_navigation?(self: OptionalUnwrap) RETURNS Bool ->
+  RETURN ((self.token.type == :CHAR) AND (CAST(self.token.value AS String) == "?"));
+END

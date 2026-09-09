@@ -7001,7 +7001,7 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE op: ClearParserConcurrentPipelineOp = castLocatableToConcurrentOp__type_analysis_session(node.right);
+    MUTABLE op: ClearParserConcurrentPipelineOp = UNWRAP (castLocatableToClearParserConcurrentPipelineOp(node.right));
     IF Locatable{ ConcurrentOp: COPY op } IS_A SelectOp THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, UNWRAP (clearParserConcurrentPipelineOp__expression(op))));
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, &op, effect));
@@ -10465,7 +10465,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE config: ?CollectionMethodConfig = collectionMethodConfig__for(TRY (type__dispatch_key( UNWRAP (obj_type))));
     IF config EXISTS AS config_value THEN
       MUTABLE handled: ?Bool = TRY (typeAnalysisSession__resolve_typed_method(&rtoc_self_view, &node, UNWRAP (obj_type), config_value.registry, config_value.tag, TRY (collectionMethodConfig__label(config_value, UNWRAP (obj_type)))));
-      MUTABLE navigation = ((node.object IS_A OptionalUnwrap AND node.object.safe_navigation?()) OR implicit_safe_nav);
+      MUTABLE navigation = ((IF node.object IS_A OptionalUnwrap AS rtoc_nav THEN optionalUnwrap__safe_navigation?(rtoc_nav) ELSE FALSE END) OR implicit_safe_nav);
       IF ((handled != NIL) AND navigation) THEN
         MUTABLE result = TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node }));
         IF !(type__optional?(result)) THEN
@@ -12273,7 +12273,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE mapped_type = (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, Locatable{ MethodCall: COPY node }, "tense navigation method result") OR_ELSE TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node })));
     MUTABLE result = TRY (typeAnalysisSession__publish_tense_navigation_plan_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, castLocatableToTenseNavigation__type_analysis_session(node.object), CAST(mapped_type AS Type)));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, result));
-    IF node.object.safe_navigation?() THEN
+    IF (IF node.object IS_A OptionalUnwrap AS rtoc_nav2 THEN optionalUnwrap__safe_navigation?(rtoc_nav2) ELSE FALSE END) THEN
       node.safe_nav_chain = TRUE;
     END
 }
@@ -12866,7 +12866,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_NO_OVERLOAD }, arg_types, CAST({:name: node.name, :candidates: sigs} AS {String@symbol}Any)));
       END
       TRY (typeAnalysisSession__visit_IntrinsicFunc(&rtoc_self_view, Node{ MethodCall: COPY node }, ufcs_args, matched_def));
-      MUTABLE navigation = ((node.object IS_A OptionalUnwrap AND node.object.safe_navigation?()) OR implicit_safe_nav);
+      MUTABLE navigation = ((IF node.object IS_A OptionalUnwrap AS rtoc_nav THEN optionalUnwrap__safe_navigation?(rtoc_nav) ELSE FALSE END) OR implicit_safe_nav);
       IF navigation THEN
         MUTABLE result = TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node }));
         IF !(type__optional?(result)) THEN
