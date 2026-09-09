@@ -5062,7 +5062,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((spec.type == symbol("Any[]")) AND TRY (typeAnalysisSession__any_array_intrinsic_arg?(&rtoc_self_view, castTypeToStringSymbol(spec.type), &arg))) THEN
       RETURN TRUE;
     END
-    MUTABLE cast_source: Any = arg.resolved_type;
+    MUTABLE cast_source = arg.resolved_type;
     IF (CAST(cast_source AS String)).contains?("[") THEN
       MUTABLE full = TRY (aST__full_type_mut(arg));
       IF type__array?(full) THEN
@@ -8126,7 +8126,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE substitutions: {String@symbol}Type = {};
       FOR rtoc_key IN (TRY (type__generic_args(pattern))).zip(TRY (type__generic_args(concrete))).keys() DO
-    MUTABLE argument: Any = ((TRY (type__generic_args(pattern))).zip(TRY (type__generic_args(concrete)))[rtoc_key] OR_ELSE panic("missing hash key"));
+    MUTABLE argument = ((TRY (type__generic_args(pattern))).zip(TRY (type__generic_args(concrete)))[rtoc_key] OR_ELSE panic("missing hash key"));
     IF !((rtoc_key AND argument)) THEN
           RETURN NIL;
     END
@@ -8248,7 +8248,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF param_fn EXISTS AS param_fn_value THEN
         IF actual_fn EXISTS AS actual_fn_value THEN
           param_fn_value.params.zip(actual_fn_value.params).keys() |> EACH {
-    MUTABLE a_param: Any = (param_fn_value.params.zip(actual_fn.params)[_] OR_ELSE panic("missing hash key"));
+    MUTABLE a_param = (param_fn_value.params.zip(actual_fn.params)[_] OR_ELSE panic("missing hash key"));
     IF !((_ AND a_param)) THEN
       CONTINUE;
     END
@@ -8276,7 +8276,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       subst[p_res] = GenericBinding{ TypeMultiowned: COPY actual_binding };
     ELSE_IF ((type__generic_instance?(param_type) AND type__generic_instance?(actual_type)) AND (type__generic_base(param_type) == type__generic_base(actual_type))) THEN
       (TRY (type__generic_args(param_type))).zip(TRY (type__generic_args(actual_type))).keys() |> EACH {
-    MUTABLE a_arg: Any = ((TRY (type__generic_args(param_type))).zip(TRY (type__generic_args(actual_type)))[_] OR_ELSE panic("missing hash key"));
+    MUTABLE a_arg = ((TRY (type__generic_args(param_type))).zip(TRY (type__generic_args(actual_type)))[_] OR_ELSE panic("missing hash key"));
     IF !((_ AND a_arg)) THEN
       CONTINUE;
     END
@@ -13669,7 +13669,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], CAST({:type: node.name, :expected: (type_params).length(), :got: node.type_args.length()} AS {String@symbol}Any)));
       END
       type_params.zip(node.type_args).keys() |> EACH {
-    MUTABLE arg: Any = (type_params.zip(node.type_args)[_] OR_ELSE panic("missing hash key"));
+    MUTABLE arg = (type_params.zip(node.type_args)[_] OR_ELSE panic("missing hash key"));
       subst[_] = castTypeToGenericBinding(TRY (type__new(arg)));
       };
     ELSE_IF (type_params).any?() THEN
@@ -13731,7 +13731,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE subst: {String@symbol}String@symbol = {};
     (type_params.zip(TRY (type__generic_args(expr_t)))).keys() |> EACH {
-    MUTABLE a: Any = ((type_params.zip(TRY (type__generic_args(expr_t))))[_] OR_ELSE panic("missing hash key"));
+    MUTABLE a = ((type_params.zip(TRY (type__generic_args(expr_t))))[_] OR_ELSE panic("missing hash key"));
     IF !(a) THEN
       CONTINUE;
     END
@@ -16201,7 +16201,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (type__generic_instance?(type_obj) AND type__any?(struct_schema.type_params())) THEN
       MUTABLE subst = {};
       (struct_schema.type_params().zip(TRY (type__generic_args(type_obj)))).keys() |> EACH {
-    MUTABLE arg: Any = ((struct_schema.type_params().zip(TRY (type__generic_args(type_obj))))[_] OR_ELSE panic("missing hash key"));
+    MUTABLE arg = ((struct_schema.type_params().zip(TRY (type__generic_args(type_obj))))[_] OR_ELSE panic("missing hash key"));
     IF !(arg) THEN
       CONTINUE;
     END
@@ -20024,7 +20024,7 @@ PRIVATE FN typeAnalysisSession__get_path_to_root(MUTABLE self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE path = List[];
-    MUTABLE curr: Any = COPY node;
+    MUTABLE curr = COPY node;
     WHILE ((curr IS_A GetField OR curr IS_A GetIndex) OR curr IS_A OptionalUnwrap) DO
       IF curr IS_A GetField THEN
         path = ([symbol(curr.field)] + path);

@@ -1036,7 +1036,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ RequireNode: COPY node }, :Void));
     MUTABLE same_dir = (((node.kind != :package)) AND ((mod_value.source_dir == resolutionSession__import_source_dir(rtoc_self_view))));FOR rtoc_each_1 IN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = CAST(mod_value.global_scope AS Scope);
     TRY (scope__visible_entries(rtoc_local_receiver_21)) }).keys() DO
-    MUTABLE entry: Any = (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = CAST(mod_value.global_scope AS Scope);
+    MUTABLE entry = (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = CAST(mod_value.global_scope AS Scope);
     TRY (scope__visible_entries(rtoc_local_receiver_21)) })[rtoc_each_1] OR_ELSE panic("missing hash key"));
     MUTABLE sig: ?FunctionSignature@multiowned = symbolEntry__fn_signature(entry);
     IF !(sig) THEN
@@ -1058,7 +1058,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (scope__declare(&rtoc_mutable_receiver_22, rtoc_each_1, NIL, imported_sig, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :static));
         END
     mod_value.global_scope.types.keys() |> EACH {
-    MUTABLE type_entry: Any = (mod_value.global_scope.types[_] OR_ELSE panic("missing hash key"));
+    MUTABLE type_entry = (mod_value.global_scope.types[_] OR_ELSE panic("missing hash key"));
     MUTABLE schema = type_entry.schema;
     MUTABLE vis = (functionSignature__visibility(schema) OR :package);
     IF (vis == :private) THEN
@@ -2101,7 +2101,7 @@ PRIVATE FN resolutionSession__register_inline_struct_variants_mut(MUTABLE self: 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.variants.keys() |> EACH {
-    MUTABLE variant_data: Any = (node.variants[_] OR_ELSE panic("missing hash key"));
+    MUTABLE variant_data = (node.variants[_] OR_ELSE panic("missing hash key"));
     IF !(schemas__inline_struct?(variant_data)) THEN
       CONTINUE;
     END
