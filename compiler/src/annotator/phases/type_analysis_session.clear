@@ -2753,7 +2753,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE search_offset = (UNWRAP (symbolEntryRegInput__token(reg_value)).column - 1);
           MUTABLE match: ?CompilerRegexScanner = NIL;
           IF (search_offset < src_line.length()) THEN
-            match = COPY compilerRegexMatchData(src_line.substr(search_offset, (src_line.length() - search_offset)), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));
+            match = compilerRegexMatchData(src_line.substr(search_offset, (src_line.length() - search_offset)), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));
           END
           IF match EXISTS AS match_value THEN
             MUTABLE start_col = ((search_offset + (compilerRegexPosition(match_value) - compilerRegexCapture(match_value, 0).codepointCount())) + 1);
@@ -2848,7 +2848,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (idx == 0) THEN
         label = "(recommended)";
       END
-      MUTABLE line = "    ${(idx + 1).toString()}. ${padRight(label, 15)} ${type_sym}";
+      MUTABLE line = "    ${(idx + 1).toString()}. ${padRight(label, 15)} ${(type_sym OR_ELSE "")}";
       IF note EXISTS AS note_value THEN
         line = (line $+ "  -- ${note_value}");
       END
@@ -5354,7 +5354,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END);
-    IF (((TRUE) AND type__observable?(UNWRAP (lhs_t))) AND ((inner != NIL) AND type__array?(UNWRAP (inner)))) THEN
+    IF (((TRUE) AND type__observable?(lhs_t)) AND ((inner != NIL) AND type__array?(UNWRAP (inner)))) THEN
       MUTABLE elem_sym = type__to_sym(TRY (type__element_type(inner)));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${elem_sym}[]") }))));
       node.storage_override = :heap;
@@ -7676,7 +7676,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_ternary_value_174 = TRY (type__element_type(shape));
     END
     rtoc_ternary_value_174? };
-    IF (((TRUE) AND UNWRAP (payload).indirect?()) AND type__primitive?(payload)) THEN
+    IF (((TRUE) AND payload.indirect?()) AND type__primitive?(payload)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], CAST({:type: payload.resolved()} AS {String@symbol}Any)));
     END
     IF (type__sharded?(type_obj) AND ((payload != NIL) AND UNWRAP (payload).multiowned?())) THEN
