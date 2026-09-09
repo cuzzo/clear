@@ -5126,7 +5126,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
                   MUTABLE rtoc_heap_ctx = UNWRAP (rtoc_mutable_receiver_110); functionContext__record_heap_use_mut(&rtoc_heap_ctx);
           END
           IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-                  MUTABLE rtoc_mutable_receiver_111 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+                  MUTABLE rtoc_mutable_receiver_111: ?FunctionContext = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
                   functionContext__record_alloc_use_mut(&rtoc_mutable_receiver_111);
           END
         END
@@ -7457,7 +7457,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE min = (type__integer_type_min(type_sym) OR_ELSE 0);
             IF ((literal_value < min) OR (literal_value > max_value)) THEN
               IF node IS_A Literal AS literal THEN
-                TRY (typeAnalysisSession__handle_prefixed_int_overflow_mut(&rtoc_self_view, &literal, literal_value, type_sym, min, max_value));
+                MUTABLE rtoc_literal_slot = COPY literal;
+                TRY (typeAnalysisSession__handle_prefixed_int_overflow_mut(&rtoc_self_view, &rtoc_literal_slot, literal_value, type_sym, min, max_value));
               ELSE
                 TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :INT_LITERAL_OVERFLOW }, [], CAST({:val: literal_value, :type: type_sym, :min: min, :max: max_value} AS {String@symbol}Any)));
               END
@@ -7681,7 +7682,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (((TRUE) AND type__indirect?(payload)) AND type__primitive?(payload)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], CAST({:type: type__resolved(payload)} AS {String@symbol}Any)));
     END
-    IF (type__sharded?(type_obj) AND (payload != NIL) AND type__multiowned?(UNWRAP (payload))) THEN
+    IF ((type__sharded?(type_obj) AND (payload != NIL)) AND type__multiowned?(UNWRAP (payload))) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_ELEMENT_REQUIRES_SHARED }, [], {:got: CAST(payload AS String)}));
     END
 }
@@ -8629,7 +8630,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         type__mark_heap_allocated_mut(&node_type);
       END
     END
-    IF (!(coll_src) AND (type__soa(decl_type))) THEN
+    IF ((coll_src == NIL) AND (type__soa(decl_type))) THEN
       TRY (type__mark_soa_layout_mut(&node_type));
     END
     IF decl_type EXISTS AS decl_type_value THEN
@@ -8995,7 +8996,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF (kind == :reentrant_max_depth) THEN
           MUTABLE budget = symbol("RECURSION_YIELD_BUDGET");
           IF (((locatable__max_depth_n(UNWRAP (fn_node)) OR_ELSE 0)) <= CAST(budget AS Int64)) THEN
-            fn_node.tight_reentrance = TRUE;
+            locatable__set_tight_reentrance_mut(&UNWRAP (fn_node), TRUE);
           ELSE
             fn_node.tight_reentrance = FALSE;
           END

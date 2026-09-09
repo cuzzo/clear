@@ -18273,3 +18273,12 @@ PUB FN locatable__set_deferred_drops_mut(MUTABLE value: Locatable, new_value: ?[
     DEFAULT -> RETURN;
   END
 END
+# Ruby writes `tight_reentrance` on whichever variant it holds. A variant either
+# carries the field or it does not, so the write lands only where it fits.
+PUB FN locatable__set_tight_reentrance_mut(MUTABLE value: Locatable, new_value: ?Bool) RETURNS Void ->
+  PARTIAL MATCH value START
+    Locatable.ProtocolRequirement AS MUTABLE item -> item.tight_reentrance = COPY new_value;,
+    Locatable.FunctionDef AS MUTABLE item -> item.tight_reentrance = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END
