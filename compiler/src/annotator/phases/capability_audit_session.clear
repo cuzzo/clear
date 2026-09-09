@@ -1244,7 +1244,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetField: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], kw));
     END
-    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetField: COPY node } }, :capability, (fixes |> SELECT UNWRAP (_)), NIL, code, :error, TRUE, kw));
+    TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetField: COPY node } }, :capability, (fixes |> SELECT _), NIL, code, :error, TRUE, kw));
 }
 END
 PRIVATE FN capabilityAuditSession__emit_foreign_with_view_needs_unsafe_mut(MUTABLE self: CapabilityAuditSession, node: WithBlock, fact: CapabilityTransition) RETURNS !Void
