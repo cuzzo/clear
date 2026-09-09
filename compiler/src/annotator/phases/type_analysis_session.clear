@@ -8285,7 +8285,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(fn_type) THEN
         RETURN UNWRAP (castTypeTypeInputToType(t));
       END
-      MUTABLE params = fn_type.params |> SELECT FunctionTypeParam{ type: CAST(COPY typeAnalysisSession__apply_type_subst(&rtoc_self_view, _.type, subst) AS Type), mutable: FALSE };
+      MUTABLE params = fn_type.params |> SELECT FunctionTypeParam{ type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY _.type }, subst)) AS Type), mutable: FALSE };
       RETURN TRY (type__new(TypeConstructionInput{ FunctionType: COPY FunctionType{ params: COPY params, return_type: CAST(COPY typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY functionSignature__return_type(fn_type) }, subst) AS Type), reentrant: functionSignature__reentrant(fn_type), source_signature: COPY fn_type.source_signature, abi: COPY fn_type.abi } }));
     ELSE
       RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (typeAnalysisSession__apply_expression_subst(&rtoc_self_view, t.shape.expression(), subst)) }));
@@ -8445,7 +8445,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_ternary_value_192? };
     MUTABLE parts = [CAST(genericBinding__resolved(t) AS String)];
     MUTABLE ownership: ?String = genericBinding__ownership_surface_name(t);
-    MUTABLE sync = type__sync_surface_name(t);
+    MUTABLE sync: ?String = genericBinding__sync_surface_name(t);
     IF ownership THEN
       &parts.append(ownership);
     END

@@ -347,3 +347,13 @@ PUB FN genericBinding__elem_sync(value: GenericBinding) RETURNS ?String@symbol E
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:sync_surface_name)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN genericBinding__sync_surface_name(value: GenericBinding) RETURNS ?String EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    GenericBinding.TypeMultiowned AS item -> RETURN type__sync_surface_name(item);,
+    GenericBinding.Type AS item -> RETURN type__sync_surface_name(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
