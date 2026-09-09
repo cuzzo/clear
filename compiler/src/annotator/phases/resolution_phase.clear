@@ -1834,7 +1834,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       FOR _ IN choices DO
-      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: DiagnosticKwValue{ StringValue: COPY _[1] }, :edge: DiagnosticKwValue{ StringValue: COPY "${(edges[rtoc_idx]?.owner OR_ELSE :unknown).toString()}.${(edges[rtoc_idx]?.field_name OR_ELSE "")}" }, :capability: _[0]} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
+      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: DiagnosticKwValue{ StringValue: COPY _[1] }, :edge: DiagnosticKwValue{ StringValue: COPY "${(edges[rtoc_idx]?.owner OR_ELSE :unknown).toString()}.${(edges[rtoc_idx]?.field_name OR_ELSE "")}" }, :capability: DiagnosticKwValue{ StringValue: COPY _[0] }} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
       END
     rtoc_idx = rtoc_idx + 1;
       END
@@ -2191,7 +2191,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (typeTypeInput__indirect?(field_type_info) OR_ELSE FALSE) THEN
       &entries.append(inlineStructDeinitEntry__indirect(field, TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY UNWRAP (typeTypeInput__resolved(field_type_info)) })))))));
     ELSE_IF ((TRY (typeTypeInput__string?(field_type_info)) OR_ELSE FALSE) OR (typeTypeInput__collection?(field_type_info) OR_ELSE FALSE)) THEN
-      &entries.append(inlineStructDeinitEntry__uniform(field, TRY (type__zig_type(field_type_info))));
+      &entries.append(inlineStructDeinitEntry__uniform(field, UNWRAP (TRY (typeTypeInput__zig_type(field_type_info)))));
     ELSE_IF ((typeTypeInput__array?(field_type_info) OR_ELSE FALSE) AND !((TRY (typeTypeInput__string?(field_type_info)) OR_ELSE FALSE))) THEN
       MUTABLE elem_zig_type = TRY (type__zig_type((TRY (type__new(TRY (type__element_type(field_type_info)))))));
       &entries.append(inlineStructDeinitEntry__array(field, elem_zig_type));

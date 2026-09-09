@@ -752,3 +752,12 @@ FN ruby_array_concat_Type__lifecycle_plan(left: []Type, right: []Type) RETURNS [
   END
   RETURN result;
 END
+FN castBindingNodeToSemanticLifecycleRegistryBindingNode(value: BindingNode) RETURNS ?SemanticLifecycleRegistryBindingNode ->
+  PARTIAL MATCH value START
+    BindingNode.VarDecl AS item -> RETURN SemanticLifecycleRegistryBindingNode{ VarDecl: COPY item };,
+    BindingNode.BindExpr AS item -> RETURN SemanticLifecycleRegistryBindingNode{ BindExpr: COPY item };,
+    BindingNode.DestructureTarget AS item -> RETURN SemanticLifecycleRegistryBindingNode{ DestructureTarget: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

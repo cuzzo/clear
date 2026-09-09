@@ -89,7 +89,7 @@ PRIVATE FN annotationTypeInventory__add_lifetime_metadata_node_ids_mut(MUTABLE i
   &ignored.insert(aST__node_identity(node));
   rubyToClearVoid__type_analysis_phase()
     });
-  ELSE_IF value IS_A []AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem AS array THEN
+  ELSE_IF UNWRAP (value) IS_A ArrayValue AS array THEN
     MUTABLE array_mutable = COPY array;
     FOR _ IN array_mutable DO
     annotationTypeInventory__add_lifetime_metadata_node_ids_mut(&ignored, castAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItemToOptionalAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata(_));

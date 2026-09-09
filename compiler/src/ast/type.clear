@@ -5172,3 +5172,12 @@ PUB FN typeTypeInput__array?(value: TypeTypeInput) RETURNS ?Bool EFFECTS REENTRA
   END
   RETURN NIL;
 END
+
+# Ruby asks the input for its Zig type; only a Type can answer.
+PUB FN typeTypeInput__zig_type(value: TypeTypeInput) RETURNS !?String EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN TRY (type__zig_type(item));,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
