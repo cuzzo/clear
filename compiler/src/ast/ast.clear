@@ -18042,3 +18042,17 @@ PUB FN node__set_zig_pattern_mut(MUTABLE value: Node, new_value: ?String@symbol)
     DEFAULT -> RETURN;
   END
 END
+# Ruby asks `respond_to?(:name)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN typeDeclaration__name(value: TypeDeclaration) RETURNS ?String ->
+  PARTIAL MATCH value START
+    TypeDeclaration.StructDef AS item -> RETURN COPY item.name;,
+    TypeDeclaration.ExternStructDecl AS item -> RETURN COPY item.name;,
+    TypeDeclaration.EnumDef AS item -> RETURN COPY item.name;,
+    TypeDeclaration.UnionDef AS item -> RETURN COPY item.name;,
+    TypeDeclaration.ProtocolDef AS item -> RETURN COPY item.name;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

@@ -804,7 +804,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     MUTABLE local_protocols = (declarations.type_declarations |> SELECT:? (  IF _ IS_A ProtocolDef THEN
-      _.name()
+      typeDeclaration__name(_)
     ELSE
       NIL
     END) |> WHERE _ != NIL) |> DISTINCT _;
@@ -940,7 +940,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (binders.length() != owner_params.length()) THEN
       TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY declaration } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_OWNER_ARITY }, [], CAST({:owner: owner_name, :expected: owner_params.length(), :got: binders.length()} AS {String@symbol}Any)));
     END
-    declaration.owner_type = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TypeExpression{ kind: COPY TypeExpressionKind{ Named: COPY NamedTypeExpression{ name: COPY symbol(owner_name), arguments: COPY (binders |> SELECT typeExpression__of(TypeExpressionKind{ Named: COPY NamedTypeExpression{ name: COPY symbol(_.name), arguments: List[] } })) } }, capabilities: COPY declaration.owner_type.capabilities } }));
+    declaration.owner_type = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TypeExpression{ kind: COPY TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY symbol(owner_name), arguments: COPY (binders |> SELECT typeExpression__of(TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY symbol(_.name), arguments: List[] } })) } }, capabilities: COPY declaration.owner_type.capabilities } }));
 }
 END
 PRIVATE FN resolutionSession__conformance_owner_params(self: ResolutionSession, owner_name: String, local_owner: ?StructDef) RETURNS !?[]GenericParamDecl
@@ -1058,8 +1058,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_mutable_receiver_22 = TRY (resolutionSession__current_scope(rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_22, rtoc_each_1, NIL, SymbolEntryTypeInput{ FunctionSignatureMultiowned: COPY imported_sig }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :static));
         END
-    mod_value.global_scope.types.keys() |> EACH {
-    MUTABLE type_entry = (mod_value.global_scope.types[_] OR_ELSE panic("missing hash key"));
+    FOR rtoc_each_item_1060 IN mod_value.global_scope.types.keys() DO
+    MUTABLE type_entry = (mod_value.global_scope.types[rtoc_each_item_1060] OR_ELSE panic("missing hash key"));
     MUTABLE schema = type_entry.schema;
     MUTABLE vis = (schemaValue__visibility(schema) OR_ELSE :package);
     IF (vis == :private) THEN
@@ -1069,11 +1069,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
     END
     MUTABLE imported_schema = TRY (resolutionSession__clone_imported_schema(rtoc_self_view, schema));
-    (TRY (resolutionSession__current_scope(rtoc_self_view))).declare_type(_, imported_schema);
+    (TRY (resolutionSession__current_scope(rtoc_self_view))).declare_type(rtoc_each_item_1060, imported_schema);
     IF imported_schema IS_A UnionSchema AS union_schema THEN
-        TRY (resolutionSession__import_inline_struct_variants_mut(&rtoc_self_view, _, union_schema));
+        TRY (resolutionSession__import_inline_struct_variants_mut(&rtoc_self_view, rtoc_each_item_1060, union_schema));
     END
-    };
+    END
     NIL;
 }
 END
