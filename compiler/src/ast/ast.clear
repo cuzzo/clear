@@ -33,7 +33,7 @@ PUB UNION IsARight { Type: Type, Locatable: Locatable }
 PUB UNION AssertMessage { StringValue: String, SymbolValue: String@symbol }
 PUB UNION StubValue { StringValue: String, Locatable: Locatable }
 PUB UNION PassStateValue { Unset: Bool, MIRPassState: MIRPassState@multiowned }
-PUB UNION TensePlanValue { Unset: Bool, TenseOperationPlan: TenseOperationPlan }
+PUB UNION TensePlanValue { Unset: Bool, TenseOperationPlan: TenseOperationPlan, TenseSelectorPlan: TenseSelectorPlan, TenseJoinPlan: TenseJoinPlan }
 PUB UNION AssignmentName { StringValue: String, Identifier: Identifier, GetField: GetField, GetIndex: GetIndex }
 PUB UNION PipelineRewriteNode { Identifier: Identifier, FuncCall: FuncCall, MethodCall: MethodCall, BinaryOp: BinaryOp, GetField: GetField, GetIndex: GetIndex, BindExpr: BindExpr, Assignment: Assignment, UnaryOp: UnaryOp, CopyNode: CopyNode, MoveNode: MoveNode, KeepNode: KeepNode, ShareNode: ShareNode, WithBlock: WithBlock, StructLit: StructLit, HashLit: HashLit, ListLit: ListLit, BlockExpr: BlockExpr, Assert: Assert, IfStatement: IfStatement, StaticCall: StaticCall }
 PUB UNION BgNode { BgBlock: BgBlock, BgStreamBlock: BgStreamBlock }

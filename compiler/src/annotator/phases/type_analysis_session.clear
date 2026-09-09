@@ -5487,7 +5487,7 @@ PRIVATE FN typeAnalysisSession__validate_select_effect_contract_mut(MUTABLE self
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    op.tense_plan = TensePlanValue{ TenseOperationPlan: COPY effect.plan };
+    op.tense_plan = TensePlanValue{ TenseSelectorPlan: COPY effect.plan };
     MUTABLE declared_order = COPY CAST(op.modifier_order AS String);
     MUTABLE required_order = selectorEffectFact__required_order(effect);
     IF (declared_order == required_order) THEN
@@ -7003,9 +7003,9 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(MUTABLE sel
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE op: ClearParserConcurrentPipelineOp = UNWRAP (castLocatableToClearParserConcurrentPipelineOp(node.right));
-    IF Locatable{ ConcurrentOp: COPY op } IS_A SelectOp THEN
+    IF op IS_A SelectOp AS MUTABLE rtoc_select_op THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, UNWRAP (clearParserConcurrentPipelineOp__expression(op))));
-      TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, &op, effect));
+      TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, &rtoc_select_op, effect));
       IF selectorEffectFact__asynchronous(effect) THEN
         RETURN TRY (type__promise_list_of(TypeTypeInput{ Type: COPY selectorEffectFact__value_type(effect) }));
       ELSE
@@ -8110,12 +8110,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN NIL;
       END
       MUTABLE substitutions: {String@symbol}Type = {};
-      FOR rtoc_key IN (TRY (type__generic_args(pattern))).zip(TRY (type__generic_args(concrete))).keys() DO
-    MUTABLE argument = ((TRY (type__generic_args(pattern))).zip(TRY (type__generic_args(concrete)))[rtoc_key] OR_ELSE panic("missing hash key"));
-    IF !((rtoc_key AND argument)) THEN
+      MUTABLE rtoc_pattern_args = TRY (type__generic_args(pattern));
+      MUTABLE rtoc_concrete_args = TRY (type__generic_args(concrete));
+      MUTABLE rtoc_zip_i = 0;
+      WHILE rtoc_zip_i < rtoc_pattern_args.length() DO
+        MUTABLE parameter: ?Type = COPY rtoc_pattern_args[rtoc_zip_i];
+        MUTABLE argument: ?Type = COPY rtoc_concrete_args[rtoc_zip_i];
+        IF !((parameter != NIL AND argument != NIL)) THEN
           RETURN NIL;
-    END
-    substitutions[rtoc_key.resolved()] = TRY (type__new(argument));
+        END
+        substitutions[type__resolved(parameter)] = TRY (type__new(TypeConstructionInput{ Type: COPY argument }));
+        rtoc_zip_i = rtoc_zip_i + 1;
       END
       RETURN substitutions;
     END
@@ -8476,10 +8481,16 @@ PRIVATE FN typeAnalysisSession__substitute_type_params(MUTABLE self: TypeAnalysi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (functionSignature__new((TRY (functionSignature__params(signature))) |> SELECT (COPY _).tap(%(np) USE(subst, _, MUTABLE rtoc_self_view) -> {
-    np.type = TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY param__type(_) }, subst));
-    NIL
-    }), TypeTypeInput{ Type: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY functionSignature__return_type(signature) }, subst)) }, FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (functionSignature__return_lifetime(signature)) }, functionSignature__visibility(signature), ( { MUTABLE rtoc_empty_list_193: []String@symbol = List[]; rtoc_empty_list_193 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_194: []String@symbol = List[]; rtoc_empty_list_194 } ), NIL, ( { MUTABLE rtoc_empty_list_195: []String@symbol = List[]; rtoc_empty_list_195 } )));
+    MUTABLE rtoc_sig_params = TRY (functionSignature__params(signature));
+    MUTABLE rtoc_new_params: []Param = List[];
+    MUTABLE rtoc_p_i = 0;
+    WHILE rtoc_p_i < rtoc_sig_params.length() DO
+      MUTABLE np: Param = COPY UNWRAP (rtoc_sig_params[rtoc_p_i]);
+      np.type = TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY np.type }, subst));
+      &rtoc_new_params.append(np);
+      rtoc_p_i = rtoc_p_i + 1;
+    END
+    RETURN TRY (functionSignature__new(rtoc_new_params,  TypeTypeInput{ Type: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY functionSignature__return_type(signature) }, subst)) }, FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (functionSignature__return_lifetime(signature)) }, functionSignature__visibility(signature), ( { MUTABLE rtoc_empty_list_193: []String@symbol = List[]; rtoc_empty_list_193 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_194: []String@symbol = List[]; rtoc_empty_list_194 } ), NIL, ( { MUTABLE rtoc_empty_list_195: []String@symbol = List[]; rtoc_empty_list_195 } )));
 }
 END
 PRIVATE FN typeAnalysisSession__validate_stream_type_mut(MUTABLE self: TypeAnalysisSession, node: DeclarationNode) RETURNS !Void
