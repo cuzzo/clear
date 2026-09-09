@@ -356,7 +356,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE sources: []Any = List[];
     IF lifetime IS_A ArrayValue AS rtoc_lifetime_arr THEN
-      sources = CAST(rtoc_lifetime_arr AS []Any);
+      sources = COPY CAST(rtoc_lifetime_arr AS []Any);
     ELSE
       sources = [CAST(lifetime AS Any)];
     END
@@ -2188,7 +2188,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE entries: []InlineStructDeinitEntry = List[];
     FOR field_name IN variant_data.fields.keys() DO
     MUTABLE field_type: TypeTypeInput = UNWRAP (variant_data.fields[field_name]);
-    MUTABLE field_type_info = field_type;
+    MUTABLE field_type_info = COPY field_type;
     MUTABLE field = COPY CAST(field_name AS String);
     IF (typeTypeInput__indirect?(field_type_info) OR_ELSE FALSE) THEN
       &entries.append(inlineStructDeinitEntry__indirect(field, TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY UNWRAP (typeTypeInput__resolved(field_type_info)) })))))));

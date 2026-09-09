@@ -4521,7 +4521,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE sources: []Any = List[];
     IF rl IS_A ArrayValue AS rl_items THEN
-      sources = CAST(rl_items AS []Any);
+      sources = COPY CAST(rl_items AS []Any);
     ELSE
       sources = [CAST(rl AS Any)];
     END
@@ -15419,7 +15419,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ownership_kind = :value;
     END
     symbolEntry__set_ownership_kind(&entry, ownership_kind);
-    RETURN ownership_kind;
+    RETURN COPY ownership_kind;
 }
 END
 PRIVATE FN typeAnalysisSession__track_union_alias(MUTABLE self: TypeAnalysisSession, var_name: String, MUTABLE value_node: Locatable) RETURNS !Void

@@ -3145,7 +3145,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &queue.append(COPY _);
       END
     END
-    RETURN max;
+    RETURN COPY max;
 }
 END
 PRIVATE FN capabilityAuditSession__check_indirect_reentrancy_mut(MUTABLE self: CapabilityAuditSession) RETURNS !Void
