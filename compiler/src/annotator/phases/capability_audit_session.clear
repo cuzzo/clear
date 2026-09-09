@@ -771,7 +771,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         src = capabilityAuditSession__source_code(rtoc_self_view);
-        IF (((decl != NIL) AND aST__node__token(UNWRAP (castSymbolEntryRegInputToLocatable(decl)))) AND (src != NIL)) THEN
+        IF (((decl != NIL) AND aST__node__token(castSymbolEntryRegInputToLocatable(decl))) AND (src != NIL)) THEN
           MUTABLE dline = aST__node__token(decl).line;
           MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
           MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(decl).column - 1));
@@ -1684,7 +1684,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (code == :WITH_EXCLUSIVE_NEEDS_LOCK) THEN
       TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, (fixes |> SELECT _), NIL, code, :error, TRUE, CAST({:got: (kw[:got] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE_IF (code == :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC) OR (code == :WITH_ATOMIC_NEEDS_SHARED_ATOMIC) THEN
-      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, (fixes |> SELECT UNWRAP (_)), NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :actual: (kw[:actual] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, (fixes |> SELECT _), NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :actual: (kw[:actual] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE_IF (code == :WITH_NEEDS_MULTIOWNED) OR (code == :WITH_NEEDS_SHARED) THEN
       TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, (fixes |> SELECT UNWRAP (_)), NIL, code, :error, TRUE, CAST({:name: (kw[:name] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
     ELSE
@@ -2868,7 +2868,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, castAsyncBodyNodeToAsyncSpawnNode(node), body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), UNWRAP (asyncBodyNode__can_smash(node)), UNWRAP (castAsyncBodyNodeToAsyncValidationNode(node))));
     ELSE_IF (node IS_A BgStreamBlock) THEN
-        MUTABLE rtoc_open_0 = UNWRAP (castAsyncBodyNodeToAsyncSpawnNode(node));
+        MUTABLE rtoc_open_0 = castAsyncBodyNodeToAsyncSpawnNode(node);
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, &rtoc_open_0, body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, node.stack_size, FALSE, node));
     ELSE_IF (node IS_A DoBranch) THEN
