@@ -5199,3 +5199,12 @@ PUB FN castTypeTypeInputToType(value: TypeTypeInput) RETURNS ?Type EFFECTS REENT
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:fn_type?)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN typeTypeInput__fn_type?(value: TypeTypeInput) RETURNS ?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN type__fn_type?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

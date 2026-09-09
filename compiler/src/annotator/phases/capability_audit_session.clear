@@ -2776,8 +2776,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE callees = ((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[name] OR_ELSE List[]);
     MUTABLE fallible_callee = callees |> FIND (IF fn_nodes[_] != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = (fn_nodes[_]);
-    functionSignature__can_fail(rtoc_local_receiver_19) }
+      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19: ?FunctionDef@multiowned = (fn_nodes[_]);
+    (UNWRAP (rtoc_local_receiver_19)).can_fail }
     ELSE
       NIL
     END);

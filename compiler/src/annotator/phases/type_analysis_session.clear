@@ -4469,7 +4469,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names: []String = List[];
     MUTABLE rtoc_name_i = 0;
     WHILE rtoc_name_i < unique_args.length() DO
-      MUTABLE rtoc_arg = UNWRAP (unique_args[rtoc_name_i]);
+      MUTABLE rtoc_arg = unique_args[rtoc_name_i];
       IF rtoc_arg IS_A Identifier THEN
         &names.append(COPY (aST__node_name(rtoc_arg) OR_ELSE "<expr>"));
       ELSE
@@ -4477,7 +4477,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       rtoc_name_i = rtoc_name_i + 1;
     END
-    typeAnalysisSession__warning_mut(&rtoc_self_view, castFunctionCallNodeToLocatable(node), "Call to '${node.name()}' reads multiple atomic values independently (${names.join(", ")}). This is not a multi-object-consistent snapshot; default mode allows it as ordinary atomic loads. STRICT/STRICT EXTREME will require an explicit @inconsistent call-site annotation.");
+    typeAnalysisSession__warning_mut(&rtoc_self_view, castFunctionCallNodeToLocatable(node), "Call to '${functionCallNode__name(node)}' reads multiple atomic values independently (${names.join(", ")}). This is not a multi-object-consistent snapshot; default mode allows it as ordinary atomic loads. STRICT/STRICT EXTREME will require an explicit @inconsistent call-site annotation.");
 }
 END
 PRIVATE FN typeAnalysisSession__verify_param_lifetime_mut(MUTABLE self: TypeAnalysisSession, arg_node: Locatable, param: Param, signature: FunctionSignature) RETURNS !Bool
@@ -5981,7 +5981,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY t });
     MUTABLE func_name: ?String = locatable__name(node.right);
     IF sig != NIL THEN
-      TRY (typeAnalysisSession__analyze_pipe_to_named_function(&rtoc_self_view, &node, sig, func_name));
+      TRY (typeAnalysisSession__analyze_pipe_to_named_function(&rtoc_self_view, &node, sig, UNWRAP (func_name)));
     ELSE_IF ((sig == :Intrinsic) OR (sig == :Nil)) THEN
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF ((sig == :Intrinsic)) THEN
         :Any
@@ -6331,7 +6331,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     MUTABLE ctx: ?PassStateValue = conc.shard_context;
     IF ctx THEN
-      conc.shard_context = pipelineShardContext__with_frame_allocations((CAST(ctx AS PipelineShardContext)), FALSE, FALSE);
+      conc.shard_context = COPY pipelineShardContext__with_frame_allocations((CAST(ctx AS PipelineShardContext)), FALSE, FALSE);
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, :Void));
     node.storage_override = :stack;
@@ -8273,12 +8273,12 @@ PRIVATE FN typeAnalysisSession__apply_type_subst(MUTABLE self: TypeAnalysisSessi
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE t = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_185: ?TypeTypeInput = NIL;
     IF type_obj IS_A Type THEN
-      rtoc_ternary_value_185 = type_obj;
+      rtoc_ternary_value_185 = COPY type_obj;
     ELSE
       rtoc_ternary_value_185 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(type_obj)));
     END
     rtoc_ternary_value_185? };
-    IF t.fn_type?() THEN
+    IF typeTypeInput__fn_type?(t) THEN
       MUTABLE fn_type = type__function_type(t);
       IF !(fn_type) THEN
         RETURN t;
@@ -8403,7 +8403,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF left IS_A Type THEN
       rtoc_ternary_value_188 = left;
     ELSE
-      rtoc_ternary_value_188 = TRY (type__new(castGenericBindingToTypeConstructionInput(left)));
+      rtoc_ternary_value_188 = GenericBinding{ Type: COPY TRY (type__new(castGenericBindingToTypeConstructionInput(left))) };
     END
     rtoc_ternary_value_188? };
     MUTABLE r = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_190: ?GenericBinding = NIL;
@@ -8923,7 +8923,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (TRUE AND (func_call.extern_call OR_ELSE FALSE)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castTightLoopNodeToLocatable(loop_node)), TypeAnalysisCodeOrMessage{ SymbolValue: :TIGHT_CALLS_EXTERN_FN }, [], CAST({:name: funcCall__name(func_call)} AS {String@symbol}Any)));
       END
-      MUTABLE fn: ?FunctionDef = COPY fn_nodes[funcCall__name(func_call)];
+      MUTABLE fn: ?FunctionDef = COPY fn_nodes[callName__string_value(funcCall__name(func_call))];
       IF ((fn != NIL) AND (fn.reentrance_kind == :reentrant)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castTightLoopNodeToLocatable(loop_node)), TypeAnalysisCodeOrMessage{ SymbolValue: :TIGHT_CALLS_REENTRANT_FN }, [], CAST({:name: funcCall__name(func_call)} AS {String@symbol}Any)));
       END
@@ -8931,7 +8931,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (IF node IS_A FuncCall AS func_call THEN func_call.extern_call ELSE FALSE END) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castTightLoopNodeToLocatable(loop_node)), TypeAnalysisCodeOrMessage{ SymbolValue: :TIGHT_CALLS_EXTERN_FN }, [], CAST({:name: locatable__name(node)} AS {String@symbol}Any)));
       END
-      MUTABLE fn: ?FunctionDef = COPY fn_nodes[locatable__name(node)];
+      MUTABLE fn: ?FunctionDef = COPY fn_nodes[UNWRAP (locatable__name(node))];
       IF ((fn != NIL) AND (fn.reentrance_kind == :reentrant)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castTightLoopNodeToLocatable(loop_node)), TypeAnalysisCodeOrMessage{ SymbolValue: :TIGHT_CALLS_REENTRANT_FN }, [], CAST({:name: locatable__name(node)} AS {String@symbol}Any)));
       END
@@ -8963,7 +8963,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE callee: ?FunctionDef@multiowned = COPY fn_nodes[UNWRAP (callLikeNode__name(node))];
     IF callee EXISTS AS callee_value THEN
-      MUTABLE effs = callee_value.effects;
+      MUTABLE effs: ?[Set]String@symbol = callee_value.effects;
       RETURN !(!(((effs AND (effs |> ANY (suspends_family |> ANY (_ == _)))))));
     ELSE
       RETURN FALSE;
@@ -11505,7 +11505,7 @@ PRIVATE FN typeAnalysisSession__concrete_program_type_for(MUTABLE self: TypeAnal
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A Program AS program THEN
-      MUTABLE last_stmt: ?Locatable = program.statements.reverse() |> FIND TRUE;
+      MUTABLE last_stmt: ?Locatable = program.statements.last();
       IF last_stmt EXISTS AS last_stmt_value THEN
         MUTABLE last_stmt_value_mutable = COPY last_stmt_value;
         MUTABLE stmt_type = TRY (typeAnalysisSession__auto_finalization_node_type(&rtoc_self_view, &last_stmt_value_mutable));
@@ -11562,7 +11562,7 @@ PRIVATE FN typeAnalysisSession__with_body_fact_frame(MUTABLE self: TypeAnalysisS
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE identity = COPY identity_input;
-    IF (identity.body_id == unassigned_body_id) THEN
+    IF (identity.body_id == semanticUnassignedBodyId()) THEN
       MUTABLE ordinal = typeAnalysisSession__phase_traversal_state(&rtoc_self_view).next_synthetic_body_ordinal;
       rtoc_self_view.traversal_state.next_synthetic_body_ordinal=((typeAnalysisSession__phase_traversal_state(&rtoc_self_view).next_synthetic_body_ordinal - 1));
       identity = BodyIdentity{ definition_id: COPY DefId{ value: ordinal }, body_id: COPY BodyId{ value: ordinal } };
@@ -13330,7 +13330,8 @@ PRIVATE FN typeAnalysisSession__comptime_is_a_type_param_refinement(MUTABLE self
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF condition IS_A IsA AS MUTABLE is_a THEN
+    MUTABLE condition_mutable = COPY condition;
+    IF condition_mutable IS_A IsA AS MUTABLE is_a THEN
       MUTABLE left = is_a.left;
       IF !(left IS_A Identifier) THEN
         RETURN NIL;
@@ -13974,7 +13975,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE inline_payload: InlineStructVariant@multiowned = CAST(inline_struct_variant AS InlineStructVariant@multiowned);
       RETURN MatchSchema{ StructSchemaMultiowned: COPY TRY (structSchema__new(( { MUTABLE rtoc_transform_values_result_337: {String@symbol}StructField = {}; FOR rtoc_key IN inline_payload.fields.keys() DO rtoc_transform_values_result_337[rtoc_key] = { MUTABLE rtoc_value_block_marker = 0;
     MUTABLE t: TypeTypeInput = (inline_payload.fields[rtoc_key] OR_ELSE CAST(panic("missing hash key") AS TypeTypeInput));
-      StructField{ type: COPY castTypeTypeInputToType(t), default: NIL, borrowed: FALSE }
+      StructField{ type: COPY UNWRAP (castTypeTypeInputToType(t)), default: NIL, borrowed: FALSE }
       }; END rtoc_transform_values_result_337 } ), ( { MUTABLE rtoc_empty_list_338: []String@symbol = List[]; rtoc_empty_list_338 } ), ( { MUTABLE rtoc_empty_list_339: []GenericParamDecl = List[]; rtoc_empty_list_339 } ), {}, {})) };
     END
     IF raw_payload? IS_A Type AS type THEN
@@ -17136,7 +17137,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE arm_admits_atomic = ((node.arms OR_ELSE List[])) |> ANY (_.family == :ATOMIC);
     MUTABLE offender: ?CapabilityTransition = caps |> FIND TRY (typeAnalysisSession__cap_admits_atomic?(&rtoc_self_view, _));
-    IF !((offender OR_ELSE arm_admits_atomic)) THEN
+    IF !(((offender != NIL) OR arm_admits_atomic)) THEN
       RETURN;
     END
     MUTABLE var_name: String = "";
@@ -20016,7 +20017,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE curr = COPY node;
     WHILE ((curr IS_A GetField OR curr IS_A GetIndex) OR curr IS_A OptionalUnwrap) DO
       IF curr IS_A GetField THEN
-        path = ([symbol(node__field(curr))] + path);
+        path = ([symbol(node__field(curr) OR_ELSE "")] + path);
       END
       IF curr IS_A GetIndex THEN
         path = ([symbol("*")] + path);
@@ -20447,7 +20448,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN COPY identifier__name(identifier);
       END
       curr =     IF (aST__node_target( UNWRAP (curr)) EXISTS) THEN
-        curr.target
+        locatable__target(UNWRAP (curr))
       ELSE_IF (locatable__object( UNWRAP (curr)) != NIL) THEN
         curr.object
       ELSE
@@ -20533,7 +20534,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END)));
     MUTABLE ti = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_517: ?TypeTypeInput = NIL;
     IF type_info IS_A Type THEN
-      rtoc_ternary_value_517 = type_info;
+      rtoc_ternary_value_517 = COPY type_info;
     ELSE
       rtoc_ternary_value_517 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(type_info)));
     END

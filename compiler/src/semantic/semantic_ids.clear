@@ -88,3 +88,9 @@ END
 PUB FN semanticBodyIdStride() RETURNS Int64 ->
   RETURN 1000000;
 END
+
+# Ruby holds this as Semantic::UNASSIGNED_BODY_ID. A module binding is not
+# visible across packages, so the module that owns it answers for it.
+PUB FN semanticUnassignedBodyId() RETURNS BodyId ->
+  RETURN BodyId{ value: 0 };
+END
