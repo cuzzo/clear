@@ -1372,7 +1372,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &nested.append(TRY (type__tense_type(type)));
     END
     MUTABLE names = nested |> REDUCE(Set[]) {
-    &acc.merge(resolutionSession__unbound_type_parameter_names(rtoc_self_view, _, seen));
+    FOR rtoc_merge_name IN resolutionSession__unbound_type_parameter_names(rtoc_self_view, _, seen) DO
+      &acc.insert(COPY rtoc_merge_name);
+    END
     acc
     };
     MUTABLE resolved = type__resolved(type);

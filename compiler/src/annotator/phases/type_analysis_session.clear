@@ -4720,8 +4720,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < captures.length() DO
-      MUTABLE cap_name = captures[rtoc_idx].name();
-      IF captures[rtoc_idx].default() THEN
+      MUTABLE cap_name = UNWRAP (captures[rtoc_idx]).name;
+      IF capture__default(UNWRAP (captures[rtoc_idx])) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :CAPTURE_NO_DEFAULT }, [], CAST({:name: cap_name} AS {String@symbol}Any)));
       END
       IF !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_96 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
@@ -6584,7 +6584,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE key_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__key_expr(shard_op)));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__target_map(shard_op)));
     MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(shard_op)));
-    MUTABLE target_sync = IF TRUE THEN
+    MUTABLE target_sync: ?String@symbol = IF TRUE THEN
       (IF locatable__symbol(UNWRAP (locatable__target_map(shard_op))) != NIL THEN
       symbolEntry__sync(UNWRAP ((locatable__symbol(UNWRAP (locatable__target_map(shard_op))))))
     ELSE
@@ -6593,7 +6593,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END;
-    IF !((((target_info != NIL) AND type__sharded?(UNWRAP (target_info))) AND FALSE)) THEN
+    IF !((((TRUE) AND type__sharded?(UNWRAP (target_info))) AND FALSE)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, shard_op.target_map, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARD_TARGET_BAD }, [], CAST({:remediation: "SHARD routes items to owning schedulers \u{2014} :locked maps don't have ownership."} AS {String@symbol}Any)));
     END
     MUTABLE map_key = (IF target_info != NIL THEN
@@ -8503,7 +8503,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE final_type_info = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_197: ?AnnotationTypeShape = NIL;
     IF final_type IS_A Type THEN
-      rtoc_ternary_value_197 = final_type;
+      rtoc_ternary_value_197 = COPY final_type;
     ELSE
       rtoc_ternary_value_197 = TRY (type__new(castAnnotationTypeShapeToTypeConstructionInput(final_type)));
     END
@@ -10269,7 +10269,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ((storage == :multiowned) OR (storage == :shared)) THEN
         MUTABLE own = COPY storage;
       END
-      IF !((sync OR_ELSE own)) THEN
+      IF !((sync != NIL)) THEN
         RETURN NIL;
       END
       MUTABLE fn_nodes = TRY (typeAnalysisSession__function_node_map(&rtoc_self_view));
@@ -11005,7 +11005,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE rtoc_idx_n4 = 0;
       WHILE rtoc_idx_n4 < held_lock_types.length() DO
-          MUTABLE held_rank: ?Int64 = lock_type_ranks[castTypeToStringSymbol(held_lock_types[rtoc_idx_n4]?.type)];
+          MUTABLE held_rank: ?Int64 = lock_type_ranks[UNWRAP (held_lock_types[rtoc_idx_n4]?.type)];
           IF !(held_rank) THEN
               rtoc_idx_n4 = rtoc_idx_n4 + 1;
         CONTINUE;
@@ -11315,7 +11315,7 @@ PRIVATE FN typeAnalysisSession__restamp_auto_local_mut(MUTABLE self: TypeAnalysi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE decl: AutoConstraintCollectorDeclarationNode = COPY castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__type_analysis_session(slot.decl_node);
-    MUTABLE concrete = TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(castTypeToType(autoConstraintCollectorDeclarationNode__type( decl)))));
+    MUTABLE concrete = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (autoConstraintCollectorDeclarationNode__type( decl)) }));
     MATCH decl START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
         MUTABLE item_mutable = COPY item;
@@ -12054,7 +12054,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN "${requirement.name}: expected ${expected_kind}, found ${actual_kind}";
     END
     IF (requirement.params.length() != member.params.length()) THEN
-      RETURN "${requirement.name}: expected ${requirement.params.length()} parameter(s), found ${member.params.length()}";
+      RETURN "${requirement.name}: expected ${requirement.params.length().toString()} parameter(s), found ${member.params.length()}";
     END
     MUTABLE substitutions: {String@symbol}GenericBinding = {:Self: resolution.declaration.owner_type}.keys() |> REDUCE(COPY resolution.associated_types) { acc[_] = COPY ({:Self: resolution.declaration.owner_type}[_] OR_ELSE panic("missing hash key")); acc };
     MUTABLE rtoc_idx = 0;
