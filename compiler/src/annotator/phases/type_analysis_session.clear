@@ -1776,7 +1776,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             pt = castTypeToTypeTypeInput__type_analysis_session(TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(pt))));
           END
           MUTABLE param_admits_shared = ((pt != NIL) AND (IF (typeTypeInput__shared?(pt) != NIL) THEN
-            type__shared?(pt)
+            type__shared?(UNWRAP (castTypeTypeInputToType(pt)))
           ELSE
             FALSE
           END));

@@ -2500,7 +2500,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END)));
       IF sig EXISTS AS sig_value THEN
         IF functionSignature__needs_rt(sig_value) THEN
-          needs_rt[callees[rtoc_idx]] = TRUE;
+          needs_rt[UNWRAP (callees[rtoc_idx])] = TRUE;
       END
       END
     rtoc_idx = rtoc_idx + 1;
@@ -2572,7 +2572,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           functionSignature__error_fallible(sig)
         END;
       IF ef EXISTS AS ef_value THEN
-          error_fallible[callees[rtoc_idx]] = TRUE;
+          error_fallible[UNWRAP (callees[rtoc_idx])] = TRUE;
       END
     rtoc_idx = rtoc_idx + 1;
     END
