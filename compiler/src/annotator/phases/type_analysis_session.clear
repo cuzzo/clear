@@ -11953,7 +11953,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node IS_A FuncCall) OR (node IS_A MethodCall) THEN
         IF _.record_call_sites THEN
           _.next_call_site_ordinal=((_.next_call_site_ordinal + 1));
-          &summary.call_site_facts.append(COPY CallSiteFact{ id: COPY CallSiteId{ value: ((summary.body_id.value * semanticBodyIdStride()) + _.next_call_site_ordinal) }, node: node, callee_name: COPY locatable__name(node), args: COPY locatable__args(node), fn_var_call: (IF node IS_A FuncCall AS func_call THEN (func_call.fn_var_call == TRUE) ELSE FALSE END), propagates_failure: !(_.failure_absorbed) });
+          &summary.call_site_facts.append(COPY CallSiteFact{ id: COPY CallSiteId{ value: ((summary.body_id.value * semanticBodyIdStride()) + _.next_call_site_ordinal) }, node: COPY node, callee_name: COPY UNWRAP (locatable__name(node)), args: COPY (locatable__args(node) OR_ELSE List[]), fn_var_call: (IF node IS_A FuncCall AS func_call THEN (func_call.fn_var_call == TRUE) ELSE FALSE END), propagates_failure: !(_.failure_absorbed) });
         END
         IF (IF node IS_A FuncCall AS func_call THEN func_call.fn_var_call ELSE FALSE END) THEN
           summary.has_fnptr_call = TRUE;
@@ -11961,9 +11961,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             summary.raises_directly = TRUE;
           END
         ELSE_IF node IS_A FuncCall AS func_call THEN
-          &summary.callees.insert(funcCall__name(func_call));
+          &summary.callees.insert(callName__string_value(funcCall__name(func_call)));
           IF !(_.failure_absorbed) THEN
-            &summary.propagating_callees.insert(funcCall__name(func_call));
+            &summary.propagating_callees.insert(callName__string_value(funcCall__name(func_call)));
           END
           IF (!(_.failure_absorbed) AND TRY (typeAnalysisSession__resolved_call_error_fallible?(&rtoc_self_view, Node{ FuncCall: COPY func_call }))) THEN
             summary.raises_directly = TRUE;
@@ -12204,18 +12204,27 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE protocol: ?ProtocolDef = typeAnalysisSession__semantic_protocol(&rtoc_self_view, rtoc_each_items_285[rtoc_idx_n5]?);
           MUTABLE requirement: ?ProtocolRequirement = ((protocol?.requirements OR_ELSE List[]) |> FIND (((!(_.is_method) AND (_.name == callName__string_value(node.name))) AND (_.params[rtoc_idx] != NIL)) AND (type__resolved(param__type(UNWRAP (_.params[rtoc_idx]))) == :Self)));
           IF ((protocol != NIL) AND (requirement != NIL)) THEN
-              &matches.append([protocol, requirement, receiver, rtoc_idx_n5]);
+              &matches.append(Tuple{protocol, requirement, receiver, rtoc_idx_n5});
           END
         rtoc_idx_n5 = rtoc_idx_n5 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
     END
-    &matches.uniq_mut(%(protocol: Tuple<ProtocolDef, ProtocolRequirement, Type, Int64>, requirement, ignored_receiver) -> [protocol.name, requirement.name()]);
+    MUTABLE rtoc_seen_keys: [Set]String = Set[];
+    MUTABLE rtoc_unique: []Tuple<ProtocolDef, ProtocolRequirement, Type, Int64> = List[];
+    FOR rtoc_match IN matches DO
+      MUTABLE rtoc_key = "${rtoc_match._0.name}/${rtoc_match._1.name}";
+      IF !(rtoc_seen_keys.contains?(rtoc_key)) THEN
+        &rtoc_seen_keys.insert(COPY rtoc_key);
+        &rtoc_unique.append(COPY rtoc_match);
+      END
+    END
+    matches = rtoc_unique;
     IF (matches.length() == 0) THEN
       RETURN FALSE;
     END
     IF (matches.length() > 1) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FuncCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_PROTOCOL_FUNCTION_AMBIGUOUS }, [], CAST({:name: node.name, :protocols: (matches |> SELECT _.first().name()).join(", ")} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FuncCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_PROTOCOL_FUNCTION_AMBIGUOUS }, [], CAST({:name: node.name, :protocols: (matches |> SELECT _._0.name).join(", ")} AS {String@symbol}Any)));
     END
     MUTABLE protocol, requirement, receiver, receiver_index = UNWRAP (matches.first());
     MUTABLE signature = TRY (typeAnalysisSession__protocol_requirement_signature(&rtoc_self_view, protocol, requirement, receiver));
