@@ -1734,7 +1734,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) |> WHERE _ != NIL;
-    TRY (resolutionSession__resolve_recursive_struct_layouts_mut(&rtoc_self_view, structs));
+    TRY (resolutionSession__resolve_recursive_struct_layouts_mut(&rtoc_self_view, (structs |> SELECT UNWRAP (castTypeDeclarationToStructDef(UNWRAP (_))))));
     FOR _ IN declarations.type_declarations DO
     IF _ IS_A ProtocolDef AS protocol_def THEN
       MUTABLE protocol_def_mutable = COPY protocol_def;
@@ -2066,7 +2066,7 @@ PRIVATE FN resolutionSession__register_enum_declaration(MUTABLE self: Resolution
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY ( castStringListToSchemasEnumSchemaVariantInputItemList(resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), SchemaValue{ EnumSchemaMultiowned: COPY TRY (enumSchema__new(node.variants, node.visibility)) })));
+    TRY ( castStringListToSchemasEnumSchemaVariantInputItemList(resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), SchemaValue{ EnumSchemaMultiowned: COPY TRY (enumSchema__new((node.variants |> SELECT SchemasEnumSchemaVariantInputItem{ StringValue: COPY _ }), node.visibility)) })));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
 }
 END

@@ -3210,7 +3210,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF node IS_A FuncCall AS func_call THEN func_call.fn_var_call ELSE FALSE END) THEN
       RETURN FALSE;
     END
-    MUTABLE callee = fn_nodes[node.name];
+    MUTABLE callee = fn_nodes[callLikeNode__name(node)];
     IF !(callee) THEN
       RETURN FALSE;
     END
@@ -4211,7 +4211,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           ELSE
             NIL
           END);
-          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY UNWRAP (KEEP rtoc_each_items_45[rtoc_idx]?.node) } } } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_EXCLUSIVE_NEEDS_LOCK_GOT }, [], CAST({:got: (storage OR_ELSE "unknown")} AS {String@symbol}Any)));
+          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY UNWRAP (KEEP rtoc_each_items_45[rtoc_idx]?.node)} }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_EXCLUSIVE_NEEDS_LOCK_GOT }, [], CAST({:got: (storage OR_ELSE "unknown")} AS {String@symbol}Any)));
       ELSE_IF (UNWRAP (fact).capability == :write_locked_read) THEN
           IF (syn == :write_locked) THEN
             rtoc_idx = rtoc_idx + 1;

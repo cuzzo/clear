@@ -18066,3 +18066,31 @@ PUB FN node__field(value: Node) RETURNS ?String ->
   END
   RETURN NIL;
 END
+
+PUB FN aST__metatype(self: Locatable) RETURNS ?String@symbol EFFECTS REENTRANT ->
+  IF self IS_A LambdaLit THEN
+    RETURN :lambda;
+  END
+  IF self IS_A FunctionDef THEN
+    RETURN :named_function;
+  END
+  IF locatable__type_object(self) EXISTS AS t THEN
+    IF type__void?(t) THEN
+      RETURN :void;
+    END
+    IF (type__resolved(t) == :NoReturn) THEN
+      RETURN :die;
+    END
+    IF type__array?(t) THEN
+      RETURN :array;
+    END
+    IF type__map?(t) THEN
+      RETURN :hashmap;
+    END
+    IF !(type__primitive?(t)) THEN
+      RETURN :struct;
+    END
+    RETURN :primitive;
+  END
+  RETURN NIL;
+END

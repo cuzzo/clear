@@ -205,3 +205,11 @@ PUB FN routineNode__requires(value: RoutineNode) RETURNS ?{String}[Set]String@sy
   END
   RETURN NIL;
 END
+# Ruby writes `module_alias` on whichever variant it holds. A variant either
+# carries the field or it does not, so the write lands only where it fits.
+PUB FN functionCallNode__set_module_alias_mut(MUTABLE value: FunctionCallNode, new_value: ?String) RETURNS Void ->
+  PARTIAL MATCH value START
+    FunctionCallNode.FuncCall AS MUTABLE item -> item.module_alias = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END

@@ -186,8 +186,8 @@ END
 PRIVATE FN programMIRFinalizer__ast_node_lowers_through_runtime?(node: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN PARTIAL MATCH node START
     Locatable.FuncCall AS func_call -> TRY (programMIRFinalizer__ast_call_needs_runtime?(Node{ FuncCall: COPY func_call }, fn_nodes)),
-    AST.MethodCall -> TRY (programMIRFinalizer__ast_call_needs_runtime?(castLocatableToNode__program_mir_facts(node), fn_nodes)),
-    AST.BgBlock -> TRUE,
+    Locatable.MethodCall -> TRY (programMIRFinalizer__ast_call_needs_runtime?(castLocatableToNode__program_mir_facts(node), fn_nodes)),
+    Locatable.BgBlock -> TRUE,
     Locatable.BgStreamBlock AS bg_stream_block -> TRUE,
     Locatable.Assignment AS assignment -> TRY (programMIRFinalizer__indexed_assignment_lowers_through_runtime?(assignment)),
     Locatable.CopyNode AS copy_node -> TRY (programMIRFinalizer__copy_node_lowers_through_runtime?(Node{ CopyNode: COPY copy_node }, schema_lookup)),

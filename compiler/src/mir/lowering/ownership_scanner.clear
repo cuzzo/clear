@@ -152,7 +152,7 @@ PRIVATE FN mIRLoweringOwnershipScanner__nested_ownership_scope?(self: MIRLowerin
   RETURN PARTIAL MATCH node START
     Locatable.WithBlock AS with_block -> TRUE,
     doblock -> TRUE,
-    AST.BgBlock -> TRUE,
+    Locatable.BgBlock -> TRUE,
     Locatable.BgStreamBlock AS bg_stream_block -> TRUE,
     Locatable.FunctionDef AS function_def -> TRUE,
     Locatable.LambdaLit AS lambda_lit -> TRUE,

@@ -24,3 +24,12 @@ FN castAllocDeclarationNodeToLocatable(value: AllocDeclarationNode) RETURNS Loca
   END
   panic("Invalid cast to Locatable");
 END
+# Ruby writes `storage_override` on whichever variant it holds. A variant either
+# carries the field or it does not, so the write lands only where it fits.
+PUB FN allocDeclarationNode__set_storage_override_mut(MUTABLE value: AllocDeclarationNode, new_value: ?String@symbol) RETURNS Void ->
+  PARTIAL MATCH value START
+    AllocDeclarationNode.VarDecl AS MUTABLE item -> item.storage_override = COPY new_value;,
+    AllocDeclarationNode.BindExpr AS MUTABLE item -> item.storage_override = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END
