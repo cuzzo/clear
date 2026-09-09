@@ -18056,3 +18056,13 @@ PUB FN typeDeclaration__name(value: TypeDeclaration) RETURNS ?String ->
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:field)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN node__field(value: Node) RETURNS ?String ->
+  PARTIAL MATCH value START
+    Node.GetField AS item -> RETURN COPY item.field;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

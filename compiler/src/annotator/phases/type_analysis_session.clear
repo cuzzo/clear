@@ -2718,7 +2718,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(tok) THEN
         RETURN NIL;
       END
-      IF (tok.value == "MUTABLE") THEN
+      IF ((IF tok.value IS_A String AS tokvalue_payload THEN (tokvalue_payload == "MUTABLE") ELSE FALSE END)) THEN
         RETURN NIL;
       END
       RETURN TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: tok.line} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
@@ -3418,7 +3418,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         fn_type_branch_value = NIL;
       END
       MUTABLE fn_type: ?FunctionType = fn_type_branch_value;
-      IF (func_type == :Intrinsic) THEN
+      IF ((type__resolved(func_type) == :Intrinsic)) THEN
         TRY (typeAnalysisSession__visit_IntrinsicFunc(&rtoc_self_view, castFunctionCallNodeToNode(node), args));
       ELSE_IF ((fsig != NIL) AND ((entry != NIL) AND (symbolEntry__storage(entry) == :static))) THEN
         MUTABLE signature: ?FunctionSignature@multiowned = KEEP fsig;
@@ -4507,7 +4507,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (rl == NIL) THEN
       RETURN TRUE;
     END
-    IF (rl == :wildcard) THEN
+    IF ((IF rl IS_A String@symbol AS rl_payload THEN (rl_payload == :wildcard) ELSE FALSE END)) THEN
       typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ FunctionDef: COPY node }, "Function '${node.name}' uses wildcard return lifetime `RETURNS *:T`. Every parameter is conservatively folded into the source set. Consider replacing with the explicit list of parameters whose lifetimes the return value actually depends on; `clear fix` (lint) will offer the rewrite once the audit matrix lands.");
       RETURN TRUE;
     END
@@ -7679,7 +7679,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (((TRUE) AND type__indirect?(payload)) AND type__primitive?(payload)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], CAST({:type: type__resolved(payload)} AS {String@symbol}Any)));
     END
-    IF (type__sharded?(type_obj) AND ((payload != NIL) AND UNWRAP (payload).multiowned?())) THEN
+    IF (type__sharded?(type_obj) AND (((type__resolved(payload) != NIL)) AND UNWRAP (payload).multiowned?())) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_ELEMENT_REQUIRES_SHARED }, [], {:got: CAST(payload AS String)}));
     END
 }
@@ -12129,7 +12129,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR MUTABLE rtoc_for_elem_12042 IN node.args DO
     TRY (typeAnalysisSession__annotate_call_argument_mut(&rtoc_self_view, node, &rtoc_for_elem_12042));
     END
-    IF (node.name == "native_call") THEN
+    IF ((IF node.name IS_A String AS nodename_payload THEN (nodename_payload == "native_call") ELSE FALSE END)) THEN
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ FuncCall: COPY node }, :Any));
       RETURN;
     END
@@ -20006,7 +20006,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE curr = COPY node;
     WHILE ((curr IS_A GetField OR curr IS_A GetIndex) OR curr IS_A OptionalUnwrap) DO
       IF curr IS_A GetField THEN
-        path = ([symbol(curr.field)] + path);
+        path = ([symbol(node__field(curr))] + path);
       END
       IF curr IS_A GetIndex THEN
         path = ([symbol("*")] + path);
@@ -20392,7 +20392,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (rl == NIL) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_514: []TypeAnalysisSessionReturnValueItem = List[]; rtoc_empty_list_514 } ) AS []TypeAnalysisSessionReturnValueItem);
     END
-    IF (rl == :wildcard) THEN
+    IF ((IF rl IS_A String@symbol AS rl_payload THEN (rl_payload == :wildcard) ELSE FALSE END)) THEN
       RETURN CAST([TypeAnalysisSessionReturnValueItem{ SymbolValue: :wildcard }] AS []TypeAnalysisSessionReturnValueItem);
     END
     MUTABLE sources: []Any = List[];
@@ -20707,7 +20707,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END))) THEN
       RETURN;
     END
-    MUTABLE has_pointer = (IF vti != NIL THEN
+    MUTABLE has_pointer = (IF (type__resolved(vti) != NIL) THEN
       TRY (type__heap_ptr?(vti))
     ELSE
       NIL
