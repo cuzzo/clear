@@ -5050,7 +5050,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (CAST(cast_source AS String)).contains?("[") THEN
       MUTABLE full = TRY (aST__full_type_mut(arg));
       IF type__array?(full) THEN
-        cast_source = COPY full;
+        cast_source = COPY type__resolved(full);
       END
     END
     IF !(((spec.type == :Any) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, cast_source, castTypeToTypeTypeInput__type_analysis_session(spec.type))))) THEN
@@ -5123,7 +5123,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF ((locatable__storage(Locatable{ BinaryOp: COPY node }) == :heap) OR type__heap?( UNWRAP (result_ti))) THEN
           IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
                   MUTABLE rtoc_mutable_receiver_110: ?FunctionContext = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
-                  functionContext__record_heap_use_mut(&UNWRAP (rtoc_mutable_receiver_110));
+                  MUTABLE rtoc_heap_ctx = UNWRAP (rtoc_mutable_receiver_110); functionContext__record_heap_use_mut(&rtoc_heap_ctx);
           END
           IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
                   MUTABLE rtoc_mutable_receiver_111 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
@@ -7457,7 +7457,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE min = (type__integer_type_min(type_sym) OR_ELSE 0);
             IF ((literal_value < min) OR (literal_value > max_value)) THEN
               IF node IS_A Literal AS literal THEN
-                TRY (typeAnalysisSession__handle_prefixed_int_overflow_mut(&rtoc_self_view, literal, literal_value, type_sym, min, max_value));
+                TRY (typeAnalysisSession__handle_prefixed_int_overflow_mut(&rtoc_self_view, &literal, literal_value, type_sym, min, max_value));
               ELSE
                 TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :INT_LITERAL_OVERFLOW }, [], CAST({:val: literal_value, :type: type_sym, :min: min, :max: max_value} AS {String@symbol}Any)));
               END
@@ -8208,7 +8208,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF first EXISTS AS first_value THEN
       MUTABLE mismatch: ?SharedGenericArg = shared_args |> FIND !(typeAnalysisSession__same_shared_call_capability?(&rtoc_self_view, first_value.type, _.type));
       IF mismatch EXISTS AS mismatch_value THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castGenericCallNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :POLY_SHARED_INCONSISTENT }, [], CAST({:fn: node.name(), :first: first_value.name, :first_cap: typeAnalysisSession__shared_call_capability_display(&rtoc_self_view, first_value.type), :second: mismatch_value.name, :second_cap: typeAnalysisSession__shared_call_capability_display(&rtoc_self_view, mismatch_value.type)} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(UNWRAP (castGenericCallNodeToLocatable(node))), TypeAnalysisCodeOrMessage{ SymbolValue: :POLY_SHARED_INCONSISTENT }, [], CAST({:fn: node.name(), :first: first_value.name, :first_cap: typeAnalysisSession__shared_call_capability_display(&rtoc_self_view, first_value.type), :second: mismatch_value.name, :second_cap: typeAnalysisSession__shared_call_capability_display(&rtoc_self_view, mismatch_value.type)} AS {String@symbol}Any)));
       ELSE
         RETURN;
       END
@@ -8994,7 +8994,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     
       ELSE_IF (kind == :reentrant_max_depth) THEN
           MUTABLE budget = symbol("RECURSION_YIELD_BUDGET");
-          IF (((locatable__max_depth_n(UNWRAP (fn_node)) OR_ELSE 0)) <= budget) THEN
+          IF (((locatable__max_depth_n(UNWRAP (fn_node)) OR_ELSE 0)) <= CAST(budget AS Int64)) THEN
             fn_node.tight_reentrance = TRUE;
           ELSE
             fn_node.tight_reentrance = FALSE;
@@ -9150,7 +9150,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       raw_branch_value = NIL;
     END
-    MUTABLE raw: ?TypeShapeRaw = raw_branch_value; (IF (((raw != NIL) AND (raw IS_A FunctionSignature)) AND (raw.reentrant() == TRUE)) THEN NIL ELSE name END) } END) } END) } |> WHERE _ != NIL;
+    MUTABLE raw: ?TypeShapeRaw = raw_branch_value; (IF ((raw != NIL) AND (functionSignature__reentrant(UNWRAP (castTypeShapeRawToFunctionSignature(UNWRAP (raw)))) == TRUE)) THEN NIL ELSE name END) } END) } END) } |> WHERE _ != NIL;
     IF (candidates.length() == 0) THEN
       RETURN;
     END
