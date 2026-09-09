@@ -2728,7 +2728,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           CONTINUE;
     END
     MUTABLE range: ?SourceRange = locatable__source_range((COPY _.node));
-    IF (((UNWRAP (range)).start_line <= 0) OR (span__end_line(range) <= 0)) THEN
+    IF (((UNWRAP (range)).start_line <= 0) OR ((UNWRAP (range)).end_line <= 0)) THEN
           CONTINUE;
     END
     &acc.append(edit__new(span__new(range.file, token__start_line(range), token__start_column(range), 0), "TRY ("));
