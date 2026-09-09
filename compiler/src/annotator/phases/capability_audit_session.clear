@@ -771,7 +771,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         src = capabilityAuditSession__source_code(rtoc_self_view);
-        IF (((decl != NIL) AND aST__node__token(castSymbolEntryRegInputToLocatable(decl))) AND (src != NIL)) THEN
+        IF ((decl != NIL) AND (src != NIL)) THEN
           MUTABLE dline = aST__node__token(decl).line;
           MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
           MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(decl).column - 1));
@@ -1453,11 +1453,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE search_offset = (token.column - 1);
         MUTABLE ann_match: ?CompilerRegexScanner = NIL;
         IF (search_offset < line_text.length()) THEN
-          ann_match = COPY compilerRegexMatchData(line_text.substr(search_offset, (line_text.length() - search_offset)), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
+          ann_match = compilerRegexMatchData(line_text.substr(search_offset, (line_text.length() - search_offset)), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
         END
-        IF ((ann_match != NIL) AND !(line_text.contains?("~"))) THEN
-          MUTABLE type_col = ((search_offset + (compilerRegexPosition(ann_match) - compilerRegexCapture(ann_match, 1).codepointCount())) + 1);
+        IF ann_match EXISTS AS ann_match_md THEN
+        IF !(line_text.contains?("~")) THEN
+          MUTABLE type_col = ((search_offset + (compilerRegexPosition(ann_match_md) - compilerRegexCapture(ann_match_md, 1).codepointCount())) + 1);
           fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :PREFIX_TENSE_TYPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, dline, type_col, 0), "~")], :interactive));
+        END
         END
       END
     END
