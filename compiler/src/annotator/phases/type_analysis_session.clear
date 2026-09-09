@@ -2309,7 +2309,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
       IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
-        length = COPY CAST(((tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(index)).value)) + 1.0)) AS String);
+        length = COPY CAST(((tokenValue__to_f(UNWRAP (castLocatableToLiteral(index))) + 1.0)) AS String);
       ELSE
         length = "0";
       END
@@ -7512,7 +7512,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(((UNWRAP (castLocatableToLiteral(UNWRAP (lit))).type == :INT64) OR (UNWRAP (castLocatableToLiteral(UNWRAP (lit))).type == :PREFIXED_INT))) THEN
       RETURN NIL;
     END
-    RETURN (-tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (lit))).value)));
+    RETURN (-tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (lit)))));
 }
 END
 PRIVATE FN typeAnalysisSession__integer_range_target_type(MUTABLE self: TypeAnalysisSession, effective_type: TypeTypeInput) RETURNS !?String@symbol
@@ -9003,7 +9003,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
       END
       TRY (typeAnalysisSession__validate_requires_clauses_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node)))));
-      TRY (typeAnalysisSession__validate_not_logical_return_mut(&rtoc_self_view, fn_node));
+      TRY (typeAnalysisSession__validate_not_logical_return_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(fn_node))));
       TRY (typeAnalysisSession__offer_unconstrained_fn_param_fix_mut(&rtoc_self_view, fn_node));
     rtoc_idx = rtoc_idx + 1;
     END
@@ -9541,7 +9541,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :guard, with_node: COPY node, fn_node: NIL, pred_expr: COPY guard_expr, guard_alias: COPY own, sibling_aliases: COPY siblings, param_names: ( { MUTABLE rtoc_empty_list_206: []String = List[]; rtoc_empty_list_206 } ), allowed_names: ( { MUTABLE rtoc_empty_list_207: []String = List[]; rtoc_empty_list_207 } ), rejected_param_names: COPY Set[], fn_name: NIL }, %() USE(MUTABLE guard_expr, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, guard_expr));
       MUTABLE guard_type = TRY (aST__full_type_mut(guard_expr));
-      IF !((guard_type AND (guard_type.resolved() == :Bool))) THEN
+      IF !((guard_type AND (type__resolved(guard_type) == :Bool))) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, guard_expr, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_GUARD_EXPR_MUST_BE_BOOL }, [], CAST({:got: (guard_type OR_ELSE "Unknown")} AS {String@symbol}Any)));
       END
       NIL
@@ -11110,7 +11110,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     END
     IF typeAnalysisSession__strict_test?(&rtoc_self_view) THEN
-      MUTABLE stubbed_fns = (node.setup |> SELECT:? (    IF _ IS_A StubDecl THEN
+      MUTABLE stubbed_fns = ((node.setup OR_ELSE List[]) |> SELECT:? (    IF _ IS_A StubDecl THEN
         _.function_name()
       ELSE
         NIL
@@ -15154,7 +15154,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (typeAnalysisSession__language_mode(&rtoc_self_view) == :strict) THEN
       RETURN;
     END
-    IF (UNWRAP (plan).action == :pending) THEN
+    IF (plan.action == :pending) THEN
       RETURN;
     END
     IF ((plan.action == :move) OR (plan.last_alias_use == NIL)) THEN
@@ -19681,7 +19681,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE call_node: TypeAnalysisCallNode = UNWRAP (castLocatableToTypeAnalysisCallNode(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))));
-    IF aST__collection_method_call?( UNWRAP (call_node)) THEN
+    IF aST__collection_method_call?( call_node) THEN
       RETURN;
     END
     MUTABLE actual_arg: ?Locatable = TRY (typeAnalysisSession__resolve_borrow_source(&rtoc_self_view, call_node));
