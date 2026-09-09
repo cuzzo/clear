@@ -18178,3 +18178,23 @@ PUB FN locatable__set_tail_call_mut(MUTABLE value: Locatable, new_value: ?Bool) 
     DEFAULT -> RETURN;
   END
 END
+# Ruby asks `respond_to?(:size)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__size(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.WindowOp AS item -> RETURN COPY item.size;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:size)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__size(value: Locatable) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    Locatable.WindowOp AS item -> RETURN COPY item.size;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
