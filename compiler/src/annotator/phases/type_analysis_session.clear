@@ -9150,7 +9150,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       raw_branch_value = NIL;
     END
-    MUTABLE raw: ?TypeShapeRaw = raw_branch_value; (IF ((raw != NIL) AND (functionSignature__reentrant(UNWRAP (castTypeShapeRawToFunctionSignature(UNWRAP (raw)))) == TRUE)) THEN NIL ELSE name END) } END) } END) } |> WHERE _ != NIL;
+    MUTABLE raw: ?TypeShapeRaw = raw_branch_value; (IF ((raw != NIL) AND (IF UNWRAP (raw) IS_A FunctionType AS rtoc_fn_shape THEN (rtoc_fn_shape.reentrant == TRUE) ELSE FALSE END)) THEN NIL ELSE name END) } END) } END) } |> WHERE _ != NIL;
     IF (candidates.length() == 0) THEN
       RETURN;
     END
