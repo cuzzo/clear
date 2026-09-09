@@ -9297,7 +9297,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         MUTABLE storage: ?String@symbol = COPY fact.storage;
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY storage }} AS {String@symbol}DiagnosticKwValue)));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, UNWRAP (name), :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY storage }} AS {String@symbol}DiagnosticKwValue)));
       END
     ELSE_IF (fact.capability == :write_locked_read) THEN
       IF !(capabilityTransition__write_locked_sync?(fact)) THEN
@@ -16380,7 +16380,7 @@ PRIVATE FN typeAnalysisSession__visit_StructLit(MUTABLE self: TypeAnalysisSessio
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE display_name = COPY node.name;
-    MUTABLE schema: TypeAnalysisSchema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(display_name)));
+    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(display_name)));
     IF schemas__union?(schema) THEN
       IF (node.fields.length() != 1) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_LITERAL_VARIANT_COUNT }, [], CAST({:name: node.name, :got: node.fields.length()} AS {String@symbol}Any)));
@@ -16563,7 +16563,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE union_schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type__resolved((TRY (type__value_payload_type(expected_item))))));
+      MUTABLE union_schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type__resolved((TRY (type__value_payload_type(expected_item))))));
       IF TRY (unionPayloadCompatibility__unique_variant(expected_item, actual_item, union_schema)) THEN
             node.items[rtoc_idx].coerced_type = COPY expected_item;
             rtoc_idx = rtoc_idx + 1;
@@ -19899,7 +19899,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF ((symbolEntryRegInput__var_used(info.reg) != NIL) AND info.reg.var_used) THEN
+      IF ((info.reg != NIL) AND (symbolEntryRegInput__var_used(UNWRAP (info.reg)) OR_ELSE FALSE)) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END

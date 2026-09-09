@@ -2637,7 +2637,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       CONTINUE;
     END
     MUTABLE prop = ((TRY (capabilityAuditSession__function_propagating_callees(&rtoc_self_view)))[rtoc_each_13] OR_ELSE callees);
-    IF prop |> ANY alloc_fault[rtoc_each_13] THEN
+    IF prop |> ANY ((alloc_fault[rtoc_each_13] OR_ELSE FALSE)) THEN
           alloc_fault[rtoc_each_13] = TRUE;
           changed = TRUE;
     END
