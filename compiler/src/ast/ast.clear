@@ -18517,3 +18517,12 @@ PUB FN castLocatableToWhileBindLoop(value: Locatable) RETURNS ?WhileBindLoop EFF
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToShardOp(value: Locatable) RETURNS ?ShardOp EFFECTS REENTRANT ->
+  IF value IS_A ShardOp AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

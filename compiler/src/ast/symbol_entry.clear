@@ -222,7 +222,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__carrier_contract(self: SymbolEntry) RETURNS String@symbol
-  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
