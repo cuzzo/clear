@@ -18150,3 +18150,14 @@ PUB FN castLocatableToIdentifier(value: Locatable) RETURNS ?Identifier EFFECTS R
   END
   RETURN NIL;
 END
+
+# Ruby reads the literal's value and asks whether it is an integer; the token
+# value carries the Int64 case.
+PUB FN literal__value_int(self: Literal) RETURNS ?Int64 ->
+  IF self.value EXISTS AS value_present THEN
+    IF value_present IS_A Int64Value AS int_value THEN
+      RETURN int_value;
+    END
+  END
+  RETURN NIL;
+END

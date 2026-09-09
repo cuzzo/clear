@@ -1376,7 +1376,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
       IF (node IS_A FuncCall OR node IS_A MethodCall) THEN
-        MUTABLE signature = node.matched_signature;
+        MUTABLE signature = locatable__matched_signature(node);
         MUTABLE actuals = IF node IS_A MethodCall THEN
           ([node.object] + locatable__args(node))
         ELSE
@@ -1782,8 +1782,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END));
           MUTABLE param_admits_multi = ((pt != NIL) AND (typeTypeInput__multiowned?(pt) OR_ELSE FALSE));
           IF (((pt != NIL) AND !(param_admits_shared)) AND !(param_admits_multi)) THEN
-            &candidate_caps.delete("@shared");
-            &candidate_caps.delete("@multiowned");
+            candidate_caps = candidate_caps |> WHERE ((_ != "@shared") AND (_ != "@multiowned"));
           END
         END
         MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, name));
@@ -2392,10 +2391,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE found: Bool = FALSE;
     WHILE ((off < window_lines.length()) AND !(found)) DO
           MUTABLE line = window_lines[off];
-          MUTABLE idx = compilerRegexMatch(line, pat);
-          IF idx THEN
+          MUTABLE idx: ?CompilerRegexScanner = compilerRegexMatchData(UNWRAP (line), pat);
+          IF idx EXISTS AS idx_md THEN
             MUTABLE line_no = (with_line + off);
-            MUTABLE mut_col = (idx + 1);
+            MUTABLE mut_col = ((compilerRegexPosition(idx_md) - compilerRegexMatched(idx_md).codepointCount()) + 1);
             &edits.append(edit__new(span__new(NIL, line_no, mut_col, "MUTABLE ".codepointCount()), ""));
             found = TRUE;
           END
@@ -2476,9 +2475,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF (search_offset < line_text.length()) THEN
           ann_match = COPY compilerRegexMatchData(line_text.substr(search_offset, (line_text.length() - search_offset)), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
         END
-        IF ((ann_match != NIL) AND !(line_text.contains?("~"))) THEN
-          MUTABLE type_col = ((search_offset + (compilerRegexPosition(ann_match) - compilerRegexCapture(ann_match, 1).codepointCount())) + 1);
+        IF ann_match EXISTS AS ann_match_md THEN
+        IF !(line_text.contains?("~")) THEN
+          MUTABLE type_col = ((search_offset + (compilerRegexPosition(ann_match_md) - compilerRegexCapture(ann_match_md, 1).codepointCount())) + 1);
           fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :PREFIX_TENSE_TYPE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, dline, type_col, 0), "~")], :interactive));
+        END
         END
       END
     END
