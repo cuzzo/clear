@@ -12461,7 +12461,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     acc[symbol(_.name)] = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of( TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved(receiver), member: COPY symbol(_.name), protocol: COPY symbol(protocol.name) } }) }));
     acc
     };
-    RETURN TRY (functionSignature__new(requirement.params |> SELECT Param{ name: COPY _.name, type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(_.type), castMapTypeToMapGenericBinding(substitutions))) AS Type), required: TRUE, mutable: _.mutable, takes: _.takes, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }, TypeTypeInput{ Type: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(requirement.return_type), substitutions)) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_296: []String@symbol = List[]; rtoc_empty_list_296 } ), {}, (requirement.effects_decl == :reentrant), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_297: []String@symbol = List[]; rtoc_empty_list_297 } ), NIL, ( { MUTABLE rtoc_empty_list_298: []String@symbol = List[]; rtoc_empty_list_298 } )));
+    RETURN TRY (functionSignature__new(requirement.params |> SELECT Param{ name: COPY _.name, type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(_.type), castMapTypeToMapGenericBinding(substitutions))) AS Type), required: TRUE, mutable: _.mutable, takes: _.takes, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }, TypeTypeInput{ Type: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(requirement.return_type), castMapTypeToMapGenericBinding(substitutions))) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_296: []String@symbol = List[]; rtoc_empty_list_296 } ), {}, (requirement.effects_decl == :reentrant), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_297: []String@symbol = List[]; rtoc_empty_list_297 } ), NIL, ( { MUTABLE rtoc_empty_list_298: []String@symbol = List[]; rtoc_empty_list_298 } )));
 }
 END
 PRIVATE FN typeAnalysisSession__verify_protocol_method_argument_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, index_value: Int64, expected: Type) RETURNS !Void
@@ -13914,7 +13914,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       match_case.indirect_payload_as = TRUE;
       RETURN CAST(TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castMatchPayloadToTypeTypeInput(inner_type), castMapStringToMapGenericBinding(plan.union_subst))) AS Type);
     END
-    RETURN CAST(TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castMatchPayloadToTypeTypeInput(payload), plan.union_subst)) AS Type);
+    RETURN CAST(TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castMatchPayloadToTypeTypeInput(payload), castMapStringToMapGenericBinding(plan.union_subst))) AS Type);
 }
 END
 PRIVATE FN typeAnalysisSession__borrow_match_payload_binding_mut(MUTABLE self: TypeAnalysisSession, binding: String) RETURNS !Void
