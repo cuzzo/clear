@@ -46,6 +46,7 @@ class PipelineListLowerer < T::Struct
   const :cleanup_bearing_type, T.proc.params(type_info: Type).returns(T::Boolean)
   const :owning_pipeline_temp_stmts, T.proc.params(name: String, source: MIR::Node, type_info: Type, zig_type: String, alloc: Symbol).returns(T::Array[MIR::Emittable])
   const :loop_mark_stmts, T.proc.returns(T::Array[MIR::Emittable])
+  const :stamp_loop_scopes, T.proc.params(arg0: T::Array[MIR::Emittable], arg1: Symbol).void
 
   sig { params(site: PipelineSite, op: PipelineListTerminalOp).returns(MIR::BlockExpr) }
   def lower(site, op)
@@ -162,7 +163,13 @@ class PipelineListLowerer < T::Struct
       # the append's cross-allocator copy creates its own iteration-scoped frame
       # temp, which a head-only scan cannot see (that gap made a heap SELECT
       # feeding DISTINCT fail FRAME_NO_REWIND).
-      body.unshift(*self.loop_mark_stmts.call) if alloc == :heap && body_frame_transients?(body)
+      rewound = alloc == :heap && body_frame_transients?(body)
+      body.unshift(*self.loop_mark_stmts.call) if rewound
+      # Say which scope the body's frame allocations belong to. Without this
+      # they keep Placement's default of :iteration, and a loop that rightly
+      # never rewinds -- because its values flow into a frame result that
+      # outlives the loop -- reads as one that forgot to.
+      self.stamp_loop_scopes.call(body, rewound ? :iteration : :function)
       [
         # Explicit allocation + block-result transfer facts (mirrors
         # lower_order_by): statement-level finalization stamps these when the

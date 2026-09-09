@@ -49,6 +49,7 @@ class PipelineEachLowerer < T::Struct
   const :ast_stmts_use_placeholder, T.proc.params(body_stmts: T::Array[AST::Node]).returns(T::Boolean)
   const :next_index_name, T.proc.returns(String)
   const :loop_mark_stmts, T.proc.returns(T::Array[MIR::Emittable])
+  const :stamp_loop_scopes, T.proc.params(arg0: T::Array[MIR::Emittable], arg1: Symbol).void
   const :source_alloc_fact, T.proc.params(value: MIR::Node, name: String, type_info: Type).returns(T.nilable([MIR::AllocMark, CleanupEntry]))
 
   sig { params(list_node: AST::Node, each_op: AST::EachOp).returns(PipelineEachResult) }
@@ -256,6 +257,7 @@ class PipelineEachLowerer < T::Struct
   def with_iteration_rewind(body)
     return body unless body_frame_transients?(body)
 
+    self.stamp_loop_scopes.call(body, :iteration)
     self.loop_mark_stmts.call.dup + body
   end
 

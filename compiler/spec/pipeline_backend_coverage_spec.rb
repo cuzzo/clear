@@ -400,6 +400,7 @@ class PipelineEachCoverageHost
     PipelineEachLowerer.new(
         source_alloc_fact: ->(_value, _name, _type_info) { nil },
       loop_mark_stmts: -> { [] },
+      stamp_loop_scopes: ->(_stmts, _scope) {},
       bc_target: -> { @bc_target },
       visit_mir: ->(node) { each_visit_mir(node) },
       visit_body_with_placeholder: ->(_body_stmts, placeholder) {
@@ -1992,6 +1993,7 @@ RSpec.describe "pipeline backend coverage" do
           [MIR::Let.new(name, source, false, type_info, nil)]
         },
         loop_mark_stmts: -> { [] },
+      stamp_loop_scopes: ->(_stmts, _scope) {},
       )
       items = id("items", type: Type.new(:"Int64[]"))
 

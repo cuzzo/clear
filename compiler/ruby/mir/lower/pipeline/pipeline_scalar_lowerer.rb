@@ -27,6 +27,7 @@ class PipelineScalarLowerer < T::Struct
   const :pipeline_block, T.proc.params(list_node: AST::Node, blk: T.proc.params(items: String, label: String).returns(T::Array[MIR::Emittable])).returns(MIR::BlockExpr)
   const :transpile_type, T.proc.params(type_info: PipelineTypeInput).returns(String)
   const :loop_mark_stmts, T.proc.returns(T::Array[MIR::Emittable])
+  const :stamp_loop_scopes, T.proc.params(arg0: T::Array[MIR::Emittable], arg1: Symbol).void
 
   sig { params(site: PipelineSite, op: PipelineMaterializedScalarOp).returns(MIR::BlockExpr) }
   def lower(site, op)
@@ -254,6 +255,7 @@ class PipelineScalarLowerer < T::Struct
     MIR.each_node_until(body, boundary) do |node|
       found = true if node.is_a?(MIR::AllocMark) && MIR::Placement.frame?(node.alloc)
     end
+    self.stamp_loop_scopes.call(body, found ? :iteration : :function)
     return body unless found
 
     self.loop_mark_stmts.call.dup + body

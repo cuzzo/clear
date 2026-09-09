@@ -5263,6 +5263,15 @@ class MIRLowering
     Type.new(raw).error_union?
   end
 
+  # A pipeline emits its own loops, so it has to answer the same question an
+  # AST loop answers: are this body's frame allocations scoped to one
+  # iteration? Without the stamp they keep Placement's default of :iteration
+  # and the checker reads a loop that never rewinds.
+  sig { params(stmts: T::Array[MIR::Emittable], scope: Symbol).void }
+  def pipeline_stamp_loop_scopes(stmts, scope)
+    stamp_loop_frame_alloc_scopes!(stmts, scope)
+  end
+
   sig { returns(T::Array[MIR::Emittable]) }
   def pipeline_iteration_loop_marks
     rt = MIR::Ident.new(runtime_binding_name)

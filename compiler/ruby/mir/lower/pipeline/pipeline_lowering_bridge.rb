@@ -157,6 +157,11 @@ class PipelineLoweringBridge
     @lowering.pipeline_iteration_loop_marks
   end
 
+  sig { params(stmts: T::Array[MIR::Emittable], scope: Symbol).void }
+  def pipeline_stamp_loop_scopes(stmts, scope)
+    @lowering.pipeline_stamp_loop_scopes(stmts, scope)
+  end
+
   sig do
     type_parameters(:U)
       .params(alloc: Symbol, blk: T.proc.returns(T.type_parameter(:U)))

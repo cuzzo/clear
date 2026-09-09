@@ -1,0 +1,40 @@
+# A pipeline emits its own loop. Its body's frame allocations have to say which
+# scope they belong to: without the stamp they defaulted to "one iteration" and
+# a loop that rightly never rewinds -- because its values flow into a result
+# that outlives the loop -- was rejected as one that forgot to.
+STRUCT Fact {
+  callee_name: String,
+  node: String
+}
+
+STRUCT Session {
+  tag: String
+}
+
+FN self_calls(self: Session, facts: []Fact, want: String) RETURNS Bool
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS rtoc_self_view {
+    MUTABLE all = facts |> SELECT:? (IF (_.callee_name == want) THEN
+      COPY _.node
+    ELSE
+      NIL
+    END) |> WHERE _ != NIL;
+    IF (all.length() == 0) THEN
+      RETURN FALSE;
+    END
+    MUTABLE ids = (all |> SELECT ("id-" $+ UNWRAP (_))) |> DISTINCT _;
+    RETURN (ids.length() > 0);
+}
+END
+
+FN main() RETURNS Void ->
+  MUTABLE facts: []Fact = [Fact{ callee_name: COPY "a", node: COPY "n1" },
+                           Fact{ callee_name: COPY "b", node: COPY "n2" }];
+  MUTABLE s = Session{ tag: COPY "t" };
+  IF self_calls(s, facts, "a") THEN
+    print("found\n");
+  ELSE
+    print("none\n");
+  END
+END
