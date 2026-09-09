@@ -787,13 +787,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         MUTABLE consumer: ?String = capabilityAuditSession__consumer_source_text(rtoc_self_view, move_line_value);
+        MUTABLE msg = "";
         MUTABLE phrase = capabilityAuditSession__ownership_active_phrase(rtoc_self_view, (og_node.move_action OR_ELSE :move));
         IF consumer EXISTS AS consumer_value THEN
           msg = "USE AFTER MOVE: You can't use `${name}`. `${consumer_value}` ${phrase} (line ${move_line_value.toString()}).";
         ELSE
           msg = "USE AFTER MOVE: You can't use `${name}` \u{2014} it ${phrase} (line ${move_line_value.toString()}).";
         END
-        TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY use_node } }, :ownership, fixes, NIL, :USE_OF_MOVED_VALUE, :error, TRUE, CAST({:detail: _} AS {String@symbol}Any)));
+        TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY use_node } }, :ownership, fixes, NIL, :USE_OF_MOVED_VALUE, :error, TRUE, CAST({:detail: msg} AS {String@symbol}Any)));
       ELSE
         MUTABLE msg = "USE AFTER MOVE: You can't use `${name}`.";
         RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Identifier: COPY use_node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :USE_OF_MOVED_VALUE }, [], CAST({:detail: msg} AS {String@symbol}Any)));
@@ -1581,7 +1582,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         target_name_branch_value = COPY target_type;
       END
       MUTABLE target_name: TypeTypeInput = target_name_branch_value?;
-      MUTABLE text_length = NIL;
+      MUTABLE text_length: ?Int64 = NIL;
       PARTIAL MATCH value_value START
         Locatable.Literal AS literal -> text_length = capabilityAuditSession__literal_source_length(rtoc_self_view, UNWRAP (tok));,
         Locatable.Identifier AS identifier -> text_length = identifier__name(identifier).codepointCount();,
@@ -1590,7 +1591,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(text_length) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, CAST({:type: (castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(target_name) OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (tok).line, UNWRAP (tok).column, 0), "CAST("), edit__new(span__new(NIL, UNWRAP (tok).line, (UNWRAP (tok).column + text_length), 0), " AS ${castTypeTypeInputToString__capability_audit_session(target_name)})")], :interactive));
+      RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :WRAP_VALUE_WITH_CAST, CAST({:type: castTypeTypeInputToOptionalDiagnosticKwValue__capability_audit_session(target_name)} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (tok).line, UNWRAP (tok).column, 0), "CAST("), edit__new(span__new(NIL, UNWRAP (tok).line, (UNWRAP (tok).column + text_length), 0), " AS ${castTypeTypeInputToString__capability_audit_session(target_name)})")], :interactive));
     ELSE
       RETURN NIL;
     END
@@ -2584,7 +2585,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
             END
     END
-    MUTABLE alloc_fault = {};
+    MUTABLE alloc_fault: {String}Bool = {};
     fn_nodes.keys() |> EACH {
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
     MUTABLE direct_alloc = ((fn_node.uses_alloc == TRUE));
@@ -2639,7 +2640,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       CONTINUE;
     END
     MUTABLE prop = ((TRY (capabilityAuditSession__function_propagating_callees(&rtoc_self_view)))[rtoc_each_13] OR_ELSE callees);
-    IF prop |> ANY ((alloc_fault[rtoc_each_13] OR_ELSE FALSE)) THEN
+    IF prop |> ANY ((alloc_fault[_] OR_ELSE FALSE)) THEN
           alloc_fault[rtoc_each_13] = TRUE;
           changed = TRUE;
     END

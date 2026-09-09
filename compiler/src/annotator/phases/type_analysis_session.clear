@@ -2596,7 +2596,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         target_name_branch_value = COPY target_type;
       END
       MUTABLE target_name: TypeTypeInput = target_name_branch_value?;
-      MUTABLE text_length = NIL;
+      MUTABLE text_length: ?Int64 = NIL;
       PARTIAL MATCH value_value START
         Locatable.Literal AS literal -> text_length = typeAnalysisSession__literal_source_length(&rtoc_self_view, UNWRAP (tok));,
         Locatable.Identifier AS identifier -> text_length = identifier__name(identifier).codepointCount();,
