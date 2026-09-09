@@ -1,0 +1,11 @@
+# A symbol local placed into a list literal. Symbols are bit-copy, so the
+# literal must not claim the binding as an owned operand: it has no
+# allocation to hand over, and claiming it reported TRANSFER_WITHOUT_ALLOC.
+FN main() RETURNS Int64
+->
+  head: String@symbol = :first;
+  tail: []String@symbol = [:second, :third];
+  ranked = ([head] + tail);
+  print("${ranked.length().toString()}");
+  RETURN 0;
+END

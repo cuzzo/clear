@@ -3006,7 +3006,11 @@ class MIRLowering
     names.map(&:to_s).reject(&:empty?).uniq.filter_map do |name|
       entry = function_state.bindings[name] || CleanupEntry::NONE
       has_alloc_mark = function_state.lowered_alloc_names.include?(name)
-      next nil if require_visible && !(has_alloc_mark || (entry && entry.present?))
+      # `present?` only says the classifier produced a recipe -- and it
+      # produces one saying "needs no cleanup" for a bit-copy binding such as
+      # a symbol. Such a name owns nothing to hand over, so claiming it here
+      # emitted a TransferMark with no AllocMark behind it.
+      next nil if require_visible && !(has_alloc_mark || entry.needs_cleanup?)
 
       MIR::OwnershipOperandFact.owned_binding(name, Type.new(:Any), source, target_alloc)
     end
