@@ -1363,7 +1363,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         MUTABLE value = assignment_mutable.value;
         IF (IF value IS_A Identifier AS rtoc_transfer_ident THEN (rtoc_transfer_ident.ownership_pending_transfer == TRUE) ELSE FALSE END) THEN
-          ownershipTransportFacts__record_transfer(&facts_value_mutable, Locatable{ Assignment: COPY assignment_mutable }, OwnershipTransportSlot{ StringValue: COPY "value" }, value);
+          ownershipTransportFacts__record_transfer(&facts_value_mutable, Locatable{ Assignment: COPY assignment_mutable }, OwnershipTransportSlot{ StringValue: COPY "value" }, UNWRAP (castLocatableToIdentifier(value)));
         END
       ELSE_IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :decl) ELSE FALSE END) THEN
         MUTABLE entry: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_24 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
@@ -1780,11 +1780,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           ELSE
             FALSE
           END));
-          MUTABLE param_admits_multi = ((pt != NIL) AND (IF (typeTypeInput__multiowned?(pt) != NIL) THEN
-            typeTypeInput__multiowned?(pt)
-          ELSE
-            FALSE
-          END));
+          MUTABLE param_admits_multi = ((pt != NIL) AND (typeTypeInput__multiowned?(pt) OR_ELSE FALSE));
           IF (((pt != NIL) AND !(param_admits_shared)) AND !(param_admits_multi)) THEN
             &candidate_caps.delete("@shared");
             &candidate_caps.delete("@multiowned");
@@ -2687,7 +2683,7 @@ PRIVATE FN typeAnalysisSession__emit_with_cap_mismatch_mut(MUTABLE self: TypeAna
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fixes = candidates |> SELECT:? TRY (typeAnalysisSession__build_decl_cap_insert_fix(&rtoc_self_view, name, _.sigil, _.description_code, _.description_params, confidence)) |> WHERE _ != NIL;
+    MUTABLE fixes: []Fix = candidates |> SELECT:? TRY (typeAnalysisSession__build_decl_cap_insert_fix(&rtoc_self_view, name, _.sigil, _.description_code, _.description_params, confidence)) |> WHERE _ != NIL |> SELECT UNWRAP (_);
     IF (fixes.length() == 0) THEN
       RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueMapToAnyMap__type_analysis_session(kw)));
     END
@@ -2793,11 +2789,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE ranked = ([default] + alts);
       MUTABLE rtoc_idx_n3 = 0;
       WHILE rtoc_idx_n3 < ranked.length() DO
-          MUTABLE stat: ?Any = COPY agg[ranked[rtoc_idx_n3]];
-          IF !(stat) THEN
-              stat = {:count: 0, :rank_sum: 0, :notes: List[]};
-              agg[ranked[rtoc_idx_n3]] = UNWRAP (stat);
+          MUTABLE stat_opt: ?Any = COPY agg[ranked[rtoc_idx_n3]];
+          IF !(stat_opt) THEN
+              stat_opt = {:count: 0, :rank_sum: 0, :notes: List[]};
+              agg[ranked[rtoc_idx_n3]] = UNWRAP (stat_opt);
           END
+          MUTABLE stat: Any = UNWRAP (stat_opt);
           stat[:count] = (CAST(stat[:count] AS Int64) + 1);
           stat[:rank_sum] = (CAST(stat[:rank_sum] AS Int64) + rtoc_idx_n3);
           IF notes[ranked[rtoc_idx_n3]] THEN
