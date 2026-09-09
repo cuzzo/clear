@@ -1624,7 +1624,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN NIL;
         END
         MUTABLE insert_col = (semi_idx_value + 1);
-        MUTABLE fix_params = {:sigil: sigil, :name: name, :line: dline}.keys() |> REDUCE(COPY description_params) { acc[_] = COPY ({:sigil: sigil, :name: name, :line: dline}[_] OR_ELSE panic("missing hash key")); acc };
+        MUTABLE fix_params: {String@symbol}DiagnosticKwValue = COPY description_params;
+        &fix_params.put(:sigil, DiagnosticKwValue{ StringValue: COPY sigil });
+        &fix_params.put(:name, DiagnosticKwValue{ StringValue: COPY name });
+        &fix_params.put(:line, DiagnosticKwValue{ Int64Value: COPY dline });
         RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description_from_hash(rtoc_self_view, description_code, fix_params)), [edit__new(span__new(NIL, dline, insert_col, 0), " ${sigil}")], confidence));
       ELSE
         RETURN NIL;
@@ -1654,7 +1657,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
       MUTABLE idx: ?Int64 = line_text.indexOf(old_sigil);
       IF idx EXISTS AS idx_value THEN
-        MUTABLE fix_params = {:old_sigil: old_sigil, :new_sigil: new_sigil, :name: name, :line: dline}.keys() |> REDUCE(COPY description_params) { acc[_] = COPY ({:old_sigil: old_sigil, :new_sigil: new_sigil, :name: name, :line: dline}[_] OR_ELSE panic("missing hash key")); acc };
+        MUTABLE fix_params: {String@symbol}DiagnosticKwValue = COPY description_params;
+        &fix_params.put(:old_sigil, DiagnosticKwValue{ StringValue: COPY old_sigil });
+        &fix_params.put(:new_sigil, DiagnosticKwValue{ StringValue: COPY new_sigil });
+        &fix_params.put(:name, DiagnosticKwValue{ StringValue: COPY name });
+        &fix_params.put(:line, DiagnosticKwValue{ Int64Value: COPY dline });
         RETURN TRY (fix__new(TRY (capabilityAuditSession__fix_description_from_hash(rtoc_self_view, description_code, fix_params)), [edit__new(span__new(NIL, dline, (idx_value + 1), old_sigil.codepointCount()), new_sigil)], confidence));
       ELSE
         RETURN NIL;
@@ -1803,11 +1810,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE auto_tok: ?Token@multiowned = capabilityAuditSession__auto_token_for(rtoc_self_view, slot);
     IF auto_tok EXISTS AS auto_tok_value THEN
       MUTABLE type_str = COPY CAST(type_sym AS String);
-      RETURN TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :PIN_AUTO_SLOT, CAST({:position: DiagnosticKwValue{ Int64Value: position }, :label: (ruby_wrap_optional_String_DiagnosticKwValue__capability_audit_session(capabilityAuditSession__auto_slot_label(rtoc_self_view, slot)) OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :type: DiagnosticKwValue{ StringValue: COPY type_str }, :note: DiagnosticKwValue{ StringValue: COPY IF note != NIL THEN
-        " ${note}"
-      ELSE
-        ""
-      END }} AS {String@symbol}DiagnosticKwValue)), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :interactive));
+      MUTABLE note_text: String = "";
+      IF note EXISTS AS note_value THEN
+        note_text = " ${note_value}";
+      END
+      RETURN TRY (fix__new(capabilityAuditSession__fix_description(rtoc_self_view, :PIN_AUTO_SLOT, CAST({:position: DiagnosticKwValue{ Int64Value: position }, :label: (ruby_wrap_optional_String_DiagnosticKwValue__capability_audit_session(capabilityAuditSession__auto_slot_label(rtoc_self_view, slot)) OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :type: DiagnosticKwValue{ StringValue: COPY type_str }, :note: DiagnosticKwValue{ StringValue: COPY note_text }} AS {String@symbol}DiagnosticKwValue)), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :interactive));
     ELSE
       RETURN NIL;
     END
