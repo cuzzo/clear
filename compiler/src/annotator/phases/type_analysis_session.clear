@@ -6540,7 +6540,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF !((TRUE AND type__sharded?(ti))) THEN
           RETURN NIL;
         END
-        RETURN PipelineShardedAccess{ map_name: COPY UNWRAP (aST__node_name(get_index.target)), key_expr: COPY get_index.indexOf(), map_token: get_index.target.token() };
+        RETURN PipelineShardedAccess{ map_name: COPY UNWRAP (aST__node_name(get_index.target)), key_expr: COPY get_index.index, map_token: UNWRAP (locatable__token(get_index.target)) };
       ELSE
         RETURN NIL;
       END
@@ -6617,7 +6617,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expr IS_A Literal AS literal THEN
       RETURN tokenValue__to_f(UNWRAP (literal.value));
     ELSE
-    IF (expr IS_A UnaryOp AND (expr.op() == :SUB)) THEN
+    IF (IF expr IS_A UnaryOp AS rtoc_neg_op THEN (rtoc_neg_op.op == :SUB) ELSE FALSE END) THEN
         MUTABLE right = aST__node_right(expr);
         IF right IS_A Literal THEN
           RETURN (-aST__node_value( UNWRAP (right)).to_f());
@@ -6664,7 +6664,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_concurrent_option_values_mut(&rtoc_self_view, options));
     MUTABLE lhs_type = TRY (aST__full_type_mut(node.left));
     MUTABLE shard_node: ?ShardOp = typeAnalysisSession__prepare_concurrent_shard_context_mut(&rtoc_self_view, node, castLocatableToConcurrentOp__type_analysis_session(conc));
-    MUTABLE proxy = BinaryOp{ token: COPY UNWRAP (locatable__token(Locatable{ BinaryOp: COPY node })), left: COPY (node).left, op: :SMOOTH, right: COPY conc.op, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
+    MUTABLE proxy = BinaryOp{ token: COPY UNWRAP (locatable__token(Locatable{ BinaryOp: COPY node })), left: COPY locatable__left(Locatable{ BinaryOp: COPY node }), op: :SMOOTH, right: COPY conc.op, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
     IF (conc.op() IS_A SelectOp) OR (conc.op() IS_A WhereOp) THEN
       IF TRY (typeAnalysisSession__bounded_stream_source?(&rtoc_self_view, &node.left)) THEN
         TRY (typeAnalysisSession__analyze_concurrent_bounded_select_family_op(&rtoc_self_view, &node));
@@ -6990,7 +6990,7 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(MUTABLE sel
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE op: ConcurrentOp = COPY castLocatableToConcurrentOp__type_analysis_session(node.right);
-    IF op IS_A SelectOp THEN
+    IF Locatable{ ConcurrentOp: COPY op } IS_A SelectOp THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, UNWRAP (clearParserConcurrentPipelineOp__expression(op))));
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, &op, effect));
       IF selectorEffectFact__asynchronous(effect) THEN
@@ -7058,7 +7058,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (aST__metatype(UNWRAP (locatable__left( Locatable{ BinaryOp: COPY node }))) == :array) THEN
       RETURN;
     END
-    IF lhs_type EXISTS AS lhs_type_value THEN
+    MUTABLE lhs_type_value: Type = lhs_type;
+    IF TRUE THEN
       IF type__collection?(lhs_type_value) THEN
       RETURN;
     END
@@ -7102,7 +7103,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (total < 4) THEN
         RETURN;
       END
-      MUTABLE ratio = (accessed_value.length().to_f() / total);
+      MUTABLE ratio = (CAST(accessed_value.length() AS Float64) / total);
       IF (ratio < soa_threshold) THEN
         MUTABLE fields_str = ((accessed_value |> SELECT COPY _) |> ORDER_BY _).join(", ");
         typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, "Pipeline accesses ${accessed_value.length()} of ${total} fields (${fields_str}). Consider @soa for better cache performance on '${castTypeToString(item_type)}'.");
@@ -7445,7 +7446,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE min = (type__integer_type_min(type_sym) OR_ELSE 0);
             IF ((literal_value < min) OR (literal_value > max_value)) THEN
               IF node IS_A Literal AS literal THEN
-                TRY (typeAnalysisSession__handle_prefixed_int_overflow_mut(&rtoc_self_view, &literal, literal_value, type_sym, min, max_value));
+                TRY (typeAnalysisSession__handle_prefixed_int_overflow_mut(&rtoc_self_view, literal, literal_value, type_sym, min, max_value));
               ELSE
                 TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :INT_LITERAL_OVERFLOW }, [], CAST({:val: literal_value, :type: type_sym, :min: min, :max: max_value} AS {String@symbol}Any)));
               END
