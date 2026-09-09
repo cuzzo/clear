@@ -1812,7 +1812,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (internal.length() == 1) THEN
           TRY (resolutionSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ StructDef: COPY owner_node } }, :type, fixes, NIL, :RECURSIVE_LAYOUT_REQUIRES_INDIRECT, :error, TRUE, CAST({:edge: labels} AS {String@symbol}Any)));
       ELSE
-          TRY (resolutionSession__fixable_mut(&rtoc_self_view, owner_node, :type, fixes, NIL, :RECURSIVE_LAYOUT_AMBIGUOUS, :error, TRUE, CAST({:edges: labels} AS {String@symbol}Any)));
+          TRY (resolutionSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ StructDef: COPY owner_node } }, :type, fixes, NIL, :RECURSIVE_LAYOUT_AMBIGUOUS, :error, TRUE, CAST({:edges: labels} AS {String@symbol}Any)));
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -1834,7 +1834,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       FOR _ IN choices DO
-      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: _._1, :edge: DiagnosticKwValue{ StringValue: COPY "${edges[rtoc_idx]?.owner}.${edges[rtoc_idx]?.field_name}" }, :capability: _._0} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
+      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: UNWRAP (_[1]), :edge: DiagnosticKwValue{ StringValue: COPY "${edges[rtoc_idx]?.owner}.${edges[rtoc_idx]?.field_name}" }, :capability: _._0} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
       END
     rtoc_idx = rtoc_idx + 1;
       END
@@ -1962,11 +1962,11 @@ PRIVATE FN resolutionSession__register_type_declaration(MUTABLE self: Resolution
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A StructDef AS MUTABLE struct_def THEN
       TRY (resolutionSession__register_struct_declaration(&rtoc_self_view, &struct_def));
-    ELSE_IF node IS_A ExternStructDecl AS extern_struct_decl THEN
+    ELSE_IF node IS_A ExternStructDecl AS MUTABLE extern_struct_decl THEN
       TRY (resolutionSession__register_extern_struct_declaration(&rtoc_self_view, &extern_struct_decl));
-    ELSE_IF node IS_A EnumDef AS enum_def THEN
+    ELSE_IF node IS_A EnumDef AS MUTABLE enum_def THEN
       TRY (resolutionSession__register_enum_declaration(&rtoc_self_view, &enum_def));
-    ELSE_IF node IS_A UnionDef AS union_def THEN
+    ELSE_IF node IS_A UnionDef AS MUTABLE union_def THEN
       TRY (resolutionSession__register_union_declaration(&rtoc_self_view, &union_def));
     END
 }
@@ -1987,7 +1987,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resourceSchema__new(close_plan, {}, castStructFieldMapToSchemasResourceSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.from_module, node.as_type, :package, {}))
     }
     ELSE
-      TRY (structSchema__new(node.field_decls, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), ( { MUTABLE rtoc_empty_list_55: []GenericParamDecl = List[]; rtoc_empty_list_55 } ), {}, {}, :package, node.from_module, node.as_type))
+      TRY (structSchema__new(castStructFieldMapToSchemasStructSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), ( { MUTABLE rtoc_empty_list_55: []GenericParamDecl = List[]; rtoc_empty_list_55 } ), {}, {}, :package, node.from_module, node.as_type))
     END;
     MUTABLE existing: ?ScopeTypeEntry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_56 = TRY (resolutionSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type_entry(rtoc_local_receiver_56, symbol(node.name))) };
@@ -2068,7 +2068,7 @@ PRIVATE FN resolutionSession__register_enum_declaration(MUTABLE self: Resolution
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), SchemaValue{ EnumSchemaMultiowned: COPY TRY (enumSchema__new((node.variants |> SELECT SchemasEnumSchemaVariantInputItem{ StringValue: COPY _ }), node.visibility)) }));
-    TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
+    TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ EnumDef: COPY node }, :Void));
 }
 END
 PRIVATE FN resolutionSession__register_union_declaration(MUTABLE self: ResolutionSession, MUTABLE node: UnionDef) RETURNS !Void
@@ -2078,7 +2078,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node.type_params.any?() THEN
       TRY (resolutionSession__validate_type_param_list_mut(&rtoc_self_view, Node{ UnionDef: COPY node }, node.type_params, "union"));
     END
-    IF (node.type_params.any?() AND (node.variants.values() |> ANY schemas__inline_struct?(_))) THEN
+    IF (node.type_params.any?() AND (node.variants.values() |> ANY schemas__inline_struct?(castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(UNWRAP (_))))) THEN
       TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ UnionDef: COPY node } }, ResolutionCodeOrMessage{ SymbolValue: :UNION_INLINE_IN_GENERIC }));
     END
     TRY (resolutionSession__register_inline_struct_variants_mut(&rtoc_self_view, node));
@@ -2105,14 +2105,13 @@ PRIVATE FN resolutionSession__register_inline_struct_variants_mut(MUTABLE self: 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.variants.keys() |> EACH {
     MUTABLE variant_data = (node.variants[_] OR_ELSE panic("missing hash key"));
-    IF !(schemas__inline_struct?(variant_data)) THEN
-      CONTINUE;
-    END
+    IF schemas__inline_struct?(castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(variant_data)) THEN
     MUTABLE synthetic_name = symbol("${node.name}_${_}");
     TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, synthetic_name, SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(variant_data.fields().transform_values(%(type) -> StructField{ type: type, default: NIL, borrowed: FALSE }), ( { MUTABLE rtoc_empty_list_60: []String@symbol = List[]; rtoc_empty_list_60 } ), ( { MUTABLE rtoc_empty_list_61: []GenericParamDecl = List[]; rtoc_empty_list_61 } ), {}, {})) }));
     MUTABLE entries = TRY (resolutionSession__inline_struct_deinit_entries(rtoc_self_view, variant_data));
     IF (entries.length() > 0) THEN
         TRY (inlineStructVariant__set_deinit_entries(&variant_data, entries));
+    END
     END
     };
 }

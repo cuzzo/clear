@@ -769,10 +769,12 @@ END
 # The schema constructors take their fields as the input union; a map of plain
 # StructFields is converted entry by entry, in the same shape as the tree's
 # list casts.
-PUB FN castStructFieldMapToSchemasStructSchemaFieldInputMap(values: {String}StructField) RETURNS {String}SchemasStructSchemaFieldInput ->
-  MUTABLE out: {String}SchemasStructSchemaFieldInput = {};
+# The schema keys its fields by symbol, the way every other schema key is
+# spelled; the source map is keyed by the declared field name.
+PUB FN castStructFieldMapToSchemasStructSchemaFieldInputMap(values: {String}StructField) RETURNS {String@symbol}SchemasStructSchemaFieldInput ->
+  MUTABLE out: {String@symbol}SchemasStructSchemaFieldInput = {};
   FOR key IN values.keys() DO
-    out[key] = SchemasStructSchemaFieldInput{ StructField: COPY (values[key] OR_ELSE panic("missing hash key")) };
+    out[symbol(key)] = SchemasStructSchemaFieldInput{ StructField: COPY (values[key] OR_ELSE panic("missing hash key")) };
   END
   RETURN out;
 END
@@ -795,6 +797,18 @@ PUB FN schemaValue__visibility(value: SchemaValue) RETURNS ?String@symbol ->
     SchemaValue.StructSchemaMultiowned AS item -> RETURN COPY item.visibility;,
     SchemaValue.UnionSchemaMultiowned AS item -> RETURN COPY item.visibility;,
     SchemaValue.ResourceSchemaMultiowned AS item -> RETURN COPY item.visibility;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+FN castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(value: SchemasUnionSchemaVariantInput) RETURNS ?SchemasUnionSchemaVariantValue ->
+  PARTIAL MATCH value START
+    SchemasUnionSchemaVariantInput.FunctionType AS item -> RETURN SchemasUnionSchemaVariantValue{ FunctionType: COPY item };,
+    SchemasUnionSchemaVariantInput.TypeMultiowned AS item -> RETURN SchemasUnionSchemaVariantValue{ TypeMultiowned: COPY item };,
+    SchemasUnionSchemaVariantInput.SymbolValue AS item -> RETURN SchemasUnionSchemaVariantValue{ SymbolValue: COPY item };,
+    SchemasUnionSchemaVariantInput.StringValue AS item -> RETURN SchemasUnionSchemaVariantValue{ StringValue: COPY item };,
+    SchemasUnionSchemaVariantInput.InlineStructVariantMultiowned AS item -> RETURN SchemasUnionSchemaVariantValue{ InlineStructVariantMultiowned: COPY item };,
+    SchemasUnionSchemaVariantInput.Type AS item -> RETURN SchemasUnionSchemaVariantValue{ Type: COPY item };,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
