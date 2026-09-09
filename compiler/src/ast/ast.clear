@@ -2700,7 +2700,7 @@ PUB STRUCT ConcurrentOp {
   needs_heap_create: ?Bool,
   needs_mut_ref: ?Bool,
   resource_close_plan: ?ResourceClosePlan,
-  shard_context: ?PassStateValue,
+  shard_context: ?PipelineShardContext,
   slot_size: ?Int64,
   source_range: ?SourceRange,
   stdlib_allocates: ?Bool,
