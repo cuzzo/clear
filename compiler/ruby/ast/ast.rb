@@ -2449,6 +2449,7 @@ module AST
   IsA          = Struct.new(:token, :left, :right, :binding, :binding_mutable) do
     extend T::Sig
     include Locatable
+    attr_accessor :static_is_a_result # comptime answer when the subject is not a union
     attr_accessor :runtime_variant_name
     attr_accessor :runtime_payload_type
     attr_accessor :runtime_indirect_payload_as

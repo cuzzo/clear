@@ -1,0 +1,19 @@
+# A SHAPE test on a value that is not a union has one possible answer, and the
+# compiler already knows the type: `m IS_A {}Any` on a map is true, the way
+# Ruby's `h.is_a?(Hash)` is. Only a union needs a runtime tag test, and naming
+# a value's own struct stays an error -- that test asks nothing.
+FN main() RETURNS !Void ->
+  m: {String}Int64 = {};
+  xs: []String = List[];
+  MUTABLE parts: []String = List[];
+  IF m IS_A {} Any THEN
+    &parts.append(COPY "map");
+  END
+  IF xs IS_A [] Any THEN
+    &parts.append(COPY "list");
+  END
+  IF m IS_A [] Any THEN
+    &parts.append(COPY "wrong");
+  END
+  print("${parts.join(",")}");
+END

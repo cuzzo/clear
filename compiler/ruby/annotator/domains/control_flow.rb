@@ -207,6 +207,36 @@ module Annotator
         @current_if_is_a_condition = previous
       end
 
+      # Whether a non-union subject satisfies the tested shape, or nil when the
+      # shapes are unrelated enough that the author meant something else.
+      sig { params(subject: Type, right: T.untyped).returns(T.nilable(T::Boolean)) }
+      def static_is_a_answer(subject, right)
+        # A bare NAME on the right names a type; its own full_type would be the
+        # value the identifier holds, which is not what is being tested.
+        tested = if right.is_a?(Type)
+          right
+        elsif right.is_a?(AST::Identifier) && right.name.to_s.match?(/\A[A-Z]/)
+          Type.new(right.name.to_sym)
+        else
+          Type.from_node!(right, context: "IS_A tested shape")
+        end
+        return nil unless tested.is_a?(Type)
+
+        # Only a SHAPE question gets a static answer: Ruby's `h.is_a?(Hash)`
+        # asks something real about a value whose static type the author may
+        # not have in view. `node IS_A BinaryOp` on a BinaryOp asks nothing,
+        # and stays an error so the mistake is reported.
+        return subject.map? if tested.map?
+        # A map is a collection too, so the list question has to exclude it.
+        if tested.array? == true || tested.collection?
+          return !subject.map? && (subject.array? == true || subject.collection?)
+        end
+        return subject.string? if tested.string?
+
+        nil
+      end
+      private :static_is_a_answer
+
       sig { params(node: AST::IsA).void }
       def annotate_runtime_is_a!(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
@@ -216,7 +246,19 @@ module Annotator
         type_name = T.cast(subject_type.generic_instance? ? subject_type.generic_base : subject_type.resolved, Symbol)
         schema = T.cast(lookup_type_schema(type_name), T.nilable(MatchSchema))
         unless Schemas.union?(schema)
-          error!(node.left, :IS_A_RUNTIME_NEEDS_UNION, got: subject_type.to_s)
+          # A non-union subject has ONE type, so the question is already
+          # answered: `m IS_A {}Any` on a HashMap is true, the same way Ruby's
+          # `h.is_a?(Hash)` is. Only a union needs a runtime tag test.
+          static = static_is_a_answer(subject_type, node.right)
+          if static.nil?
+            error!(node.left, :IS_A_RUNTIME_NEEDS_UNION, got: subject_type.to_s)
+          end
+          node.static_is_a_result = static
+          # The tested shape is still a type operand and has to carry a type,
+          # even though nothing reads it at runtime.
+          annotate_is_a_operand!(node.right, side: "Right")
+          stamp_type!(node, :Bool)
+          return
         end
 
         union_schema = T.cast(schema, Schemas::UnionSchema)

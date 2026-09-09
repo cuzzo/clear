@@ -460,6 +460,12 @@ module MIRLoweringExpressions
   def lower_is_a(node)
     T.bind(self, MIRLowering) rescue nil
 
+    unless node.static_is_a_result.nil?
+      # The annotator already answered this: the subject is not a union, so it
+      # has one type and the test is a constant.
+      return MIR::Lit.new(node.static_is_a_result ? "true" : "false")
+    end
+
     if node.runtime_variant_name
       subject = T.cast(lower(node.left), MIR::Emittable)
       return MIR::BinOp.new("==", active_tag_call(subject), MIR::EnumTag.new(variant: T.must(node.runtime_variant_name)))
