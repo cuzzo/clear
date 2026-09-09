@@ -2309,7 +2309,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
       IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
-        length = COPY CAST(((tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(index)).value)) + 1.0)) AS String);
+        length = COPY CAST(((tokenValue__to_f(UNWRAP (castLocatableToLiteral(index))) + 1.0)) AS String);
       ELSE
         length = "0";
       END
@@ -3290,7 +3290,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_implicit_return = functionDef__implicit_return_type?(node);
     node.type_params = TRY (typeAnalysisSession__infer_implicit_type_params(&rtoc_self_view, node));
     MUTABLE declared_return = TRY (functionDef__annotation_return_type(node));
-    MUTABLE lifetime_paths: []TypeAnalysisSessionReturnValueItem = TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, node));
+    MUTABLE lifetime_paths: []FunctionContextLifetimeSource = TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, node));
     MUTABLE fn_type_params = node.type_params |> SELECT symbol(_);
     MUTABLE fn_ctx = TRY (functionContext__new(node.name, TypeTypeInput{ Type: COPY TRY (functionDef__annotation_return_type(node)) }, lifetime_paths, fn_type_params, node.generic_params));
     typeAnalysisSession__push_function_context_mut(&rtoc_self_view, fn_ctx);
@@ -5639,7 +5639,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
       END
       IF UNWRAP (opts["size"]) IS_A Literal THEN
-        MUTABLE v = tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))).value));
+        MUTABLE v = tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))));
         IF (v <= 0) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_POSITIVE }));
         END
@@ -9299,7 +9299,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         MUTABLE storage: ?String@symbol = COPY fact.storage;
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, UNWRAP (name), :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY storage }} AS {String@symbol}DiagnosticKwValue)));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY storage }} AS {String@symbol}DiagnosticKwValue)));
       END
     ELSE_IF (fact.capability == :write_locked_read) THEN
       IF !(capabilityTransition__write_locked_sync?(fact)) THEN
@@ -11897,7 +11897,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       CONTINUE;
         END
         &summary.binding_nodes.append(BindingNode{ DestructureTarget: COPY rtoc_each_items_282[rtoc_idx]? });
-        typeAnalysisSession__record_local_binding_fact_mut(&rtoc_self_view, _, BindingNode{ DestructureTarget: COPY rtoc_each_items_282[rtoc_idx]? }, CAST(((UNWRAP (rtoc_each_items_282[rtoc_idx])).name) AS String));
+        typeAnalysisSession__record_local_binding_fact_mut(&rtoc_self_view, &_, BindingNode{ DestructureTarget: COPY rtoc_each_items_282[rtoc_idx]? }, CAST(((UNWRAP (rtoc_each_items_282[rtoc_idx])).name) AS String));
       rtoc_idx = rtoc_idx + 1;
         END
     ELSE_IF node IS_A Identifier AS identifier THEN
@@ -12337,7 +12337,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE key_type = TRY (typeAnalysisSession__protocol_map_associated_type(&rtoc_self_view, receiver, :Key));
     MUTABLE value_type = TRY (typeAnalysisSession__protocol_map_associated_type(&rtoc_self_view, receiver, :Value));
-    TRY (typeAnalysisSession__verify_generic_map_receiver_mutability_mut(&rtoc_self_view, &node, receiver, operation));
+    TRY (typeAnalysisSession__verify_generic_map_receiver_mutability_mut(&rtoc_self_view, &node, receiver, UNWRAP (operation)));
     IF expected_arity.positive?() THEN
       TRY (typeAnalysisSession__verify_protocol_method_argument_mut(&rtoc_self_view, &node, 0, CAST(key_type AS Type)));
     END
@@ -14630,7 +14630,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE wants_future = (type__future?(declared_value) AND (type__resolved((TRY (type__tense_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_error = (type__error_union?(declared_value) AND (type__resolved((TRY (type__success_type(declared_value)))) == symbol("Auto")));
       MUTABLE wants_optional = (type__optional?(declared_value) AND (type__resolved(UNWRAP (TRY (type__wrapped_type(declared_value)))) == symbol("Auto")));
-      MUTABLE wants_error_optional = ((type__error_union?(declared_value) AND type__optional?((TRY (type__success_type(UNWRAP (declared_value)))))) AND (type__resolved(UNWRAP (TRY (type__wrapped_type((TRY (type__success_type(declared_value))))))) == symbol("Auto")));
+      MUTABLE wants_error_optional = ((type__error_union?(declared_value) AND type__optional?((TRY (type__success_type(declared_value))))) AND (type__resolved(UNWRAP (TRY (type__wrapped_type((TRY (type__success_type(declared_value))))))) == symbol("Auto")));
       IF !((((wants_future OR wants_error) OR wants_optional) OR wants_error_optional)) THEN
         RETURN;
       END
@@ -14961,7 +14961,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         DeclarationNode.BindExpr AS item ->
           source = COPY item.value;,
       END
-      IF !(ownershipTransportFacts__source?(source)) THEN
+      IF !(ownershipTransportFacts__source?(UNWRAP (source))) THEN
         RETURN;
       END
       MUTABLE source_name = ownershipTransportFacts__source_display(source);
@@ -15390,7 +15390,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ Identifier: COPY node }, :Type));
         RETURN NIL;
       END
-      MUTABLE type_schema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(node.name)));
+      MUTABLE type_schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(node.name)));
       IF type_schema THEN
         TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ Identifier: COPY node }, :Type));
         RETURN NIL;
@@ -16025,7 +16025,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         indices = [node.index];
       END
-      IF (indices.length() != TRY (type__rank( UNWRAP (target_type_info)))) THEN
+      IF (indices.length() != TRY (type__rank( target_type_info))) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetIndex: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_INDEX_ARITY }, [], CAST({:expected: TRY (type__rank( UNWRAP (target_type_info))), :got: indices.length()} AS {String@symbol}Any)));
       END
       FOR _ IN indices DO
@@ -16376,7 +16376,7 @@ PRIVATE FN typeAnalysisSession__visit_StructLit(MUTABLE self: TypeAnalysisSessio
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE display_name = COPY node.name;
-    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(display_name)));
+    MUTABLE schema: TypeAnalysisSchema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(display_name)));
     IF schemas__union?(schema) THEN
       IF (node.fields.length() != 1) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_LITERAL_VARIANT_COUNT }, [], CAST({:name: node.name, :got: node.fields.length()} AS {String@symbol}Any)));
@@ -19114,7 +19114,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE vti = TRY (aST__full_type_mut(val_node));
-    IF ((vti != NIL) AND !(TRUE)) THEN
+    IF ((TRUE) AND !(TRUE)) THEN
       vti = TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(vti)));
     END
     IF type__symbol?(vti) THEN
@@ -19900,7 +19900,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       IF !(symbolEntry__ownership_kind(info)) THEN
-            TRY (typeAnalysisSession__classify_ownership_mut(&rtoc_self_view, UNWRAP (info)));
+            TRY (typeAnalysisSession__classify_ownership_mut(&rtoc_self_view, info));
       END
       IF ([:resource, :collection, :rc]).contains?(symbolEntry__ownership_kind(info)) THEN
             rtoc_idx = rtoc_idx + 1;
