@@ -5690,7 +5690,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (scope__declare(&rtoc_mutable_receiver_120, "_", NIL, SymbolEntryTypeInput{ SymbolValue: COPY symbol("${item_type}[]") }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, bw.expression()))
     });
-    MUTABLE rtoc_held_5699 = aST__full_type_mut(UNWRAP (locatable__expression(bw)), {:context: "BATCH WINDOW expression"});
+    MUTABLE rtoc_held_5699 = aST__full_type_mut(UNWRAP (locatable__expression(bw)));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${type__resolved(_).toString()}[]") }))));
     node.storage_override = :heap;
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
@@ -6486,20 +6486,22 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     IF node? IS_A Capability AS ast_capability THEN
-      FOR _ IN (CAST(Tuple{ast_capability.var_node, ast_capability.guard_expr, ast_capability.view_length} AS Tuple<Locatable, ?Locatable, ?Locatable>)) DO
-      IF ((_ IS_A []@multiowned Any OR _ IS_A Capability) OR _ IS_A Locatable) THEN
-        typeAnalysisSession__each_shard_scan_node(rtoc_self_view, _, blk);
-      END
+      MUTABLE rtoc_cap_children: []?Locatable = [ast_capability.guard_expr, ast_capability.view_length];
+      &rtoc_cap_children.append(ast_capability.var_node);
+      FOR _ IN rtoc_cap_children DO
+        IF _ EXISTS AS rtoc_cap_child THEN
+          typeAnalysisSession__each_shard_scan_node(rtoc_self_view, castNodeToOptionalShardScanNode(castLocatableToNode__type_analysis_session(rtoc_cap_child)), blk);
+        END
       END
       RETURN;
     END
-    IF node? IS_A Locatable AS locatable THEN
+    IF castShardScanNodeToLocatable(UNWRAP (node)) EXISTS AS locatable THEN
       blk(locatable);
       IF (locatable IS_A BgBlock OR locatable IS_A DoBlock) THEN
         RETURN;
       END
       FOR rtoc_child IN locatable__child_nodes(locatable) DO
-        typeAnalysisSession__each_shard_scan_node(rtoc_self_view, rtoc_child, blk);
+        typeAnalysisSession__each_shard_scan_node(rtoc_self_view, castLocatableToShardScanNode(rtoc_child), blk);
       END
     ELSE
       RETURN;
@@ -6573,7 +6575,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     MUTABLE key_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__key_expr(shard_op)));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__target_map(shard_op)));
-    MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(shard_op)));
+    MUTABLE target_info: Type = TRY (aST__full_type_mut(UNWRAP (locatable__target_map(shard_op))));
     MUTABLE target_sync: ?String@symbol = IF TRUE THEN
       (IF locatable__symbol(UNWRAP (locatable__target_map(shard_op))) != NIL THEN
       symbolEntry__sync(UNWRAP ((locatable__symbol(UNWRAP (locatable__target_map(shard_op))))))
@@ -6583,17 +6585,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END;
-    IF !((((TRUE) AND type__sharded?(TRY (target_info))) AND FALSE)) THEN
+    IF !((((TRUE) AND type__sharded?(target_info)) AND FALSE)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (locatable__target_map(shard_op)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARD_MAP_NOT_SHARDED }, [], CAST({} AS {String@symbol}Any)));
     END
     MUTABLE map_key: ?Type = (IF TRUE THEN
-      TRY (type__key_type(TRY (target_info)))
+      TRY (type__key_type(target_info))
     ELSE
       NIL
     END);
-    MUTABLE actual_key = aST__full_type_mut(UNWRAP (locatable__key_expr(shard_op)), {:context: "SHARD key expression"});
-    IF ((map_key AND target_info) AND !(TRY (type__accepts_map_key?(target_info, actual_key)))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, shard_op.key_expr, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MAP_KEY_MISMATCH }, [], CAST({:expected: TRY (type__surface_name(map_key)), :actual: TRY (type__surface_name(actual_key))} AS {String@symbol}Any)));
+    MUTABLE actual_key: Type = TRY (aST__full_type_mut(UNWRAP (locatable__key_expr(shard_op))));
+    IF ((map_key != NIL) AND !(TRY (type__accepts_map_key?(target_info, actual_key)))) THEN
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (locatable__key_expr(shard_op)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MAP_KEY_MISMATCH }, [], CAST({:expected: TRY (type__surface_name(TypeTypeInput{ Type: COPY map_key })), :actual: TRY (type__surface_name(TypeTypeInput{ Type: COPY actual_key }))} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, :Void));
     node.storage_override = :stack;
@@ -8045,7 +8047,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF active.contains?(key) THEN
       RETURN NIL;
     END
-    MUTABLE next_active: [Set]String = (COPY active).insert(key);
+    MUTABLE next_active: [Set]String = COPY active;
+    &next_active.insert(COPY key);
     MUTABLE rtoc_each_items_181 = (TRY (typeAnalysisSession__semantic_conformance_resolutions(&rtoc_self_view)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_181.length() DO
@@ -8053,7 +8056,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE owner = COPY (rtoc_each_items_181[rtoc_idx]?.declaration).owner_type;
+      MUTABLE owner: ?Type = COPY (rtoc_each_items_181[rtoc_idx]?.declaration).owner_type;
       MUTABLE substitutions: ?{String@symbol}Type@multiowned = TRY (typeAnalysisSession__conformance_owner_substitutions(&rtoc_self_view, UNWRAP (owner), concrete));
       IF !(substitutions) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -8231,7 +8234,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, _.type, a_param.type(), type_params, &subst));
           };
-          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, UNWRAP (param_fn_value).return_type, actual_fn.return_type, type_params, &subst));
+          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, param_fn_value.return_type, actual_fn.return_type, type_params, &subst));
         ELSE
           RETURN;
         END
@@ -9710,7 +9713,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         symbol("SNAPSHOT")
       ELSE_IF (syn == :atomic) THEN
         :ATOMIC
-      ELSE_IF ((((TRUE AND (node.polymorphic OR_ELSE FALSE))) AND (((syn == NIL) OR (syn? == :local)))) AND ((((((storage == NIL) OR (storage? == :local)) OR (storage == :multiowned)) OR (storage == :stack)) OR (storage == :heap)))) THEN
+      ELSE_IF ((((TRUE AND (node.polymorphic OR_ELSE FALSE))) AND (((syn == NIL) OR (syn == :local)))) AND ((((((storage == NIL) OR (storage? == :local)) OR (storage == :multiowned)) OR (storage == :stack)) OR (storage == :heap)))) THEN
         {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE root: ?Identifier = aST__root_identifier(var_node);
@@ -9768,7 +9771,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE expanded_cap = Capability{ capability: COPY capability__capability(cap), var_node: Locatable{ GetField: COPY rtoc_each_key }, old_scope: COPY capability__old_scope(cap), resolved_type: CAST(COPY TRY (aST__full_type_mut(rtoc_each_key)) AS Type), alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
     withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(&rtoc_self_view, rtoc_each_key)));
       END
-      MUTABLE base_t = aST__full_type_mut(UNWRAP (locatable__target(var_node)), {:context: "WITH wildcard base"});
+      MUTABLE base_t = aST__full_type_mut(UNWRAP (locatable__target(var_node)));
       MUTABLE rtoc_each_key = Capability{ capability: COPY capability__capability(cap), var_node: COPY UNWRAP (locatable__target(var_node)), old_scope: COPY capability__old_scope(cap), resolved_type: COPY rtoc_each_key, alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
       withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(&rtoc_self_view, rtoc_each_key)));
     ELSE
@@ -15588,7 +15591,7 @@ PRIVATE FN typeAnalysisSession__visit_Assignment(MUTABLE self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE previous_auto_lock: ?String = COPY typeAnalysisSession__phase_traversal_state(&rtoc_self_view).auto_locked_assign_name;
-    MUTABLE auto_lock_name: ?String = previous_auto_lock;
+    MUTABLE auto_lock_name: ?String = COPY previous_auto_lock;
     MUTABLE target = COPY node.name;
     IF target IS_A GetField AS get_field THEN
     IF get_field.target IS_A Identifier THEN
