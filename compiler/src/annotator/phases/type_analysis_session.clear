@@ -2391,7 +2391,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE found: Bool = FALSE;
     WHILE ((off < window_lines.length()) AND !(found)) DO
           MUTABLE line = window_lines[off];
-          MUTABLE idx: ?CompilerRegexScanner = compilerRegexMatchData(UNWRAP (line), pat);
+          MUTABLE idx: ?CompilerRegexScanner = compilerRegexMatchData(line, pat);
           IF idx EXISTS AS idx_md THEN
             MUTABLE line_no = (with_line + off);
             MUTABLE mut_col = ((compilerRegexPosition(idx_md) - compilerRegexMatched(idx_md).codepointCount()) + 1);
@@ -2473,7 +2473,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE search_offset = (token.column - 1);
         MUTABLE ann_match: ?CompilerRegexScanner = NIL;
         IF (search_offset < line_text.length()) THEN
-          ann_match = COPY compilerRegexMatchData(line_text.substr(search_offset, (line_text.length() - search_offset)), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
+          ann_match = compilerRegexMatchData(line_text.substr(search_offset, (line_text.length() - search_offset)), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
         END
         IF ann_match EXISTS AS ann_match_md THEN
         IF !(line_text.contains?("~")) THEN
@@ -2921,7 +2921,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE observed_strs = observed |> SELECT typeAnalysisSession__auto_type_source_form(&rtoc_self_view, _);
     MUTABLE message = TRY (typeAnalysisSession__build_auto_ambiguity_message(&rtoc_self_view, label?, observed_strs, slot));
     MUTABLE slot_id: ?AutoSlotId = typeAnalysisSession__slot_id_for(&rtoc_self_view, slot);
-    MUTABLE ops: [Set]Any = Set[];
+    MUTABLE ops: [Set]String@symbol = Set[];
     IF slot_id EXISTS AS slot_id_value THEN
       ops = ((op_evidence[slot_id_value] OR_ELSE Set[]));
     ELSE
@@ -2951,7 +2951,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE label: ?String = TRY (typeAnalysisSession__auto_slot_label(&rtoc_self_view, slot));
     MUTABLE base_msg = "Cannot infer type for ${(label OR_ELSE "")} \u{2014} no observed uses to drive inference.";
     MUTABLE slot_id: ?AutoSlotId = typeAnalysisSession__slot_id_for(&rtoc_self_view, slot);
-    MUTABLE ops: [Set]Any = Set[];
+    MUTABLE ops: [Set]String@symbol = Set[];
     IF slot_id EXISTS AS slot_id_value THEN
       ops = ((op_evidence[slot_id_value] OR_ELSE Set[]));
     ELSE
