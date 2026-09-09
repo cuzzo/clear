@@ -2309,7 +2309,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
       IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
-        length = COPY CAST(((index.value() + 1)) AS String);
+        length = COPY CAST(((tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(index)).value)) + 1.0)) AS String);
       ELSE
         length = "0";
       END
@@ -5880,7 +5880,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.storage_override = :frame;
     IF inner_bind_name THEN
       RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_133 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-      TRY (scope__declare(&rtoc_mutable_receiver_133, inner_bind_name, NIL, SymbolEntryTypeInput{ StringValue: COPY CAST(nested_element_type AS String) }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack)) };
+      TRY (scope__declare(&rtoc_mutable_receiver_133, UNWRAP (inner_bind_name), NIL, SymbolEntryTypeInput{ StringValue: COPY CAST(nested_element_type AS String) }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack)) };
     END
 }
 END
@@ -7117,7 +7117,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE ratio = (CAST(accessed_value.length() AS Float64) / total);
       IF (ratio < 0.5) THEN
         MUTABLE fields_str = ((accessed_value |> SELECT COPY _) |> ORDER_BY _).join(", ");
-        typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, "Pipeline accesses ${accessed_value.length()} of ${total} fields (${fields_str}). Consider @soa for better cache performance on '${castTypeToString(item_type)}'.");
+        typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, "Pipeline accesses ${accessed_value.length().toString()} of ${total.toString()} fields (${fields_str}). Consider @soa for better cache performance on '${castTypeToString(item_type)}'.");
       END
     ELSE
       RETURN;
@@ -9111,7 +9111,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         NIL
       END)
     } |> WHERE _ != NIL;
-    MUTABLE blessed_ids = (blessed |> SELECT aST__node_identity(_)) |> DISTINCT _;
+    MUTABLE blessed_ids = (blessed |> SELECT aST__node_identity(UNWRAP (_))) |> DISTINCT _;
     IF (blessed.length() == 0) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :TAIL_CALL_NEEDS_RECURSIVE }, [], CAST({:fn: fn_name} AS {String@symbol}Any)));
     END
