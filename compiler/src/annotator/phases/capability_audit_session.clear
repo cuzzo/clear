@@ -2601,7 +2601,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, callees[rtoc_idx]));
+      MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, UNWRAP (callees[rtoc_idx])));
       IF !(scope) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -2683,7 +2683,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE hint = TRY (capabilityAuditSession__fallibility_hint_for(&rtoc_self_view, rtoc_each_14));
     MUTABLE return_type = type__resolved(ret_t);
-    MUTABLE tok = IF TRUE THEN
+    MUTABLE tok: ?Token = IF TRUE THEN
         fn_node.return_type_token
       ELSE
         NIL
@@ -4218,7 +4218,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
           END
           TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY UNWRAP (KEEP rtoc_each_items_45[rtoc_idx]?.node) } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_READ_NEEDS_WRITE_LOCK_NAME }, [], CAST({:name: UNWRAP (fact).target_label} AS {String@symbol}Any)));
-      ELSE_IF (fact.capability == :ATOMIC) THEN
+      ELSE_IF (UNWRAP (fact).capability == :ATOMIC) THEN
           IF (syn == :atomic) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;

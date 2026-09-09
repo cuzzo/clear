@@ -2721,7 +2721,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ((IF tok.value IS_A String AS tokvalue_payload THEN ((type__resolved(tokvalue_payload) == "MUTABLE")) ELSE FALSE END)) THEN
         RETURN NIL;
       END
-      RETURN TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: tok.line} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
+      RETURN TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :DECLARE_MUTABLE_BINDING, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :line: DiagnosticKwValue{ Int64Value: COPY tok.line }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, tok.line, tok.column, 0), "MUTABLE ")], :auto));
     ELSE
       RETURN NIL;
     END
@@ -3439,7 +3439,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MATCH node START
             FunctionCallNode.FuncCall AS item ->
               MUTABLE item_mutable = COPY item;
-              item_mutable.extern_effects = TRY (functionSignature__extern_effects(signature));
+              item_mutable.extern_effects = TRY (functionSignature__extern_effects(UNWRAP (signature)));
               node = FunctionCallNode{ FuncCall: item_mutable };,
             FunctionCallNode.MethodCall AS item ->
               MUTABLE item_mutable = COPY item;
@@ -13480,7 +13480,7 @@ PRIVATE FN typeAnalysisSession__if_bind_unwrapped_type_mut(MUTABLE self: TypeAna
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (binding.predicate == :is_ok) THEN
       IF !(type__error_union?(type)) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (binding).expr, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_OK_REQUIRES_FALLIBLE }, [], CAST({:got: (binding).expr.resolved_type} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (binding).expr, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_OK_REQUIRES_FALLIBLE }, [], CAST({:got: locatable__resolved_type((binding).expr)} AS {String@symbol}Any)));
       END
       RETURN TRY (type__success_type(type));
     END
@@ -14800,7 +14800,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       prefix
     END)] AS []Edit) + ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_374: ?[]Edit = NIL;
     IF wraps_expression THEN
-      rtoc_ternary_value_374 = [edit__new(span__new(NIL, span__end_line(value_range), value_range.end_column, 0), ")")];
+      rtoc_ternary_value_374 = [edit__new(span__new(NIL, (UNWRAP (value_range)).end_line, value_range.end_column, 0), ")")];
     ELSE
       rtoc_ternary_value_374 = List[];
     END
