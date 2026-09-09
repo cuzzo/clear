@@ -18490,3 +18490,30 @@ END
 PUB FN optionalUnwrap__safe_navigation?(self: OptionalUnwrap) RETURNS Bool ->
   RETURN ((self.token.type == :CHAR) AND (CAST(self.token.value AS String) == "?"));
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToBgStreamBlock(value: Locatable) RETURNS ?BgStreamBlock EFFECTS REENTRANT ->
+  IF value IS_A BgStreamBlock AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToMethodCall(value: Locatable) RETURNS ?MethodCall EFFECTS REENTRANT ->
+  IF value IS_A MethodCall AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToWhileBindLoop(value: Locatable) RETURNS ?WhileBindLoop EFFECTS REENTRANT ->
+  IF value IS_A WhileBindLoop AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

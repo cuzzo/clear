@@ -8520,7 +8520,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           stream = COPY item.value;,
       END
       IF TRY (typeAnalysisSession__stream_body_contains_close?(&rtoc_self_view, UNWRAP (locatable__body(UNWRAP (stream))))) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BgStreamBlock: COPY stream } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INFINITE_STREAM_CLOSE }));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BgStreamBlock: COPY UNWRAP (castLocatableToBgStreamBlock(stream))} }, TypeAnalysisCodeOrMessage{ SymbolValue: :INFINITE_STREAM_CLOSE }));
       END
       IF TRY (typeAnalysisSession__stream_body_may_fall_through?(&rtoc_self_view, locatable__body(UNWRAP (stream)))) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BgStreamBlock: COPY stream } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INFINITE_STREAM_FALLTHROUGH }));
@@ -9300,7 +9300,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         MUTABLE storage: ?String@symbol = COPY fact.storage;
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY storage }} AS {String@symbol}DiagnosticKwValue)));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY UNWRAP (storage)}} AS {String@symbol}DiagnosticKwValue)));
       END
     ELSE_IF (fact.capability == :write_locked_read) THEN
       IF !(capabilityTransition__write_locked_sync?(fact)) THEN
@@ -10458,7 +10458,7 @@ PRIVATE FN typeAnalysisSession__resolve_collection_method(MUTABLE self: TypeAnal
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE obj_type = TRY (aST__full_type_mut(node.object));
-    MUTABLE implicit_safe_nav = ((type__optional?(obj_type) AND (locatable__safe_nav_chain(UNWRAP (locatable__object(Locatable{ MethodCall: COPY node }))) != NIL)) AND (locatable__safe_nav_chain( Locatable{ MethodCall: COPY node.object }) == TRUE));
+    MUTABLE implicit_safe_nav = ((type__optional?(obj_type) AND (locatable__safe_nav_chain(UNWRAP (locatable__object(Locatable{ MethodCall: COPY UNWRAP (castLocatableToMethodCall(node))}))) != NIL)) AND (locatable__safe_nav_chain( Locatable{ MethodCall: COPY node.object }) == TRUE));
     IF implicit_safe_nav THEN
       obj_type = TRY (type__wrapped_type( UNWRAP (obj_type)));
     END
@@ -12852,7 +12852,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN FALSE;
       END
       MUTABLE receiver_type = TRY (aST__full_type_mut(node.object));
-      MUTABLE implicit_safe_nav = ((type__optional?(receiver_type) AND (locatable__safe_nav_chain(UNWRAP (locatable__object(Locatable{ MethodCall: COPY node }))) != NIL)) AND (locatable__safe_nav_chain( Locatable{ MethodCall: COPY node.object }) == TRUE));
+      MUTABLE implicit_safe_nav = ((type__optional?(receiver_type) AND (locatable__safe_nav_chain(UNWRAP (locatable__object(Locatable{ MethodCall: COPY UNWRAP (castLocatableToMethodCall(node))}))) != NIL)) AND (locatable__safe_nav_chain( Locatable{ MethodCall: COPY node.object }) == TRUE));
       MUTABLE resolution_receiver = COPY node.object;
       IF implicit_safe_nav THEN
         resolution_receiver = COPY node.object;
@@ -14265,7 +14265,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.condition));
     MUTABLE ti = TRY (aST__full_type_mut(node.condition));
     IF !((type__optional?(ti) OR TRY (type__stream_step?(ti)))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, locatable__condition(Locatable{ WhileBindLoop: COPY node }), TypeAnalysisCodeOrMessage{ SymbolValue: :WHILE_AS_NEEDS_OPTIONAL }, [], CAST({:got: locatable__resolved_type( Locatable{ WhileBindLoop: COPY node.condition })} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, locatable__condition(Locatable{ WhileBindLoop: COPY UNWRAP (castLocatableToWhileBindLoop(node))}), TypeAnalysisCodeOrMessage{ SymbolValue: :WHILE_AS_NEEDS_OPTIONAL }, [], CAST({:got: locatable__resolved_type( Locatable{ WhileBindLoop: COPY node.condition })} AS {String@symbol}Any)));
     END
     MUTABLE unwrapped = IF TRY (type__stream_step?(ti)) THEN
       TRY (type__stream_step_item_type(ti))
@@ -17220,7 +17220,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE diagnostic_token = (token OR_ELSE node.token);
     IF (form == :kind) THEN
         IF !(aST__error_kind?(name)) THEN
-          TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, diagnostic_token, NameCandidate{ SymbolValue: COPY name }, (((ruby_constant_error_kinds() |> SELECT _.toString() |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }), "Unknown error kind '${name}'. Expected one of: ${(ruby_constant_error_kinds() |> SELECT _.toString()).join(", ")}", "closest known kind"));
+          TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, diagnostic_token, NameCandidate{ SymbolValue: COPY name }, (((ruby_constant_error_kinds() |> SELECT _.toString() |> SELECT NameCandidate{ StringValue: COPY UNWRAP (castNameCandidateToString(_))}) |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }), "Unknown error kind '${name}'. Expected one of: ${(ruby_constant_error_kinds() |> SELECT _.toString()).join(", ")}", "closest known kind"));
         END
         IF aST__error_kind?(name) THEN
           matched = ruby_array_concat_Any__type_analysis_session(matched, CAST(TRY (aST__types_for_kind(name)) AS []Any));
@@ -17797,7 +17797,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (_.form == :kind) THEN
       MUTABLE kind_sym = symbol(_.name);
       IF !(aST__error_kind?(kind_sym)) THEN
-        TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, CAST(COPY _.token AS Token), NameCandidate{ StringValue: COPY _.name }, (((ruby_constant_error_kinds() |> SELECT _.toString() |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }), "Unknown error kind '${_.name}'. Expected one of: ${(ruby_constant_error_kinds() |> SELECT _.toString()).join(", ")}", "closest known kind"));
+        TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, CAST(COPY _.token AS Token), NameCandidate{ StringValue: COPY UNWRAP (castNameCandidateToString(_.name))}, (((ruby_constant_error_kinds() |> SELECT _.toString() |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }), "Unknown error kind '${_.name}'. Expected one of: ${(ruby_constant_error_kinds() |> SELECT _.toString()).join(", ")}", "closest known kind"));
       END
       IF aST__error_kind?(kind_sym) THEN
         &kinds.append(kind_sym);

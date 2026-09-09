@@ -30,3 +30,12 @@ PUB FN nameCandidate__to_s(value: NameCandidate) RETURNS String ->
   END
   RETURN "";
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castNameCandidateToString(value: NameCandidate) RETURNS ?String EFFECTS REENTRANT ->
+  IF value IS_A String AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
