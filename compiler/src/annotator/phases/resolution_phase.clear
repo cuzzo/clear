@@ -818,7 +818,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_PROTOCOL }, [], CAST({:protocol: protocol_name} AS {String@symbol}Any)));
     END
     MUTABLE local_owner: ?TypeDeclaration = local_structs[owner_name];
-    MUTABLE owner_params: ?[]GenericParamDecl = TRY (resolutionSession__conformance_owner_params(rtoc_self_view, owner_name, UNWRAP (castTypeDeclarationToStructDef(local_owner))));
+    MUTABLE owner_params: ?[]GenericParamDecl = TRY (resolutionSession__conformance_owner_params(rtoc_self_view, owner_name, UNWRAP (castTypeDeclarationToStructDef(UNWRAP (local_owner)))));
     IF !(owner_params) THEN
         TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_OWNER }, [], CAST({:owner: owner_name} AS {String@symbol}Any)));
     END
