@@ -23103,3 +23103,17 @@ FN castTypeAnalysisCallNodeToLocatable(value: TypeAnalysisCallNode) RETURNS ?Loc
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:type_params)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN typeAnalysisSchema__type_params(value: TypeAnalysisSchema) RETURNS ?[]String@symbol ->
+  PARTIAL MATCH value START
+    TypeAnalysisSchema.StructSchemaMultiowned AS item -> RETURN COPY item.type_params;,
+    TypeAnalysisSchema.ResourceSchemaMultiowned AS item -> RETURN COPY item.type_params;,
+    TypeAnalysisSchema.UnionSchemaMultiowned AS item -> RETURN COPY item.type_params;,
+    TypeAnalysisSchema.StructSchema AS item -> RETURN COPY item.type_params;,
+    TypeAnalysisSchema.UnionSchema AS item -> RETURN COPY item.type_params;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
