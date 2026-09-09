@@ -4604,7 +4604,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE schema: ?SchemaValue = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_85 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__resolve_type_definition(rtoc_local_receiver_85, current_type_name)) };
       MUTABLE sf = (schemaValue__fields(UNWRAP (schema))[field_name] OR schemaValue__fields(UNWRAP (schema))[rtoc_each_items_84[rtoc_idx]]);
-      IF (sf == NIL) THEN
+      IF (FALSE) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :LIFETIME_NO_FIELD }, [], CAST({:type: current_type_name, :field: field_name} AS {String@symbol}Any)));
       END
       current_type_name = sf.type().resolved();
@@ -5374,7 +5374,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END);
-    IF (((lhs_t != NIL) AND type__observable?(UNWRAP (lhs_t))) AND ((inner != NIL) AND type__array?(UNWRAP (inner)))) THEN
+    IF (((TRUE) AND type__observable?(UNWRAP (lhs_t))) AND ((inner != NIL) AND type__array?(UNWRAP (inner)))) THEN
       MUTABLE elem_sym = type__to_sym(TRY (type__element_type(inner)));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${elem_sym}[]") }))));
       node.storage_override = :heap;
@@ -7696,7 +7696,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_ternary_value_174 = TRY (type__element_type(shape));
     END
     rtoc_ternary_value_174? };
-    IF (((payload != NIL) AND UNWRAP (payload).indirect?()) AND type__primitive?(payload)) THEN
+    IF (((TRUE) AND UNWRAP (payload).indirect?()) AND type__primitive?(payload)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], CAST({:type: payload.resolved()} AS {String@symbol}Any)));
     END
     IF (type__sharded?(type_obj) AND ((payload != NIL) AND UNWRAP (payload).multiowned?())) THEN
