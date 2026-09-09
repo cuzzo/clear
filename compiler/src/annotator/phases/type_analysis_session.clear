@@ -3932,7 +3932,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE callee_param: ?Param = ((TRY (typeAnalysisSession__function_node_for(&rtoc_self_view, aST__node_name(UNWRAP (castFunctionCallNodeToLocatable(facts.site.node))))))?.params[facts.index]);
     MUTABLE contract: String@symbol = UNWRAP (facts.param.carrier_contract);
     IF callee_param != NIL THEN
-      contract = symbolEntry__carrier_contract(callee_param);
+      contract = (callee_param).carrier_contract;
     END
     IF !((contract == :unique)) THEN
       RETURN;
@@ -5227,7 +5227,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF TRY (type__open_stream?(source_type)) THEN
       MUTABLE item: ?Type = (IF TRY (type__canonical_stream_item_type(source_type)) != NIL THEN TRY (type__canonical_stream_item_type(source_type)) ELSE UNWRAP (TRY (type__open_stream_element_type(source_type))) END);
-      RETURN PipelineSourceFact{ kind: :open_stream, item_type: COPY item };
+      RETURN PipelineSourceFact{ kind: :open_stream, item_type: COPY UNWRAP (item)};
     END
     IF TRY (type__dynamic_stream?(source_type)) THEN
       MUTABLE item = (IF TRY (type__canonical_stream_item_type(source_type)) != NIL THEN TRY (type__canonical_stream_item_type(source_type)) ELSE UNWRAP (TRY (type__element_type((TRY (type__tense_type(source_type)))))) END);
@@ -8309,7 +8309,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         RETURN COPY replacement.shape.expression;
       END
-      RETURN TypeExpression{ kind: TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY UNWRAP (typeExpressionKind__name(kind)), arguments: COPY typeExpressionKind__arguments(kind) |> SELECT typeAnalysisSession__apply_expression_subst(&rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY UNWRAP (typeExpressionKind__name(kind)), arguments: COPY (typeExpressionKind__arguments(kind) OR_ELSE List[]) |> SELECT typeAnalysisSession__apply_expression_subst(&rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A TypeProjectionExpression) THEN
       MUTABLE binding: ?GenericBinding = COPY subst[kind.owner];
       IF binding EXISTS AS binding_value THEN
@@ -8981,7 +8981,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE fn_node: ?Locatable = program_node.statements[rtoc_idx];
-      MUTABLE kind: ?String@symbol = typeAnalysisSession__canonical_reentrance_kind(rtoc_self_view, UNWRAP (castLocatableToFunctionDef(fn_node)));
+      MUTABLE kind: ?String@symbol = typeAnalysisSession__canonical_reentrance_kind(rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node))));
       fn_node.reentrance_kind = kind;
       IF (kind == :reentrant_tail_call) THEN
           fn_node.tail_call = TRUE;
@@ -15767,7 +15767,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       assignment_field_type = UNWRAP (TRY (type__wrapped_type(assignment_field_type)));
     END
     IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND assignment_node.value IS_A Identifier) AND !(TRY (type__implicitly_copyable?((TRY (aST__full_type_mut(assignment_node.value))), %(name: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, name)))))) THEN
-      assignment_node.value.ownership_pending_transfer = TRUE;
+      locatable__set_ownership_pending_transfer_mut(&assignment_node.value, TRUE);
     END
     IF type__multiowned?(assignment_field_type) THEN
       MUTABLE owner = ((TRY (aST__full_type_mut(field_node.target))).resolved());

@@ -4136,7 +4136,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE param: ?Param = ((TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_39[rtoc_idx]?.callee_name)))?.params[rtoc_each_items_39[rtoc_idx]?.param_index]);
       IF (IF param != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_40: ?SymbolEntry@multiowned = param.symbol;
-      symbolEntry__kept_identity(rtoc_local_receiver_40) }
+      symbolEntry__kept_identity(UNWRAP (rtoc_local_receiver_40)) }
         ELSE
           NIL
         END) THEN
@@ -4159,7 +4159,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE param: ?Param = ((TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.callee_name)))?.params[rtoc_each_items_42[rtoc_idx]?.param_index]);
       IF (IF param != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_43: ?SymbolEntry@multiowned = param.symbol;
-      symbolEntry__kept_identity(rtoc_local_receiver_43) }
+      symbolEntry__kept_identity(UNWRAP (rtoc_local_receiver_43)) }
         ELSE
           NIL
         END) THEN
