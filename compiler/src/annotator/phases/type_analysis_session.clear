@@ -4628,7 +4628,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_STRUCT_MISSING_DEFAULTS }, [], CAST({:name: DiagnosticKwValue{ StringValue: COPY _.name }, :type: _.type, :missing: missing.join(", ")} AS {String@symbol}Any)));
             END
           END
-          TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &UNWRAP (param_default), _.type));
+          MUTABLE rtoc_default_slot = UNWRAP (param_default);
+          TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &rtoc_default_slot, _.type));
         ELSE
           TRY (typeAnalysisSession__visit(&rtoc_self_view, param_default));
           MUTABLE def_type = TRY (aST__full_type_mut(param_default));
@@ -5647,7 +5648,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF opts["time"] THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, opts["time"]));
-      IF !((opts["time"] IS_A Literal AND (opts["time"].type() == :STRING))) THEN
+      IF !((IF UNWRAP (opts["time"]) IS_A Literal AS rtoc_time_lit THEN (rtoc_time_lit.type == :STRING) ELSE FALSE END)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, opts["time"], TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_NEEDS_STRING_LIT }));
       END
       MUTABLE ns: ?Int64 = TRY (typeAnalysisSession__parse_batch_window_time_ns(&rtoc_self_view, opts["time"].value()));
@@ -13433,7 +13434,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE mutable_list_alias = (((rtoc_mutable_block_param_327.expr IS_A GetIndex AND (root != NIL)) AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_322 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       scope__is_immutable?(rtoc_local_receiver_322, root.name) })) AND mutable_slot_payload);
       MUTABLE rtoc_mutable_receiver_323 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-      TRY (scope__declare(&rtoc_mutable_receiver_323, rtoc_mutable_block_param_327.name, NIL, SymbolEntryTypeInput{ TypeMultiowned: COPY unwrapped }, &mutable_list_alias, FALSE, NIL, :stack));
+      TRY (scope__declare(&rtoc_mutable_receiver_323, rtoc_mutable_block_param_327.name, NIL, SymbolEntryTypeInput{ TypeMultiowned: COPY unwrapped }, ScopeMutabilityInput{ BoolValue: mutable_list_alias }, FALSE, NIL, :stack));
       MUTABLE entry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_324 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       scope__local_entry_mut(&rtoc_local_receiver_324, rtoc_mutable_block_param_327.name) };
       rtoc_mutable_block_param_327.symbol = entry;
