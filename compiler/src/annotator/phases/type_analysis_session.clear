@@ -10814,7 +10814,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF (schemaValue__kind(UNWRAP (schema)) == :enum) THEN
       IF !(schemaValue__variants(UNWRAP (schema)).contains?(node.field)) THEN
-        TRY (typeAnalysisSession__emit_variant_typo_mut(&rtoc_self_view, UNWRAP (typeAnalysisSession__variant_anchor_from_getfield(&rtoc_self_view, node)), node.field, schemaValue__variants(UNWRAP (schema)), "Type Error: Enum '${type_name}' has no variant '${node.field}'.", "variant of enum ${type_name}", TRUE));
+        TRY (typeAnalysisSession__emit_variant_typo_mut(&rtoc_self_view, UNWRAP (typeAnalysisSession__variant_anchor_from_getfield(&rtoc_self_view, node)), node.field, ((schemaValue__variants(UNWRAP (schema)) OR_ELSE Set[]) |> SELECT NameCandidate{ StringValue: COPY _ }), "Type Error: Enum '${type_name}' has no variant '${node.field}'.", "variant of enum ${type_name}", TRUE));
       END
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.target, type_name));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ GetField: COPY node }, type_name));
@@ -10822,9 +10822,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF (schemaValue__kind(UNWRAP (schema)) == :union) THEN
       IF !(schemaValue__variants(UNWRAP (schema)).contains?(node.field)) THEN
-        TRY (typeAnalysisSession__emit_variant_typo_mut(&rtoc_self_view, UNWRAP (typeAnalysisSession__variant_anchor_from_getfield(&rtoc_self_view, node)), node.field, schemaValue__variants(UNWRAP (schema)).keys(), "Type Error: Union '${type_name}' has no variant '${node.field}'.", "variant of union ${type_name}", TRUE));
+        TRY (typeAnalysisSession__emit_variant_typo_mut(&rtoc_self_view, UNWRAP (typeAnalysisSession__variant_anchor_from_getfield(&rtoc_self_view, node)), node.field, ((schemaValue__variants(UNWRAP (schema)) OR_ELSE Set[]) |> SELECT NameCandidate{ StringValue: COPY _ }), "Type Error: Union '${type_name}' has no variant '${node.field}'.", "variant of union ${type_name}", TRUE));
       END
-      MUTABLE var_data = schemaValue__variants(UNWRAP (schema))[node.field];
+      MUTABLE var_data: ?SchemasUnionSchemaVariantValue = NIL;
+      IF schemaValue__union_variants(UNWRAP (schema)) EXISTS AS rtoc_vmap_10827 THEN
+        IF rtoc_vmap_10827[node.field] EXISTS AS rtoc_vd_10826 THEN
+        var_data = COPY rtoc_vd_10826;
+      END
+        END
       IF (schemas__inline_struct?(var_data) AND !(typeAnalysisSession__inside_match_pattern_context?(&rtoc_self_view))) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetField: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_INLINE_VARIANT_NEEDS_BRACES }, [], CAST({:union: type_name, :variant: node.field, :union2: type_name, :variant2: node.field} AS {String@symbol}Any)));
       END
@@ -10857,10 +10862,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF !(schemaValue__variants(schema).contains?(node.variant_name)) THEN
-      TRY (typeAnalysisSession__emit_variant_typo_mut(&rtoc_self_view, UNWRAP (typeAnalysisSession__variant_anchor_from_unionlit(&rtoc_self_view, Node{ UnionVariantLit: COPY node }, node.variant_name)), node.variant_name, schemaValue__variants(schema).keys(), "Type Error: Union '${node.union_name}' has no variant '${node.variant_name}'.", "variant of union ${node.union_name}", TRUE));
+      TRY (typeAnalysisSession__emit_variant_typo_mut(&rtoc_self_view, UNWRAP (typeAnalysisSession__variant_anchor_from_unionlit(&rtoc_self_view, Node{ UnionVariantLit: COPY node }, node.variant_name)), node.variant_name, ((schemaValue__variants(schema) OR_ELSE Set[]) |> SELECT NameCandidate{ StringValue: COPY _ }), "Type Error: Union '${node.union_name}' has no variant '${node.variant_name}'.", "variant of union ${node.union_name}", TRUE));
     END
-    MUTABLE var_data = schemaValue__variants(UNWRAP (schema))[node.variant_name];
-    IF !(var_data IS_A InlineStructVariant@multiowned) THEN
+    MUTABLE var_data: ?SchemasUnionSchemaVariantValue = NIL;
+    IF schemaValue__union_variants(schema) EXISTS AS rtoc_vmap_10865 THEN
+      IF rtoc_vmap_10865[node.variant_name] EXISTS AS rtoc_vd_10861 THEN
+      var_data = COPY rtoc_vd_10861;
+    END
+      END
+    IF !((IF var_data EXISTS AS rtoc_vd_probe THEN rtoc_vd_probe IS_A InlineStructVariantMultiowned ELSE FALSE END)) THEN
       IF (var_data == NIL) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ UnionVariantLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_VARIANT_IS_UNIT_NO_FIELDS }, [], CAST({:variant: node.variant_name, :union: node.union_name} AS {String@symbol}Any)));
       ELSE
@@ -10868,7 +10878,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       RETURN NIL;
     END
-    RETURN var_data;
+    IF var_data EXISTS AS rtoc_vd_ret THEN
+      IF rtoc_vd_ret IS_A InlineStructVariantMultiowned AS rtoc_isv THEN
+        RETURN KEEP rtoc_isv;
+      END
+    END
+    RETURN NIL;
 }
 END
 PRIVATE FN typeAnalysisSession__validate_union_fields_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: UnionVariantLit, expected_fields: {String}Type) RETURNS !Void
