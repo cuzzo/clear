@@ -4767,7 +4767,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < captures.length() DO
       MUTABLE owner_entry: ?SymbolEntry@multiowned = NIL;
       IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, UNWRAP (captures[rtoc_idx]).name)) != NIL THEN
-          owner_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_97 = (UNWRAP (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, captures[rtoc_idx].name()))));
+          owner_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_97 = (UNWRAP (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, UNWRAP (captures[rtoc_idx]).name))));
       scope__resolve_entry(rtoc_local_receiver_97, captures[rtoc_idx].name()) };
         END
       MUTABLE capture_entry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_98 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
@@ -5127,7 +5127,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
           IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
                   MUTABLE rtoc_mutable_receiver_111: ?FunctionContext = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
-                  functionContext__record_alloc_use_mut(&rtoc_mutable_receiver_111);
+                  MUTABLE rtoc_alloc_ctx = UNWRAP (rtoc_mutable_receiver_111); functionContext__record_alloc_use_mut(&rtoc_alloc_ctx);
           END
         END
     END
@@ -7682,7 +7682,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (((TRUE) AND type__indirect?(payload)) AND type__primitive?(payload)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], CAST({:type: type__resolved(payload)} AS {String@symbol}Any)));
     END
-    IF ((type__sharded?(type_obj) AND (payload != NIL)) AND type__multiowned?(UNWRAP (payload))) THEN
+    IF (type__sharded?(type_obj) AND type__multiowned?(payload)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_ELEMENT_REQUIRES_SHARED }, [], {:got: CAST(payload AS String)}));
     END
 }
