@@ -9816,7 +9816,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__declare_capability_binding_or_error_mut(&rtoc_self_view, fact));
     TRY (typeAnalysisSession__declare_capability_projection_mut(&rtoc_self_view, fact));
     MUTABLE alias_name = COPY fact.alias_name;
-    IF alias_name EXISTS AS alias_name_value THEN
+    MUTABLE alias_name_value: String = alias_name;
+    IF TRUE THEN
       MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       IF scope__resolve_entry(rtoc_local_receiver_217, alias_name_value) EXISTS AS MUTABLE rtoc_alias_entry THEN
         &rtoc_alias_entry.capabilities.insert(COPY fact.capability);
@@ -11809,7 +11810,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_id_base = (summary.body_id.value * semanticBodyIdStride());
     MUTABLE place_id = (body_id_base + frame.next_place_ordinal);
     &summary.local_facts.append(COPY LocalFact{ id: COPY LocalId{ value: (body_id_base + frame.next_local_ordinal) }, place_id: COPY SemanticPlaceId{ value: place_id }, name: COPY name });
-    MUTABLE symbol = aST__node__symbol(UNWRAP (castBindingNodeToLocatable(node)));
+    MUTABLE symbol = aST__node__symbol(castBindingNodeToLocatable(node));
     IF symbol IS_A SymbolEntry THEN
       &symbol.adopt_semantic_place_id_mut(place_id);
     END
@@ -12292,7 +12293,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &node.mark_explicit_mutable_argument_mut(rtoc_idx, UNWRAP (rtoc_each_items_288[rtoc_idx]).token());
+      locatable__mark_explicit_mutable_argument_mut(&node, rtoc_idx, locatable__token(UNWRAP ((rtoc_each_items_288 OR_ELSE List[])[rtoc_idx])));
       MUTABLE rtoc_index_receiver_289 = node__args(node);
       rtoc_index_receiver_289[rtoc_idx] = UNWRAP (rtoc_each_items_288[rtoc_idx]).target;
     rtoc_idx = rtoc_idx + 1;
@@ -12636,7 +12637,7 @@ PRIVATE FN typeAnalysisSession__resolve_inherent_static_call_mut(MUTABLE self: T
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE call = FuncCall{ token: COPY node.token, name: ImplementationRegistration.function_name(CAST(owner AS String), node.method_name), args: COPY node.args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, module_alias: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, fn_var_call: NIL, pipe_lhs: NIL, heap_dupe_result: NIL, arg_families: NIL, collapsed_errors: NIL, error_union_type: NIL, protocol_name: NIL, protocol_operation: NIL, protocol_receiver_index: NIL, retain_error_channel: NIL };
+    MUTABLE call = FuncCall{ token: COPY node.token, name: CallName{ StringValue: COPY implementationRegistration__function_name(CAST(owner AS String), node.method_name) }, args: COPY node.args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, module_alias: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, fn_var_call: NIL, pipe_lhs: NIL, heap_dupe_result: NIL, arg_families: NIL, collapsed_errors: NIL, error_union_type: NIL, protocol_name: NIL, protocol_operation: NIL, protocol_receiver_index: NIL, retain_error_channel: NIL };
     FOR rtoc_each_key IN node.explicit_mutable_argument_tokens.keys() DO
     MUTABLE token: Token@multiowned = COPY UNWRAP (node.explicit_mutable_argument_tokens[rtoc_each_key]);
     &call.mark_explicit_mutable_argument_mut(rtoc_each_key, CAST(COPY token AS Token));
@@ -13224,7 +13225,7 @@ PRIVATE FN typeAnalysisSession__runtime_is_a_payload_matches?(MUTABLE self: Type
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF UNWRAP (payload) IS_A Type@multiowned AS type_multiowned THEN
       MUTABLE payload_name = TRY (type__coercion_surface_name(TypeTypeInput{ Type: COPY type_multiowned }));
-      MUTABLE payload_names = (CAST(Tuple{payload_name, payload_name.split(".").last()} AS Tuple<String, ?String>)) |> DISTINCT _ |> SELECT COPY _;
+      MUTABLE payload_names: []String = [COPY payload_name, COPY (payload_name.split(".").last() OR_ELSE payload_name)] |> DISTINCT _;
       RETURN type__any?((ruby_set_intersection_String(payload_names, target_names)));
     ELSE_IF payload IS_A InlineStructVariant@multiowned AS inline_struct_variant_multiowned THEN
       MUTABLE synthetic_name = "${union_type}_${variant_name}";
@@ -15077,7 +15078,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (typeAnalysisSession__finish_previsited_copy_mut(&rtoc_self_view, CAST(wrapper AS CopyNode)));
           END
       END
-      MUTABLE symbol = aST__node__symbol(UNWRAP (castBindingNodeToLocatable(node)));
+      MUTABLE symbol = aST__node__symbol(castBindingNodeToLocatable(node));
       IF symbol IS_A SymbolEntry THEN
           TRY (typeAnalysisSession__establish_inferred_alias_mut(&rtoc_self_view, &node, &symbol));
       END
@@ -15545,7 +15546,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(((curr IS_A GetField OR curr IS_A GetIndex) OR curr IS_A OptionalUnwrap)) THEN
         BREAK;
       END
-      curr = UNWRAP (accessPathNode__target(curr));
+      curr = UNWRAP (castLocatableToAccessPathNode(UNWRAP (accessPathNode__target(curr))));
     END
     RETURN FALSE;
 }

@@ -1346,6 +1346,26 @@ PUB STRUCT FuncCall {
   zig_pattern: ?String@symbol
 }
 
+# Ruby records the token that marked argument `index` as mutable; the map is
+# created on first use, the way Ruby's `||= {}` does.
+# Ruby records the token that marked argument `index` as mutable; the map is
+# created on first use, the way Ruby's `||= {}` does.
+PUB FN locatable__mark_explicit_mutable_argument_mut(MUTABLE value: Locatable, index_value: Int64, token: ?Token) RETURNS Void ->
+  IF token EXISTS AS token_value THEN
+    PARTIAL MATCH value START
+      Locatable.FuncCall AS MUTABLE item ->
+        item.explicit_mutable_argument_tokens = COPY funcCall__with_explicit_mutable_token((COPY item.explicit_mutable_argument_tokens OR_ELSE {}), index_value, token_value);,
+      Locatable.MethodCall AS MUTABLE item ->
+        item.explicit_mutable_argument_tokens = COPY funcCall__with_explicit_mutable_token((COPY item.explicit_mutable_argument_tokens OR_ELSE {}), index_value, token_value);,
+      DEFAULT -> RETURN;
+    END
+  END
+END
+FN funcCall__with_explicit_mutable_token(tokens: {Int64}Token@multiowned, index_value: Int64, token: Token) RETURNS {Int64}Token@multiowned ->
+  MUTABLE out = COPY tokens;
+  out[index_value] = COPY token;
+  RETURN out;
+END
 PUB FN funcCall__explicit_mutable_argument?(self: FuncCall, index_value: Int64) RETURNS Bool ->
   MUTABLE tokens: ?{Int64}Token = COPY self.explicit_mutable_argument_tokens;
   IF tokens EXISTS AS tokens_value THEN
