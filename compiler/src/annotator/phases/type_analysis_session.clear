@@ -8287,7 +8287,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN UNWRAP (castTypeTypeInputToType(t));
       END
       MUTABLE params = fn_type.params |> SELECT FunctionTypeParam{ type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY _.type }, subst)) AS Type), mutable: FALSE };
-      RETURN TRY (type__new(TypeConstructionInput{ FunctionType: COPY FunctionType{ params: COPY params, return_type: CAST(COPY typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY functionSignature__return_type(fn_type) }, subst) AS Type), reentrant: functionSignature__reentrant(fn_type), source_signature: COPY fn_type.source_signature, abi: COPY fn_type.abi } }));
+      RETURN TRY (type__new(TypeConstructionInput{ FunctionType: COPY FunctionType{ params: COPY params, return_type: CAST(COPY typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY fn_type.return_type }, subst) AS Type), reentrant: functionSignature__reentrant(fn_type), source_signature: COPY fn_type.source_signature, abi: COPY fn_type.abi } }));
     ELSE
       RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (typeAnalysisSession__apply_expression_subst(&rtoc_self_view, t.shape.expression(), subst)) }));
     END
@@ -8453,7 +8453,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF sync THEN
       &parts.append(sync);
     END
-    IF t.indirect?() THEN
+    IF (genericBinding__indirect?(t) OR_ELSE FALSE) THEN
       &parts.append("@boxed");
     END
     RETURN parts.join("");

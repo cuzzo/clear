@@ -357,3 +357,13 @@ PUB FN genericBinding__sync_surface_name(value: GenericBinding) RETURNS ?String 
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:indirect?)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN genericBinding__indirect?(value: GenericBinding) RETURNS ?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    GenericBinding.TypeMultiowned AS item -> RETURN type__indirect?(item);,
+    GenericBinding.Type AS item -> RETURN type__indirect?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
