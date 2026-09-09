@@ -1787,22 +1787,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, name));
         MUTABLE decl: ?SymbolEntryRegInput = NIL;
-        IF (IF scope != NIL THEN
-          scope__resolve_entry(scope, name)
-        ELSE
-          NIL
-        END) != NIL THEN
-          decl = COPY (((IF scope != NIL THEN
-          scope__resolve_entry(scope, name)
-        ELSE
-          NIL
-        END))?).reg;
+        IF scope EXISTS AS rtoc_scope_value THEN
+          IF scope__resolve_entry(rtoc_scope_value, name) EXISTS AS rtoc_entry_value THEN
+            decl = COPY rtoc_entry_value.reg;
+          END
         END
         src = typeAnalysisSession__source_code(&rtoc_self_view);
-        IF (((decl != NIL) AND aST__node__token(decl)) AND (src != NIL)) THEN
-          MUTABLE dline = aST__node__token(decl).line;
+        IF (((decl != NIL) AND TRUE) AND (src != NIL)) THEN
+          MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
           MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
-          MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(decl).column - 1));
+          MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(castSymbolEntryRegInputToLocatable(decl)).column - 1));
           IF semi_idx EXISTS AS semi_idx_value THEN
             MUTABLE insert_col = (semi_idx_value + 1);
             FOR _ IN candidate_caps DO
@@ -1810,12 +1804,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (_ == "@multiowned") THEN
                 reason = "single-scheduler Rc; automatic clone on move";
     END
-    &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :CHANGE_BINDING_CAPABILITY_FOR_MOVE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :cap: _, :reason: DiagnosticKwValue{ StringValue: COPY reason }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, dline, insert_col, 0), " ${_}")], :interactive)));
+    &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :CHANGE_BINDING_CAPABILITY_FOR_MOVE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :cap: DiagnosticKwValue{ StringValue: COPY _ }, :reason: DiagnosticKwValue{ StringValue: COPY reason }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, dline, insert_col, 0), " ${_}")], :interactive)));
             END
           END
         END
         MUTABLE consumer: ?String = typeAnalysisSession__consumer_source_text(&rtoc_self_view, move_line_value);
         MUTABLE phrase = typeAnalysisSession__ownership_active_phrase(&rtoc_self_view, (og_node.move_action OR_ELSE :move));
+        MUTABLE msg = "";
         IF consumer EXISTS AS consumer_value THEN
           msg = "USE AFTER MOVE: You can't use `${name}`. `${consumer_value}` ${phrase} (line ${move_line_value.toString()}).";
         ELSE
@@ -5985,11 +5980,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE func_name: ?String = locatable__name(node.right);
     IF sig != NIL THEN
       TRY (typeAnalysisSession__analyze_pipe_to_named_function(&rtoc_self_view, &node, sig, UNWRAP (func_name)));
-    ELSE_IF FALSE THEN
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF FALSE THEN
+    ELSE_IF ((type__resolved(t) == :Intrinsic) OR (type__resolved(t) == :Nil)) THEN
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF (type__resolved(t) == :Intrinsic) THEN
         :Any
       ELSE
-        sig
+        type__resolved(t)
       END));
     ELSE
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BinaryOp: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :PIPE_NOT_CALLABLE }, [], CAST({:name: func_name, :type: sig} AS {String@symbol}Any)));
@@ -6345,31 +6340,24 @@ PRIVATE FN typeAnalysisSession__emit_multi_map_warning(MUTABLE self: TypeAnalysi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE shard_counts = ((sharded_names |> SELECT {
-    MUTABLE sc: ?Type@multiowned = NIL;
-    IF (IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_149: ?Scope@multiowned = (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)));
-    scope__resolve_entry(UNWRAP (rtoc_local_receiver_149), _) }
-      ELSE
-        NIL
-      END) != NIL THEN
-        sc = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_150 = (((IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_149: ?Scope = (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)));
-    scope__resolve_entry(UNWRAP (rtoc_local_receiver_149), _) }
-      ELSE
-        NIL
-      END))?);
-    symbolEntry__type(rtoc_local_receiver_150) };
+    MUTABLE rtoc_counts: []Int64 = List[];
+    FOR _ IN sharded_names DO
+      MUTABLE sc: ?Type@multiowned = NIL;
+      IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)) EXISTS AS rtoc_scope_150 THEN
+        IF scope__resolve_entry(rtoc_scope_150, _) EXISTS AS rtoc_entry_150 THEN
+          sc = COPY symbolEntry__type(rtoc_entry_150);
+        END
       END
-    (  IF (sc != NIL) THEN
-        type__shard_count(sc)
-      ELSE
-        type__shard_count((TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (sc) }))))
-      END)
-    }) |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
+      IF sc EXISTS AS rtoc_sc_value THEN
+        IF type__shard_count(rtoc_sc_value) EXISTS AS rtoc_count_value THEN
+          &rtoc_counts.append(rtoc_count_value);
+        END
+      END
+    END
+    MUTABLE shard_counts = rtoc_counts |> DISTINCT _ |> SELECT COPY _;
     MUTABLE names_str = (sharded_names |> SELECT COPY _).join(", ");
     IF ((shard_counts).length() == 1) THEN
-      typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH accesses ${sharded_names.length()} @sharded maps (${names_str}). Co-located (same shard count ${shard_counts.first()}), but auto-sharding requires a single map. Use explicit SHARD() or @sharded(N):locked.");
+      typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH accesses ${sharded_names.length().toString()} @sharded maps (${names_str}). Co-located (same shard count ${UNWRAP (shard_counts.first()).toString()}), but auto-sharding requires a single map. Use explicit SHARD() or @sharded(N):locked.");
     ELSE
       typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH accesses @sharded maps with different shard counts (${names_str}). Cross-shard routing is likely \u{2014} consider @sharded(N):locked.");
     END
