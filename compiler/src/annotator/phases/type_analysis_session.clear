@@ -6650,15 +6650,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (((((typeAnalysisSession__shard_concurrent_source?(rtoc_self_view, lhs) OR TRY (typeAnalysisSession__bounded_stream_source?(&rtoc_self_view, &lhs))) OR (IF TRUE THEN
       type__inf_stream?(lhs_type)
     ELSE
-      NIL
+      FALSE
     END)) OR (IF lhs_type != NIL THEN
       TRY (type__dynamic_stream?(lhs_type))
     ELSE
-      NIL
+      FALSE
     END)) OR (IF lhs_type != NIL THEN
       TRY (type__open_stream?(lhs_type))
     ELSE
-      NIL
+      FALSE
     END)) OR lhs IS_A RangeLit);
 }
 END
