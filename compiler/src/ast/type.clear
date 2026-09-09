@@ -5145,3 +5145,30 @@ PUB FN typeTypeInput__resolved(value: TypeTypeInput) RETURNS ?String@symbol EFFE
   END
   RETURN NIL;
 END
+
+# Ruby asks the question of whatever the input holds. Only a Type can answer.
+PUB FN typeTypeInput__string?(value: TypeTypeInput) RETURNS !?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN TRY (type__string?(item));,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks the question of whatever the input holds. Only a Type can answer.
+PUB FN typeTypeInput__collection?(value: TypeTypeInput) RETURNS ?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN type__collection?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks the question of whatever the input holds. Only a Type can answer.
+PUB FN typeTypeInput__array?(value: TypeTypeInput) RETURNS ?Bool EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN type__array?(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

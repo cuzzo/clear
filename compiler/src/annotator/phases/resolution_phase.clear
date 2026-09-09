@@ -1834,7 +1834,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       FOR _ IN choices DO
-      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: DiagnosticKwValue{ StringValue: COPY _[1] }, :edge: DiagnosticKwValue{ StringValue: COPY "${edges[rtoc_idx]?.owner}.${edges[rtoc_idx]?.field_name}" }, :capability: _._0} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
+      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: DiagnosticKwValue{ StringValue: COPY _[1] }, :edge: DiagnosticKwValue{ StringValue: COPY "${(edges[rtoc_idx]?.owner OR_ELSE :unknown).toString()}.${(edges[rtoc_idx]?.field_name OR_ELSE "")}" }, :capability: _[0]} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
       END
     rtoc_idx = rtoc_idx + 1;
       END
@@ -2172,9 +2172,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(((left.keys() |> ORDER_BY _) == (right.keys() |> ORDER_BY _))) THEN
       RETURN FALSE;
     END
-    RETURN left |> ALL {
-    MUTABLE right_field: ?StructField = COPY right[_._0];
-    ((((right_field != NIL) AND (CAST(structField__type(_._1) AS String) == CAST(right_field.type AS String))) AND (structField__borrowed(_._1) == right_field.borrowed)) AND ((structField__default(_._1) == NIL) == ((COPY right_field.default) == NIL)))
+    RETURN left.keys() |> ALL {
+    MUTABLE left_field: StructField = UNWRAP (left[_]);
+    MUTABLE right_field: ?StructField = COPY right[_];
+    ((((right_field != NIL) AND (CAST(structField__type(left_field) AS String) == CAST(right_field.type AS String))) AND (structField__borrowed(left_field) == right_field.borrowed)) AND ((structField__default(left_field) == NIL) == ((COPY right_field.default) == NIL)))
     };
 }
 END
@@ -2182,21 +2183,21 @@ PRIVATE FN resolutionSession__inline_struct_deinit_entries(self: ResolutionSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN variant_data.fields.each_with_object(List[], %(tuple_param_0: Tuple<String@symbol,TypeTypeInput>, entries) -> {
-    MUTABLE field_name = tuple_param_0._0;
-    MUTABLE field_type = tuple_param_0._1;
+    MUTABLE entries: []InlineStructDeinitEntry = List[];
+    FOR field_name IN variant_data.fields.keys() DO
+    MUTABLE field_type: TypeTypeInput = UNWRAP (variant_data.fields[field_name]);
     MUTABLE field_type_info = field_type;
     MUTABLE field = COPY CAST(field_name AS String);
-    IF typeTypeInput__indirect?(field_type_info) THEN
-      RETURN &entries.append(inlineStructDeinitEntry__indirect(field, TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY UNWRAP (typeTypeInput__resolved(field_type_info)) })))))));
-    ELSE_IF (TRY (type__string?(field_type_info)) OR type__collection?(field_type_info)) THEN
-      RETURN &entries.append(inlineStructDeinitEntry__uniform(field, TRY (type__zig_type(field_type_info))));
-    ELSE_IF (type__array?(field_type_info) AND !(TRY (type__string?(field_type_info)))) THEN
+    IF (typeTypeInput__indirect?(field_type_info) OR_ELSE FALSE) THEN
+      &entries.append(inlineStructDeinitEntry__indirect(field, TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY UNWRAP (typeTypeInput__resolved(field_type_info)) })))))));
+    ELSE_IF ((TRY (typeTypeInput__string?(field_type_info)) OR_ELSE FALSE) OR (typeTypeInput__collection?(field_type_info) OR_ELSE FALSE)) THEN
+      &entries.append(inlineStructDeinitEntry__uniform(field, TRY (type__zig_type(field_type_info))));
+    ELSE_IF ((typeTypeInput__array?(field_type_info) OR_ELSE FALSE) AND !((TRY (typeTypeInput__string?(field_type_info)) OR_ELSE FALSE))) THEN
       MUTABLE elem_zig_type = TRY (type__zig_type((TRY (type__new(TRY (type__element_type(field_type_info)))))));
-      RETURN &entries.append(inlineStructDeinitEntry__array(field, elem_zig_type));
+      &entries.append(inlineStructDeinitEntry__array(field, elem_zig_type));
     END
-    NIL
-    });
+    END
+    RETURN entries;
 }
 END
 PRIVATE FN resolutionSession__type_params(self: ResolutionSession, params: []String) RETURNS ![]String@symbol

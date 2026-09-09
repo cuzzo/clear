@@ -78,7 +78,7 @@ PRIVATE FN annotationTypeInventory__ignored_node_ids(program: Program) RETURNS !
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    annotationTypeInventory__add_lifetime_metadata_node_ids_mut(&ignored, locatable__return_lifetime(UNWRAP (program.statements[rtoc_idx])));
+    annotationTypeInventory__add_lifetime_metadata_node_ids_mut(&ignored, (IF locatable__return_lifetime(UNWRAP (program.statements[rtoc_idx])) EXISTS AS rtoc_lifetime THEN castClearParserReturnLifetimeToAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata(rtoc_lifetime) ELSE NIL END));
   rtoc_idx = rtoc_idx + 1;
   END
   RETURN ignored;
@@ -415,6 +415,132 @@ FN castAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataToLocatable(value: 
     AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata.BenchmarkStmt AS item -> RETURN Locatable{ BenchmarkStmt: COPY item };,
     AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata.SmashStmt AS item -> RETURN Locatable{ SmashStmt: COPY item };,
     AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata.ProfileStmt AS item -> RETURN Locatable{ ProfileStmt: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+FN castLocatableToAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem(value: Locatable) RETURNS ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem ->
+  PARTIAL MATCH value START
+    Locatable.RequireNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ RequireNode: COPY item };,
+    Locatable.ProtocolRequirement AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ProtocolRequirement: COPY item };,
+    Locatable.ProtocolDef AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ProtocolDef: COPY item };,
+    Locatable.FunctionDef AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ FunctionDef: COPY item };,
+    Locatable.ImplementationDef AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ImplementationDef: COPY item };,
+    Locatable.ConformanceDef AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ConformanceDef: COPY item };,
+    Locatable.VarDecl AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ VarDecl: COPY item };,
+    Locatable.Assignment AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Assignment: COPY item };,
+    Locatable.DestructuringAssignment AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ DestructuringAssignment: COPY item };,
+    Locatable.BindExpr AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ BindExpr: COPY item };,
+    Locatable.BinaryOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ BinaryOp: COPY item };,
+    Locatable.IsA AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ IsA: COPY item };,
+    Locatable.CallSiteOverride AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ CallSiteOverride: COPY item };,
+    Locatable.Identifier AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Identifier: COPY item };,
+    Locatable.Literal AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Literal: COPY item };,
+    Locatable.ListLit AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ListLit: COPY item };,
+    Locatable.TupleLit AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ TupleLit: COPY item };,
+    Locatable.DefaultArrayLit AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ DefaultArrayLit: COPY item };,
+    Locatable.HashLit AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ HashLit: COPY item };,
+    Locatable.DefaultLit AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ DefaultLit: COPY item };,
+    Locatable.StructLit AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ StructLit: COPY item };,
+    Locatable.LambdaLit AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ LambdaLit: COPY item };,
+    Locatable.IfStatement AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ IfStatement: COPY item };,
+    Locatable.IfBind AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ IfBind: COPY item };,
+    Locatable.WhileLoop AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ WhileLoop: COPY item };,
+    Locatable.WhileBindLoop AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ WhileBindLoop: COPY item };,
+    Locatable.BreakNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ BreakNode: COPY item };,
+    Locatable.ContinueNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ContinueNode: COPY item };,
+    Locatable.FuncCall AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ FuncCall: COPY item };,
+    Locatable.GetField AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ GetField: COPY item };,
+    Locatable.GetIndex AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ GetIndex: COPY item };,
+    Locatable.ReturnNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ReturnNode: COPY item };,
+    Locatable.Assert AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Assert: COPY item };,
+    Locatable.ThrowNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ThrowNode: COPY item };,
+    Locatable.DieNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ DieNode: COPY item };,
+    Locatable.Slice AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Slice: COPY item };,
+    Locatable.Require AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Require: COPY item };,
+    Locatable.WithBlock AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ WithBlock: COPY item };,
+    Locatable.SyncPolicyDecl AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ SyncPolicyDecl: COPY item };,
+    Locatable.SelectOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ SelectOp: COPY item };,
+    Locatable.WhereOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ WhereOp: COPY item };,
+    Locatable.IndexOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ IndexOp: COPY item };,
+    Locatable.ReduceOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ReduceOp: COPY item };,
+    Locatable.OrderByOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ OrderByOp: COPY item };,
+    Locatable.LimitOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ LimitOp: COPY item };,
+    Locatable.UnnestOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ UnnestOp: COPY item };,
+    Locatable.DistinctOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ DistinctOp: COPY item };,
+    Locatable.EachOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ EachOp: COPY item };,
+    Locatable.TapOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ TapOp: COPY item };,
+    Locatable.SkipOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ SkipOp: COPY item };,
+    Locatable.CollectOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ CollectOp: COPY item };,
+    Locatable.TakeWhileOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ TakeWhileOp: COPY item };,
+    Locatable.WindowOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ WindowOp: COPY item };,
+    Locatable.BatchWindowOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ BatchWindowOp: COPY item };,
+    Locatable.JoinOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ JoinOp: COPY item };,
+    Locatable.FindOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ FindOp: COPY item };,
+    Locatable.AnyOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ AnyOp: COPY item };,
+    Locatable.AllOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ AllOp: COPY item };,
+    Locatable.CountOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ CountOp: COPY item };,
+    Locatable.SumOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ SumOp: COPY item };,
+    Locatable.AverageOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ AverageOp: COPY item };,
+    Locatable.MinOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ MinOp: COPY item };,
+    Locatable.MaxOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ MaxOp: COPY item };,
+    Locatable.ShardOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ShardOp: COPY item };,
+    Locatable.ConcurrentOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ConcurrentOp: COPY item };,
+    Locatable.Placeholder AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Placeholder: COPY item };,
+    Locatable.Copy AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Copy: COPY item };,
+    Locatable.TenseNavigation AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ TenseNavigation: COPY item };,
+    Locatable.MutableBorrow AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ MutableBorrow: COPY item };,
+    Locatable.CatchBlock AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ CatchBlock: COPY item };,
+    Locatable.RecoverOp AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ RecoverOp: COPY item };,
+    Locatable.StringConcat AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ StringConcat: COPY item };,
+    Locatable.CapabilityWrap AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ CapabilityWrap: COPY item };,
+    Locatable.MoveNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ MoveNode: COPY item };,
+    Locatable.CopyNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ CopyNode: COPY item };,
+    Locatable.KeepNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ KeepNode: COPY item };,
+    Locatable.ShareNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ShareNode: COPY item };,
+    Locatable.LinkNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ LinkNode: COPY item };,
+    Locatable.ResolveNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ResolveNode: COPY item };,
+    Locatable.FreezeNode AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ FreezeNode: COPY item };,
+    Locatable.PassStmt AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ PassStmt: COPY item };,
+    Locatable.StructPattern AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ StructPattern: COPY item };,
+    Locatable.ExternFnDecl AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ExternFnDecl: COPY item };,
+    Locatable.ExternStructDecl AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ExternStructDecl: COPY item };,
+    Locatable.UnionDef AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ UnionDef: COPY item };,
+    Locatable.UnionVariantLit AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ UnionVariantLit: COPY item };,
+    Locatable.StaticCall AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ StaticCall: COPY item };,
+    Locatable.ThenChain AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ThenChain: COPY item };,
+    Locatable.BgStreamBlock AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ BgStreamBlock: COPY item };,
+    Locatable.YieldExpr AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ YieldExpr: COPY item };,
+    Locatable.CloseStream AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ CloseStream: COPY item };,
+    Locatable.NextExpr AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ NextExpr: COPY item };,
+    Locatable.MatchStatement AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ MatchStatement: COPY item };,
+    Locatable.ForRange AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ForRange: COPY item };,
+    Locatable.ForEach AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ForEach: COPY item };,
+    Locatable.TestBlock AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ TestBlock: COPY item };,
+    Locatable.WhenBlock AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ WhenBlock: COPY item };,
+    Locatable.LetBinding AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ LetBinding: COPY item };,
+    Locatable.TestThat AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ TestThat: COPY item };,
+    Locatable.AssertRaises AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ AssertRaises: COPY item };,
+    Locatable.BenchmarkStmt AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ BenchmarkStmt: COPY item };,
+    Locatable.SmashStmt AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ SmashStmt: COPY item };,
+    Locatable.ProfileStmt AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ProfileStmt: COPY item };,
+    Locatable.StubDecl AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ StubDecl: COPY item };,
+    Locatable.Drop AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Drop: COPY item };,
+    Locatable.SuppressCleanup AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ SuppressCleanup: COPY item };,
+    Locatable.Return AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ Return: COPY item };,
+    Locatable.ReassignCleanup AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ ReassignCleanup: COPY item };,
+    Locatable.FieldCleanup AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem{ FieldCleanup: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# A return lifetime is a symbol or a list of nodes; the metadata union spells
+# the same two cases with its own item type.
+FN castClearParserReturnLifetimeToAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata(value: ClearParserReturnLifetime) RETURNS ?AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata ->
+  PARTIAL MATCH value START
+    ClearParserReturnLifetime.SymbolValue AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ SymbolValue: COPY item };,
+    ClearParserReturnLifetime.ArrayValue AS item -> RETURN AnnotatorPhasesAnnotationTypeInventoryLifetimeMetadata{ ArrayValue: COPY (item |> SELECT UNWRAP (castLocatableToAnnotatorPhasesAnnotationTypeInventoryLifetimeMetadataArrayItem(_))) };,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
