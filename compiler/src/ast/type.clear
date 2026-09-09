@@ -5181,3 +5181,12 @@ PUB FN typeTypeInput__zig_type(value: TypeTypeInput) RETURNS !?String EFFECTS RE
   END
   RETURN NIL;
 END
+
+# Ruby asks the input for its element type; only a Type can answer.
+PUB FN typeTypeInput__element_type(value: TypeTypeInput) RETURNS !?Type EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN TRY (type__element_type(item));,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

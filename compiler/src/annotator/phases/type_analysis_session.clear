@@ -1261,7 +1261,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       Locatable.OrElsePrune AS MUTABLE or_else_prune -> TRY (typeAnalysisSession__visit_OrElsePrune(&rtoc_self_view, &or_else_prune)),
       Locatable.OrElseExit AS MUTABLE or_else_exit -> TRY (typeAnalysisSession__visit_OrElseExit(&rtoc_self_view, &or_else_exit)),
       Locatable.WithBlock AS MUTABLE with_block -> TRY (typeAnalysisSession__visit_WithBlock(&rtoc_self_view, &with_block)),
-      doblock -> TRY (typeAnalysisSession__visit_DoBlock(&rtoc_self_view, &node)),
+      Locatable.DoBlock AS MUTABLE do_block -> TRY (typeAnalysisSession__visit_DoBlock(&rtoc_self_view, &do_block)),
       Locatable.BgStreamBlock AS MUTABLE bg_stream_block -> TRY (typeAnalysisSession__visit_BgStreamBlock(&rtoc_self_view, &bg_stream_block)),
       Locatable.YieldExpr AS MUTABLE yield_expr -> TRY (typeAnalysisSession__visit_YieldExpr(&rtoc_self_view, &yield_expr)),
       Locatable.CloseStream AS MUTABLE close_stream -> TRY (typeAnalysisSession__visit_CloseStream(&rtoc_self_view, &close_stream)),
@@ -1362,7 +1362,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         MUTABLE value = assignment_mutable.value;
-        IF (value IS_A Identifier AND (value.ownership_pending_transfer == TRUE)) THEN
+        IF (IF value IS_A Identifier AS rtoc_transfer_ident THEN (rtoc_transfer_ident.ownership_pending_transfer == TRUE) ELSE FALSE END) THEN
           ownershipTransportFacts__record_transfer(&facts_value_mutable, Locatable{ Assignment: COPY assignment_mutable }, Slot{ StringValue: COPY "value" }, value);
         END
       ELSE_IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :decl) ELSE FALSE END) THEN
@@ -2689,7 +2689,7 @@ PRIVATE FN typeAnalysisSession__emit_with_cap_mismatch_mut(MUTABLE self: TypeAna
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fixes = candidates |> SELECT:? TRY (typeAnalysisSession__build_decl_cap_insert_fix(&rtoc_self_view, name, _.sigil, _.description_code, _.description_params, confidence)) |> WHERE _ != NIL;
     IF (fixes.length() == 0) THEN
-      RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueToAnyMultiowned__type_analysis_session(kw)));
+      RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueMapToAnyMap__type_analysis_session(kw)));
     END
     IF (code == :WITH_EXCLUSIVE_NEEDS_LOCK) THEN
       TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, fixes, NIL, code, :error, TRUE, CAST({:got: (kw[:got] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}Any)));
@@ -2870,7 +2870,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE type_str = typeAnalysisSession__auto_type_source_form(&rtoc_self_view, castTypeToAutoConstraintCollectorObservedType__type_analysis_session(UNWRAP (castAutoConstraintCollectorObservedTypeToType(resolution.type))));
     MUTABLE label: ?String = TRY (typeAnalysisSession__auto_slot_label(&rtoc_self_view, slot));
     MUTABLE auto_tok: ?Token@multiowned = typeAnalysisSession__auto_token_for(&rtoc_self_view, slot);
-    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, TRY (typeAnalysisSession__build_auto_replace_fixes(&rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_TYPE, :info, FALSE, CAST({:label: label, :type: type_str} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (IF auto_tok EXISTS AS rtoc_anchor_tok THEN DiagnosticAnchor{ TokenValue: COPY rtoc_anchor_tok } ELSE DiagnosticAnchor{ Locatable: COPY UNWRAP (castAutoConstraintCollectorSlotDeclNodeToLocatable(slot.decl_node)) } END), :type, TRY (typeAnalysisSession__build_auto_replace_fixes(&rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_TYPE, :info, FALSE, CAST({:label: label, :type: type_str} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN typeAnalysisSession__emit_auto_shape_resolved_finding_mut(MUTABLE self: TypeAnalysisSession, decl: AutoConstraintCollectorSlotDeclNode, slot: Slot) RETURNS !Void
@@ -2899,7 +2899,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       name = "<binding>";
     END
     MUTABLE auto_tok: ?Token@multiowned = typeAnalysisSession__auto_token_for(&rtoc_self_view, slot);
-    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE decl), :type, TRY (typeAnalysisSession__build_auto_replace_fixes(&rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_BINDING_TYPE, :info, FALSE, CAST({:name: name, :type: type_str} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (IF auto_tok EXISTS AS rtoc_anchor_tok THEN DiagnosticAnchor{ TokenValue: COPY rtoc_anchor_tok } ELSE DiagnosticAnchor{ Locatable: COPY UNWRAP (castAutoConstraintCollectorSlotDeclNodeToLocatable(decl)) } END), :type, TRY (typeAnalysisSession__build_auto_replace_fixes(&rtoc_self_view, CAST(auto_tok AS ?Token), type_str)), NIL, :AUTO_INFERRED_BINDING_TYPE, :info, FALSE, CAST({:name: name, :type: type_str} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN typeAnalysisSession__build_auto_replace_fixes(MUTABLE self: TypeAnalysisSession, auto_tok: ?Token, type_str: String) RETURNS ![]Fix
