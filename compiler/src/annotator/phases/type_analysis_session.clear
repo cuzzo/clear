@@ -4768,7 +4768,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE owner_entry: ?SymbolEntry@multiowned = NIL;
       IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, UNWRAP (captures[rtoc_idx]).name)) != NIL THEN
           owner_entry = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_97 = (UNWRAP (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, UNWRAP (captures[rtoc_idx]).name))));
-      scope__resolve_entry(rtoc_local_receiver_97, captures[rtoc_idx].name()) };
+      scope__resolve_entry(rtoc_local_receiver_97, UNWRAP (captures[rtoc_idx]).name) };
         END
       MUTABLE capture_entry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_98 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_98, captures[rtoc_idx].name(), NIL, captures[rtoc_idx].type(), captures[rtoc_idx].mutable(), FALSE, NIL, captures[rtoc_idx].storage())) };
@@ -5880,7 +5880,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.storage_override = :frame;
     IF inner_bind_name THEN
       RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_133 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-      TRY (scope__declare(&rtoc_mutable_receiver_133, (inner_bind_name OR_ELSE "_"), NIL, SymbolEntryTypeInput{ StringValue: COPY CAST(nested_element_type AS String) }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack)) };
+      TRY (scope__declare(&rtoc_mutable_receiver_133, "_", NIL, SymbolEntryTypeInput{ StringValue: COPY CAST(nested_element_type AS String) }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack)) };
     END
 }
 END
@@ -9568,7 +9568,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE param_names = fn_node.params |> SELECT _.name;
     FOR _ IN pre_clauses DO
     MUTABLE expr: ?ContractClauseValue = _[:expr];
-    typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :pre, with_node: NIL, fn_node: fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_208: []String = List[]; rtoc_empty_list_208 } ), param_names: COPY param_names, allowed_names: ( { MUTABLE rtoc_empty_list_209: []String = List[]; rtoc_empty_list_209 } ), rejected_param_names: COPY Set[], fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :pre, with_node: NIL, fn_node: COPY fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_208: []String = List[]; rtoc_empty_list_208 } ), param_names: COPY param_names, allowed_names: ( { MUTABLE rtoc_empty_list_209: []String = List[]; rtoc_empty_list_209 } ), rejected_param_names: COPY Set[], fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, expr));
       MUTABLE pred_type = TRY (aST__full_type_mut(expr));
       IF !((pred_type AND (pred_type.resolved() == :Bool))) THEN
@@ -10117,7 +10117,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__record_capture_move_mut(&rtoc_self_view, ctx_value, name, &rtoc_info_slot, &node));
       ELSE
       IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, name)) THEN
-          ctx_value.analysis.has_outer_ref = TRUE;
+          MUTABLE rtoc_outer_analysis = COPY ctx_value.analysis; rtoc_outer_analysis.has_outer_ref = TRUE;
       END
       END
     ELSE
