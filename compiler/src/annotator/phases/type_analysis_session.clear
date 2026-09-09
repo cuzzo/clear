@@ -4477,7 +4477,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       rtoc_name_i = rtoc_name_i + 1;
     END
-    typeAnalysisSession__warning_mut(&rtoc_self_view, castFunctionCallNodeToLocatable(node), "Call to '${functionCallNode__name(node)}' reads multiple atomic values independently (${names.join(", ")}). This is not a multi-object-consistent snapshot; default mode allows it as ordinary atomic loads. STRICT/STRICT EXTREME will require an explicit @inconsistent call-site annotation.");
+    typeAnalysisSession__warning_mut(&rtoc_self_view, castFunctionCallNodeToLocatable(node), "Call to '${(functionCallNode__name(node) OR_ELSE "")}' reads multiple atomic values independently (${names.join(", ")}). This is not a multi-object-consistent snapshot; default mode allows it as ordinary atomic loads. STRICT/STRICT EXTREME will require an explicit @inconsistent call-site annotation.");
 }
 END
 PRIVATE FN typeAnalysisSession__verify_param_lifetime_mut(MUTABLE self: TypeAnalysisSession, arg_node: Locatable, param: Param, signature: FunctionSignature) RETURNS !Bool
@@ -5596,7 +5596,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.storage_override = :frame;
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
         MUTABLE rtoc_mutable_receiver_119: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
-        functionContext__record_frame_use_mut(&UNWRAP (rtoc_mutable_receiver_119));
+        functionContext__record_frame_use_mut(UNWRAP (rtoc_mutable_receiver_119));
     END
     RETURN NIL;
 }
@@ -5982,7 +5982,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE func_name: ?String = locatable__name(node.right);
     IF sig != NIL THEN
       TRY (typeAnalysisSession__analyze_pipe_to_named_function(&rtoc_self_view, &node, sig, UNWRAP (func_name)));
-    ELSE_IF ((sig == :Intrinsic) OR (sig == :Nil)) THEN
+    ELSE_IF FALSE THEN
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF ((sig == :Intrinsic)) THEN
         :Any
       ELSE
@@ -8279,7 +8279,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     rtoc_ternary_value_185? };
     IF typeTypeInput__fn_type?(t) THEN
-      MUTABLE fn_type = type__function_type(t);
+      MUTABLE fn_type = type__function_type(UNWRAP (castTypeTypeInputToType(t)));
       IF !(fn_type) THEN
         RETURN t;
       END
@@ -8410,7 +8410,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF right IS_A Type THEN
       rtoc_ternary_value_190 = right;
     ELSE
-      rtoc_ternary_value_190 = TRY (type__new(castGenericBindingToTypeConstructionInput(right)));
+      rtoc_ternary_value_190 = GenericBinding{ Type: COPY TRY (type__new(castGenericBindingToTypeConstructionInput(right))) };
     END
     rtoc_ternary_value_190? };
     RETURN ((((((l.resolved() == r.resolved()) AND (type__ownership(l) == type__ownership(r))) AND (l.sync() == r.sync())) AND (l.layout() == r.layout())) AND (type__elem_ownership(l) == type__elem_ownership(r))) AND (type__elem_sync(l) == type__elem_sync(r)));
@@ -8438,7 +8438,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF type IS_A Type THEN
       rtoc_ternary_value_192 = type;
     ELSE
-      rtoc_ternary_value_192 = TRY (type__new(castGenericBindingToTypeConstructionInput(type)));
+      rtoc_ternary_value_192 = GenericBinding{ Type: COPY TRY (type__new(castGenericBindingToTypeConstructionInput(type))) };
     END
     rtoc_ternary_value_192? };
     MUTABLE parts = [CAST(t.resolved() AS String)];
@@ -8964,7 +8964,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE callee: ?FunctionDef@multiowned = COPY fn_nodes[UNWRAP (callLikeNode__name(node))];
     IF callee EXISTS AS callee_value THEN
       MUTABLE effs: ?[Set]String@symbol = callee_value.effects;
-      RETURN ((effs != NIL) AND anySuspendsEffect(UNWRAP (effs)));
+      RETURN ((effs != NIL) AND anySuspendsEffect(effs));
     ELSE
       RETURN FALSE;
     END
