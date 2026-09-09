@@ -4737,7 +4737,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE owner_scope = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       END
       MUTABLE entry = scope__entry_for_write_mut(&owner_scope, cap_name);
-      IF (captures[rtoc_idx].mutable() AND !(entry.mutable)) THEN
+      IF (UNWRAP (captures[rtoc_idx]).mutable AND !(entry.mutable)) THEN
       IF node IS_A FunctionDef AS node_narrowed THEN
           TRY (typeAnalysisSession__emit_capture_immutable_as_mutable_error_mut(&rtoc_self_view, &node_narrowed, cap_name, owner_scope));
       END
@@ -8617,7 +8617,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF type__rank?( UNWRAP (decl_type)) THEN
       coll_src_branch_value = NIL;
     ELSE_IF type__collection( UNWRAP (decl_type)) THEN
-      coll_src_branch_value = decl_type;
+      coll_src_branch_value = COPY decl_type;
     ELSE_IF type__collection(value_type) THEN
       coll_src_branch_value = value_type;
     ELSE
@@ -10165,7 +10165,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       typeAnalysisSession__add_capture_name_when(&rtoc_self_view, &result.resource_captures, name, string_map_cleanup);
       typeAnalysisSession__set_capture_close_plan_when(&rtoc_self_view, &result.close_plans, name, resourceClosePlan__method("deinit", 2), string_map_cleanup);
     END
-    close_plan = symbolEntry__close_plan(info);
+    MUTABLE close_plan: ?ResourceClosePlan = symbolEntry__close_plan(info);
     typeAnalysisSession__set_capture_close_plan_when(&rtoc_self_view, &result.close_plans, name, close_plan, !((close_plan == NIL)));
     result.has_local = (result.has_local OR symbolEntry__local?(info));
     result.has_rc = (result.has_rc OR (symbolEntry__storage(info) == :multiowned));
