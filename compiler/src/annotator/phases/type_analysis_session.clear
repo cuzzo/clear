@@ -1734,7 +1734,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN TRY (typeAnalysisSession__emit_carrier_fanout_error_mut(&rtoc_self_view, use_node, og_node, name, move_line_value, move_col));
         END
         MUTABLE type = ownershipNode__full_type(og_node);
-        MUTABLE is_shared = type__shared?(castTypeTypeInputToType(TypeTypeInput{ Type: COPY type }));
+        MUTABLE is_shared = type__shared?(UNWRAP (castTypeTypeInputToType(TypeTypeInput{ Type: COPY type })));
         MUTABLE is_multi = type__multiowned?(type);
         MUTABLE is_split = type__split?(type);
         MUTABLE use_clone = ((is_shared OR is_multi) OR is_split);
@@ -1776,7 +1776,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             pt = castTypeToTypeTypeInput__type_analysis_session(TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(pt))));
           END
           MUTABLE param_admits_shared = ((pt != NIL) AND (IF (typeTypeInput__shared?(pt) != NIL) THEN
-            type__shared?(castTypeTypeInputToType(pt))
+            type__shared?(UNWRAP (castTypeTypeInputToType(pt)))
           ELSE
             FALSE
           END));
@@ -4872,7 +4872,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(has_lifetime) THEN
       RETURN TRUE;
     END
-    MUTABLE is_wildcard = (lifetime_paths == [:wildcard]);
+    MUTABLE is_wildcard = ((lifetime_paths.length() == 1) AND (lifetime_paths[0] == FunctionContextLifetimeSource{ SymbolValue: :wildcard }));
     IF is_wildcard THEN
       RETURN TRUE;
     END
@@ -9298,7 +9298,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         MUTABLE storage: ?String@symbol = COPY fact.storage;
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, UNWRAP (name), :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY storage }} AS {String@symbol}DiagnosticKwValue)));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_EXCLUSIVE_NEEDS_LOCK, [CapabilityFixCandidate{ sigil: "@locked", description_code: :WITH_ADD_LOCKED, description_params: {} }, CapabilityFixCandidate{ sigil: "@writeLocked", description_code: :WITH_ADD_WRITE_LOCKED, description_params: CAST({:reader: DiagnosticKwValue{ StringValue: COPY "can coexist via WITH READ" }} AS {String@symbol}DiagnosticKwValue) }], :interactive, CAST({:got: DiagnosticKwValue{ SymbolValue: COPY storage }} AS {String@symbol}DiagnosticKwValue)));
       END
     ELSE_IF (fact.capability == :write_locked_read) THEN
       IF !(capabilityTransition__write_locked_sync?(fact)) THEN
@@ -11874,7 +11874,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         &summary.return_nodes.append(COPY return_node);
     ELSE_IF node IS_A VarDecl AS var_decl THEN
         &summary.binding_nodes.append(BindingNode{ VarDecl: COPY var_decl });
-        typeAnalysisSession__record_local_binding_fact_mut(&rtoc_self_view, &_, BindingNode{ VarDecl: COPY var_decl }, CAST(var_decl.name AS String));
+        MUTABLE rtoc_frame_slot = COPY _;
+        typeAnalysisSession__record_local_binding_fact_mut(&rtoc_self_view, &rtoc_frame_slot, BindingNode{ VarDecl: COPY var_decl }, CAST(var_decl.name AS String));
     ELSE_IF node IS_A BindExpr AS bind_expr THEN
         IF (bind_expr.mode == :assign) THEN
           &summary.assignment_nodes.append(AssignmentNode{ BindExpr: COPY bind_expr });
@@ -12572,7 +12573,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__resolve_inherent_static_call_mut(&rtoc_self_view, &node, type_name));
       RETURN;
     END
-    IF !((schema.kind() == :resource)) THEN
+    IF !((schemaValue__kind(UNWRAP (schema)) == :resource)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StaticCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_NOT_RESOURCE }, [], CAST({:type: type_name} AS {String@symbol}Any)));
     END
     MUTABLE static_methods = (schema.static_methods OR_ELSE {});

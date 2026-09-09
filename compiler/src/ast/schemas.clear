@@ -863,3 +863,15 @@ PUB FN schemaValue__static_methods(value: SchemaValue) RETURNS ?{String@symbol}F
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:kind)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN schemaValue__kind(value: SchemaValue) RETURNS ?String@symbol EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    SchemaValue.EnumSchemaMultiowned AS item -> RETURN enumSchema__kind(item);,
+    SchemaValue.StructSchemaMultiowned AS item -> RETURN structSchema__kind(item);,
+    SchemaValue.UnionSchemaMultiowned AS item -> RETURN unionSchema__kind(item);,
+    SchemaValue.ResourceSchemaMultiowned AS item -> RETURN resourceSchema__kind(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
