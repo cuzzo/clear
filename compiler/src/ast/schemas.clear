@@ -323,7 +323,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 FN inlineStructVariant__equals?(self: InlineStructVariant, other: InlineStructVariant) RETURNS Bool
-  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
