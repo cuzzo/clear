@@ -245,7 +245,7 @@ PUB FN resolutionSession__register_local_declaration_mut(MUTABLE self: Resolutio
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A StructDef AS struct_def THEN
       TRY (resolutionSession__register_type_declaration(&rtoc_self_view, TypeDeclaration{ StructDef: COPY struct_def }));
-    ELSE_IF node IS_A ExternStructDecl AS extern_struct_decl THEN
+    ELSE_IF node IS_A ExternStructDecl AS MUTABLE extern_struct_decl THEN
       TRY (resolutionSession__register_type_declaration(&rtoc_self_view, TypeDeclaration{ ExternStructDecl: COPY extern_struct_decl }));
     ELSE_IF node IS_A EnumDef AS enum_def THEN
       TRY (resolutionSession__register_type_declaration(&rtoc_self_view, TypeDeclaration{ EnumDef: COPY enum_def }));
@@ -366,7 +366,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       NIL
     END) } END) |> WHERE _ != NIL;
     IF (paths.length() == 1) THEN
-      RETURN paths.first();
+      RETURN COPY paths.first();
     ELSE
       RETURN NIL;
     END
@@ -1368,7 +1368,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (type__error_union?(type) AND (TRY (type__payload_type(type)) != NIL)) THEN
       &nested.append(UNWRAP (TRY (type__payload_type(type))));
     END
-    IF (type__tense?(type) AND TRY (type__tense_type(type))) THEN
+    IF type__tense?(type) THEN
       &nested.append(TRY (type__tense_type(type)));
     END
     MUTABLE names = nested |> REDUCE(Set[]) {
@@ -1810,7 +1810,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE fixes: []Fix@multiowned = TRY (resolutionSession__recursive_layout_fixes(rtoc_self_view, internal));
       MUTABLE owner_node = UNWRAP (structs |> FIND (symbol(_.name) == (UNWRAP (internal.first())).owner));
       IF (internal.length() == 1) THEN
-          TRY (resolutionSession__fixable_mut(&rtoc_self_view, owner_node, :type, fixes, NIL, :RECURSIVE_LAYOUT_REQUIRES_INDIRECT, :error, TRUE, CAST({:edge: labels} AS {String@symbol}Any)));
+          TRY (resolutionSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ StructDef: COPY owner_node } }, :type, fixes, NIL, :RECURSIVE_LAYOUT_REQUIRES_INDIRECT, :error, TRUE, CAST({:edge: labels} AS {String@symbol}Any)));
       ELSE
           TRY (resolutionSession__fixable_mut(&rtoc_self_view, owner_node, :type, fixes, NIL, :RECURSIVE_LAYOUT_AMBIGUOUS, :error, TRUE, CAST({:edges: labels} AS {String@symbol}Any)));
       END
@@ -2067,7 +2067,7 @@ PRIVATE FN resolutionSession__register_enum_declaration(MUTABLE self: Resolution
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY ( castStringListToSchemasEnumSchemaVariantInputItemList(resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), SchemaValue{ EnumSchemaMultiowned: COPY TRY (enumSchema__new((node.variants |> SELECT SchemasEnumSchemaVariantInputItem{ StringValue: COPY _ }), node.visibility)) })));
+    TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ EnumDef: COPY node }, symbol(node.name), SchemaValue{ EnumSchemaMultiowned: COPY TRY (enumSchema__new((node.variants |> SELECT SchemasEnumSchemaVariantInputItem{ StringValue: COPY _ }), node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
 }
 END
