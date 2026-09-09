@@ -18289,3 +18289,12 @@ FN castContractClauseValueToLocatable(value: ContractClauseValue) RETURNS ?Locat
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToIfStatement(value: Locatable) RETURNS ?IfStatement EFFECTS REENTRANT ->
+  IF value IS_A IfStatement AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

@@ -15083,7 +15083,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (typeAnalysisSession__finish_previsited_copy_mut(&rtoc_self_view, CAST(wrapper AS CopyNode)));
           END
       END
-      MUTABLE symbol = aST__node__symbol(castBindingNodeToLocatable(node));
+      MUTABLE symbol: ?SymbolEntry@multiowned = aST__node__symbol(castBindingNodeToLocatable(node));
       IF symbol != NIL THEN
           TRY (typeAnalysisSession__establish_inferred_alias_mut(&rtoc_self_view, &node, &symbol));
       END
@@ -15228,7 +15228,7 @@ PRIVATE FN typeAnalysisSession__promote_declaration_value_mut(MUTABLE self: Type
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A IfStatement, DeclarationNode.BindExpr AS item -> item.value IS_A IfStatement END) THEN
-      TRY (typeAnalysisSession__promote_to_expr_if_mut(&rtoc_self_view, UNWRAP (castDeclarationNodeToLocatable(node)), UNWRAP (declarationNode__value(node))));
+      TRY (typeAnalysisSession__promote_to_expr_if_mut(&rtoc_self_view, UNWRAP (castDeclarationNodeToLocatable(node)), UNWRAP (castLocatableToIfStatement(UNWRAP (declarationNode__value(node))))));
     END
     IF (MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A MatchStatement, DeclarationNode.BindExpr AS item -> item.value IS_A MatchStatement END) THEN
       TRY (typeAnalysisSession__promote_to_expr_match_mut(&rtoc_self_view, castDeclarationNodeToLocatable(node), UNWRAP (declarationNode__value(node))));
@@ -19563,9 +19563,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE vti = TRY (aST__full_type_mut(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))));
-    MUTABLE needs_move = ((vti AND TRY (type__requires_move?((TRY (type__new(TypeConstructionInput{ Type: COPY vti })))))) OR_ELSE TRUE);
+    MUTABLE needs_move = TRY (type__requires_move?((TRY (type__new(TypeConstructionInput{ Type: COPY vti })))));
     IF needs_move THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :MOVE_WITH_SCOPED }, [], CAST({:name: aST__node_value(UNWRAP (castNodeToLocatable(node))).name()} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(UNWRAP (castNodeToLocatable(node))), TypeAnalysisCodeOrMessage{ SymbolValue: :MOVE_WITH_SCOPED }, [], CAST({:name: aST__node_value(UNWRAP (castNodeToLocatable(node))).name()} AS {String@symbol}Any)));
     END
 }
 END
