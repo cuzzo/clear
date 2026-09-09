@@ -2580,7 +2580,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE direct_alloc = ((fn_node.uses_alloc == TRUE));
     MUTABLE decl_alloc = ({
       MUTABLE rtoc_value_block_marker = 0;
-      MUTABLE rt = fn_node.return_type;
+      MUTABLE rt: ?Type = fn_node.return_type;
       (IF rt THEN
         (IF rt.error_union?() THEN
         (type__collection?(rt) OR TRY (type__string?(rt)))
@@ -2670,7 +2670,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fn_node.explicit_return_type) THEN
         CONTINUE;
     END
-    MUTABLE ret = fn_node.return_type;
+    MUTABLE ret: ?Type = fn_node.return_type;
     IF !(ret) THEN
         CONTINUE;
     END

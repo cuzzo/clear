@@ -115,7 +115,7 @@ UNION TypeAnalysisBodyFacts { BodyScanSummary: BodyScanSummary, FunctionBodySumm
 UNION TypeAnalysisCallNode { FuncCall: FuncCall, MethodCall: MethodCall }
 PUB FN typeAnalysisCallNode__name(self: TypeAnalysisCallNode) RETURNS String ->
   PARTIAL MATCH self START
-    TypeAnalysisCallNode.FuncCall AS item -> RETURN COPY item.name;,
+    TypeAnalysisCallNode.FuncCall AS item -> RETURN COPY (IF item.name IS_A StringValue AS s THEN s ELSE "" END);,
     TypeAnalysisCallNode.MethodCall AS item -> RETURN COPY item.name;
   END
   RETURN "";
@@ -721,7 +721,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE txn_violations = COPY frame.violations;
   IF !((txn_violations.length() == 0)) THEN
       MUTABLE kinds = (CAST(((txn_violations |> SELECT effectTracker__display(_.effect)) |> DISTINCT _) AS []String)).join(", ");
-      RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_SNAPSHOT_BODY_NOT_PURE }, [], CAST({:kinds: kinds} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_SNAPSHOT_BODY_NOT_PURE }, [], CAST({:kinds: kinds} AS {String@symbol}Any)));
   END
   RETURN result;
 }
@@ -852,7 +852,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_summaries = COPY resolution.function_registry.body_summaries;
     keepAnalysis__propagate_kept_identity_mut(fn_nodes, body_summaries);
     TRY (escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes, body_summaries, %(entry, arg, callee_name) USE(body_summaries, fn_nodes, MUTABLE rtoc_self_view) -> {
-    MUTABLE sink = (((symbolEntry__kept_identity(entry)?.sink OR_ELSE ((IF (IF fn_nodes[callee_name] != NIL THEN
+    MUTABLE sink = (((symbolEntry__kept_identity(entry)?.sink OR_ELSE ((IF (IF fn_nodes[UNWRAP (callee_name)] != NIL THEN
         ((fn_nodes[callee_name]).params) |> FIND (IF aST__node__symbol(_) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (aST__node__symbol(_));
     symbolEntry__kept_identity(rtoc_local_receiver_8) }
@@ -2363,7 +2363,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE edits = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < missing_caps.length() DO
-      MUTABLE vn = COPY missing_caps[rtoc_idx]?.var_node;
+      MUTABLE vn: ?Locatable = COPY missing_caps[rtoc_idx]?.var_node;
       IF !(((IF UNWRAP (vn) IS_A Identifier AS identifier THEN TRUE ELSE FALSE END) AND locatable__token(UNWRAP (vn)))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -4180,7 +4180,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(TRY (typeAnalysisSession__reentrant_fn_argument_rejected?(&rtoc_self_view, facts))) THEN
       RETURN FALSE;
     END
-    RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :REENTRANT_FN_TO_NON_REENTRANT_PARAM }, [], CAST({:name: typeAnalysisSession__argument_name(&rtoc_self_view, facts.arg_node, "Expression"), :param: facts.param.name} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :REENTRANT_FN_TO_NON_REENTRANT_PARAM }, [], CAST({:name: typeAnalysisSession__argument_name(&rtoc_self_view, facts.arg_node, "Expression"), :param: facts.param.name} AS {String@symbol}Any)));
+    RETURN FALSE;
 }
 END
 PRIVATE FN typeAnalysisSession__reentrant_fn_argument_allowed_by_callee?(MUTABLE self: TypeAnalysisSession, facts: CallArgumentFacts) RETURNS !Bool
@@ -8880,7 +8881,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fn_ctx?.name) THEN
       RETURN;
     END
-    MUTABLE caller_name = COPY fn_ctx?.name;
+    MUTABLE caller_name: ?String = COPY fn_ctx?.name;
     MUTABLE in_loop = (typeAnalysisSession__current_loop_depth(&rtoc_self_view) > 0);
     MUTABLE in_cond = (typeAnalysisSession__current_conditional_depth(&rtoc_self_view) > 0);
     IF !((in_loop OR in_cond)) THEN
@@ -10913,7 +10914,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN rank;
     ELSE
     IF (existing != rank) THEN
-        RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ CapabilityWrap: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :LOCK_RANK_INCONSISTENT }, [], CAST({:type: type_sym, :previous: existing, :rank: rank} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ CapabilityWrap: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :LOCK_RANK_INCONSISTENT }, [], CAST({:type: type_sym, :previous: existing, :rank: rank} AS {String@symbol}Any)));
+        RETURN NIL;
     END
     END
 }
