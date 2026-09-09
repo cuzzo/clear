@@ -13031,7 +13031,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.condition IS_A IsA AND node.comptime) THEN
       TRY (typeAnalysisSession__annotate_comptime_is_a_mut(&rtoc_self_view, castLocatableToIsA__type_analysis_session(node.condition)));
     ELSE
-      IF (node.condition IS_A IsA AND TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, castLocatableToNodeOrType(UNWRAP (locatable__left))(node.condition)))) THEN
+      IF (node.condition IS_A IsA AND TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, castLocatableToNodeOrType(UNWRAP (locatable__left(node.condition)))))) THEN
         TRY (typeAnalysisSession__emit_is_a_needs_comptime_fix_mut(&rtoc_self_view, &node));
       END
       typeAnalysisSession__with_if_is_a_condition(&rtoc_self_view, node.condition, %() USE(node, MUTABLE rtoc_self_view) -> {
