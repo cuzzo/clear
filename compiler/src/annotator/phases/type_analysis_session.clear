@@ -11816,7 +11816,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &summary.local_facts.append(COPY LocalFact{ id: COPY LocalId{ value: (body_id_base + frame.next_local_ordinal) }, place_id: COPY SemanticPlaceId{ value: place_id }, name: COPY name });
     MUTABLE symbol: ?SymbolEntry@multiowned = aST__node__symbol(castBindingNodeToLocatable(node));
     IF symbol != NIL THEN
-      &symbolEntry__adopt_semantic_place_id_mut(symbol, place_id);
+      symbolEntry__adopt_semantic_place_id_mut(&UNWRAP (symbol), place_id);
     END
 }
 END
@@ -12280,7 +12280,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE mapped_type = (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, Locatable{ MethodCall: COPY node }, "tense navigation method result") OR_ELSE TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node })));
     MUTABLE result = TRY (typeAnalysisSession__publish_tense_navigation_plan_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, castLocatableToTenseNavigation__type_analysis_session(node.object), CAST(mapped_type AS Type)));
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, result));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, result));
     IF node.object.safe_navigation?() THEN
       node.safe_nav_chain = TRUE;
     END
@@ -12297,7 +12297,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      locatable__mark_explicit_mutable_argument_mut(&node, rtoc_idx, locatable__token(UNWRAP ((rtoc_each_items_288 OR_ELSE List[])[rtoc_idx])));
+      locatable__mark_explicit_mutable_argument_mut(&UNWRAP (castNodeToLocatable(node)), rtoc_idx, locatable__token(UNWRAP ((rtoc_each_items_288 OR_ELSE List[])[rtoc_idx])));
       MUTABLE rtoc_index_receiver_289 = node__args(node);
       rtoc_index_receiver_289[rtoc_idx] = UNWRAP (rtoc_each_items_288[rtoc_idx]).target;
     rtoc_idx = rtoc_idx + 1;
@@ -12366,7 +12366,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE result: Type = result_branch_value?;
     node.protocol_operation = operation;
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, result));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, result));
     IF (operation == :put) THEN
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
             MUTABLE rtoc_mutable_receiver_290 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
@@ -12644,7 +12644,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE call = FuncCall{ token: COPY node.token, name: CallName{ StringValue: COPY implementationRegistration__function_name(CAST(owner AS String), node.method_name) }, args: COPY node.args, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, module_alias: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, fn_var_call: NIL, pipe_lhs: NIL, heap_dupe_result: NIL, arg_families: NIL, collapsed_errors: NIL, error_union_type: NIL, protocol_name: NIL, protocol_operation: NIL, protocol_receiver_index: NIL, retain_error_channel: NIL };
     FOR rtoc_each_key IN node.explicit_mutable_argument_tokens.keys() DO
     MUTABLE token: Token@multiowned = COPY UNWRAP (node.explicit_mutable_argument_tokens[rtoc_each_key]);
-    locatable__mark_explicit_mutable_argument_mut(&Locatable{ FuncCall: COPY call }, rtoc_each_key, CAST(COPY token AS Token));
+    MUTABLE rtoc_call_node = Locatable{ FuncCall: COPY call };
+    locatable__mark_explicit_mutable_argument_mut(&rtoc_call_node, rtoc_each_key, CAST(COPY token AS Token));
     END
     TRY (typeAnalysisSession__resolve_call(&rtoc_self_view, FunctionCallNode{ FuncCall: COPY call }, node.args));
     MUTABLE resolved_return = TRY (aST__full_type_mut(call));
@@ -13231,7 +13232,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE payload_name = TRY (type__coercion_surface_name(TypeTypeInput{ Type: COPY type_multiowned }));
       MUTABLE payload_names: [Set]String = [COPY payload_name, COPY (payload_name.split(".").last() OR_ELSE payload_name)] |> DISTINCT _;
       RETURN !(((payload_names |> WHERE target_names.contains?(_)).length() == 0));
-    ELSE_IF payload IS_A InlineStructVariant@multiowned AS inline_struct_variant_multiowned THEN
+    ELSE_IF UNWRAP (payload) IS_A InlineStructVariant@multiowned AS inline_struct_variant_multiowned THEN
       MUTABLE synthetic_name = "${union_type}_${variant_name}";
       RETURN type__any?((ruby_set_intersection_String([synthetic_name, variant_name], target_names)));
     ELSE_IF payload IS_A String@symbol AS string_symbol THEN
@@ -13251,7 +13252,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     ELSE_IF node IS_A GetField AS get_field THEN
       MUTABLE get_field_mutable = COPY get_field;
-      TRY (typeAnalysisSession__stamp_runtime_is_a_target_mut(&rtoc_self_view, castLoccastNodeToNodeOrType(atableToNode__type_analysis_session)(castLocatableToLocatable__type_analysis_session(get_field_mutable.target)), type_name));
+      TRY (typeAnalysisSession__stamp_runtime_is_a_target_mut(&rtoc_self_view, castNodeToNodeOrType(castLocatableToNode__type_analysis_session(get_field_mutable.target)), type_name));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ GetField: COPY get_field_mutable }, type_name));
     ELSE_IF node IS_A Identifier AS identifier THEN
       MUTABLE identifier_mutable = COPY identifier;
@@ -18785,7 +18786,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plan = TRY (tenseOperationPlanner__unwrap(CAST(plan_input AS Type)));
     node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY Locatable{ OptionalUnwrap: COPY plan } };
     MUTABLE result = COPY plan.result_type;
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, result));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, result));
     node.storage_override = node.target.storage();
     IF type__error_union?(result) THEN
       node.error_union_type = result;
