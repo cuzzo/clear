@@ -2934,7 +2934,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fixes = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < candidates.length() DO
-      MUTABLE fix: ?Fix@multiowned = TRY (typeAnalysisSession__build_auto_candidate_fix(&rtoc_self_view, slot, candidates[rtoc_idx]?.type_sym, candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
+      MUTABLE fix: ?Fix@multiowned = TRY (typeAnalysisSession__build_auto_candidate_fix(&rtoc_self_view, slot, UNWRAP (candidates[rtoc_idx]?.type_sym), candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
       IF fix EXISTS AS fix_value THEN
           &fixes.append(fix_value);
       END
@@ -2967,7 +2967,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fixes = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < candidates.length() DO
-      MUTABLE fix: ?Fix@multiowned = TRY (typeAnalysisSession__build_auto_candidate_fix(&rtoc_self_view, slot, candidates[rtoc_idx]?.type_sym, candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
+      MUTABLE fix: ?Fix@multiowned = TRY (typeAnalysisSession__build_auto_candidate_fix(&rtoc_self_view, slot, UNWRAP (candidates[rtoc_idx]?.type_sym), candidates[rtoc_idx]?.note, (rtoc_idx + 1)));
       IF fix EXISTS AS fix_value THEN
           &fixes.append(fix_value);
       END
@@ -3064,14 +3064,14 @@ PRIVATE FN typeAnalysisSession__auto_local_slot_label(MUTABLE self: TypeAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE name: Any = NIL;
-    MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__type_analysis_session(slot.decl_node) START
+    MUTABLE name: ?String = NIL;
+    PARTIAL MATCH castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__type_analysis_session(slot.decl_node) START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
         name = COPY item.name;,
       AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
         name = COPY item.name;,
     END
-    RETURN "local '${name.toString()}'";
+    RETURN "local '${(name OR_ELSE "")}'";
 }
 END
 PRIVATE FN typeAnalysisSession__auto_token_for(MUTABLE self: TypeAnalysisSession, slot: Slot) RETURNS ?Token
@@ -3741,7 +3741,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE args = COPY args_input;
     args = (args OR_ELSE UNWRAP (functionCallNode__args(node)));
     MUTABLE source_name: String = "";
-    IF (IF node IS_A MethodCall AS method_call THEN (methodCall__source_method_name(&method_call) != NIL) ELSE FALSE END) THEN
+    IF (IF node IS_A MethodCall AS method_call THEN (methodCall__source_method_name(method_call) != NIL) ELSE FALSE END) THEN
       source_name = node.source_method_name;
     ELSE
       source_name = COPY CAST(node.name() AS String);
@@ -3936,9 +3936,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE src_type = (TRY (aST__full_type_mut(arg)));
-    IF !(src_type IS_A Type) THEN
-      RETURN;
-    END
     MUTABLE carrier: String = "";
     IF src_type.multiowned?() THEN
       carrier = "@multiowned";
@@ -4248,7 +4245,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((IF arg_node IS_A Identifier AS identifier THEN typeAnalysisSession__atomic_cell_arg?(&rtoc_self_view, identifier) ELSE FALSE END)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :ARG_NEEDS_ATOMIC_CELL }, [], CAST({:index: (facts.index + 1), :fn: facts.site.name, :expected: type__resolved(facts.expected_type), :name: typeAnalysisSession__argument_name(&rtoc_self_view, arg_node, "Expression"), :actual: type__resolved(facts.actual_type)} AS {String@symbol}Any)));
       END
-      IF arg_node IS_A Identifier AS identifier THEN
+      IF arg_node IS_A Identifier AS MUTABLE identifier THEN
         identifier.atomic_borrow = TRUE;
       END
     END
@@ -4322,7 +4319,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < encountered_args.length() DO
-      IF !((((typeAnalysisSession__param_mutable?(&rtoc_self_view, facts.param) OR encountered_args[rtoc_idx]?.mutable)) AND typeAnalysisSession__paths_overlap?(&rtoc_self_view, current_path, encountered_args[rtoc_idx]?.path))) THEN
+      IF !((((typeAnalysisSession__param_mutable?(&rtoc_self_view, facts.param) OR (encountered_args[rtoc_idx]?.mutable OR_ELSE FALSE))) AND typeAnalysisSession__paths_overlap?(&rtoc_self_view, current_path, encountered_args[rtoc_idx]?.path))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -4511,7 +4508,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE sources: []Any = List[];
-    IF rl IS_A []Any THEN
+    IF rl IS_A ArrayValue THEN
       sources = rl;
     ELSE
       sources = [CAST(rl AS Any)];
@@ -4700,7 +4697,7 @@ PRIVATE FN typeAnalysisSession__verify_captures_mut(MUTABLE self: TypeAnalysisSe
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE captures: Any = NIL;
-    MATCH node START
+    PARTIAL MATCH node START
       RoutineNode.FunctionDefMultiowned AS item ->
         captures = COPY item.captures;,
       RoutineNode.LambdaLit AS item ->
@@ -4745,7 +4742,7 @@ PRIVATE FN typeAnalysisSession__declare_captures(MUTABLE self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE captures: Any = NIL;
-    MATCH node START
+    PARTIAL MATCH node START
       RoutineNode.FunctionDefMultiowned AS item ->
         captures = COPY item.captures;,
       RoutineNode.LambdaLit AS item ->
@@ -4792,7 +4789,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       END
       IF declared_type EXISTS AS declared_type_value THEN
-        IF found_returns |> ALL TRY (type__accepts?(declared_type_value, TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(_.type))))) THEN
+        IF found_returns |> ALL TRY (type__accepts?(declared_type_value, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY _.type })))) THEN
           RETURN;
         END
       END
@@ -20398,7 +20395,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN CAST([TypeAnalysisSessionReturnValueItem{ SymbolValue: :wildcard }] AS []TypeAnalysisSessionReturnValueItem);
     END
     MUTABLE sources: []Any = List[];
-    IF rl IS_A []Any THEN
+    IF rl IS_A ArrayValue THEN
       sources = rl;
     ELSE
       sources = [CAST(rl AS Any)];
