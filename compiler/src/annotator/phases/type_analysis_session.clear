@@ -5061,7 +5061,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE arg_type = TRY (aST__full_type_mut(arg));
-    IF ((spec.sync != NIL) AND ((IF arg_type != NIL THEN
+    IF ((TRUE) AND ((IF arg_type != NIL THEN
       arg_type.sync()
     ELSE
       NIL
@@ -20714,7 +20714,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END))) THEN
       RETURN;
     END
-    MUTABLE has_pointer = (IF (type__resolved(vti) != NIL) THEN
+    MUTABLE has_pointer = (IF (TRUE) THEN
       TRY (type__heap_ptr?(vti))
     ELSE
       NIL
