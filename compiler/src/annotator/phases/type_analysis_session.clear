@@ -6651,11 +6651,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       type__inf_stream?(lhs_type)
     ELSE
       FALSE
-    END)) OR (IF lhs_type != NIL THEN
+    END)) OR (IF TRUE THEN
       TRY (type__dynamic_stream?(lhs_type))
     ELSE
       FALSE
-    END)) OR (IF lhs_type != NIL THEN
+    END)) OR (IF TRUE THEN
       TRY (type__open_stream?(lhs_type))
     ELSE
       FALSE
@@ -6885,7 +6885,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE shard_node: ?Locatable = aST__node_right(node.left);
     MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(UNWRAP (shard_node))));
-    conc.shard_context = PipelineShardContext{ map_var: COPY UNWRAP (locatable__target_map(UNWRAP (shard_node))), shard_count: type__shard_count(TRY (target_info)), key_expr: COPY UNWRAP locatable__key_expr((shard_node)), auto_detected: FALSE, key_allocates_frame: FALSE, body_allocates_frame: FALSE };
+    conc.shard_context = PipelineShardContext{ map_var: COPY UNWRAP (locatable__target_map(UNWRAP (shard_node))), shard_count: type__shard_count(TRY (target_info)), key_expr: COPY UNWRAP (locatable__key_expr(UNWRAP (shard_node))), auto_detected: FALSE, key_allocates_frame: FALSE, body_allocates_frame: FALSE };
     RETURN shard_node;
 }
 END
