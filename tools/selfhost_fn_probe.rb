@@ -408,6 +408,13 @@ module SelfhostFnProbe
       end
       text = "#{out}\n#{err}"
       msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|error: [^\n]*/, 0]
+      # A guidance run wants every diagnostic the compiler could reach, not the
+      # first one. Measurement never sets this, so the recorded number is
+      # unchanged.
+      if ENV['CLEAR_PROBE_ALL_ERRORS'] == '1'
+        all = text.scan(/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*/).uniq
+        msg = all.join("\n") unless all.empty?
+      end
       probe_line = text[/^\s*(\d+) \|/, 1] || text[/line (\d+)/, 1]
       # The column is what makes a positional diagnostic anchorable: several
       # rules otherwise have to guess which argument on the line the compiler
