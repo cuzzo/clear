@@ -5908,7 +5908,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
-    shape = IF type__fixed?((TRY (type__tense_type(lhs_type)))) THEN
+    shape = IF type__fixed?((TRY (type__tense_type(UNWRAP (lhs_type))))) THEN
       TRY (type__tense_type(lhs_type))
     ELSE
       TRY (type__optional_stream_shape_type(lhs_type))
@@ -10299,7 +10299,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_ternary_value_236 = TRY (type__new(castFinalTypeToTypeConstructionInput(final_type)));
       END
       rtoc_ternary_value_236? };
-      MUTABLE record = BindingAuditRecord{ fn: COPY fn_name, var: COPY var_name, line: line, column: column, sync: COPY sync, ownership: COPY own, storage: COPY storage, sharded: type__sharded?(final_type_info), mutated: FALSE, captured_bg: FALSE, captured_parallel: FALSE };
+      MUTABLE record = BindingAuditRecord{ fn: COPY fn_name, var: COPY var_name, line: line, column: column, sync: COPY sync, ownership: NIL, storage: COPY storage, sharded: type__sharded?(final_type_info), mutated: FALSE, captured_bg: FALSE, captured_parallel: FALSE };
       MUTABLE rtoc_index_receiver_237 = TRY (typeAnalysisSession__capability_audit_store(&rtoc_self_view));
       rtoc_index_receiver_237[key] = record;
       RETURN record;
@@ -12062,7 +12062,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (requirement.params.length() != member.params.length()) THEN
       RETURN "${requirement.name}: expected ${requirement.params.length().toString()} parameter(s), found ${member.params.length().toString()}";
     END
-    MUTABLE substitutions: {String@symbol}GenericBinding = COPY resolution.associated_types;
+    MUTABLE substitutions: {String@symbol}GenericBinding = castTypeMapToGenericBindingMap__type_analysis_session(resolution.associated_types);
     substitutions[:Self] = GenericBinding{ Type: COPY resolution.declaration.owner_type };
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < requirement.params.length() DO
@@ -12180,7 +12180,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
           END
           MUTABLE protocol: ?ProtocolDef = typeAnalysisSession__semantic_protocol(&rtoc_self_view, rtoc_each_items_285[rtoc_idx_n5]?);
-          MUTABLE requirement = ((protocol?.requirements OR_ELSE List[]) |> FIND (((!(_.is_method) AND (_.name == callName__string_value(node.name))) AND (_.params[rtoc_idx] != NIL)) AND (type__resolved(param__type(UNWRAP (_.params[rtoc_idx]))) == :Self)));
+          MUTABLE requirement: ?ProtocolRequirement = ((protocol?.requirements OR_ELSE List[]) |> FIND (((!(_.is_method) AND (_.name == callName__string_value(node.name))) AND (_.params[rtoc_idx] != NIL)) AND (type__resolved(param__type(UNWRAP (_.params[rtoc_idx]))) == :Self)));
           IF ((protocol != NIL) AND (requirement != NIL)) THEN
               &matches.append([protocol, requirement, receiver, rtoc_idx_n5]);
           END
@@ -12372,7 +12372,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE rtoc_heap_ctx2 = UNWRAP (rtoc_mutable_receiver_290); functionContext__record_heap_use_mut(&rtoc_heap_ctx2);
       END
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-            MUTABLE rtoc_mutable_receiver_291 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+            MUTABLE rtoc_mutable_receiver_291: ?FunctionContext = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
             functionContext__record_alloc_use_mut(&rtoc_mutable_receiver_291);
       END
       TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("HEAP")));
@@ -12408,7 +12408,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE matches = protocol_names |> SELECT:? {
     MUTABLE protocol: ?ProtocolDef = typeAnalysisSession__semantic_protocol(&rtoc_self_view, _);
-    MUTABLE requirement = (protocol?.requirements OR_ELSE List[]) |> FIND (_.is_method AND (_.name == node.name));
+    MUTABLE requirement: ?ProtocolRequirement = (protocol?.requirements OR_ELSE List[]) |> FIND (_.is_method AND (_.name == callName__string_value(node.name)));
     (  IF ((protocol != NIL) AND requirement) THEN
         [protocol, requirement]
       ELSE
@@ -23061,4 +23061,14 @@ FN castLocatableToTypeAnalysisCallNode(value: Locatable) RETURNS ?TypeAnalysisCa
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
+END
+
+# Associated types arrive as plain Types; a substitution map holds them as the
+# binding union, one entry at a time.
+FN castTypeMapToGenericBindingMap__type_analysis_session(values: {String@symbol}Type) RETURNS {String@symbol}GenericBinding ->
+  MUTABLE out: {String@symbol}GenericBinding = {};
+  FOR key IN values.keys() DO
+    out[key] = GenericBinding{ Type: COPY (values[key] OR_ELSE panic("missing hash key")) };
+  END
+  RETURN out;
 END
