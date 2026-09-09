@@ -1089,3 +1089,23 @@ PUB FN castTypeExpressionKindToFunctionTypeExpression(value: TypeExpressionKind)
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:owner)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN typeExpressionKind__owner(value: TypeExpressionKind) RETURNS ?String@symbol ->
+  PARTIAL MATCH value START
+    TypeExpressionKind.TypeProjectionExpression AS item -> RETURN COPY item.owner;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:error_set)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN typeExpressionKind__error_set(value: TypeExpressionKind) RETURNS ?TypeExpression ->
+  PARTIAL MATCH value START
+    TypeExpressionKind.FallibleTypeExpression AS item -> RETURN COPY item.error_set;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
