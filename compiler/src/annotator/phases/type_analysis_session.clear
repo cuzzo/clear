@@ -4772,7 +4772,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       scope__resolve_entry(rtoc_local_receiver_97, UNWRAP (captures[rtoc_idx]).name) };
         END
       MUTABLE capture_entry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_98 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-      TRY (scope__declare(&rtoc_mutable_receiver_98, UNWRAP (captures[rtoc_idx]).name, NIL, captures[rtoc_idx].type(), captures[rtoc_idx].mutable(), FALSE, NIL, captures[rtoc_idx].storage())) };
+      TRY (scope__declare(&rtoc_mutable_receiver_98, UNWRAP (captures[rtoc_idx]).name, NIL, SymbolEntryTypeInput{ Type: COPY UNWRAP (captures[rtoc_idx]).type }, ScopeMutabilityInput{ BoolValue: UNWRAP (captures[rtoc_idx]).mutable }, FALSE, NIL, captures[rtoc_idx].storage())) };
       IF !(owner_entry) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -11102,7 +11102,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR MUTABLE rtoc_for_elem_11054 IN node.tests DO
     typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(&rtoc_self_view), %() USE(MUTABLE test_body_summaries, rtoc_for_elem_11054, MUTABLE rtoc_self_view) -> {
     test_body_summaries[aST__node_identity(Locatable{ TestThat: COPY rtoc_for_elem_11054 })] = typeAnalysisSession__with_body_fact_frame(&rtoc_self_view, bodyIdentity__unassigned(), %() USE(rtoc_for_elem_11054, MUTABLE rtoc_self_view) -> {
-      TRY (typeAnalysisSession__visit_TestThat(&rtoc_self_view, &rtoc_for_elem_11054));
+      MUTABLE rtoc_test_slot = COPY rtoc_for_elem_11054;
+      TRY (typeAnalysisSession__visit_TestThat(&rtoc_self_view, &rtoc_test_slot));
       rubyToClearVoid__type_analysis_session()
     });
     NIL
@@ -18565,7 +18566,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF node IS_A BinaryOp AS binary_op THEN
       IF ((((binary_op.op == symbol("AND")) AND truthy)) OR (((binary_op.op == symbol("OR")) AND !(truthy)))) THEN
-        RETURN typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.right, &truthy).keys() |> REDUCE(COPY typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.left, &truthy)) { acc[_] = COPY (typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.right, &truthy)[_] OR_ELSE CAST(panic("missing hash key") AS Type@multiowned)); acc };
+        RETURN (TRY (typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.right, &truthy))).keys() |> REDUCE(COPY typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.left, &truthy)) { acc[_] = COPY (typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.right, &truthy)[_] OR_ELSE CAST(panic("missing hash key") AS Type@multiowned)); acc };
       END
       IF !(((binary_op.op == :EQ) OR (binary_op.op == :NEQ))) THEN
         RETURN {};
