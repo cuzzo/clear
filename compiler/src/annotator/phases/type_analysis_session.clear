@@ -5053,7 +5053,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         cast_source = COPY type__resolved(full);
       END
     END
-    IF !(((spec.type == :Any) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, cast_source, castTypeToTypeTypeInput__type_analysis_session(spec.type))))) THEN
+    IF !(((spec.type == :Any) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, cast_source, TypeTypeInput{ SymbolValue: COPY spec.type })))) THEN
       RETURN FALSE;
     END
     IF !(intrinsicArgSpec__capability_constrained?(spec)) THEN
@@ -6598,7 +6598,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (locatable__target_map(shard_op)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARD_MAP_NOT_SHARDED }, [], CAST({} AS {String@symbol}Any)));
     END
     MUTABLE map_key = (IF TRUE THEN
-      TRY (type__key_type(target_info))
+      TRY (type__key_type(TRY (target_info)))
     ELSE
       NIL
     END);
@@ -7683,7 +7683,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (castAnnotationNodeToLocatable(facts.node)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], CAST({:type: type__resolved(payload)} AS {String@symbol}Any)));
     END
     IF (type__sharded?(type_obj) AND type__multiowned?(payload)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_ELEMENT_REQUIRES_SHARED }, [], {:got: CAST(payload AS String)}));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(UNWRAP (castAnnotationNodeToLocatable(facts.node))), TypeAnalysisCodeOrMessage{ SymbolValue: :SHARDED_ELEMENT_REQUIRES_SHARED }, [], {:got: CAST(payload AS String)}));
     END
 }
 END
@@ -8996,7 +8996,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF (kind == :reentrant_max_depth) THEN
           MUTABLE budget = symbol("RECURSION_YIELD_BUDGET");
           IF (((locatable__max_depth_n(UNWRAP (fn_node)) OR_ELSE 0)) <= CAST(budget AS Int64)) THEN
-            locatable__set_tight_reentrance_mut(&UNWRAP (fn_node), TRUE);
+            MUTABLE rtoc_fn_slot = UNWRAP (fn_node); locatable__set_tight_reentrance_mut(&rtoc_fn_slot, TRUE);
           ELSE
             fn_node.tight_reentrance = FALSE;
           END
