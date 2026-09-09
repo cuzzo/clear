@@ -15862,7 +15862,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF type__tuple?(value_type) THEN
       element_type_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
     ELSE
-      element_type_branch_value = ((TRY (type__element_type(value_type)) OR TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }))));
+      element_type_branch_value = (TRY (type__element_type(value_type)) OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })));
     END
     MUTABLE element_type: Type = element_type_branch_value?;
     RETURN DestructureRhsFacts{ value_type: COPY value_type, element_type: COPY element_type };
@@ -15907,7 +15907,7 @@ PRIVATE FN typeAnalysisSession__destructure_value_type_at(self: TypeAnalysisSess
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE value = node.value;
-    IF (value IS_A ListLit AND locatable__items(value)[index_value]) THEN
+    IF (IF value IS_A ListLit THEN ((locatable__items(value) OR_ELSE List[])[index_value] != NIL) ELSE FALSE END) THEN
       RETURN value.items[index_value].full_type_mut({:context: "destructuring literal element"});
     END
     IF type__tuple?((TRY (aST__full_type_mut(node.value)))) THEN
@@ -18223,7 +18223,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE rtoc_mutable_receiver_443: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
         functionContext__mark_runtime_used_mut(&rtoc_mutable_receiver_443);
     END
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &Locatable{ OrElseExit: COPY node }, :Void));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ OrElseExit: COPY node }, :Void));
 }
 END
 PRIVATE FN typeAnalysisSession__recoverable_result_type(MUTABLE self: TypeAnalysisSession, MUTABLE node: Locatable, context: String) RETURNS !?Type
@@ -19506,7 +19506,7 @@ PRIVATE FN typeAnalysisSession__collect_body_identifier_names(MUTABLE self: Type
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = Set[];
-    aST__each_locatable_list(nodes, FALSE, %(node: Locatable) USE(MUTABLE names) -> {
+    aST__each_locatable_list((nodes |> SELECT UNWRAP (castNodesToLocatable(_))), FALSE, %(node: Locatable) USE(MUTABLE names) -> {
     IF node IS_A Identifier AS identifier THEN
         &names.insert(identifier__name(identifier));
     END
@@ -19544,7 +19544,7 @@ PRIVATE FN typeAnalysisSession__reject_scoped_assignment_move_mut(MUTABLE self: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier AND ((UNWRAP locatable__symbol( UNWRAP ((aST__node_value(UNWRAP (castNodeToLocatable(node)))))) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_478 = ((locatable__symbol(aST__node_value(UNWRAP (castNodeToLocatable(node)))))?);
+    IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier AND ((locatable__symbol( UNWRAP ((aST__node_value(UNWRAP (castNodeToLocatable(node)))))) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_478 = ((locatable__symbol(aST__node_value(UNWRAP (castNodeToLocatable(node)))))?);
     symbolEntry__non_escaping(rtoc_local_receiver_478) }))) THEN
       RETURN;
     END
@@ -19807,7 +19807,7 @@ PRIVATE FN typeAnalysisSession__verify_unrestricted_mut(MUTABLE self: TypeAnalys
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, aST__node_name(UNWRAP (castNodeToLocatable(node)))));
+    MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, node));
     IF (path.length() == 0) THEN
       RETURN;
     END
@@ -19985,7 +19985,7 @@ PRIVATE FN typeAnalysisSession__mark_chain_needs_mut_ref_mut(MUTABLE self: TypeA
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE curr: ?Locatable = COPY node;
-    WHILE curr DO
+    WHILE (curr != NIL) DO
       IF curr? IS_A GetIndex AS get_index THEN
         MUTABLE get_index_mutable = COPY get_index;
         get_index_mutable.needs_mut_ref = TRUE;
@@ -20428,7 +20428,7 @@ PRIVATE FN typeAnalysisSession__root_variable_name(MUTABLE self: TypeAnalysisSes
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE curr: ?Locatable = COPY node;
-    WHILE curr DO
+    WHILE (curr != NIL) DO
       IF curr? IS_A Identifier AS identifier THEN
         RETURN COPY identifier__name(identifier);
       END
@@ -22905,6 +22905,122 @@ END
 PUB FN functionCallNode__name(value: FunctionCallNode) RETURNS ?String ->
   PARTIAL MATCH value START
     FunctionCallNode.MethodCall AS item -> RETURN COPY item.name;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# 109 of 125 Nodes variants map to Locatable
+FN castNodesToLocatable(value: Nodes) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    Nodes.RequireNode AS item -> RETURN Locatable{ RequireNode: COPY item };,
+    Nodes.ProtocolRequirement AS item -> RETURN Locatable{ ProtocolRequirement: COPY item };,
+    Nodes.ProtocolDef AS item -> RETURN Locatable{ ProtocolDef: COPY item };,
+    Nodes.FunctionDef AS item -> RETURN Locatable{ FunctionDef: COPY item };,
+    Nodes.ImplementationDef AS item -> RETURN Locatable{ ImplementationDef: COPY item };,
+    Nodes.ConformanceDef AS item -> RETURN Locatable{ ConformanceDef: COPY item };,
+    Nodes.VarDecl AS item -> RETURN Locatable{ VarDecl: COPY item };,
+    Nodes.Assignment AS item -> RETURN Locatable{ Assignment: COPY item };,
+    Nodes.DestructuringAssignment AS item -> RETURN Locatable{ DestructuringAssignment: COPY item };,
+    Nodes.BindExpr AS item -> RETURN Locatable{ BindExpr: COPY item };,
+    Nodes.BinaryOp AS item -> RETURN Locatable{ BinaryOp: COPY item };,
+    Nodes.IsA AS item -> RETURN Locatable{ IsA: COPY item };,
+    Nodes.CallSiteOverride AS item -> RETURN Locatable{ CallSiteOverride: COPY item };,
+    Nodes.Identifier AS item -> RETURN Locatable{ Identifier: COPY item };,
+    Nodes.Literal AS item -> RETURN Locatable{ Literal: COPY item };,
+    Nodes.ListLit AS item -> RETURN Locatable{ ListLit: COPY item };,
+    Nodes.TupleLit AS item -> RETURN Locatable{ TupleLit: COPY item };,
+    Nodes.DefaultArrayLit AS item -> RETURN Locatable{ DefaultArrayLit: COPY item };,
+    Nodes.HashLit AS item -> RETURN Locatable{ HashLit: COPY item };,
+    Nodes.DefaultLit AS item -> RETURN Locatable{ DefaultLit: COPY item };,
+    Nodes.StructLit AS item -> RETURN Locatable{ StructLit: COPY item };,
+    Nodes.LambdaLit AS item -> RETURN Locatable{ LambdaLit: COPY item };,
+    Nodes.IfStatement AS item -> RETURN Locatable{ IfStatement: COPY item };,
+    Nodes.IfBind AS item -> RETURN Locatable{ IfBind: COPY item };,
+    Nodes.WhileLoop AS item -> RETURN Locatable{ WhileLoop: COPY item };,
+    Nodes.WhileBindLoop AS item -> RETURN Locatable{ WhileBindLoop: COPY item };,
+    Nodes.BreakNode AS item -> RETURN Locatable{ BreakNode: COPY item };,
+    Nodes.ContinueNode AS item -> RETURN Locatable{ ContinueNode: COPY item };,
+    Nodes.FuncCall AS item -> RETURN Locatable{ FuncCall: COPY item };,
+    Nodes.GetField AS item -> RETURN Locatable{ GetField: COPY item };,
+    Nodes.GetIndex AS item -> RETURN Locatable{ GetIndex: COPY item };,
+    Nodes.ReturnNode AS item -> RETURN Locatable{ ReturnNode: COPY item };,
+    Nodes.Assert AS item -> RETURN Locatable{ Assert: COPY item };,
+    Nodes.ThrowNode AS item -> RETURN Locatable{ ThrowNode: COPY item };,
+    Nodes.DieNode AS item -> RETURN Locatable{ DieNode: COPY item };,
+    Nodes.Slice AS item -> RETURN Locatable{ Slice: COPY item };,
+    Nodes.Require AS item -> RETURN Locatable{ Require: COPY item };,
+    Nodes.WithBlock AS item -> RETURN Locatable{ WithBlock: COPY item };,
+    Nodes.SyncPolicyDecl AS item -> RETURN Locatable{ SyncPolicyDecl: COPY item };,
+    Nodes.SelectOp AS item -> RETURN Locatable{ SelectOp: COPY item };,
+    Nodes.WhereOp AS item -> RETURN Locatable{ WhereOp: COPY item };,
+    Nodes.IndexOp AS item -> RETURN Locatable{ IndexOp: COPY item };,
+    Nodes.ReduceOp AS item -> RETURN Locatable{ ReduceOp: COPY item };,
+    Nodes.OrderByOp AS item -> RETURN Locatable{ OrderByOp: COPY item };,
+    Nodes.LimitOp AS item -> RETURN Locatable{ LimitOp: COPY item };,
+    Nodes.UnnestOp AS item -> RETURN Locatable{ UnnestOp: COPY item };,
+    Nodes.DistinctOp AS item -> RETURN Locatable{ DistinctOp: COPY item };,
+    Nodes.EachOp AS item -> RETURN Locatable{ EachOp: COPY item };,
+    Nodes.TapOp AS item -> RETURN Locatable{ TapOp: COPY item };,
+    Nodes.SkipOp AS item -> RETURN Locatable{ SkipOp: COPY item };,
+    Nodes.CollectOp AS item -> RETURN Locatable{ CollectOp: COPY item };,
+    Nodes.TakeWhileOp AS item -> RETURN Locatable{ TakeWhileOp: COPY item };,
+    Nodes.WindowOp AS item -> RETURN Locatable{ WindowOp: COPY item };,
+    Nodes.BatchWindowOp AS item -> RETURN Locatable{ BatchWindowOp: COPY item };,
+    Nodes.JoinOp AS item -> RETURN Locatable{ JoinOp: COPY item };,
+    Nodes.FindOp AS item -> RETURN Locatable{ FindOp: COPY item };,
+    Nodes.AnyOp AS item -> RETURN Locatable{ AnyOp: COPY item };,
+    Nodes.AllOp AS item -> RETURN Locatable{ AllOp: COPY item };,
+    Nodes.CountOp AS item -> RETURN Locatable{ CountOp: COPY item };,
+    Nodes.SumOp AS item -> RETURN Locatable{ SumOp: COPY item };,
+    Nodes.AverageOp AS item -> RETURN Locatable{ AverageOp: COPY item };,
+    Nodes.MinOp AS item -> RETURN Locatable{ MinOp: COPY item };,
+    Nodes.MaxOp AS item -> RETURN Locatable{ MaxOp: COPY item };,
+    Nodes.ShardOp AS item -> RETURN Locatable{ ShardOp: COPY item };,
+    Nodes.ConcurrentOp AS item -> RETURN Locatable{ ConcurrentOp: COPY item };,
+    Nodes.Placeholder AS item -> RETURN Locatable{ Placeholder: COPY item };,
+    Nodes.Copy AS item -> RETURN Locatable{ Copy: COPY item };,
+    Nodes.TenseNavigation AS item -> RETURN Locatable{ TenseNavigation: COPY item };,
+    Nodes.MutableBorrow AS item -> RETURN Locatable{ MutableBorrow: COPY item };,
+    Nodes.CatchBlock AS item -> RETURN Locatable{ CatchBlock: COPY item };,
+    Nodes.RecoverOp AS item -> RETURN Locatable{ RecoverOp: COPY item };,
+    Nodes.StringConcat AS item -> RETURN Locatable{ StringConcat: COPY item };,
+    Nodes.CapabilityWrap AS item -> RETURN Locatable{ CapabilityWrap: COPY item };,
+    Nodes.MoveNode AS item -> RETURN Locatable{ MoveNode: COPY item };,
+    Nodes.CopyNode AS item -> RETURN Locatable{ CopyNode: COPY item };,
+    Nodes.KeepNode AS item -> RETURN Locatable{ KeepNode: COPY item };,
+    Nodes.ShareNode AS item -> RETURN Locatable{ ShareNode: COPY item };,
+    Nodes.LinkNode AS item -> RETURN Locatable{ LinkNode: COPY item };,
+    Nodes.ResolveNode AS item -> RETURN Locatable{ ResolveNode: COPY item };,
+    Nodes.FreezeNode AS item -> RETURN Locatable{ FreezeNode: COPY item };,
+    Nodes.PassStmt AS item -> RETURN Locatable{ PassStmt: COPY item };,
+    Nodes.StructPattern AS item -> RETURN Locatable{ StructPattern: COPY item };,
+    Nodes.ExternFnDecl AS item -> RETURN Locatable{ ExternFnDecl: COPY item };,
+    Nodes.ExternStructDecl AS item -> RETURN Locatable{ ExternStructDecl: COPY item };,
+    Nodes.UnionDef AS item -> RETURN Locatable{ UnionDef: COPY item };,
+    Nodes.UnionVariantLit AS item -> RETURN Locatable{ UnionVariantLit: COPY item };,
+    Nodes.StaticCall AS item -> RETURN Locatable{ StaticCall: COPY item };,
+    Nodes.ThenChain AS item -> RETURN Locatable{ ThenChain: COPY item };,
+    Nodes.BgStreamBlock AS item -> RETURN Locatable{ BgStreamBlock: COPY item };,
+    Nodes.YieldExpr AS item -> RETURN Locatable{ YieldExpr: COPY item };,
+    Nodes.CloseStream AS item -> RETURN Locatable{ CloseStream: COPY item };,
+    Nodes.NextExpr AS item -> RETURN Locatable{ NextExpr: COPY item };,
+    Nodes.MatchStatement AS item -> RETURN Locatable{ MatchStatement: COPY item };,
+    Nodes.ForRange AS item -> RETURN Locatable{ ForRange: COPY item };,
+    Nodes.ForEach AS item -> RETURN Locatable{ ForEach: COPY item };,
+    Nodes.TestBlock AS item -> RETURN Locatable{ TestBlock: COPY item };,
+    Nodes.WhenBlock AS item -> RETURN Locatable{ WhenBlock: COPY item };,
+    Nodes.LetBinding AS item -> RETURN Locatable{ LetBinding: COPY item };,
+    Nodes.TestThat AS item -> RETURN Locatable{ TestThat: COPY item };,
+    Nodes.AssertRaises AS item -> RETURN Locatable{ AssertRaises: COPY item };,
+    Nodes.BenchmarkStmt AS item -> RETURN Locatable{ BenchmarkStmt: COPY item };,
+    Nodes.SmashStmt AS item -> RETURN Locatable{ SmashStmt: COPY item };,
+    Nodes.ProfileStmt AS item -> RETURN Locatable{ ProfileStmt: COPY item };,
+    Nodes.StubDecl AS item -> RETURN Locatable{ StubDecl: COPY item };,
+    Nodes.Drop AS item -> RETURN Locatable{ Drop: COPY item };,
+    Nodes.SuppressCleanup AS item -> RETURN Locatable{ SuppressCleanup: COPY item };,
+    Nodes.Return AS item -> RETURN Locatable{ Return: COPY item };,
+    Nodes.ReassignCleanup AS item -> RETURN Locatable{ ReassignCleanup: COPY item };,
+    Nodes.FieldCleanup AS item -> RETURN Locatable{ FieldCleanup: COPY item };,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
