@@ -2694,3 +2694,12 @@ PUB FN castMapStructFieldToMapSchemasStructSchemaFieldInput(source: {String}Stru
   END
   RETURN out;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castDiagnosticKwValueToString(value: DiagnosticKwValue) RETURNS ?String EFFECTS REENTRANT ->
+  IF value IS_A String AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

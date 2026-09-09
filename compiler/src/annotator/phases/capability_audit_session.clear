@@ -3245,7 +3245,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF (user_size == :stack) THEN
-      capabilityAuditSession__warning_mut(&rtoc_self_view, castAsyncValidationNodeToLocatable(node), UNWRAP (TRY (diagnosticRegistry__format(:STACK_SAFETY_STACK_ALIAS, List[], CAST({:computed: DiagnosticKwValue{ SymbolValue: COPY computed }} AS {String@symbol}String)))));
+      capabilityAuditSession__warning_mut(&rtoc_self_view, castAsyncValidationNodeToLocatable(node), UNWRAP (TRY (diagnosticRegistry__format(:STACK_SAFETY_STACK_ALIAS, List[], CAST({:computed: UNWRAP (castDiagnosticKwValueToString(DiagnosticKwValue{ SymbolValue: COPY computed }))} AS {String@symbol}String)))));
       RETURN;
     END
     IF ((user_size != NIL) AND ((symbol("TIER_ORDER")[user_size] OR_ELSE 0) < (symbol("TIER_ORDER")[computed] OR_ELSE 0))) THEN
@@ -3334,7 +3334,7 @@ PRIVATE FN capabilityAuditSession__replace_stack_sigil_with_service_fix(self: Ca
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (fix__new(TRY (diagnosticRegistry__fix_description(:REPLACE_STACK_SIGIL_WITH_SERVICE, CAST({:stack: ruby_wrap_optional_String_symbol_DiagnosticKwValue(user_size)} AS {String@symbol}String))), [edit__new(span__new(NIL, token.line, token.column, (CAST(token.value AS String)).codepointCount()), "@service")], :interactive));
+    RETURN TRY (fix__new(TRY (diagnosticRegistry__fix_description(:REPLACE_STACK_SIGIL_WITH_SERVICE, CAST({:stack: UNWRAP (castDiagnosticKwValueToString(ruby_wrap_optional_String_symbol_DiagnosticKwValue(user_size)))} AS {String@symbol}String))), [edit__new(span__new(NIL, token.line, token.column, (CAST(token.value AS String)).codepointCount()), "@service")], :interactive));
 }
 END
 PRIVATE FN capabilityAuditSession__insert_service_after_open_brace_fix(self: CapabilityAuditSession, token: Token) RETURNS !Fix
@@ -4133,7 +4133,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_39 = (TRY (capabilityAuditSession__deferred_give_validations(rtoc_self_view)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_39.length() DO
-      MUTABLE param: ?FunctionDef = ((TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_39[rtoc_idx]?.callee_name)))?.params[rtoc_each_items_39[rtoc_idx]?.param_index]);
+      MUTABLE param: ?Param = ((TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_39[rtoc_idx]?.callee_name)))?.params[rtoc_each_items_39[rtoc_idx]?.param_index]);
       IF (IF param != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_40 = param.symbol;
       symbolEntry__kept_identity(rtoc_local_receiver_40) }
@@ -4156,7 +4156,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_42 = (TRY (capabilityAuditSession__deferred_copy_retained_validations(rtoc_self_view)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_42.length() DO
-      MUTABLE param: ?FunctionDef = ((TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.callee_name)))?.params[rtoc_each_items_42[rtoc_idx]?.param_index]);
+      MUTABLE param: ?Param = ((TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.callee_name)))?.params[rtoc_each_items_42[rtoc_idx]?.param_index]);
       IF (IF param != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_43 = param.symbol;
       symbolEntry__kept_identity(rtoc_local_receiver_43) }
