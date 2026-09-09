@@ -3504,7 +3504,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_cycle_j = 0;
     WHILE rtoc_cycle_j < cycle_names.length() DO
       IF fn_nodes[UNWRAP (cycle_names[rtoc_cycle_j])] EXISTS AS rtoc_cycle_fn2 THEN
-        &cycle_present.append(COPY rtoc_cycle_fn2);
+        &cycle_present.append(KEEP rtoc_cycle_fn2);
       END
       rtoc_cycle_j = rtoc_cycle_j + 1;
     END
@@ -3976,7 +3976,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             rtoc_reverse_i_35 = rtoc_reverse_i_35 - 1;
     CONTINUE;
           END
-          &assigned.insert(node);
+          &assigned.insert(COPY node);
           &component.append(COPY node);
           FOR _ IN (reverse_adj[node] OR_ELSE empty) DO
           IF !(assigned.contains?(_)) THEN

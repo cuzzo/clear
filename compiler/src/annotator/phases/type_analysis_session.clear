@@ -1378,7 +1378,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (node IS_A FuncCall OR node IS_A MethodCall) THEN
         MUTABLE signature: ?FunctionSignature@multiowned = locatable__matched_signature(node);
         MUTABLE actuals = IF node IS_A MethodCall THEN
-          ([locatable__object(node)] + locatable__args(node))
+          ([UNWRAP (locatable__object(node))] + (locatable__args(node) OR_ELSE List[]))
         ELSE
           locatable__args(node)
         END;
@@ -4623,7 +4623,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF !(field_names.empty?()) THEN
             MUTABLE field_defaults = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_86 = CAST(schema AS StructSchema);
             TRY (structSchema__field_defaults(rtoc_local_receiver_86)) };
-            MUTABLE missing = field_names |> WHERE !(field_defaults.key?(_));
+            MUTABLE missing = field_names |> WHERE !(field_defaults.contains?(_));
             IF (missing).any?() THEN
               TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_STRUCT_MISSING_DEFAULTS }, [], CAST({:name: _.name(), :type: _.type, :missing: missing.join(", ")} AS {String@symbol}Any)));
             END
@@ -4862,7 +4862,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       FALSE
     END);
     MUTABLE is_type_param = TRY (typeAnalysisSession__current_function_type_param?(&rtoc_self_view, (IF type_info != NIL THEN
-      type_info.resolved()
+      type__resolved(type_info)
     ELSE
       NIL
     END)));
@@ -5638,7 +5638,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
       END
       IF UNWRAP (opts["size"]) IS_A Literal THEN
-        MUTABLE v = tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))));
+        MUTABLE v = tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))).value));
         IF (v <= 0) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, opts["size"], TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_POSITIVE }));
         END
@@ -11873,7 +11873,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         &summary.return_nodes.append(COPY return_node);
     ELSE_IF node IS_A VarDecl AS var_decl THEN
         &summary.binding_nodes.append(BindingNode{ VarDecl: COPY var_decl });
-        typeAnalysisSession__record_local_binding_fact_mut(&rtoc_self_view, _, BindingNode{ VarDecl: COPY var_decl }, CAST(var_decl.name AS String));
+        typeAnalysisSession__record_local_binding_fact_mut(&rtoc_self_view, &_, BindingNode{ VarDecl: COPY var_decl }, CAST(var_decl.name AS String));
     ELSE_IF node IS_A BindExpr AS bind_expr THEN
         IF (bind_expr.mode == :assign) THEN
           &summary.assignment_nodes.append(AssignmentNode{ BindExpr: COPY bind_expr });
@@ -12164,7 +12164,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE matches: []Tuple<ProtocolDef, ProtocolRequirement, Type, Int64> = ( { MUTABLE rtoc_empty_list_284: []Tuple<ProtocolDef, ProtocolRequirement, Type, Int64> = List[]; rtoc_empty_list_284 } );
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < node.args.length() DO
-      MUTABLE receiver = UNWRAP aST__full_type_mut((node.args[rtoc_idx]), {:context: "protocol function dispatch"});
+      MUTABLE receiver = TRY (aST__full_type_mut(UNWRAP (node.args[rtoc_idx])));
       MUTABLE rtoc_each_items_285 = TRY (typeAnalysisSession__user_protocol_names_for_receiver(&rtoc_self_view, receiver));
       MUTABLE rtoc_idx_n5 = 0;
       WHILE rtoc_idx_n5 < rtoc_each_items_285.length() DO
@@ -12323,7 +12323,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN FALSE;
     END
     TRY (typeAnalysisSession__require_generic_map_access_scope_mut(&rtoc_self_view, node.object, receiver));
-    MUTABLE operation = ({"put": :put, "delete": :delete, "contains?": :contains, "count": :count, "length": :count, "empty?": :empty, "any?": :any})[node.name];
+    MUTABLE operation: ?String@symbol = ({"put": :put, "delete": :delete, "contains?": :contains, "count": :count, "length": :count, "empty?": :empty, "any?": :any})[node.name];
     IF !(operation) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MAP_METHOD_UNKNOWN }, [], CAST({:name: node.name, :available: "put, delete, contains?, count, length, empty?, any?"} AS {String@symbol}Any)));
     END
@@ -16445,7 +16445,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(field_names.empty?()) THEN
         MUTABLE field_defaults = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_405 = CAST(schema AS StructSchema);
         TRY (structSchema__field_defaults(rtoc_local_receiver_405)) } OR_ELSE {});
-        MUTABLE missing = field_names |> WHERE !(field_defaults.key?(_));
+        MUTABLE missing = field_names |> WHERE !(field_defaults.contains?(_));
         IF (missing).any?() THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STRUCT_LITERAL_MISSING_FIELDS }, [], CAST({:name: node.name, :fields: missing.join(", ")} AS {String@symbol}Any)));
         END
