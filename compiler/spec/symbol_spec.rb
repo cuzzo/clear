@@ -221,6 +221,13 @@ RSpec.describe "String@symbol" do
       expect(Type.coercion_surface_name(t)).to eq("?String@symbol")
     end
 
+    it "names a set's element sync so a real mismatch is readable" do
+      symbols = Type.set_of(Type.new(:String, sync: :symbol))
+      strings = Type.set_of(Type.new(:String))
+      expect(Type.coercion_surface_name(symbols)).to eq("[Set]String@symbol")
+      expect(Type.coercion_surface_name(strings)).to eq("[Set]String")
+    end
+
     it "does not accept a plain String where String@symbol is required" do
       expect(Type.new(:String, sync: :symbol).accepts?(Type.new(:String))).to be false
       expect(Type.new(:String, sync: :symbol).accepts?(Type.new(:String, sync: :symbol))).to be true

@@ -303,3 +303,10 @@ PUB FN callLikeNode__name(value: CallLikeNode) RETURNS ?String ->
   END
   RETURN NIL;
 END
+
+# Ruby holds this as EffectTracker::TIER_ORDER, a frozen module constant. A
+# module binding is not visible across packages, so the table is answered by
+# the module that owns it.
+PUB FN effectTracker__tier_order() RETURNS {String@symbol}Int64 ->
+  RETURN {:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5};
+END

@@ -3167,20 +3167,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         &visited.insert(callee);
         IF (callee == _) THEN
           (IF direct_effects[_] != NIL THEN
-            (direct_effects[_]).insert(symbol("REENTRANT"))
+            (UNWRAP (direct_effects[_])).insert(symbol("REENTRANT"))
           ELSE
             NIL
           END);
           MUTABLE arrow = node.arrow_token;
           IF arrow THEN
             MUTABLE fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :ADD_EFFECTS_REENTRANT)), [edit__new(span__new(NIL, arrow.line, arrow.column, 0), "EFFECTS REENTRANT ")], :auto));
-            TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, node, :reentrance, [fix], NIL, :REENTRANCY_MUTUAL_CYCLE, :error, FALSE, CAST({:name: _} AS {String@symbol}Any)));
+            TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ FunctionDef: COPY node } }, :reentrance, [fix], NIL, :REENTRANCY_MUTUAL_CYCLE, :error, FALSE, CAST({:name: _} AS {String@symbol}Any)));
           ELSE
-            TRY (capabilityAuditSession__error_mut(&rtoc_self_view, node, CapabilityAuditCodeOrMessage{ SymbolValue: :REENTRANCY_MUTUAL_CYCLE }, [], CAST({:name: _} AS {String@symbol}Any)));
+            TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ FunctionDef: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :REENTRANCY_MUTUAL_CYCLE }, [], CAST({:name: _} AS {String@symbol}Any)));
           END
           BREAK;
         END
-        FOR _ IN (((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[callee] OR_ELSE Set[])) DO
+        FOR _ IN (((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[UNWRAP (callee)] OR_ELSE Set[])) DO
         &queue.append(COPY _);
         END
     END
@@ -3200,7 +3200,7 @@ PRIVATE FN capabilityAuditSession__func_call_suspends?(MUTABLE self: CapabilityA
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     IF (IF callLikeNode__matched_stdlib_def(node) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_23: ?FunctionSignature@multiowned = (callLikeNode__matched_stdlib_def(node));
+      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_23: ?FunctionSignature = (callLikeNode__matched_stdlib_def(node));
     TRY (functionSignature__intrinsic_suspends?(UNWRAP (rtoc_mutable_receiver_23))) }
     ELSE
       NIL
@@ -3210,11 +3210,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF node IS_A FuncCall AS func_call THEN func_call.fn_var_call ELSE FALSE END) THEN
       RETURN FALSE;
     END
-    MUTABLE callee = fn_nodes[UNWRAP (callLikeNode__name(node))];
+    MUTABLE callee: ?FunctionDef@multiowned = fn_nodes[UNWRAP (callLikeNode__name(node))];
     IF !(callee) THEN
       RETURN FALSE;
     END
-    MUTABLE effs = callee.effects();
+    MUTABLE effs: ?[Set]String@symbol = COPY callee.effects;
     RETURN !(!(((effs AND anySuspendsEffect(effs)))));
 }
 END
@@ -3245,10 +3245,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF (user_size == :stack) THEN
-      capabilityAuditSession__warning_mut(&rtoc_self_view, castAsyncValidationNodeToLocatable(node), UNWRAP (TRY (diagnosticRegistry__format(:STACK_SAFETY_STACK_ALIAS, List[], CAST({:computed: UNWRAP (castDiagnosticKwValueToString(DiagnosticKwValue{ SymbolValue: COPY computed }))} AS {String@symbol}String)))));
+      capabilityAuditSession__warning_mut(&rtoc_self_view, UNWRAP (castAsyncValidationNodeToLocatable(node)), UNWRAP (TRY (diagnosticRegistry__format(:STACK_SAFETY_STACK_ALIAS, List[], CAST({:computed: UNWRAP (castDiagnosticKwValueToString(DiagnosticKwValue{ SymbolValue: COPY computed }))} AS {String@symbol}String)))));
       RETURN;
     END
-    IF ((user_size != NIL) AND ((symbol("TIER_ORDER")[user_size] OR_ELSE 0) < (symbol("TIER_ORDER")[computed] OR_ELSE 0))) THEN
+    IF ((user_size != NIL) AND ((effectTracker__tier_order()[user_size] OR_ELSE 0) < (effectTracker__tier_order()[computed] OR_ELSE 0))) THEN
       TRY (capabilityAuditSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :STACK_SAFETY_USER_SIZE_TOO_SMALL }, [], CAST({:size: user_size, :budget: symbol("STACK_TIER_BUDGET")[user_size], :computed: computed} AS {String@symbol}Any)));
     END
 }
@@ -3387,8 +3387,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cycle_members = TRY (capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, rtoc_each_19)) |> ORDER_BY rtoc_each_19;
     MUTABLE fixes = List[];
     MUTABLE drop_edits: []Edit@multiowned = TRY (capabilityAuditSession__effects_clause_edits(rtoc_self_view, fn_node, "EFFECTS REENTRANT"));
-    IF drop_edits |> ANY rtoc_each_19 THEN
-        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DROP_MAX_DEPTH_MUTUAL, CAST({:max_depth: fn_node.max_depth_n} AS {String@symbol}DiagnosticKwValue))), drop_edits, :auto)));
+    IF !((drop_edits.length() == 0)) THEN
+        &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :DROP_MAX_DEPTH_MUTUAL, CAST({:max_depth: DiagnosticKwValue{ Int64Value: COPY (fn_node.max_depth_n OR_ELSE 0) }} AS {String@symbol}DiagnosticKwValue))), drop_edits, :auto)));
     END
     IF (fixes.length() == 0) THEN
         TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :reentrance, fixes, NIL, :REENTRANT_MAX_DEPTH_MUTUAL_DEMOTED, :warning, FALSE, CAST({:fn: rtoc_each_19, :max_depth: fn_node.max_depth_n, :cycle: cycle_members.join(", ")} AS {String@symbol}Any)));
@@ -3442,18 +3442,24 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (cycle_names.length() < 2) THEN
       RETURN FALSE;
     END
-    MUTABLE cycle_fns = cycle_names |> SELECT fn_nodes[_];
-    IF cycle_fns |> ANY _.nil?() THEN
+    MUTABLE concrete_cycle_fns: []FunctionDef = List[];
+    MUTABLE rtoc_cycle_i = 0;
+    WHILE rtoc_cycle_i < cycle_names.length() DO
+      IF fn_nodes[UNWRAP (cycle_names[rtoc_cycle_i])] EXISTS AS rtoc_cycle_fn THEN
+        &concrete_cycle_fns.append(COPY rtoc_cycle_fn);
+      END
+      rtoc_cycle_i = rtoc_cycle_i + 1;
+    END
+    IF !((concrete_cycle_fns.length() == cycle_names.length())) THEN
       RETURN FALSE;
     END
-    MUTABLE concrete_cycle_fns: []FunctionDef = cycle_fns |> WHERE _ != NIL;
     IF !(concrete_cycle_fns |> ALL (_.reentrance_kind == :reentrant_thunk)) THEN
       RETURN FALSE;
     END
     IF concrete_cycle_fns |> ANY (_.tail_call OR _.thunk_plan) THEN
       RETURN FALSE;
     END
-    MUTABLE ret_types = CAST(((concrete_cycle_fns |> SELECT _.return_type) |> SELECT (IF _ != NIL THEN
+    MUTABLE ret_types = CAST(((concrete_cycle_fns |> SELECT:? _.return_type) |> SELECT (IF _ != NIL THEN
       CAST(_ AS String)
     ELSE
       NIL
@@ -3486,7 +3492,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE name = fn_node.name;
     MUTABLE cycle_names = TRY (capabilityAuditSession__thunk_cycle_members(&rtoc_self_view, name));
-    MUTABLE cycle_thunk_fns = (cycle_names |> SELECT:? fn_nodes[_] |> WHERE _ != NIL) |> WHERE (_.reentrance_kind == :reentrant_thunk);
+    MUTABLE cycle_present: []FunctionDef = List[];
+    MUTABLE rtoc_cycle_j = 0;
+    WHILE rtoc_cycle_j < cycle_names.length() DO
+      IF fn_nodes[UNWRAP (cycle_names[rtoc_cycle_j])] EXISTS AS rtoc_cycle_fn2 THEN
+        &cycle_present.append(COPY rtoc_cycle_fn2);
+      END
+      rtoc_cycle_j = rtoc_cycle_j + 1;
+    END
+    MUTABLE cycle_thunk_fns = cycle_present |> WHERE (_.reentrance_kind == :reentrant_thunk);
     MUTABLE fixes = List[];
     MUTABLE edits_plain = cycle_thunk_fns |> UNNEST TRY (capabilityAuditSession__effects_clause_edits(rtoc_self_view, _, "EFFECTS REENTRANT"));
     IF ((edits_plain.length() == cycle_thunk_fns.length()) AND !((edits_plain.length() == 0))) THEN
@@ -3502,7 +3516,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           BREAK;
       END
       ruby_array_concat_Any__capability_audit_session(edits_nl, CAST(eff AS []Any));
-      MUTABLE rt = cycle_thunk_fns[rtoc_idx].declared_return_type();
+      MUTABLE rt: ?Type = functionDef__declared_return_type(UNWRAP (cycle_thunk_fns[rtoc_idx]));
       IF rt EXISTS AS rt_value THEN
         IF rt_value.error_union?() THEN
           rtoc_idx = rtoc_idx + 1;
@@ -3574,7 +3588,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE backward = TRY (capabilityAuditSession__compute_reachable(rtoc_self_view, reverse_graph, start_s));
     MUTABLE scc = ruby_set_intersection_String_set__capability_audit_session(forward, backward);
     IF forward.contains?(start_s) THEN
-      &scc.append(start_s);
+      &scc.insert(start_s);
     END
     RETURN (scc |> SELECT COPY _);
 }
@@ -3780,7 +3794,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         loc = "";
       END
     MUTABLE sync: ?String@symbol = COPY _.sync;
-    MUTABLE own = COPY _.ownership;
+    MUTABLE own: ?String@symbol = COPY _.ownership;
     IF ((symbolEntry__locked_family_sync?(sync) AND !(_.mutated)) AND !(_.sharded)) THEN
         print("\x1B[36m[Note]\x1B[0m Variable '${_.var}' is @${(sync OR_ELSE "")} but never mutated via WITH EXCLUSIVE. You are paying for lock acquire/release on every access. Consider @local or removing the lock.${loc}");
     END
@@ -3816,15 +3830,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE rtoc_each_items_27 = (transitive[UNWRAP (callees[rtoc_idx])]);
+      MUTABLE rtoc_each_items_27: [Set]String@symbol = UNWRAP ((transitive[UNWRAP (callees[rtoc_idx])]));
       MUTABLE rtoc_idx_n4 = 0;
       WHILE rtoc_idx_n4 < rtoc_each_items_27.length() DO
-          MUTABLE fn_set = transitive[rtoc_each_21];
+          MUTABLE fn_set: [Set]String@symbol = UNWRAP (transitive[rtoc_each_21]);
           IF fn_set.contains?(rtoc_each_items_27[rtoc_idx_n4]) THEN
                 rtoc_idx_n4 = rtoc_idx_n4 + 1;
     CONTINUE;
           END
-          &fn_set.append(COPY rtoc_each_items_27[rtoc_idx_n4]);
+          &fn_set.insert(COPY UNWRAP (rtoc_each_items_27[rtoc_idx_n4]));
           changed = TRUE;
         rtoc_idx_n4 = rtoc_idx_n4 + 1;
       END
@@ -3914,12 +3928,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE stack: []LockSccFrame = [LockSccFrame{ node: COPY nodes[rtoc_idx], expanded: FALSE }];
+      MUTABLE stack: []LockSccFrame = [LockSccFrame{ node: COPY CAST(UNWRAP (nodes[rtoc_idx]) AS String), expanded: FALSE }];
       WHILE !((stack.length() == 0)) DO
           MUTABLE frame = UNWRAP (&stack.pop());
           MUTABLE node = frame.node;
           IF frame.expanded THEN
-            &finish_order.append(node);
+            &finish_order.append(COPY node);
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
@@ -3927,7 +3941,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          &visited.insert(node);
+          &visited.insert(COPY node);
           &stack.append(LockSccFrame{ node: COPY node, expanded: TRUE });
           FOR _ IN (adj[node] OR_ELSE empty) DO
           IF !(visited.contains?(_)) THEN
@@ -3955,7 +3969,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
           END
           &assigned.insert(node);
-          &component.append(node);
+          &component.append(COPY node);
           FOR _ IN (reverse_adj[node] OR_ELSE empty) DO
           IF !(assigned.contains?(_)) THEN
             &stack.append(COPY _);
@@ -3998,7 +4012,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE full = capabilityAuditSession__build_lock_graph(rtoc_self_view, TRUE);
-    MUTABLE types_in_cycle = Set[];
+    MUTABLE types_in_cycle: [Set]String@symbol = Set[];
     MUTABLE types_with_self = Set[];
     FOR _ IN TRY (capabilityAuditSession__tarjan_scc(rtoc_self_view, full.nodes, full.adj)) DO
     IF (_.length() >= 2) THEN
@@ -4097,7 +4111,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE site_lines = (CAST(((participating |> SELECT {
     MUTABLE line: String = "?";
     IF COPY _.site_token != NIL THEN
-        line = ((COPY _.site_token)?).line;
+        line = (UNWRAP (COPY _.site_token)).line.toString();
       END
     "  - ${_.fn_name} (line ${line}): holds :${_.held}, acquires :${_.acquired}"
     }) |> DISTINCT _) AS []String)).join("\n");
@@ -4112,7 +4126,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF sample != NIL THEN
       anchor = COPY sample.site_token;
     END
-    RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, (anchor OR_ELSE capabilityAuditSession__semantic_program(rtoc_self_view)), CapabilityAuditCodeOrMessage{ SymbolValue: :LOCK_CYCLE_DETECTED }, [], CAST({:kind: kind, :types: types_str, :sites: site_lines} AS {String@symbol}Any)));
+    RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, (IF anchor EXISTS AS anchor_value THEN DiagnosticAnchor{ TokenValue: COPY anchor_value } ELSE DiagnosticAnchor{ Locatable: COPY Locatable{ Program: COPY capabilityAuditSession__semantic_program(rtoc_self_view) } } END), CapabilityAuditCodeOrMessage{ SymbolValue: :LOCK_CYCLE_DETECTED }, [], CAST({:kind: kind, :types: types_str, :sites: site_lines} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN capabilityAuditSession__run_deferred_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS !Void

@@ -987,21 +987,31 @@ class Type
       # A Set is array-shaped, so without this it prints as `[]T` -- and a
       # genuine Set/list mismatch reads as "expected '[]String', but returned
       # '[]String'", which sends the reader looking for a bug in the checker.
-      return "[Set]#{surface_name_type(element)}" if t.set_collection?
+      return "[Set]#{component_surface_name(element)}" if t.set_collection?
 
-      return "#{array_capacity_suffix(t.capacity)}#{surface_name_type(element)}"
+      return "#{array_capacity_suffix(t.capacity)}#{component_surface_name(element)}"
     end
     if t.map?
-      return "{#{surface_name_type(t.key_type)}}#{surface_name_type(t.value_type)}"
+      return "{#{component_surface_name(t.key_type)}}#{component_surface_name(t.value_type)}"
     end
     return function_type_surface_name(t) if t.fn_type?
 
     if t.generic_instance?
-      names = T.let(t.generic_args.map { |arg| surface_name_type(arg) }, T::Array[String])
+      names = T.let(t.generic_args.map { |arg| component_surface_name(arg) }, T::Array[String])
       return "#{t.generic_base}<#{names.join(",")}>"
     end
 
     t.resolved.to_s
+  end
+
+  # An ELEMENT carries its own sync, independent of the container's. Only the
+  # outermost type used to print it, so `[Set]String@symbol` and
+  # `[Set]String` rendered identically and the mismatch read as
+  # "expected '[Set]String', got '[Set]String'". (An optional or fallible
+  # wrapper SHARES its payload's sync, so those keep the plain name.)
+  sig { params(t: Type).returns(String) }
+  def self.component_surface_name(t)
+    "#{surface_name_type(t)}#{t.sync_surface_name}"
   end
 
   sig { params(type: TypeInput).returns(String) }
