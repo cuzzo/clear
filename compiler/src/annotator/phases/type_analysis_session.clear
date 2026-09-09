@@ -8513,7 +8513,7 @@ PRIVATE FN typeAnalysisSession__propagate_declared_type_to_value_mut(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE value_type: TypeConstructionInput = NIL;
+    MUTABLE value_type: ?TypeConstructionInput = NIL;
     IF !(declarationNode__type(node)) THEN
       RETURN;
     END
@@ -9336,7 +9336,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
     ELSE_IF (fact.capability == symbol("RESTRICT")) THEN
-      IF ((IF var_node IS_A Identifier AS identifier THEN (identifier.symbol != NIL) ELSE FALSE END) AND !(aST__node__symbol(Locatable{ WithBlock: COPY node }).mutable())) THEN
+      IF ((IF var_node IS_A Identifier AS identifier THEN (identifier.symbol != NIL) ELSE FALSE END) AND !(UNWRAP (aST__node__symbol(Locatable{ WithBlock: COPY node })).mutable)) THEN
         TRY (typeAnalysisSession__emit_with_restrict_immutable_error_mut(&rtoc_self_view, &node, castLocatableToIdentifier__type_analysis_session(var_node)));
       END
     ELSE_IF (fact.capability == symbol("BORROWED")) THEN
@@ -9414,17 +9414,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             actual = "plain";
           END
         END
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC, [CapabilityFixCandidate{ sigil: "@versioned", description_code: :WITH_ADD_VERSIONED, description_params: {} }, CapabilityFixCandidate{ sigil: "@boxed:atomic", description_code: :WITH_ADD_INDIRECT_ATOMIC, description_params: {} }], {:confidence: :interactive, :name: name, :actual: actual}));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC, [CapabilityFixCandidate{ sigil: "@versioned", description_code: :WITH_ADD_VERSIONED, description_params: {} }, CapabilityFixCandidate{ sigil: "@boxed:atomic", description_code: :WITH_ADD_INDIRECT_ATOMIC, description_params: {} }], :interactive, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :actual: DiagnosticKwValue{ StringValue: COPY actual }} AS {String@symbol}DiagnosticKwValue)));
       END
     ELSE_IF (fact.capability == :multiowned) THEN
       IF !((fact.storage == :multiowned)) THEN
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, UNWRAP (name), :WITH_NEEDS_MULTIOWNED, [CapabilityFixCandidate{ sigil: "@multiowned", description_code: :WITH_ADD_MULTIOWNED, description_params: CAST({:suffix: DiagnosticKwValue{ StringValue: COPY " via WITH" }} AS {String@symbol}DiagnosticKwValue) }], {:confidence: :auto, :name: name}));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_NEEDS_MULTIOWNED, [CapabilityFixCandidate{ sigil: "@multiowned", description_code: :WITH_ADD_MULTIOWNED, description_params: CAST({:suffix: DiagnosticKwValue{ StringValue: COPY " via WITH" }} AS {String@symbol}DiagnosticKwValue) }], :auto, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}DiagnosticKwValue)));
       END
     ELSE_IF (fact.capability == :shared) THEN
       IF !((fact.storage == :shared)) THEN
         MUTABLE name = COPY fact.target_label;
-        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, UNWRAP (name), :WITH_NEEDS_SHARED, [CapabilityFixCandidate{ sigil: "@shared", description_code: :WITH_ADD_SHARED, description_params: CAST({:suffix: DiagnosticKwValue{ StringValue: COPY "to clone across fibers" }} AS {String@symbol}DiagnosticKwValue) }], {:confidence: :auto, :name: name}));
+        TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_NEEDS_SHARED, [CapabilityFixCandidate{ sigil: "@shared", description_code: :WITH_ADD_SHARED, description_params: CAST({:suffix: DiagnosticKwValue{ StringValue: COPY "to clone across fibers" }} AS {String@symbol}DiagnosticKwValue) }], :auto, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }} AS {String@symbol}DiagnosticKwValue)));
       END
     ELSE_IF (fact.capability == :ATOMIC) THEN
       MUTABLE syn: ?String@symbol = COPY fact.sync;
@@ -9438,13 +9438,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF syn EXISTS AS syn_value THEN
             actual = "@${syn_value}";
           ELSE
-            actual = (IF storage THEN
-              "@${(storage OR_ELSE "")}"
+            IF storage EXISTS AS rtoc_storage_v THEN
+              actual = "@${rtoc_storage_v}";
             ELSE
-              "plain"
-            END);
+              actual = COPY "plain";
+            END
           END
-          TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, UNWRAP (name), :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, [CapabilityFixCandidate{ sigil: "@shared:atomic", description_code: :WITH_ADD_SHARED_ATOMIC, description_params: {} }], {:confidence: :auto, :name: name, :actual: actual}));
+          TRY (typeAnalysisSession__emit_with_cap_mismatch_mut(&rtoc_self_view, &node, name, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, [CapabilityFixCandidate{ sigil: "@shared:atomic", description_code: :WITH_ADD_SHARED_ATOMIC, description_params: {} }], :auto, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :actual: DiagnosticKwValue{ StringValue: COPY actual }} AS {String@symbol}DiagnosticKwValue)));
         END
       END
     ELSE
@@ -9608,11 +9608,11 @@ PRIVATE FN typeAnalysisSession__visit_post_clauses_mut(MUTABLE self: TypeAnalysi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE post_clauses: []Any = List[];
+    MUTABLE post_clauses: []{String@symbol}ContractClauseValue = List[];
     IF TRUE THEN
       post_clauses = ((fn_node.post_clauses OR_ELSE List[]));
     ELSE
-      post_clauses = ( { MUTABLE rtoc_empty_list_210: []Any = List[]; rtoc_empty_list_210 } );
+      post_clauses = ( { MUTABLE rtoc_empty_list_210: []{String@symbol}ContractClauseValue = List[]; rtoc_empty_list_210 } );
     END
     IF (post_clauses.length() == 0) THEN
       RETURN NIL;
@@ -9624,7 +9624,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE param_names = fn_node.params |> SELECT _.name;
     MUTABLE rejected = (fn_node.params |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE sym: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_211 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    scope__resolve_entry(rtoc_local_receiver_211, _.name) }; (IF !(((sym != NIL) AND ([:locked, :write_locked, :versioned, :atomic]).contains?(symbolEntry__sync(sym)))) THEN NIL ELSE _.name END) } |> WHERE _ != NIL) |> DISTINCT _;
+    scope__resolve_entry(rtoc_local_receiver_211, _.name) }; (IF !(((sym != NIL) AND ([:locked, :write_locked, :versioned, :atomic]).contains?(symbolEntry__sync(sym)))) THEN NIL ELSE _.name END) } |> WHERE _ != NIL |> SELECT COPY UNWRAP (_)) |> DISTINCT _;
     MUTABLE rt: ?Type = COPY fn_node.return_type;
     MUTABLE payload_branch_value: ?Type = NIL;
     IF ((rt != NIL) AND type__error_union?(rt)) THEN
@@ -9641,12 +9641,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE allowed_names = (param_names + ["result"]);
     FOR _ IN post_clauses DO
-      MUTABLE expr: ?ContractClauseValue = _[:expr];
-      typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :post, with_node: NIL, fn_node: fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_213: []String = List[]; rtoc_empty_list_213 } ), param_names: ( { MUTABLE rtoc_empty_list_214: []String = List[]; rtoc_empty_list_214 } ), allowed_names: COPY allowed_names, rejected_param_names: COPY rejected, fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
-        TRY (typeAnalysisSession__visit(&rtoc_self_view, castContractClauseValueToLocatable(UNWRAP (expr))));
-        MUTABLE pred_type = TRY (aST__full_type_mut(castContractClauseValueToLocatable(UNWRAP (expr))));
-        IF !((pred_type AND (pred_type.resolved() == :Bool))) THEN
-            TRY (typeAnalysisSession__error_mut(&rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :DEBUG_POST_EXPR_MUST_BE_BOOL }, [], CAST({:got: (pred_type OR_ELSE "Unknown")} AS {String@symbol}Any)));
+      MUTABLE expr: ?ContractClauseValue = COPY _[:expr];
+      typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :post, with_node: NIL, fn_node: COPY fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_213: []String = List[]; rtoc_empty_list_213 } ), param_names: ( { MUTABLE rtoc_empty_list_214: []String = List[]; rtoc_empty_list_214 } ), allowed_names: COPY allowed_names, rejected_param_names: COPY rejected, fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
+        TRY (typeAnalysisSession__visit(&rtoc_self_view, UNWRAP (castContractClauseValueToLocatable(UNWRAP (expr)))));
+        MUTABLE pred_type = TRY (aST__full_type_mut(UNWRAP (castContractClauseValueToLocatable(UNWRAP (expr)))));
+        IF !((TRUE AND (type__resolved(pred_type) == :Bool))) THEN
+            TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF expr EXISTS AS rtoc_pe THEN (IF rtoc_pe IS_A Locatable AS rtoc_pl THEN DiagnosticAnchor{ Locatable: COPY rtoc_pl } ELSE NIL END) ELSE NIL END), TypeAnalysisCodeOrMessage{ SymbolValue: :DEBUG_POST_EXPR_MUST_BE_BOOL }, [], CAST({:got: type__resolved(pred_type)} AS {String@symbol}Any)));
         END
         NIL
       });
