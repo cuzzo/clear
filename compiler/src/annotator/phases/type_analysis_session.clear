@@ -5187,7 +5187,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.observable_dest = TRUE;
     IF node.left IS_A Identifier THEN
       locatable__set_was_moved_mut(&node.left, TRUE);
-      TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, node.left.name(), node.left.token(), :takes));
+      TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, UNWRAP (locatable__name(node.left)), UNWRAP (locatable__token(node.left)), :takes));
     END
     RETURN TRUE;
 }
@@ -6999,7 +6999,7 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE op: ClearParserConcurrentPipelineOp = COPY castLocatableToConcurrentOp__type_analysis_session(node.right);
+    MUTABLE op: ClearParserConcurrentPipelineOp = ClearParserConcurrentPipelineOp{ ConcurrentOp: COPY castLocatableToConcurrentOp__type_analysis_session(node.right) };
     IF Locatable{ ConcurrentOp: COPY op } IS_A SelectOp THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, UNWRAP (clearParserConcurrentPipelineOp__expression(op))));
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, &op, effect));
@@ -7506,7 +7506,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(UNWRAP (lit) IS_A Literal) THEN
       RETURN NIL;
     END
-    IF !(((UNWRAP locatable__type((lit)) == :INT64) OR (UNWRAP (lit).type == :PREFIXED_INT))) THEN
+    IF !(((UNWRAP (lit).type == :INT64) OR (UNWRAP (lit).type == :PREFIXED_INT))) THEN
       RETURN NIL;
     END
     RETURN (-aST__node_value( UNWRAP (lit)));
