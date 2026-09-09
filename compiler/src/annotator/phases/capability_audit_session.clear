@@ -2731,7 +2731,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (((UNWRAP (range)).start_line <= 0) OR ((UNWRAP (range)).end_line <= 0)) THEN
           CONTINUE;
     END
-    &acc.append(edit__new(span__new(range.file, token__start_line(range), token__start_column(range), 0), "TRY ("));
+    &acc.append(edit__new(span__new(UNWRAP (range).file, token__start_line(range), token__start_column(range), 0), "TRY ("));
     &acc.append(edit__new(span__new(range.file, span__end_line(range), range.end_column, 0), ")"));
     acc
       };

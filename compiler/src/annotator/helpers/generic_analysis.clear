@@ -367,3 +367,11 @@ PUB FN genericBinding__indirect?(value: GenericBinding) RETURNS ?Bool EFFECTS RE
   END
   RETURN NIL;
 END
+FN castLocatableToDeclarationNode(value: Locatable) RETURNS ?DeclarationNode ->
+  PARTIAL MATCH value START
+    Locatable.VarDecl AS item -> RETURN DeclarationNode{ VarDecl: COPY item };,
+    Locatable.BindExpr AS item -> RETURN DeclarationNode{ BindExpr: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
