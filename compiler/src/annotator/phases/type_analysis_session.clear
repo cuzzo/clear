@@ -14369,7 +14369,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     scope__resolve_entry(rtoc_local_receiver_362, name) })?);
     symbolEntry__type(rtoc_local_receiver_363) };
     END
-    MUTABLE type_obj = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_365: ?Type@multiowned = NIL;
+    MUTABLE type_obj: ?Type@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_365: ?Type@multiowned = NIL;
     IF (var_type != NIL) THEN
       rtoc_ternary_value_365 = var_type;
     ELSE
@@ -19574,7 +19574,7 @@ PRIVATE FN typeAnalysisSession__handle_assignment_path_move_mut(MUTABLE self: Ty
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__reject_borrowed_index_assignment_move_mut(&rtoc_self_view, node));
-    MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode(UNWRAP (aST__node_value))(UNWRAP (castNodeToLocatable(node)))));
+    MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))))));
     IF (path.length() == 0) THEN
       RETURN;
     END
