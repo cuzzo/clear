@@ -18103,3 +18103,12 @@ PUB FN castLocatableToDeferStmt(value: Locatable) RETURNS ?DeferStmt EFFECTS REE
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToFunctionDef(value: Locatable) RETURNS ?FunctionDef EFFECTS REENTRANT ->
+  IF value IS_A FunctionDef AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

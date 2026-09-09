@@ -3334,7 +3334,7 @@ PRIVATE FN capabilityAuditSession__replace_stack_sigil_with_service_fix(self: Ca
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (fix__new(TRY (diagnosticRegistry__fix_description(:REPLACE_STACK_SIGIL_WITH_SERVICE, CAST({:stack: UNWRAP (castDiagnosticKwValueToString(ruby_wrap_optional_String_symbol_DiagnosticKwValue(user_size)))} AS {String@symbol}String))), [edit__new(span__new(NIL, token.line, token.column, (CAST(token.value AS String)).codepointCount()), "@service")], :interactive));
+    RETURN TRY (fix__new(TRY (diagnosticRegistry__fix_description(:REPLACE_STACK_SIGIL_WITH_SERVICE, CAST({:stack: UNWRAP (castDiagnosticKwValueToString(UNWRAP (ruby_wrap_optional_String_symbol_DiagnosticKwValue(user_size))))} AS {String@symbol}String))), [edit__new(span__new(NIL, token.line, token.column, (CAST(token.value AS String)).codepointCount()), "@service")], :interactive));
 }
 END
 PRIVATE FN capabilityAuditSession__insert_service_after_open_brace_fix(self: CapabilityAuditSession, token: Token) RETURNS !Fix
@@ -4135,7 +4135,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_39.length() DO
       MUTABLE param: ?Param = ((TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_39[rtoc_idx]?.callee_name)))?.params[rtoc_each_items_39[rtoc_idx]?.param_index]);
       IF (IF param != NIL THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_40 = param.symbol;
+          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_40: ?SymbolEntry@multiowned = param.symbol;
       symbolEntry__kept_identity(rtoc_local_receiver_40) }
         ELSE
           NIL
@@ -4158,7 +4158,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_42.length() DO
       MUTABLE param: ?Param = ((TRY (capabilityAuditSession__function_node_for(rtoc_self_view, rtoc_each_items_42[rtoc_idx]?.callee_name)))?.params[rtoc_each_items_42[rtoc_idx]?.param_index]);
       IF (IF param != NIL THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_43 = param.symbol;
+          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_43: ?SymbolEntry@multiowned = param.symbol;
       symbolEntry__kept_identity(rtoc_local_receiver_43) }
         ELSE
           NIL
