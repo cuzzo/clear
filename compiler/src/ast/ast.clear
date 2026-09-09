@@ -18282,3 +18282,10 @@ PUB FN locatable__set_tight_reentrance_mut(MUTABLE value: Locatable, new_value: 
     DEFAULT -> RETURN;
   END
 END
+FN castContractClauseValueToLocatable(value: ContractClauseValue) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

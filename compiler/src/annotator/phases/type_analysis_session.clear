@@ -2309,7 +2309,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
       IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
-        length = COPY CAST(((tokenValue__to_f(UNWRAP (castLocatableToLiteral(index))) + 1.0)) AS String);
+        length = COPY CAST(((tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(index)).value)) + 1.0)) AS String);
       ELSE
         length = "0";
       END
@@ -4772,7 +4772,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       scope__resolve_entry(rtoc_local_receiver_97, UNWRAP (captures[rtoc_idx]).name) };
         END
       MUTABLE capture_entry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_98 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-      TRY (scope__declare(&rtoc_mutable_receiver_98, captures[rtoc_idx].name(), NIL, captures[rtoc_idx].type(), captures[rtoc_idx].mutable(), FALSE, NIL, captures[rtoc_idx].storage())) };
+      TRY (scope__declare(&rtoc_mutable_receiver_98, UNWRAP (captures[rtoc_idx]).name, NIL, captures[rtoc_idx].type(), captures[rtoc_idx].mutable(), FALSE, NIL, captures[rtoc_idx].storage())) };
       IF !(owner_entry) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -9570,7 +9570,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN pre_clauses DO
     MUTABLE expr: ?ContractClauseValue = _[:expr];
     typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :pre, with_node: NIL, fn_node: COPY fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_208: []String = List[]; rtoc_empty_list_208 } ), param_names: COPY param_names, allowed_names: ( { MUTABLE rtoc_empty_list_209: []String = List[]; rtoc_empty_list_209 } ), rejected_param_names: COPY Set[], fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
-      TRY (typeAnalysisSession__visit(&rtoc_self_view, expr));
+      TRY (typeAnalysisSession__visit(&rtoc_self_view, castContractClauseValueToLocatable(UNWRAP (expr))));
       MUTABLE pred_type = TRY (aST__full_type_mut(expr));
       IF !((pred_type AND (pred_type.resolved() == :Bool))) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :PRE_EXPR_MUST_BE_BOOL }, [], CAST({:got: (pred_type OR_ELSE "Unknown")} AS {String@symbol}Any)));
@@ -9619,7 +9619,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN post_clauses DO
       MUTABLE expr: ?ContractClauseValue = _[:expr];
       typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :post, with_node: NIL, fn_node: fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_213: []String = List[]; rtoc_empty_list_213 } ), param_names: ( { MUTABLE rtoc_empty_list_214: []String = List[]; rtoc_empty_list_214 } ), allowed_names: COPY allowed_names, rejected_param_names: COPY rejected, fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
-        TRY (typeAnalysisSession__visit(&rtoc_self_view, expr));
+        TRY (typeAnalysisSession__visit(&rtoc_self_view, castContractClauseValueToLocatable(UNWRAP (expr))));
         MUTABLE pred_type = TRY (aST__full_type_mut(expr));
         IF !((pred_type AND (pred_type.resolved() == :Bool))) THEN
             TRY (typeAnalysisSession__error_mut(&rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :DEBUG_POST_EXPR_MUST_BE_BOOL }, [], CAST({:got: (pred_type OR_ELSE "Unknown")} AS {String@symbol}Any)));
@@ -10424,7 +10424,7 @@ PRIVATE FN typeAnalysisSession__expression_allocates?(MUTABLE self: TypeAnalysis
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN PARTIAL MATCH node START
+    RETURN PARTIAL MATCH UNWRAP (node) START
       Locatable.FuncCall AS func_call -> FALSE,
       AutoInferenceWalkNode.MethodCall -> FALSE,
       Locatable.Identifier AS identifier -> FALSE,
