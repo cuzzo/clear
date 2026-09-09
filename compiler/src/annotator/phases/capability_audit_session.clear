@@ -2872,7 +2872,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, &rtoc_open_0, body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), FALSE, UNWRAP (castAsyncBodyNodeToAsyncValidationNode(node))));
     ELSE_IF (node IS_A DoBranch) THEN
-        TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), node.can_smash, _.validation_node));
+        TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), asyncBodyNode__can_smash(node), _.validation_node));
     END
     END
 }
