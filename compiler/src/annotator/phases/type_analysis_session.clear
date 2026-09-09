@@ -10847,7 +10847,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ UnionVariantLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :NOT_A_UNION_TYPE }, [], CAST({:name: node.union_name} AS {String@symbol}Any)));
       RETURN NIL;
     END
-    IF !(schemaValue__variants(schema).key?(node.variant_name)) THEN
+    IF !(schemaValue__variants(schema).contains?(node.variant_name)) THEN
       TRY (typeAnalysisSession__emit_variant_typo_mut(&rtoc_self_view, UNWRAP (typeAnalysisSession__variant_anchor_from_unionlit(&rtoc_self_view, Node{ UnionVariantLit: COPY node }, node.variant_name)), node.variant_name, schema.variants().keys(), "Type Error: Union '${node.union_name}' has no variant '${node.variant_name}'.", "variant of union ${node.union_name}", TRUE));
     END
     MUTABLE var_data = schema.variants()[node.variant_name];
@@ -12023,7 +12023,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (typeAnalysisSession__conformance_requirement_mismatch(&rtoc_self_view, _, CAST(COPY member AS FunctionDef), resolutions[rtoc_idx]?))
           END)
       } |> WHERE _ != NIL;
-      MUTABLE extras = ((resolutions[rtoc_idx]?.members).keys() - (((resolutions[rtoc_idx]?.protocol).requirements) |> SELECT _.name));
+      MUTABLE extras = ((resolutions[rtoc_idx]?.members OR_ELSE {}).keys() - (((resolutions[rtoc_idx]?.protocol).requirements) |> SELECT _.name));
       failures = (failures + extras |> SELECT "${_}: not declared by ${(resolutions[rtoc_idx]?.protocol).name}");
       IF (failures.length() == 0) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -17099,7 +17099,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE (TRUE AND !(Locatable{ GetField: COPY root } IS_A Identifier)) DO
       root = castLocatableToGetField__type_analysis_session(COPY root.target);
     END
-    IF !(root IS_A Identifier) THEN
+    IF !(Locatable{ GetField: COPY root } IS_A Identifier) THEN
       RETURN;
     END
     MUTABLE sym: ?SymbolEntry = root.symbol;
@@ -19535,7 +19535,7 @@ PRIVATE FN typeAnalysisSession__handle_assign_move(MUTABLE self: TypeAnalysisSes
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plan: ?OwnershipTransportPlan = aST__node_ownership_transport_plan( UNWRAP (castNodeToLocatable(node)));
-    IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND (plan != NIL)) AND (UNWRAP (plan).action != :move)) THEN
+    IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND (plan != NIL)) AND (plan.action != :move)) THEN
       RETURN;
     END
     IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND aST__node_value(UNWRAP (castNodeToLocatable(node))) IS_A Identifier) AND (aST__node_value(UNWRAP (castNodeToLocatable(node))).ownership_pending_transfer == TRUE)) THEN
@@ -20022,7 +20022,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF curr IS_A GetIndex THEN
         path = ([symbol("*")] + path);
       END
-      curr = UNWRAP (castLocatableToNode__type_analysis_session(UNWRAP (locatable__target(UNWRAP (castNodeToLocatable(curr))))));
+      curr = (castLocatableToNode__type_analysis_session(UNWRAP (locatable__target(UNWRAP (castNodeToLocatable(curr))))));
     END
     IF !(curr IS_A Identifier) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_504: []String@symbol = List[]; rtoc_empty_list_504 } ) AS []String@symbol);
@@ -20541,7 +20541,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_ternary_value_517? };
     MUTABLE line: ?Int64 = aST__node__token(UNWRAP (castNodeToLocatable(UNWRAP (node)))).line;
     RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_518 = typeAnalysisSession__ownership_graph(&rtoc_self_view);
-    TRY (ownershipGraph__declare(&rtoc_mutable_receiver_518, name, kind, ti, typeAnalysisSession__ownership_graph(&rtoc_self_view).scope_depth, UNWRAP (line))) };
+    TRY (ownershipGraph__declare(&rtoc_mutable_receiver_518, name, kind, UNWRAP (castTypeTypeInputToType(ti)), typeAnalysisSession__ownership_graph(&rtoc_self_view).scope_depth, UNWRAP (line))) };
 }
 END
 PRIVATE FN typeAnalysisSession__share_consumes_source?(MUTABLE self: TypeAnalysisSession, MUTABLE node: Locatable) RETURNS !Bool

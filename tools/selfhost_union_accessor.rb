@@ -110,18 +110,30 @@ module SelfhostUnionAccessor
       return 0
     end
 
+
     if only
-      carrying = carrying.select do |_, type|
-        candidate = fields[type.sub(/@\w+\z/, '')][field].to_s.sub(/@\w+\z/, '').delete_prefix('?')
-        candidate == only || candidate == "[]#{only}"
+      # Compare the DECLARED type first: `String@symbol` and `String` are
+      # different meanings, and stripping the sync would fold them together --
+      # which is exactly the ambiguity --only exists to resolve.
+      exact = carrying.select do |_, type|
+        declared = fields[type.sub(/@\w+\z/, '')][field].to_s.delete_prefix('?')
+        declared == only || declared == "[]#{only}"
+      end
+      carrying = if exact.empty?
+        carrying.select do |_, type|
+          candidate = fields[type.sub(/@\w+\z/, '')][field].to_s.sub(/@\w+\z/, '').delete_prefix('?')
+          candidate == only || candidate == "[]#{only}"
+        end
+      else
+        exact
       end
       abort "selfhost_union_accessor: no variant's '#{field}' is #{only}" if carrying.empty?
     end
-
     types = carrying.map { |_, type| fields[type.sub(/@\w+\z/, '')][field].delete_prefix('?') }.uniq
     # A field can mean different things on different variants (MIR's `value` is
     # an Emittable on some and a String on others). --only narrows the accessor
-    # to one meaning, which is what a call site asking `is_a?` actually wants.
+    # to one meaning, which is what a call site asking `is_a?` actually wants --
+    # so it has to be applied BEFORE the mixed-type refusal it exists to answer.
     abort "selfhost_union_accessor: '#{field}' has mixed types #{types.inspect}" if types.length > 1
 
     result = types.first
