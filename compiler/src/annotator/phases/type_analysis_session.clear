@@ -1753,7 +1753,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE replacement_length = name.codepointCount();
         IF src EXISTS AS src_value THEN
           MUTABLE move_text = COPY (src_value.split("\n")[(move_line_value - 1)] OR_ELSE "");
-          MUTABLE prefix = COPY (move_text.substr(0, (UNWRAP (move_col) - 1)));
+          MUTABLE prefix = COPY (move_text.substr(0, (move_col - 1)));
           MUTABLE give_prefix: ?CompilerRegexScanner = compilerRegexMatchData(prefix, compilerRegexCompile("GIVE\\s+\\z"));
           IF give_prefix EXISTS AS give_prefix_value THEN
             replacement_col = ((compilerRegexPosition(give_prefix_value) - compilerRegexCapture(give_prefix_value, 0).codepointCount()) + 1);
@@ -2484,8 +2484,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
         MUTABLE search_offset = (token.column - 1);
         MUTABLE ann_match: ?CompilerRegexScanner = NIL;
-        IF line_text.substr(search_offset, (line_text.length() - search_offset)) != NIL THEN
-          ann_match = COPY compilerRegexMatchData(((line_text.substr(search_offset, (line_text.length() - search_offset)))?), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
+        IF (search_offset < line_text.length()) THEN
+          ann_match = COPY compilerRegexMatchData(line_text.substr(search_offset, (line_text.length() - search_offset)), compilerRegexCompile(":\\s*([A-Za-z_][\\w]*)"));
         END
         IF ((ann_match != NIL) AND !(line_text.contains?("~"))) THEN
           MUTABLE type_col = ((search_offset + (compilerRegexPosition(ann_match) - compilerRegexCapture(ann_match, 1).codepointCount())) + 1);
@@ -2771,8 +2771,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE src_line = (src_value.split("\n")[(line_num - 1)] OR_ELSE "");
           MUTABLE search_offset = (UNWRAP (symbolEntryRegInput__token(reg_value)).column - 1);
           MUTABLE match: ?CompilerRegexScanner = NIL;
-          IF src_line.substr(search_offset, (src_line.length() - search_offset)) != NIL THEN
-            match = COPY compilerRegexMatchData(((src_line.substr(search_offset, (src_line.length() - search_offset)))?), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));
+          IF (search_offset < src_line.length()) THEN
+            match = COPY compilerRegexMatchData(src_line.substr(search_offset, (src_line.length() - search_offset)), compilerRegexCompile("@(?:shared:atomic|atomic:shared)"));
           END
           IF match EXISTS AS match_value THEN
             MUTABLE start_col = ((search_offset + (compilerRegexPosition(match_value) - compilerRegexCapture(match_value, 0).codepointCount())) + 1);
@@ -6367,7 +6367,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         NIL
       END) != NIL THEN
         sc = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_150 = (((IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_149 = (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)));
+        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_149: ?Scope = (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, _)));
     scope__resolve_entry(rtoc_local_receiver_149, _) }
       ELSE
         NIL
@@ -8647,7 +8647,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         type__mark_heap_allocated_mut(&node_type);
       END
     END
-    IF (!(coll_src) AND ((decl_type != NIL) AND type__soa(UNWRAP (decl_type)))) THEN
+    IF (!(coll_src) AND (type__soa(decl_type))) THEN
       TRY (type__mark_soa_layout_mut(&node_type));
     END
     IF decl_type EXISTS AS decl_type_value THEN
