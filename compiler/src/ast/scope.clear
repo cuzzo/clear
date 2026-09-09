@@ -413,20 +413,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN visible;
 }
 END
-PUB FN scope__visible_names(MUTABLE self: Scope) RETURNS ![]String
+PUB FN scope__visible_names(self: Scope) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_4: []String = List[]; rtoc_empty_list_4 } );
     MUTABLE seen: [Set]String = Set[];
-    TRY (scope__append_visible_names_mut(&rtoc_self_view, &names, &seen));
+    TRY (scope__append_visible_names_mut(rtoc_self_view, &names, &seen));
     RETURN names;
 }
 END
-FN scope__append_visible_names_mut(MUTABLE self: Scope, MUTABLE names: []String, MUTABLE seen: [Set]String) RETURNS !Void
+FN scope__append_visible_names_mut(self: Scope, MUTABLE names: []String, MUTABLE seen: [Set]String) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+WITH POLYMORPHIC self AS rtoc_self_view {
     FOR _ IN (TRY (scope__visible_entries(rtoc_self_view))).keys() DO
     IF seen.contains?(_) THEN
       CONTINUE;

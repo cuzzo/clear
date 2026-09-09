@@ -115,7 +115,7 @@ UNION TypeAnalysisBodyFacts { BodyScanSummary: BodyScanSummary, FunctionBodySumm
 UNION TypeAnalysisCallNode { FuncCall: FuncCall, MethodCall: MethodCall }
 PUB FN typeAnalysisCallNode__name(self: TypeAnalysisCallNode) RETURNS String ->
   PARTIAL MATCH self START
-    TypeAnalysisCallNode.FuncCall AS item -> RETURN COPY (IF item.name IS_A StringValue AS s THEN s ELSE "" END);,
+    TypeAnalysisCallNode.FuncCall AS item -> RETURN COPY callName__string_value(item.name);,
     TypeAnalysisCallNode.MethodCall AS item -> RETURN COPY item.name;
   END
   RETURN "";
@@ -948,8 +948,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE name = tuple_param_0._0;
     MUTABLE fn = tuple_param_0._1;
     MUTABLE kept_param = fn.params |> FIND (IF _.symbol != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12 = (_.symbol);
-    symbolEntry__kept_identity(rtoc_local_receiver_12) }
+        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12: ?SymbolEntry@multiowned = (_.symbol);
+    symbolEntry__kept_identity(UNWRAP (rtoc_local_receiver_12)) }
       ELSE
         NIL
       END);
@@ -1008,9 +1008,9 @@ PUB FN typeAnalysisSession__kept_identity_declaration_anchor(MUTABLE self: TypeA
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR rtoc_each_item_14 IN body_summaries.values() DO
-    MUTABLE decl = rtoc_each_item_14.binding_nodes |> FIND (TRUE AND ((UNWRAP (aST__node__symbol( castBindingNodeToLocatable(_)))).binding_id == entry.binding_id));
-    IF decl THEN
-        RETURN decl;
+    MUTABLE decl: ?BindingNode = rtoc_each_item_14.binding_nodes |> FIND (TRUE AND ((UNWRAP (aST__node__symbol( castBindingNodeToLocatable(_)))).binding_id == entry.binding_id));
+    IF decl EXISTS AS decl_value THEN
+        RETURN castBindingNodeToLocatable(decl_value);
     END
     END
     RETURN NIL;
@@ -1249,38 +1249,38 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       Locatable.BreakNode AS MUTABLE break_node -> TRY (typeAnalysisSession__visit_BreakNode(&rtoc_self_view, &break_node)),
       Locatable.ContinueNode AS MUTABLE continue_node -> TRY (typeAnalysisSession__visit_ContinueNode(&rtoc_self_view, &continue_node)),
       Locatable.PassStmt AS MUTABLE pass_stmt -> TRY (typeAnalysisSession__visit_PassStmt(&rtoc_self_view, &pass_stmt)),
-      Locatable.DeferStmt -> TRY (typeAnalysisSession__visit_DeferStmt(&rtoc_self_view, &node)),
+      Locatable.DeferStmt AS MUTABLE defer_stmt -> TRY (typeAnalysisSession__visit_DeferStmt(&rtoc_self_view, &defer_stmt)),
       Locatable.SyncPolicyDecl AS MUTABLE sync_policy_decl -> TRY (typeAnalysisSession__visit_SyncPolicyDecl(&rtoc_self_view, &sync_policy_decl)),
       Locatable.Assert AS MUTABLE assert -> TRY (typeAnalysisSession__visit_Assert(&rtoc_self_view, &assert)),
       Locatable.DieNode AS MUTABLE die_node -> TRY (typeAnalysisSession__visit_DieNode(&rtoc_self_view, &die_node)),
-      raise_value -> TRY (typeAnalysisSession__visit_Raise(&rtoc_self_view, &node)),
+      Locatable.Raise AS MUTABLE raise_value -> TRY (typeAnalysisSession__visit_Raise(&rtoc_self_view, &raise_value)),
       Locatable.ReturnNode AS MUTABLE return_node -> TRY (typeAnalysisSession__visit_ReturnNode(&rtoc_self_view, &return_node)),
-      Locatable.OrElseRaise -> TRY (typeAnalysisSession__visit_OrElseRaise(&rtoc_self_view, &node)),
-      Locatable.OrElseBreak -> TRY (typeAnalysisSession__visit_OrElseBreak(&rtoc_self_view, &node)),
-      Locatable.OrElsePass -> TRY (typeAnalysisSession__visit_OrElsePass(&rtoc_self_view, &node)),
-      Locatable.OrElsePrune -> TRY (typeAnalysisSession__visit_OrElsePrune(&rtoc_self_view, &node)),
-      Locatable.OrElseExit -> TRY (typeAnalysisSession__visit_OrElseExit(&rtoc_self_view, &node)),
+      Locatable.OrElseRaise AS MUTABLE or_else_raise -> TRY (typeAnalysisSession__visit_OrElseRaise(&rtoc_self_view, &or_else_raise)),
+      Locatable.OrElseBreak AS MUTABLE or_else_break -> TRY (typeAnalysisSession__visit_OrElseBreak(&rtoc_self_view, &or_else_break)),
+      Locatable.OrElsePass AS MUTABLE or_else_pass -> TRY (typeAnalysisSession__visit_OrElsePass(&rtoc_self_view, &or_else_pass)),
+      Locatable.OrElsePrune AS MUTABLE or_else_prune -> TRY (typeAnalysisSession__visit_OrElsePrune(&rtoc_self_view, &or_else_prune)),
+      Locatable.OrElseExit AS MUTABLE or_else_exit -> TRY (typeAnalysisSession__visit_OrElseExit(&rtoc_self_view, &or_else_exit)),
       Locatable.WithBlock AS MUTABLE with_block -> TRY (typeAnalysisSession__visit_WithBlock(&rtoc_self_view, &with_block)),
       doblock -> TRY (typeAnalysisSession__visit_DoBlock(&rtoc_self_view, &node)),
       Locatable.BgStreamBlock AS MUTABLE bg_stream_block -> TRY (typeAnalysisSession__visit_BgStreamBlock(&rtoc_self_view, &bg_stream_block)),
       Locatable.YieldExpr AS MUTABLE yield_expr -> TRY (typeAnalysisSession__visit_YieldExpr(&rtoc_self_view, &yield_expr)),
       Locatable.CloseStream AS MUTABLE close_stream -> TRY (typeAnalysisSession__visit_CloseStream(&rtoc_self_view, &close_stream)),
-      Locatable.BgBlock -> TRY (typeAnalysisSession__visit_BgBlock(&rtoc_self_view, &node)),
+      Locatable.BgBlock AS MUTABLE bg_block -> TRY (typeAnalysisSession__visit_BgBlock(&rtoc_self_view, &bg_block)),
       Locatable.ThenChain AS MUTABLE then_chain -> TRY (typeAnalysisSession__visit_ThenChain(&rtoc_self_view, &then_chain)),
       Locatable.NextExpr AS MUTABLE next_expr -> TRY (typeAnalysisSession__visit_NextExpr(&rtoc_self_view, &next_expr)),
-      Locatable.Cast -> TRY (typeAnalysisSession__visit_Cast(&rtoc_self_view, &node)),
+      Locatable.Cast AS MUTABLE cast -> TRY (typeAnalysisSession__visit_Cast(&rtoc_self_view, &cast)),
       Locatable.CallSiteOverride AS call_site_override -> TRY (typeAnalysisSession__visit_CallSiteOverride(&rtoc_self_view, call_site_override)),
-      Locatable.UnaryOp -> TRY (typeAnalysisSession__visit_UnaryOp(&rtoc_self_view, &node)),
+      Locatable.UnaryOp AS MUTABLE unary_op -> TRY (typeAnalysisSession__visit_UnaryOp(&rtoc_self_view, &unary_op)),
       Locatable.Literal AS MUTABLE literal -> TRY (typeAnalysisSession__visit_Literal(&rtoc_self_view, &literal)),
       Locatable.DefaultLit AS MUTABLE default_lit -> TRY (typeAnalysisSession__visit_DefaultLit(&rtoc_self_view, &default_lit)),
       Locatable.BinaryOp AS MUTABLE binary_op -> TRY (typeAnalysisSession__visit_BinaryOp(&rtoc_self_view, &binary_op)),
       Locatable.Placeholder AS placeholder -> TRY (typeAnalysisSession__visit_Placeholder(&rtoc_self_view, placeholder)),
       Locatable.CapabilityWrap AS MUTABLE capability_wrap -> TRY (typeAnalysisSession__visit_CapabilityWrap(&rtoc_self_view, &capability_wrap)),
-      Locatable.OptionalUnwrap -> TRY (typeAnalysisSession__visit_OptionalUnwrap(&rtoc_self_view, &node)),
+      Locatable.OptionalUnwrap AS MUTABLE optional_unwrap -> TRY (typeAnalysisSession__visit_OptionalUnwrap(&rtoc_self_view, &optional_unwrap)),
       Locatable.TenseNavigation AS MUTABLE tense_navigation -> TRY (typeAnalysisSession__visit_TenseNavigation(&rtoc_self_view, &tense_navigation)),
       Locatable.MutableBorrow AS MUTABLE mutable_borrow -> TRY (typeAnalysisSession__visit_MutableBorrow(&rtoc_self_view, &mutable_borrow)),
       Locatable.FuncCall AS MUTABLE func_call -> TRY (typeAnalysisSession__visit_FuncCall(&rtoc_self_view, &func_call)),
-      Locatable.MethodCall -> TRY (typeAnalysisSession__visit_MethodCall(&rtoc_self_view, &node)),
+      Locatable.MethodCall AS MUTABLE method_call -> TRY (typeAnalysisSession__visit_MethodCall(&rtoc_self_view, &method_call)),
       Locatable.StaticCall AS MUTABLE static_call -> TRY (typeAnalysisSession__visit_StaticCall(&rtoc_self_view, &static_call)),
       Locatable.MoveNode AS MUTABLE move_node -> TRY (typeAnalysisSession__visit_MoveNode(&rtoc_self_view, &move_node)),
       Locatable.CopyNode AS MUTABLE copy_node -> TRY (typeAnalysisSession__visit_CopyNode(&rtoc_self_view, &copy_node)),
@@ -1298,7 +1298,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       Locatable.ListLit AS MUTABLE list_lit -> TRY (typeAnalysisSession__visit_ListLit(&rtoc_self_view, &list_lit)),
       Locatable.TupleLit AS MUTABLE tuple_lit -> TRY (typeAnalysisSession__visit_TupleLit(&rtoc_self_view, &tuple_lit)),
       Locatable.DefaultArrayLit AS MUTABLE default_array_lit -> TRY (typeAnalysisSession__visit_DefaultArrayLit(&rtoc_self_view, &default_array_lit)),
-      Locatable.RangeLit -> TRY (typeAnalysisSession__visit_RangeLit(&rtoc_self_view, &node)),
+      Locatable.RangeLit AS MUTABLE range_lit -> TRY (typeAnalysisSession__visit_RangeLit(&rtoc_self_view, &range_lit)),
       Locatable.VarDecl AS MUTABLE var_decl -> TRY (typeAnalysisSession__visit_VarDecl(&rtoc_self_view, &var_decl)),
       Locatable.BindExpr AS MUTABLE bind_expr -> TRY (typeAnalysisSession__visit_BindExpr(&rtoc_self_view, &bind_expr)),
       Locatable.Identifier AS MUTABLE identifier -> TRY (typeAnalysisSession__visit_Identifier(&rtoc_self_view, &identifier)),
@@ -1343,7 +1343,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         RETURN;
       END
-      IF ((((node IS_A VarDecl OR node IS_A BindExpr)) AND locatable__ownership_transport_plan(node) IS_A OwnershipTransportPlan) AND (locatable__ownership_transport_plan(node).action == :pending)) THEN
+      IF ((((node IS_A VarDecl OR node IS_A BindExpr)) AND (locatable__ownership_transport_plan(node) != NIL)) AND (UNWRAP (locatable__ownership_transport_plan(node)).action == :pending)) THEN
         ownershipTransportFacts__record_alias(&facts_value_mutable, castLocatableToNode__type_analysis_session(node), ancestors);
       END
       IF node IS_A Assignment AS assignment THEN
@@ -1422,7 +1422,7 @@ PRIVATE FN typeAnalysisSession__outer_scope_vars(MUTABLE self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN (rtoc_self_view.traversal_state.scopes |> UNNEST TRY (scope__visible_names(&_))) |> DISTINCT _;
+    RETURN (rtoc_self_view.traversal_state.scopes |> UNNEST TRY (scope__visible_names(_))) |> DISTINCT _;
 }
 END
 PRIVATE FN typeAnalysisSession__synthetic_function_definitions(MUTABLE self: TypeAnalysisSession) RETURNS ![]FunctionDef

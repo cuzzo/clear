@@ -1834,7 +1834,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       FOR _ IN choices DO
-      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: UNWRAP (_[1]), :edge: DiagnosticKwValue{ StringValue: COPY "${edges[rtoc_idx]?.owner}.${edges[rtoc_idx]?.field_name}" }, :capability: _._0} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
+      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: DiagnosticKwValue{ StringValue: COPY _[1] }, :edge: DiagnosticKwValue{ StringValue: COPY "${edges[rtoc_idx]?.owner}.${edges[rtoc_idx]?.field_name}" }, :capability: _._0} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
       END
     rtoc_idx = rtoc_idx + 1;
       END
@@ -2207,7 +2207,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN resolutionSession__new(importer: ?ModuleImporter, source_dir: String, source_code: ?String, root_scope: ?Scope = NIL, function_registry: ?FunctionRegistry = NIL, install_builtins: Bool = TRUE) RETURNS !ResolutionSession@multiowned ->
-  MUTABLE self = ResolutionSession{ function_registry: (COPY function_registry OR_ELSE FunctionRegistry{ nodes: {}, synthetic_definitions: List[], body_summaries: {} }), importer: COPY importer, local_type_declaration_names: Set[], protocols: {}, root_scope: (root_scope OR_ELSE scope__new()), scope_stack: [root_scope], source_code: COPY source_code, source_dir: COPY source_dir };
+  MUTABLE self = ResolutionSession{ function_registry: (COPY function_registry OR_ELSE FunctionRegistry{ nodes: {}, synthetic_definitions: List[], body_summaries: {} }), importer: COPY importer, local_type_declaration_names: Set[], protocols: {}, root_scope: (root_scope OR_ELSE scope__new()), scope_stack: [(root_scope OR_ELSE scope__new())], source_code: COPY source_code, source_dir: COPY source_dir };
   TRY (resolutionSession__initialize(&self, importer, source_dir, source_code, root_scope, function_registry, install_builtins));
   RETURN self @multiowned;
 END
@@ -2702,4 +2702,11 @@ PUB FN castDiagnosticKwValueToString(value: DiagnosticKwValue) RETURNS ?String E
     RETURN item;
   END
   RETURN NIL;
+END
+
+FN castDiagnosticKwValueToAnyMultiowned__resolution_phase(value: DiagnosticKwValue) RETURNS Any@multiowned ->
+  IF value IS_A Any@multiowned AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to Any@multiowned");
 END

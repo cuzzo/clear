@@ -18120,3 +18120,24 @@ PUB FN locatable__set_reentrance_kind_mut(MUTABLE value: Locatable, new_value: ?
     DEFAULT -> RETURN;
   END
 END
+
+# A CallName is either a plain name or a node that computes one. Ruby reads the
+# name off whichever it holds; the String case is the one that has it.
+PUB FN callName__string_value(self: CallName) RETURNS String ->
+  PARTIAL MATCH self START
+    CallName.StringValue AS item -> RETURN COPY item;,
+    DEFAULT -> RETURN "";
+  END
+  RETURN "";
+END
+# Ruby asks `respond_to?(:return_lifetime)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN locatable__return_lifetime(value: Locatable) RETURNS ?ClearParserReturnLifetime ->
+  PARTIAL MATCH value START
+    Locatable.FunctionDef AS item -> RETURN COPY item.return_lifetime;,
+    Locatable.ExternFnDecl AS item -> RETURN COPY item.return_lifetime;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
