@@ -12438,36 +12438,45 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (protocol_names.length() == 0) THEN
       RETURN FALSE;
     END
-    MUTABLE matches = protocol_names |> SELECT:? {
-    MUTABLE protocol: ?ProtocolDef = typeAnalysisSession__semantic_protocol(&rtoc_self_view, _);
-    MUTABLE requirement: ?ProtocolRequirement = (protocol?.requirements OR_ELSE List[]) |> FIND (_.is_method AND (_.name == callName__string_value(CallName{ StringValue: COPY node.name })));
-    (  IF ((protocol != NIL) AND requirement) THEN
-        [protocol, requirement]
-      ELSE
-        NIL
-      END)
-    } |> WHERE _ != NIL;
+    MUTABLE matches: []Tuple<ProtocolDef, ProtocolRequirement> = List[];
+    FOR _ IN protocol_names DO
+      MUTABLE protocol: ?ProtocolDef = typeAnalysisSession__semantic_protocol(&rtoc_self_view, _);
+      MUTABLE requirement: ?ProtocolRequirement = (protocol?.requirements OR_ELSE List[]) |> FIND (_.is_method AND (_.name == node.name));
+      IF protocol EXISTS AS rtoc_proto_v THEN
+        IF requirement EXISTS AS rtoc_req_v THEN
+          &matches.append(Tuple{COPY rtoc_proto_v, COPY rtoc_req_v});
+        END
+      END
+    END
     IF (matches.length() > 1) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_PROTOCOL_METHOD_AMBIGUOUS }, [], CAST({:name: node.name, :protocols: (matches |> SELECT _.first().name()).join(", ")} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_PROTOCOL_METHOD_AMBIGUOUS }, [], CAST({:name: node.name, :protocols: (matches |> SELECT _._0.name).join(", ")} AS {String@symbol}Any)));
     END
     IF (matches.length() == 0) THEN
-      MUTABLE available = ((protocol_names |> UNNEST (((IF typeAnalysisSession__semantic_protocol(&rtoc_self_view, _)?.requirements != NIL THEN
-        (typeAnalysisSession__semantic_protocol(&rtoc_self_view, _)?.requirements) |> WHERE _.is_method |> SELECT _.name()
-      ELSE
-        NIL
-      END)) OR_ELSE List[])) |> DISTINCT _ |> SELECT COPY _) |> ORDER_BY _;
+      MUTABLE rtoc_avail: [Set]String = Set[];
+      FOR _ IN protocol_names DO
+        IF typeAnalysisSession__semantic_protocol(&rtoc_self_view, _) EXISTS AS rtoc_proto_a THEN
+          FOR rtoc_req IN rtoc_proto_a.requirements DO
+            IF rtoc_req.is_method THEN
+              &rtoc_avail.insert(COPY rtoc_req.name);
+            END
+          END
+        END
+      END
+      MUTABLE available = (rtoc_avail |> SELECT COPY _) |> ORDER_BY _;
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_PROTOCOL_METHOD_UNKNOWN }, [], CAST({:name: node.name, :protocols: protocol_names.join(" & "), :available: IF available.empty?() THEN
         "none"
       ELSE
         available.join(", ")
       END} AS {String@symbol}Any)));
     END
-    MUTABLE protocol, requirement = matches.first();
-    MUTABLE signature = TRY (typeAnalysisSession__protocol_requirement_signature(&rtoc_self_view, UNWRAP (protocol), requirement, receiver));
+    MUTABLE rtoc_first_match = UNWRAP (matches.first());
+    MUTABLE protocol: ProtocolDef = COPY rtoc_first_match._0;
+    MUTABLE requirement: ProtocolRequirement = COPY rtoc_first_match._1;
+    MUTABLE signature = TRY (typeAnalysisSession__protocol_requirement_signature(&rtoc_self_view, protocol, requirement, receiver));
     TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, signature, ([node.object] + node.args)));
     node.matched_signature = signature;
     node.protocol_name = protocol.name;
-    node.protocol_operation = symbol(requirement.name());
+    node.protocol_operation = symbol(requirement.name);
     TRY (typeAnalysisSession__stamp_resolved_call_result_mut(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, CAST(functionSignature__return_type(signature) AS Type), functionSignature__recoverable_result?(signature)));
     IF functionSignature__reentrant(signature) THEN
       TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("REENTRANT")));
