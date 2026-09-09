@@ -772,7 +772,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         src = capabilityAuditSession__source_code(rtoc_self_view);
         IF ((decl != NIL) AND (src != NIL)) THEN
-          MUTABLE dline = aST__node__token(UNWRAP (castSymbolEntryRegInputToLocatable(decl))).line;
+          MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
           MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
           MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(decl).column - 1));
           IF semi_idx EXISTS AS semi_idx_value THEN
@@ -2734,7 +2734,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           CONTINUE;
     END
     &acc.append(edit__new(span__new(UNWRAP (range).file, (UNWRAP (range)).start_line, (UNWRAP (range)).start_column, 0), "TRY ("));
-    &acc.append(edit__new(span__new(UNWRAP (range).file, span__end_line(range), range.end_column, 0), ")"));
+    &acc.append(edit__new(span__new(UNWRAP (range).file, (UNWRAP (range)).end_line, range.end_column, 0), ")"));
     acc
       };
     ELSE
@@ -4322,9 +4322,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END);
-    MUTABLE policy_handlers: []ErrorClause = COPY capabilityAuditSession__whole_program_node(rtoc_self_view)?.sync_policy;
+    MUTABLE policy_handlers: []ErrorClause = UNWRAP (COPY capabilityAuditSession__whole_program_node(rtoc_self_view)?.sync_policy);
     FOR MUTABLE rtoc_mutable_block_param_48 IN fn_nodes.values() DO
-    TRY (withMatchCheck__check_function_mut(&rtoc_mutable_block_param_48, UNWRAP (body_summaries[rtoc_mutable_block_param_48.name]?.with_blocks), error_handler, warning_handler, policy_handlers));
+    TRY (withMatchCheck__check_function_mut(&rtoc_mutable_block_param_48, UNWRAP (body_summaries[rtoc_mutable_block_param_48.name]?.with_blocks), error_handler, warning_handler, rtoc_mutable_block_param_48));
     END
     TRY (capabilityAuditSession__restamp_requires_on_signatures_mut(&rtoc_self_view));
     FOR _ IN fn_nodes.values() DO
