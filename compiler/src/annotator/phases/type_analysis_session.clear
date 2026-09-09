@@ -14183,7 +14183,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE coll_type = TRY (aST__full_type_mut(node.collection));
     MUTABLE ct_branch_value: ?Type = NIL;
     IF TRUE THEN
-      ct_branch_value = coll_type;
+      ct_branch_value = COPY coll_type;
     ELSE
       ct_branch_value = TRY (type__new( TypeConstructionInput{ Type: COPY coll_type }));
     END
@@ -17060,7 +17060,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF (has_atomic_ptr AND clause) THEN
-      MUTABLE bad_selector = clause.selectors |> FIND ((_.form == :type) AND (_.name == :MvccConflict));
+      MUTABLE bad_selector: ?ErrorSelector = clause.selectors |> FIND ((_.form == :type) AND (_.name == :MvccConflict));
       IF bad_selector EXISTS AS bad_selector_value THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_ATOMIC_HANDLER_WRONG_ERROR }));
       END
@@ -18101,7 +18101,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
     MUTABLE t_right_type = TRY (aST__full_type_mut(node.right));
     MUTABLE bare_nil = (IF node.left IS_A Literal AS left_literal THEN (left_literal.type == symbol("NIL")) ELSE FALSE END);
-    MUTABLE t_left_type =   IF (bare_nil AND (type__resolved(t_right_type) != :NoReturn)) THEN
+    MUTABLE t_left_type: ?Type =   IF (bare_nil AND (type__resolved(t_right_type) != :NoReturn)) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
     contextual = TRY (type__optional_of(TypeTypeInput{ Type: COPY t_right_type }));
