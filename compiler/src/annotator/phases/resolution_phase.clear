@@ -798,7 +798,7 @@ PRIVATE FN resolutionSession__resolve_conformance_declarations_mut(MUTABLE self:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE local_structs = (declarations.type_declarations |> SELECT:? (  IF _ IS_A StructDef THEN
-      [aST__node_name(UNWRAP (castTypeDeclarationToLocatable(_))), _]
+      Tuple{aST__node_name(UNWRAP (castTypeDeclarationToLocatable(_))), _}
     ELSE
       NIL
     END) |> WHERE _ != NIL).to_h();
@@ -929,7 +929,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           NIL
         END)
-      } |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
+      } |> WHERE _ != NIL) |> DISTINCT _ |> SELECT:? COPY _;
       IF ((names).length() != owner_params.length()) THEN
         TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY declaration } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_BINDERS_CANNOT_INFER }, [], CAST({:owner: owner_name, :expected: owner_params.length(), :got: (names).length()} AS {String@symbol}Any)));
       END
@@ -1048,7 +1048,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (rtoc_each_1 == rtoc_each_1) THEN
         CONTINUE;
     END
-    MUTABLE vis = (functionSignature__visibility(sig) OR :package);
+    MUTABLE vis = (functionSignature__visibility(sig) OR_ELSE :package);
     MUTABLE importable = (((vis == :pub)) OR (((vis == :package) AND same_dir)));
     IF !(importable) THEN
         CONTINUE;
@@ -1302,7 +1302,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     member.type_params = member.generic_params |> SELECT _.name;
     member.implementation_owner = COPY resolution.owner.name;
     member.source_name = COPY source_name;
-    member.name = _.function_name(resolution.owner.name, source_name);
+    member.name = implementationRegistration__function_name(resolution.owner.name, source_name);
     IF member.is_method THEN
       TRY (resolutionSession__prepare_method_receiver_mut(&rtoc_self_view, member, resolution));
     END
