@@ -782,7 +782,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (_ == "@multiowned") THEN
                 reason = "single-scheduler Rc; automatic clone on move";
     END
-    &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CHANGE_BINDING_CAPABILITY_FOR_MOVE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :cap: _, :reason: DiagnosticKwValue{ StringValue: COPY reason }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, dline, insert_col, 0), " ${_}")], :interactive)));
+    &fixes.append(TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :CHANGE_BINDING_CAPABILITY_FOR_MOVE, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :cap: DiagnosticKwValue{ StringValue: COPY _ }, :reason: DiagnosticKwValue{ StringValue: COPY reason }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, dline, insert_col, 0), " ${_}")], :interactive)));
             END
           END
         END

@@ -8239,7 +8239,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, _.type, a_param.type(), type_params, &subst));
           };
-          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, UNWRAP (param_fn_value).return_type, actual_fn.return_type, type_params, &subst));
+          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, param_fn_value.return_type, actual_fn.return_type, type_params, &subst));
         ELSE
           RETURN;
         END
@@ -15063,7 +15063,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_377 = (TRY (ownershipTransportFacts__decisions(facts)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_377.length() DO
-      MUTABLE node: BindingNode = COPY KEEP (rtoc_each_items_377[rtoc_idx]?.alias_fact).declaration;
+      MUTABLE node: ?Any = COPY KEEP (rtoc_each_items_377[rtoc_idx]?.alias_fact).declaration;
       node?.ownership_transport_plan = COPY rtoc_each_items_377[rtoc_idx]?.plan;
       IF ((rtoc_each_items_377[rtoc_idx]?.plan).action == :move) THEN
           TRY (typeAnalysisSession__handle_assign_move(&rtoc_self_view, node));
