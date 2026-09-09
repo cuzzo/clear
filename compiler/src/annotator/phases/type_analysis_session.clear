@@ -1792,9 +1792,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         src = typeAnalysisSession__source_code(&rtoc_self_view);
         IF (((decl != NIL) AND TRUE) AND (src != NIL)) THEN
-          MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
+          MUTABLE rtoc_decl_tok_1795: Token = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
+          MUTABLE dline: Int64 = rtoc_decl_tok_1795.line;
           MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
-          MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(castSymbolEntryRegInputToLocatable(decl)).column - 1));
+          MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (rtoc_decl_tok_1795.column - 1));
           IF semi_idx EXISTS AS semi_idx_value THEN
             MUTABLE insert_col = (semi_idx_value + 1);
             FOR _ IN candidate_caps DO
@@ -2625,15 +2626,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
+      MUTABLE rtoc_decl_tok: Token = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
+      MUTABLE dline: Int64 = rtoc_decl_tok.line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
-      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(castSymbolEntryRegInputToLocatable(decl)).column - 1));
+      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (rtoc_decl_tok.column - 1));
       IF semi_idx EXISTS AS semi_idx_value THEN
         IF line_text.contains?(sigil) THEN
           RETURN NIL;
         END
         MUTABLE insert_col = (semi_idx_value + 1);
-        MUTABLE fix_params = {:sigil: sigil, :name: name, :line: dline}.keys() |> REDUCE(COPY description_params) { acc[_] = COPY ({:sigil: sigil, :name: name, :line: dline}[_] OR_ELSE panic("missing hash key")); acc };
+        MUTABLE fix_params: {String@symbol}?DiagnosticKwValue = COPY description_params;
+        fix_params[:sigil] = DiagnosticKwValue{ StringValue: COPY sigil };
+        fix_params[:name] = DiagnosticKwValue{ StringValue: COPY name };
+        fix_params[:line] = DiagnosticKwValue{ Int64Value: dline };
         RETURN TRY (fix__new(TRY (typeAnalysisSession__fix_description_from_hash(rtoc_self_view, description_code, fix_params)), [edit__new(span__new(NIL, dline, insert_col, 0), " ${sigil}")], confidence));
       ELSE
         RETURN NIL;
@@ -2659,11 +2664,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
+      MUTABLE rtoc_decl_tok_2666: Token = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
+      MUTABLE dline: Int64 = rtoc_decl_tok_2666.line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
       MUTABLE idx: ?Int64 = line_text.indexOf(old_sigil);
       IF idx EXISTS AS idx_value THEN
-        MUTABLE fix_params = {:old_sigil: old_sigil, :new_sigil: new_sigil, :name: name, :line: dline}.keys() |> REDUCE(COPY description_params) { acc[_] = COPY ({:old_sigil: old_sigil, :new_sigil: new_sigil, :name: name, :line: dline}[_] OR_ELSE panic("missing hash key")); acc };
+        MUTABLE fix_params: {String@symbol}?DiagnosticKwValue = COPY description_params;
+        fix_params[:old_sigil] = DiagnosticKwValue{ StringValue: COPY old_sigil };
+        fix_params[:new_sigil] = DiagnosticKwValue{ StringValue: COPY new_sigil };
+        fix_params[:name] = DiagnosticKwValue{ StringValue: COPY name };
+        fix_params[:line] = DiagnosticKwValue{ Int64Value: dline };
         RETURN TRY (fix__new(TRY (typeAnalysisSession__fix_description_from_hash(rtoc_self_view, description_code, fix_params)), [edit__new(span__new(NIL, dline, (idx_value + 1), old_sigil.codepointCount()), new_sigil)], confidence));
       ELSE
         RETURN NIL;

@@ -772,9 +772,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         src = capabilityAuditSession__source_code(rtoc_self_view);
         IF ((decl != NIL) AND (src != NIL)) THEN
-          MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
+          MUTABLE rtoc_decl_tok_775: Token = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
+          MUTABLE dline: Int64 = rtoc_decl_tok_775.line;
           MUTABLE line_text = (src.split("\n")[(dline - 1)] OR_ELSE "");
-          MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(castSymbolEntryRegInputToLocatable(decl)).column - 1));
+          MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (rtoc_decl_tok_775.column - 1));
           IF semi_idx EXISTS AS semi_idx_value THEN
             MUTABLE insert_col = (semi_idx_value + 1);
             FOR _ IN candidate_caps DO
@@ -1613,9 +1614,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
+      MUTABLE rtoc_decl_tok_1616: Token = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
+      MUTABLE dline: Int64 = rtoc_decl_tok_1616.line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
-      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (aST__node__token(castSymbolEntryRegInputToLocatable(decl)).column - 1));
+      MUTABLE semi_idx: ?Int64 = line_text.indexOf(";", (rtoc_decl_tok_1616.column - 1));
       IF semi_idx EXISTS AS semi_idx_value THEN
         IF line_text.contains?(sigil) THEN
           RETURN NIL;
@@ -1650,7 +1652,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     IF src EXISTS AS src_value THEN
-      MUTABLE dline = aST__node__token(castSymbolEntryRegInputToLocatable(decl)).line;
+      MUTABLE rtoc_decl_tok_1653: Token = aST__node__token(castSymbolEntryRegInputToLocatable(decl));
+      MUTABLE dline: Int64 = rtoc_decl_tok_1653.line;
       MUTABLE line_text = (src_value.split("\n")[(dline - 1)] OR_ELSE "");
       MUTABLE idx: ?Int64 = line_text.indexOf(old_sigil);
       IF idx EXISTS AS idx_value THEN
