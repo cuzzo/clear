@@ -3932,7 +3932,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE callee_param: ?Param = ((TRY (typeAnalysisSession__function_node_for(&rtoc_self_view, aST__node_name(UNWRAP (castFunctionCallNodeToLocatable(facts.site.node))))))?.params[facts.index]);
     MUTABLE contract: String@symbol = UNWRAP (facts.param.carrier_contract);
     IF callee_param != NIL THEN
-      contract = (callee_param).carrier_contract;
+      contract = UNWRAP ((callee_param).carrier_contract);
     END
     IF !((contract == :unique)) THEN
       RETURN;
@@ -5230,7 +5230,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN PipelineSourceFact{ kind: :open_stream, item_type: COPY UNWRAP (item)};
     END
     IF TRY (type__dynamic_stream?(source_type)) THEN
-      MUTABLE item = (IF TRY (type__canonical_stream_item_type(source_type)) != NIL THEN TRY (type__canonical_stream_item_type(source_type)) ELSE UNWRAP (TRY (type__element_type((TRY (type__tense_type(source_type)))))) END);
+      MUTABLE item: ?Type = (IF TRY (type__canonical_stream_item_type(source_type)) != NIL THEN TRY (type__canonical_stream_item_type(source_type)) ELSE UNWRAP (TRY (type__element_type((TRY (type__tense_type(source_type)))))) END);
       RETURN PipelineSourceFact{ kind: :dynamic_stream, item_type: COPY item };
     END
     IF TRY (type__bounded_stream?(source_type)) THEN
@@ -8982,7 +8982,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE fn_node: ?Locatable = program_node.statements[rtoc_idx];
       MUTABLE kind: ?String@symbol = typeAnalysisSession__canonical_reentrance_kind(rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node))));
-      fn_node.reentrance_kind = kind;
+      IF fn_node EXISTS AS MUTABLE fn_node_present THEN
+        fn_node_present.reentrance_kind = kind;
+      END
       IF (kind == :reentrant_tail_call) THEN
           fn_node.tail_call = TRUE;
       ELSE_IF (kind == :reentrant_not_logical) THEN
@@ -15770,7 +15772,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       locatable__set_ownership_pending_transfer_mut(&assignment_node.value, TRUE);
     END
     IF type__multiowned?(assignment_field_type) THEN
-      MUTABLE owner = ((TRY (aST__full_type_mut(field_node.target))).resolved());
+      MUTABLE owner = (type__resolved((TRY (aST__full_type_mut(field_node.target)))));
       TRY (typeAnalysisSession__keep_param_identity_mut(&rtoc_self_view, assignment_node.value, CAST(assignment_field_type AS Type), "${(owner OR_ELSE "field")}.${field_node.field}"));
     END
     TRY (typeAnalysisSession__validate_assignment_type(&rtoc_self_view, Node{ Assignment: COPY assignment_node }, TypeTypeInput{ Type: COPY assignment_field_type }, TRY (aST__full_type_mut(assignment_node.value))));
