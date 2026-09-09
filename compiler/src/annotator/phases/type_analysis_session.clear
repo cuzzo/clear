@@ -5354,7 +5354,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END);
-    IF (((TRUE) AND type__observable?(lhs_t)) AND ((inner != NIL) AND type__array?(UNWRAP (inner)))) THEN
+    IF (((TRUE) AND type__observable?(lhs_t)) AND ((inner != NIL) AND type__array?(inner))) THEN
       MUTABLE elem_sym = type__to_sym(TRY (type__element_type(inner)));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${elem_sym}[]") }))));
       node.storage_override = :heap;
@@ -7676,7 +7676,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_ternary_value_174 = TRY (type__element_type(shape));
     END
     rtoc_ternary_value_174? };
-    IF (((TRUE) AND payload.indirect?()) AND type__primitive?(payload)) THEN
+    IF (((TRUE) AND type__indirect?(payload)) AND type__primitive?(payload)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.node, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_PRIMITIVE }, [], CAST({:type: payload.resolved()} AS {String@symbol}Any)));
     END
     IF (type__sharded?(type_obj) AND ((payload != NIL) AND UNWRAP (payload).multiowned?())) THEN

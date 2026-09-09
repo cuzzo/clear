@@ -2987,7 +2987,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (effs.contains?(:REENTRANT) OR (fn.reentrance_kind == :reentrant)) THEN
         RETURN BgSpawnDecision{ spawn_form: :stackful, reason: :reentrant };
       END
-      IF effs.contains?(extern_value) THEN
+      IF effs.contains?(:EXTERN) THEN
         RETURN BgSpawnDecision{ spawn_form: :stackful, reason: :extern };
       END
       IF anySuspendsEffect(effs) THEN
