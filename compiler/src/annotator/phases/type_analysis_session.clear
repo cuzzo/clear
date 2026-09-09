@@ -7001,7 +7001,7 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE op: ClearParserConcurrentPipelineOp = ClearParserConcurrentPipelineOp{ ConcurrentOp: COPY UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right)) };
+    MUTABLE op: ConcurrentOp = UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right));
     IF Locatable{ ConcurrentOp: COPY op } IS_A SelectOp THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, UNWRAP (clearParserConcurrentPipelineOp__expression(op))));
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, &op, effect));
@@ -7509,10 +7509,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(UNWRAP (lit) IS_A Literal) THEN
       RETURN NIL;
     END
-    IF !(((UNWRAP (lit).type == :INT64) OR (UNWRAP (lit).type == :PREFIXED_INT))) THEN
+    IF !(((UNWRAP (castLocatableToLiteral(UNWRAP (lit))).type == :INT64) OR (UNWRAP (castLocatableToLiteral(UNWRAP (lit))).type == :PREFIXED_INT))) THEN
       RETURN NIL;
     END
-    RETURN (-aST__node_value( UNWRAP (lit)));
+    RETURN (-tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (lit))).value)));
 }
 END
 PRIVATE FN typeAnalysisSession__integer_range_target_type(MUTABLE self: TypeAnalysisSession, effective_type: TypeTypeInput) RETURNS ?String@symbol
