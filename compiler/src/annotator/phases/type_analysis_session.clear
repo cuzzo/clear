@@ -8404,14 +8404,14 @@ PRIVATE FN typeAnalysisSession__same_generic_binding?(MUTABLE self: TypeAnalysis
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE l = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_188: ?GenericBinding = NIL;
     IF left IS_A Type THEN
-      rtoc_ternary_value_188 = left;
+      rtoc_ternary_value_188 = COPY left;
     ELSE
       rtoc_ternary_value_188 = GenericBinding{ Type: COPY TRY (type__new(castGenericBindingToTypeConstructionInput(left))) };
     END
     rtoc_ternary_value_188? };
     MUTABLE r = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_190: ?GenericBinding = NIL;
     IF right IS_A Type THEN
-      rtoc_ternary_value_190 = right;
+      rtoc_ternary_value_190 = COPY right;
     ELSE
       rtoc_ternary_value_190 = GenericBinding{ Type: COPY TRY (type__new(castGenericBindingToTypeConstructionInput(right))) };
     END
@@ -8439,7 +8439,7 @@ PRIVATE FN typeAnalysisSession__generic_binding_source(MUTABLE self: TypeAnalysi
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE t = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_192: ?GenericBinding = NIL;
     IF type IS_A Type THEN
-      rtoc_ternary_value_192 = type;
+      rtoc_ternary_value_192 = COPY type;
     ELSE
       rtoc_ternary_value_192 = GenericBinding{ Type: COPY TRY (type__new(castGenericBindingToTypeConstructionInput(type))) };
     END
