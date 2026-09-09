@@ -813,3 +813,13 @@ FN castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(value: Sch
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:fields)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN schemasUnionSchemaVariantInput__fields(value: SchemasUnionSchemaVariantInput) RETURNS ?{String@symbol}TypeTypeInput ->
+  PARTIAL MATCH value START
+    SchemasUnionSchemaVariantInput.InlineStructVariantMultiowned AS item -> RETURN COPY item.fields;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

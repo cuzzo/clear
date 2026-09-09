@@ -18161,3 +18161,12 @@ PUB FN literal__value_int(self: Literal) RETURNS ?Int64 ->
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToLiteral(value: Locatable) RETURNS ?Literal EFFECTS REENTRANT ->
+  IF value IS_A Literal AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

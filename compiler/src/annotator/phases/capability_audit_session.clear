@@ -3516,14 +3516,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           BREAK;
       END
       ruby_array_concat_Any__capability_audit_session(edits_nl, CAST(eff AS []Any));
-      MUTABLE rt: ?Type = functionDef__declared_return_type(UNWRAP (cycle_thunk_fns[rtoc_idx]));
+      MUTABLE rt: ?Type = functionDef__declared_return_type(cycle_thunk_fns[rtoc_idx]);
       IF rt EXISTS AS rt_value THEN
-        IF rt_value.error_union?() THEN
+        IF type__error_union?(rt_value) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       END
-      MUTABLE rt_tok = cycle_thunk_fns[rtoc_idx].return_type_token;
+      MUTABLE rt_tok: ?Token = cycle_thunk_fns[rtoc_idx].return_type_token;
       IF (rt_tok == NIL) THEN
           nl_ok = FALSE;
           BREAK;
@@ -3545,14 +3545,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           BREAK;
       END
       ruby_array_concat_Any__capability_audit_session(edits_md, CAST(eff AS []Any));
-      MUTABLE rt = cycle_thunk_fns[rtoc_idx].declared_return_type();
+      MUTABLE rt: ?Type = functionDef__declared_return_type(cycle_thunk_fns[rtoc_idx]);
       IF rt EXISTS AS rt_value THEN
-        IF rt_value.error_union?() THEN
+        IF type__error_union?(rt_value) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       END
-      MUTABLE rt_tok = cycle_thunk_fns[rtoc_idx].return_type_token;
+      MUTABLE rt_tok: ?Token = cycle_thunk_fns[rtoc_idx].return_type_token;
       IF (rt_tok == NIL) THEN
           md_ok = FALSE;
           BREAK;

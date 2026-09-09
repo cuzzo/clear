@@ -1376,9 +1376,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
       IF (node IS_A FuncCall OR node IS_A MethodCall) THEN
-        MUTABLE signature = locatable__matched_signature(node);
+        MUTABLE signature: ?FunctionSignature@multiowned = locatable__matched_signature(node);
         MUTABLE actuals = IF node IS_A MethodCall THEN
-          ([node.object] + locatable__args(node))
+          ([locatable__object(node)] + locatable__args(node))
         ELSE
           locatable__args(node)
         END;
@@ -2308,7 +2308,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE inner = body.trimStart();
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
-      IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(index)) >= 0)) THEN
+      IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
         length = COPY CAST(((index.value() + 1)) AS String);
       ELSE
         length = "0";
@@ -2483,7 +2483,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
     END
-    MUTABLE kw = {:name: name, :got: got};
+    MUTABLE kw: {String@symbol}DiagnosticKwValue = {:name: DiagnosticKwValue{ StringValue: COPY name }, :got: DiagnosticKwValue{ StringValue: COPY castTypeTypeInputToString__type_analysis_session(got) }};
     IF !(fix) THEN
       RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_MATERIALIZED_NEEDS_TENSE }, [], kw));
     END
