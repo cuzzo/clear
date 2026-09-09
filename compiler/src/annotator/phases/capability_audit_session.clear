@@ -1669,7 +1669,15 @@ PRIVATE FN capabilityAuditSession__emit_with_cap_mismatch_mut(MUTABLE self: Capa
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fixes = candidates |> SELECT:? TRY (capabilityAuditSession__build_decl_cap_insert_fix(&rtoc_self_view, name, _.sigil, _.description_code, _.description_params, confidence)) |> WHERE _ != NIL;
+    MUTABLE fixes: []Fix = List[];
+    MUTABLE rtoc_fix_i = 0;
+    WHILE rtoc_fix_i < candidates.length() DO
+      MUTABLE rtoc_cand = UNWRAP (candidates[rtoc_fix_i]);
+      IF TRY (capabilityAuditSession__build_decl_cap_insert_fix(&rtoc_self_view, name, rtoc_cand.sigil, rtoc_cand.description_code, rtoc_cand.description_params, confidence)) EXISTS AS rtoc_fix THEN
+        &fixes.append(COPY rtoc_fix);
+      END
+      rtoc_fix_i = rtoc_fix_i + 1;
+    END
     IF (fixes.length() == 0) THEN
       RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], kw));
     END
@@ -2862,7 +2870,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_scan = COPY _.summary;
     IF (node IS_A BgBlock) THEN
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, castAsyncBodyNodeToAsyncSpawnNode(node), body_scan));
-        TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), UNWRAP (asyncBodyNode__can_smash(node)), node));
+        TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), UNWRAP (asyncBodyNode__can_smash(node)), UNWRAP (castAsyncBodyNodeToAsyncValidationNode(node))));
     ELSE_IF (node IS_A BgStreamBlock) THEN
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, &node, body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, node.stack_size, FALSE, node));

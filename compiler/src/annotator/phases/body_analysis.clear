@@ -174,3 +174,11 @@ PUB FN asyncBodyNode__set_computed_stack_tier_mut(MUTABLE value: AsyncBodyNode, 
     DEFAULT -> RETURN;
   END
 END
+FN castAsyncBodyNodeToAsyncValidationNode(value: AsyncBodyNode) RETURNS ?AsyncValidationNode ->
+  PARTIAL MATCH value START
+    AsyncBodyNode.BgBlock AS item -> RETURN AsyncValidationNode{ BgBlock: COPY item };,
+    AsyncBodyNode.BgStreamBlock AS item -> RETURN AsyncValidationNode{ BgStreamBlock: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

@@ -823,3 +823,14 @@ PUB FN schemasUnionSchemaVariantInput__fields(value: SchemasUnionSchemaVariantIn
   END
   RETURN NIL;
 END
+
+# Ruby maps the variant's declared field types into StructFields; the map is
+# rebuilt entry by entry with the same keys.
+PUB FN schemasUnionSchemaVariantInput__field_struct_map(value: SchemasUnionSchemaVariantInput) RETURNS {String@symbol}StructField ->
+  MUTABLE out: {String@symbol}StructField = {};
+  MUTABLE fields = (schemasUnionSchemaVariantInput__fields(value) OR_ELSE {});
+  FOR key IN fields.keys() DO
+    out[key] = StructField{ type: COPY UNWRAP (castTypeTypeInputToType(UNWRAP (fields[key]))), default: NIL, borrowed: FALSE };
+  END
+  RETURN out;
+END

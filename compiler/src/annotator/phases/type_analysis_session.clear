@@ -2684,7 +2684,15 @@ PRIVATE FN typeAnalysisSession__emit_with_cap_mismatch_mut(MUTABLE self: TypeAna
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE fixes: []Fix = candidates |> SELECT:? TRY (typeAnalysisSession__build_decl_cap_insert_fix(&rtoc_self_view, name, _.sigil, _.description_code, _.description_params, confidence)) |> WHERE _ != NIL |> SELECT UNWRAP (_);
+    MUTABLE fixes: []Fix = List[];
+    MUTABLE rtoc_fix_i = 0;
+    WHILE rtoc_fix_i < candidates.length() DO
+      MUTABLE rtoc_cand = UNWRAP (candidates[rtoc_fix_i]);
+      IF TRY (typeAnalysisSession__build_decl_cap_insert_fix(&rtoc_self_view, name, rtoc_cand.sigil, rtoc_cand.description_code, rtoc_cand.description_params, confidence)) EXISTS AS rtoc_fix THEN
+        &fixes.append(COPY rtoc_fix);
+      END
+      rtoc_fix_i = rtoc_fix_i + 1;
+    END
     IF (fixes.length() == 0) THEN
       RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueMapToAnyMap__type_analysis_session(kw)));
     END
@@ -6626,7 +6634,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF expr IS_A UnaryOp AS rtoc_neg_op THEN (rtoc_neg_op.op == :SUB) ELSE FALSE END) THEN
         MUTABLE right: ?Locatable = aST__node_right(expr);
         IF UNWRAP (right) IS_A Literal THEN
-          RETURN (-tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (right))).value)));
+          RETURN (-tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (right)))));
         END
     END
     END
@@ -6876,11 +6884,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE shard_node: ?Locatable = aST__node_right(node.left);
     MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(UNWRAP (shard_node))));
-    conc.shard_context = PipelineShardContext{ map_var: COPY UNWRAP (locatable__target_map(UNWRAP (shard_node))), shard_count: (IF target_info != NIL THEN
-      type__shard_count(target_info)
-    ELSE
-      NIL
-    END), key_expr: COPY shard_node.key_expr, auto_detected: FALSE, key_allocates_frame: FALSE, body_allocates_frame: FALSE };
+    conc.shard_context = PipelineShardContext{ map_var: COPY UNWRAP (locatable__target_map(UNWRAP (shard_node))), shard_count: type__shard_count(TRY (target_info)), key_expr: COPY UNWRAP (shard_node).key_expr, auto_detected: FALSE, key_allocates_frame: FALSE, body_allocates_frame: FALSE };
     RETURN shard_node;
 }
 END
@@ -11810,7 +11814,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_id_base = (summary.body_id.value * semanticBodyIdStride());
     MUTABLE place_id = (body_id_base + frame.next_place_ordinal);
     &summary.local_facts.append(COPY LocalFact{ id: COPY LocalId{ value: (body_id_base + frame.next_local_ordinal) }, place_id: COPY SemanticPlaceId{ value: place_id }, name: COPY name });
-    MUTABLE symbol = aST__node__symbol(castBindingNodeToLocatable(node));
+    MUTABLE symbol: ?SymbolEntry@multiowned = aST__node__symbol(castBindingNodeToLocatable(node));
     IF symbol IS_A SymbolEntry THEN
       &symbol.adopt_semantic_place_id_mut(place_id);
     END
@@ -13225,7 +13229,7 @@ PRIVATE FN typeAnalysisSession__runtime_is_a_payload_matches?(MUTABLE self: Type
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF UNWRAP (payload) IS_A Type@multiowned AS type_multiowned THEN
       MUTABLE payload_name = TRY (type__coercion_surface_name(TypeTypeInput{ Type: COPY type_multiowned }));
-      MUTABLE payload_names: []String = [COPY payload_name, COPY (payload_name.split(".").last() OR_ELSE payload_name)] |> DISTINCT _;
+      MUTABLE payload_names: [Set]String = [COPY payload_name, COPY (payload_name.split(".").last() OR_ELSE payload_name)] |> DISTINCT _;
       RETURN type__any?((ruby_set_intersection_String(payload_names, target_names)));
     ELSE_IF payload IS_A InlineStructVariant@multiowned AS inline_struct_variant_multiowned THEN
       MUTABLE synthetic_name = "${union_type}_${variant_name}";
@@ -19554,7 +19558,7 @@ PRIVATE FN typeAnalysisSession__reject_scoped_assignment_move_mut(MUTABLE self: 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier AND ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_478: ?SymbolEntry@multiowned = ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))))));
-    symbolEntry__non_escaping(rtoc_local_receiver_478) }))) THEN
+    symbolEntry__non_escaping(UNWRAP (rtoc_local_receiver_478)) }))) THEN
       RETURN;
     END
     MUTABLE vti = aST__node_value(UNWRAP (castNodeToLocatable(node))).full_type_mut("assignment scoped move value");

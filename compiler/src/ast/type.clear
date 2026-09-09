@@ -5190,3 +5190,12 @@ PUB FN typeTypeInput__element_type(value: TypeTypeInput) RETURNS !?Type EFFECTS 
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castTypeTypeInputToType(value: TypeTypeInput) RETURNS ?Type EFFECTS REENTRANT ->
+  IF value IS_A Type AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
