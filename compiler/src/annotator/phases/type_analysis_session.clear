@@ -16699,7 +16699,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         locatable__set_coerced_type_object_mut(&node.start, TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })));
       END
       IF !(finish_is_float) THEN
-        locatable__set_coerced_type_object_mut(&node.finish, :Float64);
+        locatable__set_coerced_type_object_mut(&node.finish, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY :Float64 })));
       END
     ELSE_IF start_is_float THEN
   
@@ -18531,7 +18531,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, result.type));
     IF result.left_coercion EXISTS AS left_coercion_value THEN
-      locatable__set_coerced_type_object_mut(&node.left, COPY left_coercion_value);
+      locatable__set_coerced_type_object_mut(&node.left, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY COPY left_coercion_value })));
     END
     IF result.right_coercion EXISTS AS right_coercion_value THEN
       locatable__set_coerced_type_object_mut(&node.right, COPY right_coercion_value);
