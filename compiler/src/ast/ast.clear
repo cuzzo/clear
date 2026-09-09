@@ -18461,3 +18461,12 @@ PUB FN locatable__function_name(value: Locatable) RETURNS ?String ->
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToMatchStatement(value: Locatable) RETURNS ?MatchStatement EFFECTS REENTRANT ->
+  IF value IS_A MatchStatement AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

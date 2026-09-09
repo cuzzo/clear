@@ -11950,7 +11950,7 @@ PRIVATE FN typeAnalysisSession__fn_var_call_error_fallible?(MUTABLE self: TypeAn
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_signature));
+    MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(KEEP node__matched_signature(Node{ FuncCall: COPY node })));
     IF ((sig != NIL) AND type__error_union?(functionSignature__return_type(sig))) THEN
       RETURN TRUE;
     END
@@ -15226,7 +15226,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__promote_to_expr_if_mut(&rtoc_self_view, UNWRAP (castDeclarationNodeToLocatable(node)), UNWRAP (castLocatableToIfStatement(UNWRAP (declarationNode__value(node))))));
     END
     IF (MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A MatchStatement, DeclarationNode.BindExpr AS item -> item.value IS_A MatchStatement END) THEN
-      TRY (typeAnalysisSession__promote_to_expr_match_mut(&rtoc_self_view, UNWRAP (castDeclarationNodeToLocatable(node)), UNWRAP (declarationNode__value(node))));
+      TRY (typeAnalysisSession__promote_to_expr_match_mut(&rtoc_self_view, UNWRAP (castDeclarationNodeToLocatable(node)), UNWRAP (castLocatableToMatchStatement(UNWRAP (declarationNode__value(node))))));
     END
 }
 END
