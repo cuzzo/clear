@@ -3290,7 +3290,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_implicit_return = functionDef__implicit_return_type?(node);
     node.type_params = TRY (typeAnalysisSession__infer_implicit_type_params(&rtoc_self_view, node));
     MUTABLE declared_return = TRY (functionDef__annotation_return_type(node));
-    MUTABLE lifetime_paths: []TypeAnalysisSessionReturnValueItem = TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, node));
+    MUTABLE lifetime_paths: []FunctionContextLifetimeSource = TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, node));
     MUTABLE fn_type_params = node.type_params |> SELECT symbol(_);
     MUTABLE fn_ctx = TRY (functionContext__new(node.name, TypeTypeInput{ Type: COPY TRY (functionDef__annotation_return_type(node)) }, lifetime_paths, fn_type_params, node.generic_params));
     typeAnalysisSession__push_function_context_mut(&rtoc_self_view, fn_ctx);
@@ -5908,7 +5908,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
-    shape = IF type__fixed?((TRY (type__tense_type(UNWRAP (lhs_type))))) THEN
+    shape = IF type__fixed?((TRY (type__tense_type(lhs_type)))) THEN
       TRY (type__tense_type(lhs_type))
     ELSE
       TRY (type__optional_stream_shape_type(lhs_type))
@@ -8282,7 +8282,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     rtoc_ternary_value_185? };
     IF typeTypeInput__fn_type?(t) THEN
-      MUTABLE fn_type: ?FunctionType = type__function_type(UNWRAP (castTypeTypeInputToType(t)));
+      MUTABLE fn_type: FunctionSignature = type__function_type(UNWRAP (castTypeTypeInputToType(t)));
       IF !(fn_type) THEN
         RETURN UNWRAP (castTypeTypeInputToType(t));
       END
@@ -12366,7 +12366,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
             MUTABLE rtoc_mutable_receiver_291: ?FunctionContext = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
-            functionContext__record_alloc_use_mut(&rtoc_mutable_receiver_291);
+            MUTABLE rtoc_open_0 = UNWRAP (rtoc_mutable_receiver_291);
+            functionContext__record_alloc_use_mut(&rtoc_open_0);
       END
       TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("HEAP")));
       node.can_fail = TRUE;
@@ -13522,7 +13523,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       IF schema EXISTS AS schema_value THEN
-          IF !(scopeScopeTypeSchema__fields(schema_value).contains?(pat.fields[rtoc_idx]?.name)) THEN
+          IF !(scopeScopeTypeSchema__fields(schema_value).contains?(UNWRAP (pat.fields[rtoc_idx]?.name))) THEN
             MUTABLE name_tok: ?Token@multiowned = COPY pat.fields[rtoc_idx]?.name_token;
             IF name_tok EXISTS AS name_tok_value THEN
               MUTABLE valid_fields = schemaValue__fields(UNWRAP (schema)).keys() |> WHERE !((CAST(_ AS String)).startsWith?("_"));
@@ -14720,7 +14721,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &rtoc_self_view.traversal_state.deferred_copy_wrapper_bindings.append(node);
       RETURN;
     END
-    MUTABLE error_type: ?Type@multiowned = TRY (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &value, "inferred wrapper binding"));
+    MUTABLE rtoc_open_1 = UNWRAP (value);
+    MUTABLE error_type: ?Type@multiowned = TRY (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &rtoc_open_1, "inferred wrapper binding"));
     MUTABLE error_success_type_branch_value: ?Type = NIL;
     IF error_type EXISTS AS error_type_value THEN
       IF type__error_union?(error_type_value) THEN
@@ -16372,7 +16374,7 @@ PRIVATE FN typeAnalysisSession__visit_StructLit(MUTABLE self: TypeAnalysisSessio
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE display_name = COPY node.name;
-    MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(display_name)));
+    MUTABLE schema: TypeAnalysisSchema = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, symbol(display_name)));
     IF schemas__union?(schema) THEN
       IF (node.fields.length() != 1) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNION_LITERAL_VARIANT_COUNT }, [], CAST({:name: node.name, :got: node.fields.length()} AS {String@symbol}Any)));
@@ -19680,7 +19682,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A FuncCall OR UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A MethodCall)) THEN
       RETURN;
     END
-    MUTABLE call_node: TypeAnalysisCallNode = UNWRAP (castLocatableToTypeAnalysisCallNode(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))));
+    MUTABLE call_node: Locatable = UNWRAP (castLocatableToTypeAnalysisCallNode(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))));
     IF aST__collection_method_call?( call_node) THEN
       RETURN;
     END
