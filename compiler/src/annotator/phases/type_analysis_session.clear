@@ -17814,7 +17814,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (_.form == :type) THEN
       MUTABLE type_sym = symbol((CAST(_.value AS String)));
       IF !(TRY (aST__error_type?(type_sym))) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, COPY _.token, TypeAnalysisCodeOrMessage{ SymbolValue: :CATCH_WITH_UNREGISTERED }, [], CAST({:name: _.value} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY _.token }, TypeAnalysisCodeOrMessage{ SymbolValue: :CATCH_WITH_UNREGISTERED }, [], CAST({:name: _.value} AS {String@symbol}Any)));
       END
       &filter_types.append(COPY CAST(_.value AS String));
     ELSE_IF (_.form == :message) THEN
