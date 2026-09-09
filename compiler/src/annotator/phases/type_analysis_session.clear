@@ -8282,7 +8282,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF typeTypeInput__fn_type?(t) THEN
       MUTABLE fn_type: ?FunctionType = type__function_type(UNWRAP (castTypeTypeInputToType(t)));
       IF !(fn_type) THEN
-        RETURN t;
+        RETURN UNWRAP (castTypeTypeInputToType(t));
       END
       MUTABLE params = fn_type.params() |> SELECT FunctionTypeParam{ type: CAST(COPY typeAnalysisSession__apply_type_subst(&rtoc_self_view, _.type, subst) AS Type), mutable: FALSE };
       RETURN TRY (type__new(TypeConstructionInput{ FunctionType: COPY FunctionType{ params: COPY params, return_type: CAST(COPY typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY functionSignature__return_type(fn_type) }, subst) AS Type), reentrant: functionSignature__reentrant(fn_type), source_signature: COPY fn_type.source_signature, abi: COPY fn_type.abi } }));
@@ -8414,7 +8414,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_ternary_value_190 = GenericBinding{ Type: COPY TRY (type__new(castGenericBindingToTypeConstructionInput(right))) };
     END
     rtoc_ternary_value_190? };
-    RETURN ((((((genericBinding__resolved(l) == genericBinding__resolved(r)) AND (type__ownership(l) == type__ownership(r))) AND (genericBinding__sync(l) == r.sync())) AND (l.layout() == r.layout())) AND (type__elem_ownership(l) == type__elem_ownership(r))) AND (type__elem_sync(l) == type__elem_sync(r)));
+    RETURN ((((((genericBinding__resolved(l) == genericBinding__resolved(r)) AND (genericBinding__ownership(l) == genericBinding__ownership(r))) AND (genericBinding__sync(l) == r.sync())) AND (l.layout() == r.layout())) AND (type__elem_ownership(l) == type__elem_ownership(r))) AND (type__elem_sync(l) == type__elem_sync(r)));
 }
 END
 PRIVATE FN typeAnalysisSession__same_shared_call_capability?(MUTABLE self: TypeAnalysisSession, left: Type, right: Type) RETURNS Bool
@@ -8443,7 +8443,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     rtoc_ternary_value_192? };
     MUTABLE parts = [CAST(genericBinding__resolved(t) AS String)];
-    MUTABLE ownership = type__ownership_surface_name(t);
+    MUTABLE ownership = genericBinding__ownership_surface_name(t);
     MUTABLE sync = type__sync_surface_name(t);
     IF ownership THEN
       &parts.append(ownership);

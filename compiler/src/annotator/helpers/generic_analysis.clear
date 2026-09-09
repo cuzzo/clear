@@ -297,3 +297,23 @@ PUB FN genericBinding__sync(value: GenericBinding) RETURNS ?String@symbol EFFECT
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:ownership)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN genericBinding__ownership(value: GenericBinding) RETURNS ?String@symbol EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    GenericBinding.TypeMultiowned AS item -> RETURN type__ownership(item);,
+    GenericBinding.Type AS item -> RETURN type__ownership(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:ownership_surface_name)` and then calls it. The variants that
+# can answer compute it; the rest do not respond.
+PUB FN genericBinding__ownership_surface_name(value: GenericBinding) RETURNS ?String EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    GenericBinding.TypeMultiowned AS item -> RETURN type__ownership_surface_name(item);,
+    GenericBinding.Type AS item -> RETURN type__ownership_surface_name(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
