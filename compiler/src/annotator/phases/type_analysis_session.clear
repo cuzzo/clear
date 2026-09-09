@@ -5984,7 +5984,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF sig != NIL THEN
       TRY (typeAnalysisSession__analyze_pipe_to_named_function(&rtoc_self_view, &node, sig, UNWRAP (func_name)));
     ELSE_IF FALSE THEN
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF (FALSE AND (TRUE == :Intrinsic)) THEN
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, IF FALSE THEN
         :Any
       ELSE
         sig
@@ -7000,7 +7000,7 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE op: ClearParserConcurrentPipelineOp = ClearParserConcurrentPipelineOp{ ConcurrentOp: COPY castLocatableToConcurrentOp__type_analysis_session(node.right) };
+    MUTABLE op: ClearParserConcurrentPipelineOp = ClearParserConcurrentPipelineOp{ ConcurrentOp: COPY UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right)) };
     IF Locatable{ ConcurrentOp: COPY op } IS_A SelectOp THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, UNWRAP (clearParserConcurrentPipelineOp__expression(op))));
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, &op, effect));
@@ -8823,7 +8823,7 @@ PRIVATE FN typeAnalysisSession__effect_call_site_arg_families_for(MUTABLE self: 
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__set_call_site_arg_families_mut(&rtoc_self_view, caller_name, (typeAnalysisSession__effect_call_site_arg_families(&rtoc_self_view)[caller_name] OR_ELSE {}));
-    MUTABLE caller_families = COPY UNWRAP (typeAnalysisSession__effect_call_site_arg_families(&rtoc_self_view)[caller_name]);
+    MUTABLE caller_families = COPY (typeAnalysisSession__effect_call_site_arg_families(&rtoc_self_view)[caller_name] OR_ELSE {});
     IF !(caller_families.contains?(callee_name)) THEN
       caller_families[callee_name] = [];
     END
@@ -8889,7 +8889,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE existing = typeAnalysisSession__effect_call_site_context_for(&rtoc_self_view, UNWRAP (caller_name), callee_name);
-    existing[:loop] = (existing[:loop] OR_ELSE in_loop);
+    existing[:loop] = ((existing[:loop] OR_ELSE FALSE) OR in_loop);
     existing[:cond] = (existing[:cond] OR_ELSE in_cond);
     NIL;
 }
