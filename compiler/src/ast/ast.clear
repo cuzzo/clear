@@ -1064,7 +1064,7 @@ PUB STRUCT LambdaLit {
   captures: []Capture,
   body: LambdaBody@boxed,
   storage: ?String@symbol,
-  deferred_drops: ?[]Locatable,
+  deferred_drops: ?[]DeferredDrop,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
   collection_return: ?Type,
@@ -4035,7 +4035,7 @@ PUB STRUCT ForRange {
   end_expr: Locatable@boxed,
   inclusive: Bool,
   body: []Locatable,
-  deferred_drops: ?[]Locatable,
+  deferred_drops: ?[]DeferredDrop,
   mark_per_iter: ?Bool,
   tight: Bool,
   can_fail: ?Bool,
@@ -4071,7 +4071,7 @@ PUB STRUCT ForEach {
   var_name: String,
   collection: Locatable@boxed,
   body: []Locatable,
-  deferred_drops: ?[]Locatable,
+  deferred_drops: ?[]DeferredDrop,
   is_mutable: Bool,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
@@ -12281,6 +12281,17 @@ END
 
 # Ruby reads class.name and strips the module prefix; the variant name is
 # that name.
+# Ruby reports `target.class` when the assignment target is none of the
+# handled shapes. The union already knows which shape it holds.
+PUB FN assignmentName__variant_name(value: AssignmentName) RETURNS String ->
+  PARTIAL MATCH value START
+    AssignmentName.StringValue AS item -> RETURN COPY "String";,
+    AssignmentName.Identifier AS item -> RETURN COPY "Identifier";,
+    AssignmentName.GetField AS item -> RETURN COPY "GetField";,
+    AssignmentName.GetIndex AS item -> RETURN COPY "GetIndex";,
+  END
+  RETURN COPY "";
+END
 PUB FN locatable__variant_name(value: Locatable) RETURNS String ->
   PARTIAL MATCH value START
     Locatable.Program AS item -> RETURN "Program";,
@@ -13319,7 +13330,7 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A LambdaLit AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
-    MUTABLE rtoc_new_deferred_drops: ?[]Locatable = NIL;
+    MUTABLE rtoc_new_deferred_drops: ?[]DeferredDrop = NIL;
     IF item.deferred_drops EXISTS AS rtoc_list THEN
       MUTABLE rtoc_deferred_drops: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
@@ -13927,7 +13938,7 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
       &rtoc_body.append(blk(COPY rtoc_child));
     END
     item.body = rtoc_body;
-    MUTABLE rtoc_new_deferred_drops: ?[]Locatable = NIL;
+    MUTABLE rtoc_new_deferred_drops: ?[]DeferredDrop = NIL;
     IF item.deferred_drops EXISTS AS rtoc_list THEN
       MUTABLE rtoc_deferred_drops: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO
@@ -13948,7 +13959,7 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
     END
     item.body = rtoc_body;
     item.collection = blk(COPY item.collection);
-    MUTABLE rtoc_new_deferred_drops: ?[]Locatable = NIL;
+    MUTABLE rtoc_new_deferred_drops: ?[]DeferredDrop = NIL;
     IF item.deferred_drops EXISTS AS rtoc_list THEN
       MUTABLE rtoc_deferred_drops: []Locatable = List[];
       FOR rtoc_child IN rtoc_list DO

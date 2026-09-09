@@ -733,12 +733,18 @@ module Annotator
           return
         end
 
+        # A resolved-type symbol names what a value IS, and for a lambda that
+        # is only its return type -- `[%() -> ?[]D]` came out as `[1]?[]D`,
+        # losing the function shape. Build those from the element's own Type.
+        first_type = T.must(node.items.first).full_type!(context: "list literal element")
+        element_shaped = !all_strings && first_type.fn_type?
         if node.storage == :stack
-          inferred = Type.new(:"#{base_type}[#{node.items.size}]")
+          inferred = element_shaped ? Type.array_of(first_type, capacity: node.items.size) :
+            Type.new(:"#{base_type}[#{node.items.size}]")
           inferred.elem_sync = string_element_sync if string_element_sync
           stamp_type!(node, inferred)
         else
-          t = Type.new(:"#{base_type}[]", location: :heap)
+          t = element_shaped ? Type.array_of(first_type) : Type.new(:"#{base_type}[]", location: :heap)
           t.elem_sync = string_element_sync if string_element_sync
           t.mark_frame_allocated!  # makeList uses frameAlloc for backing
           stamp_type!(node, t)
