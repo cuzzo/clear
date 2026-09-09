@@ -7449,7 +7449,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF val EXISTS AS val_value THEN
         MUTABLE literal_value = val_value;
         MUTABLE checked_type = COPY effective_type_value;
-        MUTABLE t: ?String@symbol = typeAnalysisSession__integer_range_target_type(&rtoc_self_view, checked_type);
+        MUTABLE t: ?String@symbol = TRY (typeAnalysisSession__integer_range_target_type(&rtoc_self_view, checked_type));
         IF t EXISTS AS t_value THEN
           MUTABLE type_sym = t_value;
           MUTABLE max: ?Int64 = type__integer_type_max(type_sym);
@@ -7515,7 +7515,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (-tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (lit))).value)));
 }
 END
-PRIVATE FN typeAnalysisSession__integer_range_target_type(MUTABLE self: TypeAnalysisSession, effective_type: TypeTypeInput) RETURNS ?String@symbol
+PRIVATE FN typeAnalysisSession__integer_range_target_type(MUTABLE self: TypeAnalysisSession, effective_type: TypeTypeInput) RETURNS !?String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
