@@ -2752,7 +2752,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((signature != NIL) AND type__error_union?(functionSignature__return_type(signature))) THEN
       RETURN TRUE;
     END
-    MUTABLE intrinsic = locatable__matched_stdlib_def(node);
+    MUTABLE intrinsic: ?FunctionSignature@multiowned = locatable__matched_stdlib_def(node);
     IF intrinsic EXISTS AS intrinsic_value THEN
       IF functionSignature__recoverable_result?(intrinsic_value) THEN
       RETURN TRUE;

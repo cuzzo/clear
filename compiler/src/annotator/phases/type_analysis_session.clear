@@ -10679,7 +10679,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_stdlib_def));
-    signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(KEEP node__matched_signature(node))));
+    signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(node__matched_signature(node))));
     IF signature EXISTS AS signature_value THEN
       MUTABLE signature_params: []Param = TRY (functionSignature__params(signature_value));
       MUTABLE takes_count = 0;
@@ -11969,7 +11969,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((signature != NIL) AND type__error_union?(functionSignature__return_type(signature))) THEN
       RETURN TRUE;
     END
-    MUTABLE intrinsic = node__matched_stdlib_def(node);
+    MUTABLE intrinsic: ?FunctionSignature@multiowned = node__matched_stdlib_def(node);
     IF intrinsic EXISTS AS intrinsic_value THEN
       IF functionSignature__recoverable_result?(intrinsic_value) THEN
       RETURN TRUE;
