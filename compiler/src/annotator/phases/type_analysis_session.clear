@@ -8233,7 +8233,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, _.type, a_param.type(), type_params, &subst));
           };
-          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, param_fn_value.return_type, actual_fn.return_type, type_params, &subst));
+          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, UNWRAP (param_fn_value).return_type, actual_fn.return_type, type_params, &subst));
         ELSE
           RETURN;
         END
@@ -9544,8 +9544,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :guard, with_node: COPY node, fn_node: NIL, pred_expr: COPY guard_expr, guard_alias: COPY own, sibling_aliases: COPY siblings, param_names: ( { MUTABLE rtoc_empty_list_206: []String = List[]; rtoc_empty_list_206 } ), allowed_names: ( { MUTABLE rtoc_empty_list_207: []String = List[]; rtoc_empty_list_207 } ), rejected_param_names: COPY Set[], fn_name: NIL }, %() USE(MUTABLE guard_expr, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, guard_expr));
       MUTABLE guard_type = TRY (aST__full_type_mut(guard_expr));
-      IF !((guard_type AND (type__resolved(guard_type) == :Bool))) THEN
-          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, guard_expr, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_GUARD_EXPR_MUST_BE_BOOL }, [], CAST({:got: (guard_type OR_ELSE "Unknown")} AS {String@symbol}Any)));
+      IF !((TRUE AND (type__resolved(guard_type) == :Bool))) THEN
+          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY guard_expr }, TypeAnalysisCodeOrMessage{ SymbolValue: :WITH_GUARD_EXPR_MUST_BE_BOOL }, [], CAST({:got: type__resolved(guard_type)} AS {String@symbol}Any)));
       END
       NIL
     });
@@ -9575,8 +9575,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :pre, with_node: NIL, fn_node: COPY fn_node, pred_expr: COPY CAST(expr AS Locatable), guard_alias: NIL, sibling_aliases: ( { MUTABLE rtoc_empty_list_208: []String = List[]; rtoc_empty_list_208 } ), param_names: COPY param_names, allowed_names: ( { MUTABLE rtoc_empty_list_209: []String = List[]; rtoc_empty_list_209 } ), rejected_param_names: COPY Set[], fn_name: COPY fn_node.name }, %() USE(MUTABLE expr, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, castContractClauseValueToLocatable(UNWRAP (expr))));
       MUTABLE pred_type = TRY (aST__full_type_mut(UNWRAP (castContractClauseValueToLocatable(UNWRAP (expr)))));
-      IF !((pred_type AND (type__resolved(pred_type) == :Bool))) THEN
-          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, expr, TypeAnalysisCodeOrMessage{ SymbolValue: :PRE_EXPR_MUST_BE_BOOL }, [], CAST({:got: (pred_type OR_ELSE "Unknown")} AS {String@symbol}Any)));
+      IF !((TRUE AND (type__resolved(pred_type) == :Bool))) THEN
+          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF expr EXISTS AS rtoc_expr_v THEN (IF rtoc_expr_v IS_A Locatable AS rtoc_loc_v THEN DiagnosticAnchor{ Locatable: COPY rtoc_loc_v } ELSE NIL END) ELSE NIL END), TypeAnalysisCodeOrMessage{ SymbolValue: :PRE_EXPR_MUST_BE_BOOL }, [], CAST({:got: type__resolved(pred_type)} AS {String@symbol}Any)));
       END
       NIL
     });
@@ -12065,7 +12065,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE actual = COPY UNWRAP (member.params[rtoc_idx]);
       MUTABLE expected_type = TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(UNWRAP (requirement.params[rtoc_idx]?.type)), substitutions));
       IF (((type__semantic_type_key(expected_type) != type__semantic_type_key(actual.type)) OR (requirement.params[rtoc_idx]?.mutable != actual.mutable)) OR (requirement.params[rtoc_idx]?.takes != actual.takes)) THEN
-          RETURN "${requirement.name}: parameter ${(rtoc_idx + 1)} is incompatible";
+          RETURN "${requirement.name}: parameter ${(rtoc_idx + 1).toString()} is incompatible";
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -13672,7 +13672,7 @@ PRIVATE FN typeAnalysisSession__literal_instance_type(MUTABLE self: TypeAnalysis
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node.type_args EXISTS AS type_args_value THEN
       IF type_args_value.any?() THEN
-      RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(NamedTypeExpression{ name: COPY symbol(node.name), arguments: COPY (node.type_args OR_ELSE List[]) |> SELECT ((TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session( TypeExpressionKind{ NamedTypeExpression: COPY _ })))).shape).expression }) }));
+      RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY symbol(node.name), arguments: COPY ((node.type_args OR_ELSE List[]) |> SELECT ((TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(_)))).shape).expression) } }) }));
     ELSE
       RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(node.name) }));
     END
