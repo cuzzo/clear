@@ -4500,7 +4500,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     scope__is_restricted?(rtoc_local_receiver_83, UNWRAP (locatable__name(arg_node))) }) THEN
       RETURN TRUE;
     END
-    MUTABLE base_paths = lifetime_paths |> UNNEST (IF ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol__type_analysis_session(_, :wildcard) THEN [COPY "wildcard"] ELSE [UNWRAP ((CAST(_ AS String)).split(".").first())] END);
+    MUTABLE base_paths: []String = List[];
+    FOR _ IN lifetime_paths DO
+      IF ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol__type_analysis_session(_, :wildcard) THEN
+        &base_paths.append(COPY "wildcard");
+      ELSE
+        &base_paths.append(COPY UNWRAP ((CAST(_ AS String)).split(".").first()));
+      END
+    END
     IF !((base_paths.contains?("wildcard") OR base_paths.contains?(param.name))) THEN
       RETURN TRUE;
     END
