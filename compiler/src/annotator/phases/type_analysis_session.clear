@@ -13489,7 +13489,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN UNWRAP (TRY (type__stream_step_item_type(type)));
     END
     IF !(type__optional?(type)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, binding.expr, TypeAnalysisCodeOrMessage{ SymbolValue: :IF_AS_NEEDS_OPTIONAL }, [], CAST({:got: binding.expr.resolved_type} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, binding.expr, TypeAnalysisCodeOrMessage{ SymbolValue: :IF_AS_NEEDS_OPTIONAL }, [], CAST({:got: locatable__resolved_type(binding.expr)} AS {String@symbol}Any)));
     END
     RETURN UNWRAP (TRY (type__wrapped_type(type)));
 }
