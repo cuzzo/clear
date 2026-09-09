@@ -13540,7 +13540,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             MUTABLE field_def: ?StructField = schemaValue__fields(UNWRAP (schema))[UNWRAP (pat.fields[rtoc_idx]?.name)];
             MUTABLE field_type = structField__type(UNWRAP (field_def));
             MUTABLE rtoc_mutable_receiver_328 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-            TRY (scope__declare(&rtoc_mutable_receiver_328, UNWRAP (pat.fields[rtoc_idx]?.name), NIL, field_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+            TRY (scope__declare(&rtoc_mutable_receiver_328, UNWRAP (pat.fields[rtoc_idx]?.name), NIL, SymbolEntryTypeInput{ Type: COPY field_type }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
             TRY (typeAnalysisSession__og_declare(&rtoc_self_view, pat.fields[rtoc_idx]?.name, NIL, field_type));
           END
       ELSE
