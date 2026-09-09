@@ -3278,7 +3278,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lambda_ctx = TRY (functionContext__new("<lambda>", TypeTypeInput{ SymbolValue: :Any }, ( { MUTABLE rtoc_empty_list_55: []FunctionContextLifetimeSource = List[]; rtoc_empty_list_55 } ), ( { MUTABLE rtoc_empty_list_56: []String@symbol = List[]; rtoc_empty_list_56 } ), ( { MUTABLE rtoc_empty_list_57: []GenericParamDecl = List[]; rtoc_empty_list_57 } )));
     typeAnalysisSession__push_function_context_mut( &rtoc_self_view, lambda_ctx);
     DEFER typeAnalysisSession__pop_function_context_mut( &rtoc_self_view);
-    MUTABLE return_type: ?String@symbol = TRY (typeAnalysisSession__with_body_fact_nested_body(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__with_body_fact_lambda_body(&rtoc_self_view, &node, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__analyze_routine(&rtoc_self_view, RoutineNode{ LambdaLit: COPY node }, castLambdaBodyToRoutineBody(node.body), TypeTypeInput{ SymbolValue: :Any }, TRUE))))));
+    MUTABLE return_type: ?String@symbol = TRY (typeAnalysisSession__with_body_fact_nested_body(&rtoc_self_view, %() USE(MUTABLE node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__with_body_fact_lambda_body(&rtoc_self_view, &node, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__analyze_routine(&rtoc_self_view, RoutineNode{ LambdaLit: COPY node }, castLambdaBodyToRoutineBody(node.body), TypeTypeInput{ SymbolValue: :Any }, TRUE))))));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ LambdaLit: COPY node }, TRY (typeAnalysisSession__build_lambda_signature(&rtoc_self_view, (node.params OR_ELSE List[]), CAST(return_type AS String@symbol)))));
 }
 END
@@ -5396,25 +5396,26 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))));
       rubyToClearVoid__type_analysis_session()
         });
-        locatable__set_capture_analysis_mut(&node.right, (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), FALSE, FALSE)) OR_ELSE analysis));
+        MUTABLE rtoc_right_slot = COPY node.right;
+        locatable__set_capture_analysis_mut(&rtoc_right_slot, (TRY (typeAnalysisSession__validate_capture_analysis_mut(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))), UNWRAP (analysis), FALSE, FALSE)) OR_ELSE analysis));
     ELSE
         TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__annotate_pipeline_expression_mut(&rtoc_self_view, node.right, UNWRAP (locatable__expression(node.right))))));
     END
-    selector_effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, node.right.expression()));
+    selector_effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, UNWRAP (locatable__expression(node.right))));
     IF node.right IS_A WhereOp THEN
       TRY (typeAnalysisSession__validate_where_effect_contract_mut(&rtoc_self_view, castLocatableToWhereOp__type_analysis_session(node.right), UNWRAP (selector_effect)));
       RETURN NIL;
     ELSE_IF node.right IS_A SelectOp THEN
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, castLocatableToSelectOp__type_analysis_session(node.right), UNWRAP (selector_effect)));
-      IF (pipelineSourceFact__inf_stream?(source) AND pipelinePlaceholderUsage__moved_placeholder?(node.right.expression())) THEN
-        RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right, TypeAnalysisCodeOrMessage{ SymbolValue: :INF_STREAM_SELECT_MOVES_ITEM }));
+      IF (pipelineSourceFact__inf_stream?(source) AND pipelinePlaceholderUsage__moved_placeholder?(UNWRAP (locatable__expression(node.right)))) THEN
+        RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node.right }, TypeAnalysisCodeOrMessage{ SymbolValue: :INF_STREAM_SELECT_MOVES_ITEM }));
       END
     END
     NIL
     });
     IF (node.right IS_A SelectOp) THEN
       MUTABLE effect = selector_effect?;
-      MUTABLE result_type =     IF (pipelineSourceFact__stream?(source) OR node.right.stream_mode) THEN
+      MUTABLE result_type =     IF (pipelineSourceFact__stream?(source) OR (locatable__stream_mode(node.right) OR_ELSE FALSE)) THEN
         TRY (typeAnalysisSession__select_stream_result_type(&rtoc_self_view, lhs_type, source, effect))
       ELSE_IF selectorEffectFact__asynchronous(effect) THEN
         TRY (type__promise_list_of(TypeTypeInput{ Type: COPY TRY (selectorEffectFact__leaf_type(effect)) }))
@@ -5429,23 +5430,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         symbol("${castTypeToString(item_type)}[]")
       END));
     ELSE_IF (node.right IS_A IndexOp) THEN
-      MUTABLE key_type = node.right.expression().resolved_type;
+      MUTABLE key_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__expression(node.right)));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${castTypeToString(item_type)}[]>") }))));
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, TRY (key_type)));
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, key_type));
     ELSE_IF (node.right IS_A OrderByOp) THEN
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${castTypeToString(item_type)}[]") }))));
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, node.right, node.right.expression().resolved_type));
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.right, locatable__resolved_type(UNWRAP (locatable__expression(node.right)))));
     END
     node.storage_override = IF type__promise_list?((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })))) THEN
       :heap
     ELSE
       :frame
     END;
-    IF (((node.storage() == :frame) AND node.right IS_A SelectOp) AND TRY (typeAnalysisSession__select_element_forces_heap_result?(&rtoc_self_view, node.right.expression()))) THEN
+    IF (((node.storage_override == :frame) AND node.right IS_A SelectOp) AND TRY (typeAnalysisSession__select_element_forces_heap_result?(&rtoc_self_view, UNWRAP (locatable__expression(node.right))))) THEN
       node.storage_override = :heap;
     END
     IF !(pipelineSourceFact__inf_stream?(source)) THEN
-      IF (node.storage() == :heap) THEN
+      IF (node.storage_override == :heap) THEN
         IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
                 MUTABLE rtoc_mutable_receiver_113 = UNWRAP (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
                 functionContext__record_heap_use_mut(&rtoc_mutable_receiver_113);
