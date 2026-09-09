@@ -5208,3 +5208,13 @@ PUB FN typeTypeInput__fn_type?(value: TypeTypeInput) RETURNS ?Bool EFFECTS REENT
   END
   RETURN NIL;
 END
+# Ruby asks `respond_to?(:shape)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN typeTypeInput__shape(value: TypeTypeInput) RETURNS ?TypeShape ->
+  PARTIAL MATCH value START
+    TypeTypeInput.Type AS item -> RETURN COPY item.shape;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
