@@ -5068,7 +5068,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END) != (spec.sync)?)) THEN
       RETURN FALSE;
     END
-    IF ((TRUE) AND ((IF (type__resolved(arg_type) != NIL) THEN
+    IF ((TRUE) AND ((IF (TRUE) THEN
       type__ownership(arg_type)
     ELSE
       NIL
@@ -8529,7 +8529,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A BgStreamBlock, DeclarationNode.BindExpr AS item -> item.value IS_A BgStreamBlock END) AND (MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__runtime_stream?(UNWRAP (item.type))), DeclarationNode.BindExpr AS item -> TRY (type__runtime_stream?(UNWRAP (item.type))) END)) THEN
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, UNWRAP (declarationNode__value(node)), final_type_info));
     END
-    IF ((MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A BgStreamBlock, DeclarationNode.BindExpr AS item -> item.value IS_A BgStreamBlock END) AND (MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))), DeclarationNode.BindExpr AS item -> TRY (type__split_open_stream?(item.type)) END)) THEN
+    IF ((MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A BgStreamBlock, DeclarationNode.BindExpr AS item -> item.value IS_A BgStreamBlock END) AND (MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))), DeclarationNode.BindExpr AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))) END)) THEN
       value_type = (MATCH node START DeclarationNode.VarDecl AS item -> TRY (aST__full_type_mut(item.value)), DeclarationNode.BindExpr AS item -> TRY (aST__full_type_mut(item.value)) END);
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, UNWRAP (declarationNode__value(node)), TRY (type__new(value_type, :split))));
     END
@@ -13537,7 +13537,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF patternField__bind?(pat.fields[rtoc_idx]?) THEN
           IF (TRUE AND schemaValue__fields(UNWRAP (schema)).contains?(UNWRAP (pat.fields[rtoc_idx]?.name))) THEN
-            MUTABLE field_def = schemaValue__fields(UNWRAP (schema))[UNWRAP (pat.fields[rtoc_idx]?.name)];
+            MUTABLE field_def: ?{String@symbol}StructField = schemaValue__fields(UNWRAP (schema))[UNWRAP (pat.fields[rtoc_idx]?.name)];
             MUTABLE field_type = field_def.type();
             MUTABLE rtoc_mutable_receiver_328 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
             TRY (scope__declare(&rtoc_mutable_receiver_328, pat.fields[rtoc_idx]?.name, NIL, field_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
@@ -19576,7 +19576,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (path.length() == 0) THEN
       RETURN;
     END
-    MUTABLE value_type = TRY (type__new(UNWRAP locatable__resolved_type(UNWRAP ((aST__node_value(UNWRAP (castNodeToLocatable(node))))))));
+    MUTABLE value_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY UNWRAP locatable__resolved_type(UNWRAP ((aST__node_value(UNWRAP (castNodeToLocatable(node)))))) }));
     IF !(TRY (type__requires_move?(value_type))) THEN
       RETURN;
     END
@@ -20722,7 +20722,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END);
     IF (!(has_pointer) AND !((IF (TRUE) THEN
-      vti.struct?()
+      type__struct?(vti)
     ELSE
       NIL
     END))) THEN
