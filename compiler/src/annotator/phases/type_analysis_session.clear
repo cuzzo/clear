@@ -5054,7 +5054,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         cast_source = COPY type__resolved(full);
       END
     END
-    IF !(((spec.type == :Any) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, cast_source, TypeTypeInput{ SymbolValue: COPY spec.type })))) THEN
+    IF !(((spec.type == :Any) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, cast_source, spec.type)))) THEN
       RETURN FALSE;
     END
     IF !(intrinsicArgSpec__capability_constrained?(spec)) THEN
@@ -8999,7 +8999,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF (((locatable__max_depth_n(UNWRAP (fn_node)) OR_ELSE 0)) <= CAST(budget AS Int64)) THEN
             MUTABLE rtoc_fn_slot = UNWRAP (fn_node); locatable__set_tight_reentrance_mut(&rtoc_fn_slot, TRUE);
           ELSE
-            fn_node.tight_reentrance = FALSE;
+            MUTABLE rtoc_fn_slot2 = UNWRAP (fn_node); locatable__set_tight_reentrance_mut(&rtoc_fn_slot2, FALSE);
           END
       END
       TRY (typeAnalysisSession__validate_requires_clauses_mut(&rtoc_self_view, fn_node));
@@ -9152,7 +9152,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       raw_branch_value = NIL;
     END
-    MUTABLE raw: ?TypeShapeRaw = raw_branch_value; (IF ((raw != NIL) AND (IF UNWRAP (raw) IS_A FunctionType AS rtoc_fn_shape THEN (rtoc_fn_shape.reentrant == TRUE) ELSE FALSE END)) THEN NIL ELSE name END) } END) } END) } |> WHERE _ != NIL;
+    MUTABLE raw: ?TypeShapeRaw = raw_branch_value; (IF ((raw != NIL) AND (IF raw IS_A FunctionType AS rtoc_fn_shape THEN (rtoc_fn_shape.reentrant == TRUE) ELSE FALSE END)) THEN NIL ELSE name END) } END) } END) } |> WHERE _ != NIL;
     IF (candidates.length() == 0) THEN
       RETURN;
     END
