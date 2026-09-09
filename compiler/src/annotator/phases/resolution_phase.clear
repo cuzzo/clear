@@ -2107,8 +2107,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE variant_data = (node.variants[_] OR_ELSE panic("missing hash key"));
     IF schemas__inline_struct?(castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(variant_data)) THEN
     MUTABLE synthetic_name = symbol("${node.name}_${_}");
-    TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, synthetic_name, SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(schemasUnionSchemaVariantInput__field_struct_map(variant_data), ( { MUTABLE rtoc_empty_list_60: []String@symbol = List[]; rtoc_empty_list_60 } ), ( { MUTABLE rtoc_empty_list_61: []GenericParamDecl = List[]; rtoc_empty_list_61 } ), {}, {})) }));
-    MUTABLE entries = TRY (resolutionSession__inline_struct_deinit_entries(rtoc_self_view, variant_data));
+    TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, synthetic_name, SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(castStructFieldSymbolMapToSchemasStructSchemaFieldInputMap(schemasUnionSchemaVariantInput__field_struct_map(variant_data)), ( { MUTABLE rtoc_empty_list_60: []String@symbol = List[]; rtoc_empty_list_60 } ), ( { MUTABLE rtoc_empty_list_61: []GenericParamDecl = List[]; rtoc_empty_list_61 } ), {}, {})) }));
+    MUTABLE entries = TRY (resolutionSession__inline_struct_deinit_entries(rtoc_self_view, UNWRAP (castSchemasUnionSchemaVariantInputToInlineStructVariant(variant_data))));
     IF (entries.length() > 0) THEN
         TRY (inlineStructVariant__set_deinit_entries(&variant_data, entries));
     END

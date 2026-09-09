@@ -182,3 +182,11 @@ FN castAsyncBodyNodeToAsyncValidationNode(value: AsyncBodyNode) RETURNS ?AsyncVa
   END
   RETURN NIL;
 END
+FN castAsyncBodyNodeToAsyncSpawnNode(value: AsyncBodyNode) RETURNS ?AsyncSpawnNode ->
+  PARTIAL MATCH value START
+    AsyncBodyNode.BgBlock AS item -> RETURN AsyncSpawnNode{ BgBlock: COPY item };,
+    AsyncBodyNode.BgStreamBlock AS item -> RETURN AsyncSpawnNode{ BgStreamBlock: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

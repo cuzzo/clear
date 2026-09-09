@@ -834,3 +834,22 @@ PUB FN schemasUnionSchemaVariantInput__field_struct_map(value: SchemasUnionSchem
   END
   RETURN out;
 END
+
+# The schema takes its fields as the input union; a map of plain StructFields
+# names each one as the StructField case.
+PUB FN castStructFieldSymbolMapToSchemasStructSchemaFieldInputMap(values: {String@symbol}StructField) RETURNS {String@symbol}SchemasStructSchemaFieldInput ->
+  MUTABLE out: {String@symbol}SchemasStructSchemaFieldInput = {};
+  FOR key IN values.keys() DO
+    out[key] = SchemasStructSchemaFieldInput{ StructField: COPY (values[key] OR_ELSE panic("missing hash key")) };
+  END
+  RETURN out;
+END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castSchemasUnionSchemaVariantInputToInlineStructVariant(value: SchemasUnionSchemaVariantInput) RETURNS ?InlineStructVariant@multiowned EFFECTS REENTRANT ->
+  IF value IS_A InlineStructVariant AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END

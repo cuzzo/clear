@@ -5180,7 +5180,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE ti = TRY (aST__full_type_mut(node.left));
-    IF !((((ti != NIL) AND type__future?(ti)) AND ((((TRY (type__dynamic_stream?(ti)) OR TRY (type__inf_stream?(ti))) OR TRY (type__open_stream?(ti))) OR TRY (type__bounded_stream?(ti)))))) THEN
+    IF !((((TRUE) AND type__future?(ti)) AND ((((TRY (type__dynamic_stream?(ti)) OR TRY (type__inf_stream?(ti))) OR TRY (type__open_stream?(ti))) OR TRY (type__bounded_stream?(ti)))))) THEN
       RETURN NIL;
     END
     node.observable_terminal = TRUE;
@@ -6884,7 +6884,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE shard_node: ?Locatable = aST__node_right(node.left);
     MUTABLE target_info: !Type = aST__full_type_mut(UNWRAP (locatable__target_map(UNWRAP (shard_node))));
-    conc.shard_context = PipelineShardContext{ map_var: COPY UNWRAP (locatable__target_map(UNWRAP (shard_node))), shard_count: type__shard_count(TRY (target_info)), key_expr: COPY UNWRAP (shard_node).key_expr, auto_detected: FALSE, key_allocates_frame: FALSE, body_allocates_frame: FALSE };
+    conc.shard_context = PipelineShardContext{ map_var: COPY UNWRAP (locatable__target_map(UNWRAP (shard_node))), shard_count: type__shard_count(TRY (target_info)), key_expr: COPY UNWRAP locatable__key_expr((shard_node)), auto_detected: FALSE, key_allocates_frame: FALSE, body_allocates_frame: FALSE };
     RETURN shard_node;
 }
 END
@@ -6999,7 +6999,7 @@ PRIVATE FN typeAnalysisSession__concurrent_select_family_result_type(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE op: ConcurrentOp = COPY castLocatableToConcurrentOp__type_analysis_session(node.right);
+    MUTABLE op: ClearParserConcurrentPipelineOp = COPY castLocatableToConcurrentOp__type_analysis_session(node.right);
     IF Locatable{ ConcurrentOp: COPY op } IS_A SelectOp THEN
       MUTABLE effect = TRY (typeAnalysisSession__selector_effect_fact(&rtoc_self_view, UNWRAP (clearParserConcurrentPipelineOp__expression(op))));
       TRY (typeAnalysisSession__validate_select_effect_contract_mut(&rtoc_self_view, &op, effect));
@@ -7506,7 +7506,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(UNWRAP (lit) IS_A Literal) THEN
       RETURN NIL;
     END
-    IF !(((lit.type == :INT64) OR (lit.type == :PREFIXED_INT))) THEN
+    IF !(((UNWRAP (lit).type == :INT64) OR (UNWRAP (lit).type == :PREFIXED_INT))) THEN
       RETURN NIL;
     END
     RETURN (-aST__node_value( UNWRAP (lit)));
@@ -11816,7 +11816,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &summary.local_facts.append(COPY LocalFact{ id: COPY LocalId{ value: (body_id_base + frame.next_local_ordinal) }, place_id: COPY SemanticPlaceId{ value: place_id }, name: COPY name });
     MUTABLE symbol: ?SymbolEntry@multiowned = aST__node__symbol(castBindingNodeToLocatable(node));
     IF symbol != NIL THEN
-      &symbol.adopt_semantic_place_id_mut(place_id);
+      &symbolEntry__adopt_semantic_place_id_mut(symbol, place_id);
     END
 }
 END
@@ -19562,7 +19562,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE vti = TRY (aST__full_type_mut(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))));
-    MUTABLE needs_move = ((vti AND TRY (type__requires_move?((TRY (type__new(vti)))))) OR_ELSE TRUE);
+    MUTABLE needs_move = ((vti AND TRY (type__requires_move?((TRY (type__new(TypeConstructionInput{ Type: COPY vti })))))) OR_ELSE TRUE);
     IF needs_move THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :MOVE_WITH_SCOPED }, [], CAST({:name: aST__node_value(UNWRAP (castNodeToLocatable(node))).name()} AS {String@symbol}Any)));
     END
