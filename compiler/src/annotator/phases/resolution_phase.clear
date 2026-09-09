@@ -355,8 +355,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE sources: []Any = List[];
-    IF lifetime IS_A []Any THEN
-      sources = lifetime;
+    IF lifetime IS_A ArrayValue AS rtoc_lifetime_arr THEN
+      sources = CAST(rtoc_lifetime_arr AS []Any);
     ELSE
       sources = [CAST(lifetime AS Any)];
     END
@@ -404,14 +404,15 @@ PRIVATE FN resolutionSession__resolved_function_names(self: ResolutionSession) R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (scope__visible_entries(rtoc_self_view.root_scope))).each_with_object(List[], %(tuple_param_0: Tuple<String,SymbolEntry@multiowned>, names) -> {
-    MUTABLE name = tuple_param_0._0;
-    MUTABLE entry = tuple_param_0._1;
-    IF symbolEntry__fn_signature(entry) THEN
-      RETURN &names.append(COPY name);
+    MUTABLE names: []String = List[];
+    MUTABLE rtoc_entries = TRY (scope__visible_entries(rtoc_self_view.root_scope));
+    FOR rtoc_name IN rtoc_entries.keys() DO
+      MUTABLE entry: SymbolEntry@multiowned = KEEP UNWRAP (rtoc_entries[rtoc_name]);
+      IF symbolEntry__fn_signature(entry) THEN
+        &names.append(COPY rtoc_name);
+      END
     END
-    NIL
-    });
+    RETURN names;
 }
 END
 PRIVATE FN resolutionSession__validate_union_method_mut(MUTABLE self: ResolutionSession, node: UnionDef, requirement: UnionMethodRequirement) RETURNS !Void
@@ -1342,10 +1343,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE seen = COPY seen_input;
     MUTABLE key = type__semantic_type_key(type);
     IF seen.contains?(key) THEN
-      MUTABLE rtoc_empty_1342: [Set]String = Set[];
+      MUTABLE rtoc_empty_1342: [Set]String@symbol = Set[];
       RETURN rtoc_empty_1342;
     END
-    seen = (COPY seen).insert(key);
+    &seen.insert(COPY key);
     MUTABLE nested: []Type = ( { MUTABLE rtoc_empty_list_31: []Type = List[]; rtoc_empty_list_31 } );
     IF type__generic_instance?(type) THEN
       nested = ruby_array_concat_Type__resolution_phase(nested, TRY (type__generic_args(type)));
@@ -1565,7 +1566,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (resolutionSession__validate_c_boundary_type_mut(&rtoc_self_view, node, UNWRAP (node.return_type), "return", TRUE));
     FOR _ IN node.params DO
-    TRY (resolutionSession__validate_c_boundary_type_mut(&rtoc_self_view, node, param__type(_), "parameter ${param__name(_)}", FALSE));
+    TRY (resolutionSession__validate_c_boundary_type_mut(&rtoc_self_view, node, param__type(_), "parameter ${(CAST(_ AS Param)).name}", FALSE));
     END
 }
 END
@@ -1793,14 +1794,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE field: StructField@multiowned = (rtoc_struct.field_decls[_] OR_ELSE CAST(panic("missing hash key") AS StructField@multiowned));
     MUTABLE target: ?String@symbol = TRY (resolutionSession__inline_recursive_target(rtoc_self_view, structField__type(field), names));
     IF target EXISTS AS target_value THEN
-        &edges.append(RecursiveFieldEdge{ owner: COPY symbol(_.name), target: COPY target_value, field_name: COPY _, type: COPY structField__type(field) });
+        &edges.append(RecursiveFieldEdge{ owner: COPY symbol(rtoc_struct.name), target: COPY target_value, field_name: COPY _, type: COPY structField__type(field) });
     END
     };
     END
     MUTABLE rtoc_each_items_48 = TRY (resolutionSession__recursive_components(rtoc_self_view, names, edges));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_48.length() DO
-      MUTABLE internal = edges |> WHERE (rtoc_each_items_48[rtoc_idx]?.contains?(_.owner) AND rtoc_each_items_48[rtoc_idx]?.contains?(_.target));
+      MUTABLE internal = edges |> WHERE ((rtoc_each_items_48[rtoc_idx]?.contains?(_.owner) OR_ELSE FALSE) AND (rtoc_each_items_48[rtoc_idx]?.contains?(_.target) OR_ELSE FALSE));
       IF (internal.length() == 0) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -1911,8 +1912,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE component: [Set]String@symbol = Set[];
     WHILE TRUE DO
       MUTABLE member = symbol(UNWRAP (&stack.pop()));
-      &on_stack.delete(member);
-      &component.insert(member);
+      &on_stack.remove(member);
+      &component.insert(COPY member);
       IF (member == node) THEN
         BREAK;
       END
@@ -1955,7 +1956,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN result;
 }
 END
-PRIVATE FN resolutionSession__register_type_declaration(MUTABLE self: ResolutionSession, node: TypeDeclaration) RETURNS !Void
+PRIVATE FN resolutionSession__register_type_declaration(MUTABLE self: ResolutionSession, MUTABLE node: TypeDeclaration) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1983,7 +1984,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       close_plan = resourceClosePlan__method(UNWRAP (node.close_method));
     END
-    TRY (resourceSchema__new(close_plan, {}, node.castStructFieldMapToSchemasResourceSchemaFieldInputMap(field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.from_module, node.as_type, :package, {}))
+    TRY (resourceSchema__new(close_plan, {}, castStructFieldMapToSchemasResourceSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.from_module, node.as_type, :package, {}))
     }
     ELSE
       TRY (structSchema__new(node.field_decls, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), ( { MUTABLE rtoc_empty_list_55: []GenericParamDecl = List[]; rtoc_empty_list_55 } ), {}, {}, :package, node.from_module, node.as_type))
@@ -2028,7 +2029,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (resolutionSession__stamp_field_defaults_mut(&rtoc_self_view, node.field_decls));
     TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ StructDef: COPY node }, symbol(node.name), SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(castMapStructFieldToMapSchemasStructSchemaFieldInput(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.generic_params, {}, {}, node.visibility)) }));
-    TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
+    TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ StructDef: COPY node }, :Void));
 }
 END
 PRIVATE FN resolutionSession__validate_generic_bounds_mut(MUTABLE self: ResolutionSession, params: []GenericParamDecl) RETURNS !Void
@@ -2090,7 +2091,7 @@ PRIVATE FN resolutionSession__stamp_field_defaults_mut(MUTABLE self: ResolutionS
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN fields.values() DO
-    MUTABLE default = KEEP _.default;
+    MUTABLE default: ?Locatable@boxed = COPY _.default;
     IF !(default) THEN
         CONTINUE;
     END

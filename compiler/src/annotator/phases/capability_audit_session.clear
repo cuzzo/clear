@@ -4237,8 +4237,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          MUTABLE storage = (IF UNWRAP locatable__symbol(UNWRAP ((var_node))) != NIL THEN
-            (var_node.symbol).storage()
+          MUTABLE storage = (IF locatable__symbol(UNWRAP ((var_node))) != NIL THEN
+            locatable__storage(UNWRAP (var_node))
           ELSE
             NIL
           END);
@@ -4305,7 +4305,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN fn_nodes.values() DO
     TRY (capabilityPlan__refresh_function_plans_mut(_, UNWRAP (body_summaries[_.name]?.with_blocks)));
     END
-    TRY (bgCaptureClassifier__classify_all_mut(fn_nodes, %(type: String) USE(rtoc_self_view) -> (TRY (capabilityAuditSession__lookup_type_schema(rtoc_self_view, type)))));
+    TRY (bgCaptureClassifier__classify_all_mut(fn_nodes, %(type: String) USE(rtoc_self_view) -> (TRY (capabilityAuditSession__lookup_type_schema(rtoc_self_view, symbol(type))))));
     TRY (effectInference__analyze_mut(fn_nodes));
     MUTABLE error_handler = %(node: Locatable, message: String) USE(MUTABLE rtoc_self_view) -> TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, CapabilityAuditCodeOrMessage{ SymbolValue: :EFFECT_INFERENCE_VIOLATION }, [], CAST({:detail: message} AS {String@symbol}Any)));
     MUTABLE warning_handler = %(node: Locatable, message: String) USE(MUTABLE rtoc_self_view) -> capabilityAuditSession__note_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, message);
