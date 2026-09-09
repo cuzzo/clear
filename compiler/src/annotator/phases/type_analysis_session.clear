@@ -6380,17 +6380,18 @@ PRIVATE FN typeAnalysisSession__analyze_auto_shard_each_op(MUTABLE self: TypeAna
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE lhs_type = TRY (aST__full_type_mut(smooth_node.left));
+    MUTABLE item_type: String@symbol = :Any;
     MUTABLE iterable = TRY (typeAnalysisSession__pipeline_source_fact(&rtoc_self_view, smooth_node.left, lhs_type));
     IF !(pipelineSourceFact__valid?(iterable)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF locatable__left(Locatable{ BinaryOp: COPY smooth_node }) EXISTS AS rtoc_wrap_6397 THEN DiagnosticAnchor{ Locatable: COPY rtoc_wrap_6397 } ELSE NIL END), TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_EACH_BAD_INPUT }, [], CAST({:got: locatable__resolved_type(UNWRAP (locatable__left( Locatable{ BinaryOp: COPY smooth_node })))} AS {String@symbol}Any)));
-      MUTABLE item_type = :Any;
+      item_type = :Any;
     ELSE
       item_type = castTypeToStringSymbol(COPY iterable.item_type);
     END
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(conc, item_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_151 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_151, "_", NIL, SymbolEntryTypeInput{ SymbolValue: COPY item_type }, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
-    FOR _ IN conc.op.body() DO
+    FOR _ IN (clearParserConcurrentPipelineOp__body(UNWRAP (conc.op)) OR_ELSE List[]) DO
     TRY (typeAnalysisSession__visit(&rtoc_self_view, _));
     END
     NIL
