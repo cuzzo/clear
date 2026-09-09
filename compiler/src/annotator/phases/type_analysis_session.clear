@@ -4253,7 +4253,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &atomic_bare_value_args.append(COPY arg_node);
     END
     IF TRY (typeAnalysisSession__atomic_cell_to_atomic_param?(&rtoc_self_view, arg_node, facts.param, signature)) THEN
-      IF arg_node IS_A Identifier AS identifier THEN
+      IF arg_node IS_A Identifier AS MUTABLE identifier THEN
         identifier.atomic_borrow = TRUE;
       END
     END
@@ -4323,7 +4323,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, facts.arg_node, TypeAnalysisCodeOrMessage{ SymbolValue: :ARG_ALIAS_CONFLICT }, [], CAST({:index: (facts.index + 1), :name: typeAnalysisSession__argument_name(&rtoc_self_view, facts.arg_node, "arg"), :other_index: (rtoc_idx + 1), :path: symbol(UNWRAP (current_path.first()))} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY facts.arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :ARG_ALIAS_CONFLICT }, [], CAST({:index: (facts.index + 1), :name: typeAnalysisSession__argument_name(&rtoc_self_view, facts.arg_node, "arg"), :other_index: (rtoc_idx + 1), :path: symbol(UNWRAP (current_path.first()))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
     &encountered_args.append(EncounteredCallArgument{ path: COPY current_path, mutable: typeAnalysisSession__param_mutable?(&rtoc_self_view, facts.param), name: COPY typeAnalysisSession__argument_name(&rtoc_self_view, facts.arg_node, "arg") });
@@ -4508,8 +4508,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE sources: []Any = List[];
-    IF rl IS_A ArrayValue THEN
-      sources = rl;
+    IF rl IS_A ArrayValue AS rl_items THEN
+      sources = CAST(rl_items AS []Any);
     ELSE
       sources = [CAST(rl AS Any)];
     END
@@ -4579,11 +4579,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE schema: ?SchemaValue = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_85 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__resolve_type_definition(rtoc_local_receiver_85, current_type_name)) };
-      MUTABLE sf = (schemaValue__fields(UNWRAP (schema))[field_name] OR schemaValue__fields(UNWRAP (schema))[rtoc_each_items_84[rtoc_idx]]);
+      MUTABLE sf: ?StructField = (schemaValue__fields(UNWRAP (schema))[symbol(field_name)] OR_ELSE schemaValue__fields(UNWRAP (schema))[rtoc_each_items_84[rtoc_idx]]);
       IF (FALSE) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :LIFETIME_NO_FIELD }, [], CAST({:type: current_type_name, :field: field_name} AS {String@symbol}Any)));
       END
-      current_type_name = sf.type().resolved();
+      current_type_name = type__resolved(structField__type(UNWRAP (sf)));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -4703,7 +4703,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RoutineNode.LambdaLit AS item ->
         captures = COPY item.captures;,
     END
-    IF ((captures == NIL) OR captures.empty?()) THEN
+    IF ((captures OR_ELSE List[]).length() == 0) THEN
       RETURN;
     END
     MUTABLE rtoc_idx = 0;
@@ -4748,7 +4748,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RoutineNode.LambdaLit AS item ->
         captures = COPY item.captures;,
     END
-    IF ((captures == NIL) OR captures.empty?()) THEN
+    IF ((captures OR_ELSE List[]).length() == 0) THEN
       RETURN;
     END
     MUTABLE rtoc_idx = 0;
@@ -20395,8 +20395,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN CAST([TypeAnalysisSessionReturnValueItem{ SymbolValue: :wildcard }] AS []TypeAnalysisSessionReturnValueItem);
     END
     MUTABLE sources: []Any = List[];
-    IF rl IS_A ArrayValue THEN
-      sources = rl;
+    IF rl IS_A ArrayValue AS rl_items THEN
+      sources = CAST(rl_items AS []Any);
     ELSE
       sources = [CAST(rl AS Any)];
     END
