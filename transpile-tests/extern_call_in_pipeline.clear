@@ -1,0 +1,22 @@
+# An EXTERN is a foreign function: it takes no CLEAR runtime, so the pass that
+# finalizes needs_rt never stamps one. Asking for that stamp from inside a
+# pipeline raised instead of answering.
+EXTERN FN getpid() RETURNS Int32 FROM "std.c";
+
+FN tagged(values: []Int64) RETURNS []Bool ->
+  RETURN values |> SELECT ((CAST(getpid() AS Int64) > 0) AND (_ > 0));
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE values: []Int64 = List[];
+  &values.append(3);
+  &values.append(-1);
+  MUTABLE out = tagged(values);
+  MUTABLE hits = 0;
+  FOR flag IN out DO
+    IF flag THEN
+      hits = (hits + 1);
+    END
+  END
+  print("${out.length().toString()} ${hits.toString()}");
+END

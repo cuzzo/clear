@@ -1741,6 +1741,9 @@ module MIRLoweringControlFlow
     sig = fn_sig_for(name)
     return true unless sig
     return sig.needs_rt == true || sig.emits_allocating? if sig.intrinsic
+    # An EXTERN is a foreign function: it has no CLEAR runtime parameter, so
+    # the needs_rt pass never stamps one and there is nothing to finalize.
+    return false if sig.respond_to?(:extern_source) && sig.extern_source
     unless sig.needs_rt == true || sig.needs_rt == false
       raise "callee #{name} missing finalized needs_rt metadata before MIR lowering"
     end
