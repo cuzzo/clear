@@ -4208,15 +4208,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     capabilityAuditSession__clear_deferred_recovery_validations_mut(&rtoc_self_view);
 }
 END
-PRIVATE FN capabilityAuditSession__flush_deferred_with_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS ![]DeferredWithValidation
+PRIVATE FN capabilityAuditSession__flush_deferred_with_validations_mut(MUTABLE self: CapabilityAuditSession) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_45 = (TRY (capabilityAuditSession__deferred_with_validations(rtoc_self_view)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_45.length() DO
-      MUTABLE fact = COPY rtoc_each_items_45[rtoc_idx]?.fact;
-      MUTABLE var_node = COPY fact?.var_node;
+      MUTABLE fact: ?CapabilityTransition = COPY rtoc_each_items_45[rtoc_idx]?.fact;
+      MUTABLE var_node: ?Locatable = COPY UNWRAP (fact).var_node;
       MUTABLE syn: ?String = (IF locatable__symbol(UNWRAP (var_node)) != NIL THEN
           symbolEntry__sync(UNWRAP ((locatable__symbol(UNWRAP (var_node)))))
         ELSE
@@ -4232,13 +4232,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           ELSE
             NIL
           END);
-          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY UNWRAP (KEEP rtoc_each_items_45[rtoc_idx]?.node)} }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_EXCLUSIVE_NEEDS_LOCK_GOT }, [], CAST({:got: (storage OR_ELSE "unknown")} AS {String@symbol}Any)));
+          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY UNWRAP (rtoc_each_items_45[rtoc_idx]?.node)} }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_EXCLUSIVE_NEEDS_LOCK_GOT }, [], CAST({:got: (storage OR_ELSE "unknown")} AS {String@symbol}Any)));
       ELSE_IF (UNWRAP (fact).capability == :write_locked_read) THEN
           IF (syn == :write_locked) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY UNWRAP (KEEP rtoc_each_items_45[rtoc_idx]?.node) } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_READ_NEEDS_WRITE_LOCK_NAME }, [], CAST({:name: UNWRAP (fact).target_label} AS {String@symbol}Any)));
+          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY UNWRAP (rtoc_each_items_45[rtoc_idx]?.node) } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_READ_NEEDS_WRITE_LOCK_NAME }, [], CAST({:name: UNWRAP (fact).target_label} AS {String@symbol}Any)));
       ELSE_IF (UNWRAP (fact).capability == :ATOMIC) THEN
           IF (syn == :atomic) THEN
             rtoc_idx = rtoc_idx + 1;
@@ -4253,13 +4253,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF syn THEN
             actual = "@${syn}";
           ELSE
-            actual = (IF storage THEN
-              "@${storage}"
+            IF storage THEN
+              actual = "@${storage}";
             ELSE
-              "plain"
-            END);
+              actual = COPY "plain";
+            END
           END
-          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, KEEP rtoc_each_items_45[rtoc_idx]?.node, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_ATOMIC_NEEDS_SHARED_ATOMIC }, [], CAST({:name: fact.target_label, :actual: actual} AS {String@symbol}Any)));
+          TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY UNWRAP (rtoc_each_items_45[rtoc_idx]?.node) } }, CapabilityAuditCodeOrMessage{ SymbolValue: :WITH_ATOMIC_NEEDS_SHARED_ATOMIC }, [], CAST({:name: UNWRAP (fact).target_label, :actual: actual} AS {String@symbol}Any)));
       END
     rtoc_idx = rtoc_idx + 1;
     END

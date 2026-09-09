@@ -2817,11 +2817,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE auto_tok: ?Token@multiowned = typeAnalysisSession__auto_token_for(&rtoc_self_view, slot);
     IF auto_tok EXISTS AS auto_tok_value THEN
       MUTABLE type_str = COPY CAST(type_sym AS String);
-      RETURN TRY (fix__new(typeAnalysisSession__fix_description(rtoc_self_view, :PIN_AUTO_SLOT, CAST({:position: DiagnosticKwValue{ Int64Value: position }, :label: (ruby_wrap_optional_String_DiagnosticKwValue__type_analysis_session(typeAnalysisSession__auto_slot_label(&rtoc_self_view, slot)) OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :type: DiagnosticKwValue{ StringValue: COPY type_str }, :note: DiagnosticKwValue{ StringValue: COPY IF note != NIL THEN
-        " ${note}"
-      ELSE
-        ""
-      END }} AS {String@symbol}DiagnosticKwValue)), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :interactive));
+      MUTABLE rtoc_note_text: String = COPY "";
+      IF note != NIL THEN
+        rtoc_note_text = " ${note}";
+      END
+      RETURN TRY (fix__new(typeAnalysisSession__fix_description(rtoc_self_view, :PIN_AUTO_SLOT, CAST({:position: DiagnosticKwValue{ Int64Value: position }, :label: (ruby_wrap_optional_String_DiagnosticKwValue__type_analysis_session(typeAnalysisSession__auto_slot_label(&rtoc_self_view, slot)) OR_ELSE DiagnosticKwValue{ StringValue: COPY "" }), :type: DiagnosticKwValue{ StringValue: COPY type_str }, :note: DiagnosticKwValue{ StringValue: COPY rtoc_note_text }} AS {String@symbol}DiagnosticKwValue)), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :interactive));
     ELSE
       RETURN NIL;
     END
