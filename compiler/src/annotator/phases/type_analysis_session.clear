@@ -4640,12 +4640,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
     END
     MUTABLE param_sync = NIL;
-    IF _.sync() THEN
-        param_sync = _.sync();
+    IF _.sync THEN
+        param_sync = _.sync;
     ELSE_IF type__any_sync?(_.type) THEN
-        param_sync = _.type.sync();
+        param_sync = type__sync(_.type);
     ELSE_IF requires_map THEN
-        MUTABLE families: ?[Set]String@symbol = COPY requires_map[CAST(_.name() AS String)];
+        MUTABLE families: ?[Set]String@symbol = COPY requires_map[CAST(_.name AS String)];
         IF families EXISTS AS families_value THEN
           MUTABLE sync_by_family = {:LOCKED: :locked, :VERSIONED: :versioned, :ATOMIC: :atomic, :SNAPSHOTTED: :versioned, :LOCAL: :local};
           MUTABLE family: ?Any = sync_by_family.keys() |> FIND families_value.contains?(_);
@@ -11110,7 +11110,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     END
     IF typeAnalysisSession__strict_test?(&rtoc_self_view) THEN
-      MUTABLE stubbed_fns = ((node.setup OR_ELSE List[]) |> SELECT:? (    IF _ IS_A StubDecl THEN
+      MUTABLE stubbed_fns: [Set]String = ((node.setup OR_ELSE List[]) |> SELECT:? (    IF _ IS_A StubDecl THEN
         locatable__function_name(_)
       ELSE
         NIL
@@ -16030,7 +16030,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_mutable_block_param_397 = COPY _;
     MUTABLE index_type = TRY (aST__full_type_mut(rtoc_mutable_block_param_397));
     IF !(type__integer?(index_type)) THEN
-          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, rtoc_mutable_block_param_397, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_INDEX_INTEGER }, [], CAST({:got: type__resolved(index_type)} AS {String@symbol}Any)));
+          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY rtoc_mutable_block_param_397 }, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_INDEX_INTEGER }, [], CAST({:got: type__resolved(index_type)} AS {String@symbol}Any)));
     END
       END
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ GetIndex: COPY node }, TRY (type__element_type( UNWRAP (target_type_info)))));
