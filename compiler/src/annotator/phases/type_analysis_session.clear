@@ -9104,7 +9104,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END) |> WHERE _ != NIL;
     MUTABLE blessed = body_scan.return_nodes |> SELECT:? {
     MUTABLE value: ?Locatable = _.value;
-    (  IF (value IS_A FuncCall AND (value.name() == fn_name)) THEN
+    (  IF (IF UNWRAP (value) IS_A FuncCall AS rtoc_fc THEN (callName__string_value(rtoc_fc.name) == fn_name) ELSE FALSE END) THEN
         value
       ELSE
         NIL
@@ -9143,7 +9143,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE existing = (fn_node.requires_clauses OR_ELSE {});
-    MUTABLE candidates = fn_node.params |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = COPY _.name; (IF existing.key?(name) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE type = COPY _.type; (IF !((TRUE AND type__fn_type?(type))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE raw_branch_value: ?TypeShapeRaw = NIL;
+    MUTABLE candidates = fn_node.params |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = COPY _.name; (IF existing.contains?(name) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE type = COPY _.type; (IF !((TRUE AND type__fn_type?(type))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE raw_branch_value: ?TypeShapeRaw = NIL;
     IF TRUE THEN
       raw_branch_value = type__raw(type);
     ELSE
@@ -9533,7 +9533,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE aliases = caps |> SELECT _.alias_name;
     FOR _ IN guarded DO
     MUTABLE own = COPY _.alias_name;
-    MUTABLE siblings = (aliases - [own]);
+    MUTABLE siblings = (aliases |> WHERE (_ != own));
     MUTABLE guard_expr = COPY UNWRAP (_.guard_expr);
     typeAnalysisSession__with_predicate_context(&rtoc_self_view, PredicateContext{ kind: :guard, with_node: node, fn_node: NIL, pred_expr: COPY guard_expr, guard_alias: COPY own, sibling_aliases: COPY siblings, param_names: ( { MUTABLE rtoc_empty_list_206: []String = List[]; rtoc_empty_list_206 } ), allowed_names: ( { MUTABLE rtoc_empty_list_207: []String = List[]; rtoc_empty_list_207 } ), rejected_param_names: COPY Set[], fn_name: NIL }, %() USE(MUTABLE guard_expr, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit(&rtoc_self_view, guard_expr));
@@ -14981,7 +14981,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       RETURN;
     END
-    IF (plan.action == :pending) THEN
+    IF (UNWRAP (plan).action == :pending) THEN
       RETURN;
     END
     IF (plan.action == :move) THEN
@@ -15162,7 +15162,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (typeAnalysisSession__language_mode(&rtoc_self_view) == :strict) THEN
       RETURN;
     END
-    IF (plan.action == :pending) THEN
+    IF (UNWRAP (plan).action == :pending) THEN
       RETURN;
     END
     IF ((plan.action == :move) OR (plan.last_alias_use == NIL)) THEN
@@ -16702,7 +16702,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE finish_is_float = type__float?((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY finish_type }))));
     IF (start_is_float != finish_is_float) THEN
       IF !(start_is_float) THEN
-        locatable__set_coerced_type_object_mut(&node.start, :Float64);
+        locatable__set_coerced_type_object_mut(&node.start, TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })));
       END
       IF !(finish_is_float) THEN
         locatable__set_coerced_type_object_mut(&node.finish, :Float64);
@@ -17262,7 +17262,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
     typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, &rtoc_mutable_block_param_419, AsyncValidationNode{ DoBlock: COPY node }, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
       full_analysis = typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, rtoc_mutable_block_param_419.parallel, FALSE, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
-        TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, &rtoc_mutable_block_param_419.body));
+        TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, rtoc_mutable_block_param_419.body));
         rubyToClearVoid__type_analysis_session()
       });
       rubyToClearVoid__type_analysis_session()
@@ -18785,7 +18785,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE plan_input: Type@multiowned = plan_input_branch_value?;
     MUTABLE plan = TRY (tenseOperationPlanner__unwrap(CAST(plan_input AS Type)));
-    node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY Locatable{ OptionalUnwrap: COPY plan } };
+    node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY plan };
     MUTABLE result = COPY plan.result_type;
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, result));
     node.storage_override = node.target.storage();
@@ -19688,7 +19688,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A FuncCall OR UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A MethodCall)) THEN
       RETURN;
     END
-    MUTABLE call_node: TypeAnalysisCallNode = aST__node_value(UNWRAP (castNodeToLocatable(node)));
+    MUTABLE call_node: TypeAnalysisCallNode = UNWRAP (castLocatableToTypeAnalysisCallNode(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))));
     IF aST__collection_method_call?( UNWRAP (call_node)) THEN
       RETURN;
     END
@@ -20042,7 +20042,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (sources.length() == 0) THEN
       RETURN;
     END
-    IF (TRUE AND (sources == [sym])) THEN
+    IF (TRUE AND ((sources.length() == 1) AND (sources[0] == sym))) THEN
       RETURN;
     END
     MUTABLE dest_depth: ?Int64 = TRY (typeAnalysisSession__dest_scope_depth_for_target(&rtoc_self_view, castAssignmentNameToLocatable__type_analysis_session(assign_node.name)));
@@ -23054,4 +23054,12 @@ FN nodes__locatable_list(values: []Nodes) RETURNS []Locatable ->
     rtoc_idx = rtoc_idx + 1;
   END
   RETURN out;
+END
+FN castLocatableToTypeAnalysisCallNode(value: Locatable) RETURNS ?TypeAnalysisCallNode ->
+  PARTIAL MATCH value START
+    Locatable.FuncCall AS item -> RETURN TypeAnalysisCallNode{ FuncCall: COPY item };,
+    Locatable.MethodCall AS item -> RETURN TypeAnalysisCallNode{ MethodCall: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END
