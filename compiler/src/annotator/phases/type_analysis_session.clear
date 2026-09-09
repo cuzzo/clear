@@ -14914,9 +14914,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE value_node: ?AsyncSpawnNode = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
-        value_node = COPY item.value;,
+        value_node = UNWRAP (castLocatableToAsyncSpawnNode(COPY item.value));,
       DeclarationNode.BindExpr AS item ->
-        value_node = COPY item.value;,
+        value_node = UNWRAP (castLocatableToAsyncSpawnNode(COPY item.value));,
     END
     IF (value_node IS_A BgBlock AND ((declared != NIL) AND TRY (type__single_future?(UNWRAP (declared))))) THEN
       MUTABLE payload = TRY (type__tense_type(declared));

@@ -310,3 +310,11 @@ END
 PUB FN effectTracker__tier_order() RETURNS {String@symbol}Int64 ->
   RETURN {:micro: 0, :standard: 1, :large: 2, :xl: 3, :service: 4, :unbounded: 5};
 END
+FN castLocatableToAsyncSpawnNode(value: Locatable) RETURNS ?AsyncSpawnNode ->
+  PARTIAL MATCH value START
+    Locatable.BgBlock AS item -> RETURN AsyncSpawnNode{ BgBlock: COPY item };,
+    Locatable.BgStreamBlock AS item -> RETURN AsyncSpawnNode{ BgStreamBlock: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
