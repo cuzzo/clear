@@ -8476,7 +8476,7 @@ PRIVATE FN typeAnalysisSession__substitute_type_params(MUTABLE self: TypeAnalysi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (functionSignature__new((TRY (functionSignature__params(signature))) |> SELECT (COPY _).tap(%(np) USE(subst, _, MUTABLE rtoc_self_view) -> {
-    np.type = TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(_.type), subst));
+    np.type = TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY param__type(_) }, subst));
     NIL
     }), TypeTypeInput{ Type: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, TypeTypeInput{ Type: COPY functionSignature__return_type(signature) }, subst)) }, FunctionSignatureLifetimeInput{ ArrayValue: COPY TRY (functionSignature__return_lifetime(signature)) }, functionSignature__visibility(signature), ( { MUTABLE rtoc_empty_list_193: []String@symbol = List[]; rtoc_empty_list_193 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_194: []String@symbol = List[]; rtoc_empty_list_194 } ), NIL, ( { MUTABLE rtoc_empty_list_195: []String@symbol = List[]; rtoc_empty_list_195 } )));
 }
