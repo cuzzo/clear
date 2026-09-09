@@ -4999,7 +4999,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         WHILE rtoc_indexed_i_107 < rtoc_indexed_items_106.length() DO
           IF {
         MUTABLE spec = COPY UNWRAP (specs[rtoc_indexed_i_107]);
-        (!(intrinsicArgSpec__unconstrained_any?(spec)) AND (UNWRAP (rtoc_indexed_items_106[rtoc_indexed_i_107]).resolved_type == spec.type))
+        (!(intrinsicArgSpec__unconstrained_any?(spec)) AND (locatable__resolved_type(UNWRAP (rtoc_indexed_items_106[rtoc_indexed_i_107])) == spec.type))
       } THEN
             rtoc_indexed_output_108 = rtoc_indexed_output_108 + 1;
           END
@@ -5032,7 +5032,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((spec.type == symbol("Any[]")) AND TRY (typeAnalysisSession__any_array_intrinsic_arg?(&rtoc_self_view, spec.type, &arg))) THEN
       RETURN TRUE;
     END
-    MUTABLE cast_source = arg.resolved_type;
+    MUTABLE cast_source = locatable__resolved_type(arg);
     IF (CAST(cast_source AS String)).contains?("[") THEN
       MUTABLE full = TRY (aST__full_type_mut(arg));
       IF type__array?(full) THEN
@@ -5108,7 +5108,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         IF ((locatable__storage(Locatable{ BinaryOp: COPY node }) == :heap) OR type__heap?( UNWRAP (result_ti))) THEN
           IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-                  MUTABLE rtoc_mutable_receiver_110 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+                  MUTABLE rtoc_mutable_receiver_110: ?FunctionContext = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
                   functionContext__record_heap_use_mut(&rtoc_mutable_receiver_110);
           END
           IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
@@ -5127,7 +5127,7 @@ PRIVATE FN typeAnalysisSession__select_element_forces_heap_result?(MUTABLE self:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE found: Bool = FALSE;
-    aST__each_locatable_list(expr, FALSE, %(node: Locatable) -> {
+    aST__each_locatable(expr, FALSE, %(node: Locatable) -> {
     IF node IS_A BinaryOp AS binary_op THEN
         IF binaryOp__smooth?(binary_op) THEN
           found = TRUE;
@@ -5166,7 +5166,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE ti = TRY (aST__full_type_mut(node.left));
-    IF !(((ti AND type__future?(ti)) AND ((((TRY (type__dynamic_stream?(ti)) OR ti.inf_stream?()) OR TRY (type__open_stream?(ti))) OR ti.bounded_stream?())))) THEN
+    IF !((((ti != NIL) AND type__future?(ti)) AND ((((TRY (type__dynamic_stream?(ti)) OR TRY (type__inf_stream?(ti))) OR TRY (type__open_stream?(ti))) OR TRY (type__bounded_stream?(ti)))))) THEN
       RETURN NIL;
     END
     node.observable_terminal = TRUE;
@@ -5567,7 +5567,7 @@ PRIVATE FN typeAnalysisSession__analyze_window_op(MUTABLE self: TypeAnalysisSess
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(&rtoc_self_view, node, "WINDOW"));
     MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right.length()));
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, UNWRAP (locatable__size(node.right))));
     MUTABLE size_type = node.right.length().resolved_type;
     IF !(([:Int64, :Float64]).contains?(size_type)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right.length(), TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
@@ -5614,7 +5614,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF locatable__token(bw) EXISTS AS rtoc_wrap_5632 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_5632 } ELSE NIL END), TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_BAD_OPTION }, [], CAST({:name: _, :valid: valid_keys.join(", ")} AS {String@symbol}Any)));
     END
     END
-    IF !((opts.key?("size") OR opts.key?("time"))) THEN
+    IF !((opts.contains?("size") OR opts.contains?("time"))) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, bw.token(), TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_NEEDS_SIZE_OR_TIME }));
     END
     IF opts["size"] THEN
