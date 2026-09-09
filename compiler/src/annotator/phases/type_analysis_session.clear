@@ -11809,7 +11809,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body_id_base = (summary.body_id.value * semanticBodyIdStride());
     MUTABLE place_id = (body_id_base + frame.next_place_ordinal);
     &summary.local_facts.append(COPY LocalFact{ id: COPY LocalId{ value: (body_id_base + frame.next_local_ordinal) }, place_id: COPY SemanticPlaceId{ value: place_id }, name: COPY name });
-    MUTABLE symbol = aST__node__symbol(node);
+    MUTABLE symbol = aST__node__symbol(UNWRAP (castBindingNodeToLocatable(node)));
     IF symbol IS_A SymbolEntry THEN
       &symbol.adopt_semantic_place_id_mut(place_id);
     END
@@ -12273,7 +12273,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (UNWRAP (locatable__markers(node.object)).contains?("~") AND (node.mutates_receiver != NIL)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :TENSE_NAVIGATION_MUTATION }, [], CAST({:markers: locatable__markers(node.object)} AS {String@symbol}Any)));
     END
-    MUTABLE mapped_type = (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &Locatable{ MethodCall: COPY node }, "tense navigation method result") OR_ELSE TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node })));
+    MUTABLE mapped_type = (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, Locatable{ MethodCall: COPY node }, "tense navigation method result") OR_ELSE TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node })));
     MUTABLE result = TRY (typeAnalysisSession__publish_tense_navigation_plan_mut(&rtoc_self_view, &node, castLocatableToTenseNavigation__type_analysis_session(node.object), CAST(mapped_type AS Type)));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, result));
     IF node.object.safe_navigation?() THEN
@@ -12288,7 +12288,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_288: ?[]Locatable = node__args(node);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < UNWRAP (rtoc_each_items_288).length() DO
-      IF !(UNWRAP (rtoc_each_items_288[rtoc_idx]) IS_A MutableBorrow) THEN
+      IF !(UNWRAP ((rtoc_each_items_288 OR_ELSE List[])[rtoc_idx]) IS_A MutableBorrow) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -12784,7 +12784,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
       fn_name = UNWRAP (((typeAnalysisSession__current_fn_ctx(&rtoc_self_view))?).name);
     END
-    typeAnalysisSession__record_held_call_mut(&rtoc_self_view, fn_name, node.name, held_lock_types, node.token);
+    typeAnalysisSession__record_held_call_mut(&rtoc_self_view, fn_name, callName__string_value(node.name), held_lock_types, node.token);
 }
 END
 PRIVATE FN typeAnalysisSession__resolve_extern_method_call_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall) RETURNS !Bool
@@ -15077,7 +15077,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (typeAnalysisSession__finish_previsited_copy_mut(&rtoc_self_view, CAST(wrapper AS CopyNode)));
           END
       END
-      MUTABLE symbol = aST__node__symbol(node);
+      MUTABLE symbol = aST__node__symbol(UNWRAP (castBindingNodeToLocatable(node)));
       IF symbol IS_A SymbolEntry THEN
           TRY (typeAnalysisSession__establish_inferred_alias_mut(&rtoc_self_view, &node, &symbol));
       END
