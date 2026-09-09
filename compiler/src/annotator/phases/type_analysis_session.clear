@@ -5568,7 +5568,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(&rtoc_self_view, node, "WINDOW"));
     MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, UNWRAP (locatable__size(node.right))));
-    MUTABLE size_type = locatable__resolved_type(UNWRAP (locatable__size(node.right)));
+    MUTABLE size_type: ?String@symbol = locatable__resolved_type(UNWRAP (locatable__size(node.right)));
     IF !(([:Int64, :Float64]).contains?(size_type)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right.length(), TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
     END
@@ -5615,7 +5615,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     END
     IF !((opts.contains?("size") OR opts.contains?("time"))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY locatable__token(bw) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_NEEDS_SIZE_OR_TIME }));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY UNWRAP (locatable__token(bw)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_NEEDS_SIZE_OR_TIME }));
     END
     IF opts["size"] THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, opts["size"]));
@@ -5848,7 +5848,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE inner_bind_name = NIL;
     MUTABLE expr: ?Locatable@boxed = locatable__expression(node.right);
     IF (IF UNWRAP (expr) IS_A BinaryOp AS rtoc_bind_op THEN (rtoc_bind_op.op == :BIND_VAR) ELSE FALSE END) THEN
-      inner_bind_name = expr.right().name();
+      inner_bind_name = locatable__name(UNWRAP (locatable__right(UNWRAP (expr))));
     END
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_132 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
@@ -5950,7 +5950,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRY (typeAnalysisSession__has_catch_blocks?(&rtoc_self_view)) AND TRUE) THEN
       MUTABLE t = TRY (type__new(TypeConstructionInput{ Type: COPY result_type }));
       IF type__error_union?(t) THEN
-        result_type = type__resolved(UNWRAP (TRY (type__payload_type(t))));
+        result_type = UNWRAP (TRY (type__payload_type(t)));
       END
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, result_type));
@@ -6031,7 +6031,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (retain_error_union AND (error_type != NIL)) THEN
       node.error_union_type = error_type;
     END
-    IF (error_type OR (call.can_fail == TRUE)) THEN
+    IF ((error_type != NIL) OR (call.can_fail == TRUE)) THEN
       node.can_fail = TRUE;
     END
 }
@@ -6306,7 +6306,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE conc = castLocatableToConcurrentOp__type_analysis_session(COPY node.right);
     MUTABLE each_op: ?ClearParserConcurrentPipelineOp = conc.op;
     MUTABLE ti = TRY (aST__full_type_mut( UNWRAP (shard_node.target_map)));
-    MUTABLE key_type = (((type__numeric_map?(ti) AND ((TRY (type__key_type(ti)) != NIL) AND type__resolved(((TRY (type__key_type(ti)))?))))) OR :String);
+    MUTABLE key_type: String@symbol = (IF (type__numeric_map?(ti) AND (TRY (type__key_type(ti)) != NIL)) THEN type__resolved(UNWRAP (TRY (type__key_type(ti)))) ELSE :String END);
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(each_op, key_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_148 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_148, "_", NIL, key_type, ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
