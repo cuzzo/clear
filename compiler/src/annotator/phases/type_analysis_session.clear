@@ -18158,7 +18158,7 @@ PRIVATE FN typeAnalysisSession__plan_or_else_with_diagnostic(MUTABLE self: TypeA
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (tenseOperationPlanner__or_else(left_type, right_type, operation, recovery));
 }
-CATCH ArgumentError
+CATCH Input
   MUTABLE expected = TRY (type__value_payload_type(left_type));
   TRY (typeAnalysisSession__error_mut(&self, DiagnosticAnchor{ Locatable: Locatable{ BinaryOp: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_MISMATCH_IN_OR }, [], CAST({:expected: type__resolved(expected), :got: type__resolved(right_type)} AS {String@symbol}Any)));
   RETURN TRY (tenseOperationPlanner__or_else(left_type, expected, operation, recovery));
@@ -18416,7 +18416,7 @@ PRIVATE FN typeAnalysisSession__try_value_plan_with_diagnostic(MUTABLE self: Typ
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (tenseOperationPlanner__try_value(plan_input));
 }
-CATCH ArgumentError
+CATCH Input
   TRY (typeAnalysisSession__error_mut(&self, DiagnosticAnchor{ Locatable: Locatable{ UnaryOp: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :UNWRAP_NON_OPTIONAL }, [], CAST({:got: raw_type} AS {String@symbol}Any)));
   RETURN NIL;
 END

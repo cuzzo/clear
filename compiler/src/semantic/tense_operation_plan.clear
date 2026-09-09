@@ -382,7 +382,7 @@ PUB FN tenseOperationPlanner__or_else(type: Type, fallback_type: Type, operation
   END
   MUTABLE available = recoverable |> WHERE ((_.kind == TenseLayerKind.Fallible) OR (_.kind == TenseLayerKind.Optional));
   IF (available.length() == 0) THEN
-    panic("OR_ELSE requires a recoverable outer layer, got {}");
+    RAISE Input, ArgumentError, "OR_ELSE requires a recoverable outer layer";
   END
   MUTABLE handled: []TenseLayer = List[];
   IF (recovery == TenseRecovery.Fallback) THEN
@@ -397,7 +397,7 @@ PUB FN tenseOperationPlanner__or_else(type: Type, fallback_type: Type, operation
     result = TRY (type__optional_of(TypeTypeInput{ Type: COPY result }));
   END
   IF ((((recovery == TenseRecovery.Fallback) AND (type__resolved(fallback_type) != :NoReturn)) AND !(TRY (type__accepts?(result, fallback_type)))) AND !(TRY (type__accepts?(fallback_type, result)))) THEN
-    panic("OR_ELSE fallback {} does not match {}");
+    RAISE Input, ArgumentError, "OR_ELSE fallback does not match";
   END
   MUTABLE backend = IF available |> ANY (_.kind == TenseLayerKind.Fallible) THEN
     TenseBackendForm.ZigCatch
