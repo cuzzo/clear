@@ -82,3 +82,9 @@ PUB FN semanticIdIndex__body_id_for(self: SemanticIdIndex, name: String) RETURNS
   RETURN COPY self.bodies[name];
 END
 # End Ruby module Semantic
+
+# Ruby holds this as Semantic::BODY_ID_STRIDE. A module binding is not visible
+# across packages, so the module that owns it answers for it.
+PUB FN semanticBodyIdStride() RETURNS Int64 ->
+  RETURN 1000000;
+END

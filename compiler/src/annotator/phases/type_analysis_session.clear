@@ -6620,7 +6620,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF expr IS_A UnaryOp AS rtoc_neg_op THEN (rtoc_neg_op.op == :SUB) ELSE FALSE END) THEN
         MUTABLE right: ?Locatable = aST__node_right(expr);
         IF UNWRAP (right) IS_A Literal THEN
-          RETURN (-aST__node_value( UNWRAP (right)).to_f());
+          RETURN (-tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (right)))));
         END
     END
     END
@@ -8841,8 +8841,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     effect = typeAnalysisSession__promote_suspends_for_current_context(&rtoc_self_view, effect);
     (TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, UNWRAP (fn_ctx?.name)))).insert(COPY effect);
-    IF (typeAnalysisSession__inside_snapshot_transaction_body?(&rtoc_self_view) AND (suspends_family |> ANY (_ == effect))) THEN
-      typeAnalysisSession__record_snapshot_txn_violation_mut(&rtoc_self_view, effect, fn_ctx.name);
+    IF (typeAnalysisSession__inside_snapshot_transaction_body?(&rtoc_self_view) AND anySuspendsEffect(Set[effect])) THEN
+      typeAnalysisSession__record_snapshot_txn_violation_mut(&rtoc_self_view, effect, UNWRAP (fn_ctx).name);
     END
     NIL;
 }
@@ -9810,9 +9810,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__declare_capability_binding_or_error_mut(&rtoc_self_view, fact));
     TRY (typeAnalysisSession__declare_capability_projection_mut(&rtoc_self_view, fact));
     MUTABLE alias_name = COPY fact.alias_name;
-    IF alias_name THEN
-      (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-      scope__resolve_entry( rtoc_local_receiver_217, alias_name) })?.capabilities).insert(COPY fact.capability);
+    IF alias_name EXISTS AS alias_name_value THEN
+      MUTABLE rtoc_local_receiver_217 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
+      IF scope__resolve_entry(rtoc_local_receiver_217, alias_name_value) EXISTS AS MUTABLE rtoc_alias_entry THEN
+        &rtoc_alias_entry.capabilities.insert(COPY fact.capability);
+      END
     END
     RETURN NIL;
 }
@@ -11047,7 +11049,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE state = COPY typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).lock_analysis;
     FOR _ IN held_stack DO
     IF state.held_calls[fn_name] EXISTS AS rtoc_map_slot_252 THEN
-      &rtoc_map_slot_252.append(LockHeldCallSite{ held: COPY _.type, callee: COPY callee_name, site_token: site_token, opted_out: _.opted_out });
+      &rtoc_map_slot_252.append(LockHeldCallSite{ held: COPY _.type, callee: COPY callee_name, site_token: COPY site_token, opted_out: _.opted_out });
     ELSE
       panic("T.must: map slot is NIL");
     END
@@ -11798,7 +11800,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE summary = COPY frame.summary;
     frame.next_local_ordinal=((frame.next_local_ordinal + 1));
     frame.next_place_ordinal=((frame.next_place_ordinal + 1));
-    MUTABLE body_id_base = (summary.body_id.value * body_id_stride);
+    MUTABLE body_id_base = (summary.body_id.value * semanticBodyIdStride());
     MUTABLE place_id = (body_id_base + frame.next_place_ordinal);
     &summary.local_facts.append(COPY LocalFact{ id: COPY LocalId{ value: (body_id_base + frame.next_local_ordinal) }, place_id: COPY SemanticPlaceId{ value: place_id }, name: COPY name });
     MUTABLE symbol = aST__node__symbol(node);
@@ -11904,7 +11906,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node IS_A FuncCall) OR (node IS_A MethodCall) THEN
         IF _.record_call_sites THEN
           _.next_call_site_ordinal=((_.next_call_site_ordinal + 1));
-          &summary.call_site_facts.append(COPY CallSiteFact{ id: COPY CallSiteId{ value: ((summary.body_id.value * body_id_stride) + _.next_call_site_ordinal) }, node: node, callee_name: COPY node.name(), args: COPY node.args(), fn_var_call: (IF node IS_A FuncCall AS func_call THEN (func_call.fn_var_call == TRUE) ELSE FALSE END), propagates_failure: !(_.failure_absorbed) });
+          &summary.call_site_facts.append(COPY CallSiteFact{ id: COPY CallSiteId{ value: ((summary.body_id.value * semanticBodyIdStride()) + _.next_call_site_ordinal) }, node: node, callee_name: COPY node.name(), args: COPY node.args(), fn_var_call: (IF node IS_A FuncCall AS func_call THEN (func_call.fn_var_call == TRUE) ELSE FALSE END), propagates_failure: !(_.failure_absorbed) });
         END
         IF (IF node IS_A FuncCall AS func_call THEN func_call.fn_var_call ELSE FALSE END) THEN
           summary.has_fnptr_call = TRUE;
@@ -12826,7 +12828,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((alloc_kind AND (fn_ctx != NIL))) THEN
       RETURN;
     END
-    IF (alloc_kind == :heap) THEN
+    IF ((IF alloc_kind IS_A String@symbol AS alloc_kind_payload THEN (alloc_kind_payload == :heap) ELSE FALSE END)) THEN
       functionContext__record_heap_use_mut(&fn_ctx);
     ELSE
       functionContext__record_frame_use_mut(&fn_ctx);
@@ -13173,7 +13175,7 @@ PRIVATE FN typeAnalysisSession__runtime_is_a_target_segments(self: TypeAnalysisS
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF node IS_A Type AS type THEN
+    IF castNodeToNodeOrType(node) IS_A Type AS type THEN
       RETURN CAST([TRY (type__coercion_surface_name(castTypeToTypeTypeInput__type_analysis_session(type)))] AS []String);
     ELSE_IF node IS_A Identifier AS identifier THEN
       RETURN CAST([identifier__name(identifier)] AS []String);
@@ -13234,7 +13236,7 @@ PRIVATE FN typeAnalysisSession__stamp_runtime_is_a_target_mut(MUTABLE self: Type
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF node IS_A Type AS type THEN
+    IF castNodeToNodeOrType(node) IS_A Type AS type THEN
       RETURN;
     ELSE_IF node IS_A GetField AS get_field THEN
       MUTABLE get_field_mutable = COPY get_field;
@@ -13274,7 +13276,7 @@ PRIVATE FN typeAnalysisSession__static_type_expr?(MUTABLE self: TypeAnalysisSess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF node IS_A Type AS type THEN
+    IF castNodeToNodeOrType(node) IS_A Type AS type THEN
       RETURN TRUE;
     ELSE_IF node IS_A Identifier AS identifier THEN
       MUTABLE name = symbol(identifier__name(identifier));
@@ -13340,7 +13342,7 @@ PRIVATE FN typeAnalysisSession__static_is_a_target_type(MUTABLE self: TypeAnalys
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF node IS_A Type AS type THEN
+    IF castNodeToNodeOrType(node) IS_A Type AS type THEN
       RETURN TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(type)));
     ELSE_IF node IS_A Identifier AS identifier THEN
       RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(identifier__name(identifier)) }));
@@ -15908,7 +15910,7 @@ PRIVATE FN typeAnalysisSession__destructure_value_type_at(self: TypeAnalysisSess
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE value = node.value;
     IF (IF value IS_A ListLit THEN ((locatable__items(value) OR_ELSE List[])[index_value] != NIL) ELSE FALSE END) THEN
-      RETURN value.items[index_value].full_type_mut({:context: "destructuring literal element"});
+      RETURN TRY (aST__full_type_mut(UNWRAP ((locatable__items(value) OR_ELSE List[])[index_value])));
     END
     IF type__tuple?((TRY (aST__full_type_mut(node.value)))) THEN
       RETURN COPY (TRY (type__generic_args((TRY (aST__full_type_mut(node.value))))))[index_value];
@@ -19506,7 +19508,7 @@ PRIVATE FN typeAnalysisSession__collect_body_identifier_names(MUTABLE self: Type
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = Set[];
-    aST__each_locatable_list((nodes |> SELECT UNWRAP (castNodesToLocatable(_))), FALSE, %(node: Locatable) USE(MUTABLE names) -> {
+    aST__each_locatable_list(nodes__locatable_list(nodes), FALSE, %(node: Locatable) USE(MUTABLE names) -> {
     IF node IS_A Identifier AS identifier THEN
         &names.insert(identifier__name(identifier));
     END
@@ -19544,7 +19546,7 @@ PRIVATE FN typeAnalysisSession__reject_scoped_assignment_move_mut(MUTABLE self: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier AND ((locatable__symbol( UNWRAP ((aST__node_value(UNWRAP (castNodeToLocatable(node)))))) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_478 = ((locatable__symbol(aST__node_value(UNWRAP (castNodeToLocatable(node)))))?);
+    IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier AND ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_478 = ((locatable__symbol(aST__node_value(UNWRAP (castNodeToLocatable(node)))))?);
     symbolEntry__non_escaping(rtoc_local_receiver_478) }))) THEN
       RETURN;
     END
@@ -23024,4 +23026,18 @@ FN castNodesToLocatable(value: Nodes) RETURNS ?Locatable ->
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
+END
+
+# Ruby walks the same nodes; the walker takes the AST union, so each entry is
+# named as the locatable it already is.
+FN nodes__locatable_list(values: []Nodes) RETURNS []Locatable ->
+  MUTABLE out: []Locatable = List[];
+  MUTABLE rtoc_idx = 0;
+  WHILE rtoc_idx < values.length() DO
+    IF castNodesToLocatable(UNWRAP (values[rtoc_idx])) EXISTS AS rtoc_node THEN
+      &out.append(COPY rtoc_node);
+    END
+    rtoc_idx = rtoc_idx + 1;
+  END
+  RETURN out;
 END
