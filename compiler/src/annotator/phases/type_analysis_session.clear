@@ -10679,7 +10679,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_stdlib_def));
-    signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_signature)));
+    signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(KEEP node__matched_signature(node))));
     IF signature EXISTS AS signature_value THEN
       MUTABLE signature_params: []Param = TRY (functionSignature__params(signature_value));
       MUTABLE takes_count = 0;
@@ -11950,11 +11950,7 @@ PRIVATE FN typeAnalysisSession__fn_var_call_error_fallible?(MUTABLE self: TypeAn
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_signature));
-    IF type__error_union(UNWRAP ((IF sig != NIL THEN
-      functionSignature__return_type(sig)
-    ELSE
-      NIL
-    END))) THEN
+    IF ((sig != NIL) AND type__error_union?(functionSignature__return_type(sig))) THEN
       RETURN TRUE;
     END
     RETURN type__error_union?((TRY (aST__full_type_mut(Locatable{ FuncCall: COPY node }))));
@@ -11970,14 +11966,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap((IF node__matched_signature(node) EXISTS AS rtoc_wrap_11966 THEN X{ FunctionSignature: COPY rtoc_wrap_11966 } ELSE NIL END));
-    IF type__error_union(UNWRAP ((IF signature != NIL THEN
-      functionSignature__return_type(signature)
-    ELSE
-      NIL
-    END))) THEN
+    IF ((signature != NIL) AND type__error_union?(functionSignature__return_type(signature))) THEN
       RETURN TRUE;
     END
-    MUTABLE intrinsic = node.matched_stdlib_def;
+    MUTABLE intrinsic = node__matched_stdlib_def(node);
     IF intrinsic EXISTS AS intrinsic_value THEN
       IF functionSignature__recoverable_result?(intrinsic_value) THEN
       RETURN TRUE;

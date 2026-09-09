@@ -2749,14 +2749,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap((IF locatable__matched_signature(node) EXISTS AS rtoc_wrap_2756 THEN X{ FunctionSignature: COPY rtoc_wrap_2756 } ELSE NIL END));
-    IF type__error_union(UNWRAP ((IF signature != NIL THEN
-      functionSignature__return_type(signature)
-    ELSE
-      NIL
-    END))) THEN
+    IF ((signature != NIL) AND type__error_union?(functionSignature__return_type(signature))) THEN
       RETURN TRUE;
     END
-    MUTABLE intrinsic = node.matched_stdlib_def;
+    MUTABLE intrinsic = locatable__matched_stdlib_def(node);
     IF intrinsic EXISTS AS intrinsic_value THEN
       IF functionSignature__recoverable_result?(intrinsic_value) THEN
       RETURN TRUE;
