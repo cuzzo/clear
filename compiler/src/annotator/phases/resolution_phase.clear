@@ -797,11 +797,12 @@ PRIVATE FN resolutionSession__resolve_conformance_declarations_mut(MUTABLE self:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE local_structs = (declarations.type_declarations |> SELECT:? (  IF _ IS_A StructDef THEN
-      Tuple{aST__node_name(UNWRAP (castTypeDeclarationToLocatable(_))), _}
-    ELSE
-      NIL
-    END) |> WHERE _ != NIL).to_h();
+    MUTABLE local_structs: {String}TypeDeclaration = {};
+    FOR rtoc_decl IN declarations.type_declarations DO
+      IF rtoc_decl IS_A StructDef THEN
+        local_structs[(aST__node_name(UNWRAP (castTypeDeclarationToLocatable(rtoc_decl))) OR_ELSE "")] = COPY rtoc_decl;
+      END
+    END
     MUTABLE local_protocols = (declarations.type_declarations |> SELECT:? (  IF _ IS_A ProtocolDef THEN
       _.name()
     ELSE
@@ -939,7 +940,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (binders.length() != owner_params.length()) THEN
       TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY declaration } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_OWNER_ARITY }, [], CAST({:owner: owner_name, :expected: owner_params.length(), :got: binders.length()} AS {String@symbol}Any)));
     END
-    declaration.owner_type = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TypeExpression{ kind: COPY NamedTypeExpression{ name: COPY symbol(owner_name), arguments: COPY binders |> SELECT typeExpression__of(NamedTypeExpression{ name: COPY symbol(_.name), arguments: List[] }) }, capabilities: COPY declaration.owner_type.capabilities } }));
+    declaration.owner_type = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TypeExpression{ kind: COPY TypeExpressionKind{ Named: COPY NamedTypeExpression{ name: COPY symbol(owner_name), arguments: COPY (binders |> SELECT typeExpression__of(TypeExpressionKind{ Named: COPY NamedTypeExpression{ name: COPY symbol(_.name), arguments: List[] } })) } }, capabilities: COPY declaration.owner_type.capabilities } }));
 }
 END
 PRIVATE FN resolutionSession__conformance_owner_params(self: ResolutionSession, owner_name: String, local_owner: ?StructDef) RETURNS !?[]GenericParamDecl
@@ -1060,7 +1061,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     mod_value.global_scope.types.keys() |> EACH {
     MUTABLE type_entry = (mod_value.global_scope.types[_] OR_ELSE panic("missing hash key"));
     MUTABLE schema = type_entry.schema;
-    MUTABLE vis = (functionSignature__visibility(schema) OR :package);
+    MUTABLE vis = (schemaValue__visibility(schema) OR_ELSE :package);
     IF (vis == :private) THEN
         CONTINUE;
     END
