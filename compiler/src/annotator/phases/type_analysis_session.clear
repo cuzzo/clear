@@ -4500,8 +4500,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     scope__is_restricted?(rtoc_local_receiver_83, UNWRAP (locatable__name(arg_node))) }) THEN
       RETURN TRUE;
     END
-    MUTABLE base_paths = lifetime_paths |> UNNEST (IF ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol__type_analysis_session(_, :wildcard) THEN [:wildcard] ELSE [(CAST(_ AS String)).split(".").first()] END);
-    IF !((base_paths.contains?(:wildcard) OR base_paths.contains?(param.name))) THEN
+    MUTABLE base_paths = lifetime_paths |> UNNEST (IF ruby_union_scalar_equal_FunctionSignatureLifetimeSource_String_symbol__type_analysis_session(_, :wildcard) THEN [COPY "wildcard"] ELSE [UNWRAP ((CAST(_ AS String)).split(".").first())] END);
+    IF !((base_paths.contains?("wildcard") OR base_paths.contains?(param.name))) THEN
       RETURN TRUE;
     END
     TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY arg_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :MUTABLE_PARAM_NEEDS_RESTRICT }, [], CAST({:name: param.name, :arg: locatable__name(arg_node), :callee: "the callee"} AS {String@symbol}Any)));
@@ -8238,14 +8238,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE actual_fn: ?FunctionType = type__function_type(actual_type);
       IF param_fn EXISTS AS param_fn_value THEN
         IF actual_fn EXISTS AS actual_fn_value THEN
-          param_fn_value.params.zip(actual_fn_value.params).keys() |> EACH {
-    MUTABLE a_param = (param_fn_value.params.zip(actual_fn.params)[_] OR_ELSE panic("missing hash key"));
-    IF !((_ AND a_param)) THEN
-      CONTINUE;
-    END
-    TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, _.type, a_param.type(), type_params, &subst));
-          };
-          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, UNWRAP (param_fn_value).return_type, actual_fn.return_type, type_params, &subst));
+          MUTABLE rtoc_zip_i = 0;
+          WHILE rtoc_zip_i < param_fn_value.params.length() DO
+            MUTABLE p_param: ?FunctionTypeParam = COPY param_fn_value.params[rtoc_zip_i];
+            MUTABLE a_param: ?FunctionTypeParam = COPY actual_fn_value.params[rtoc_zip_i];
+            IF p_param EXISTS AS rtoc_pp THEN
+              IF a_param EXISTS AS rtoc_ap THEN
+                TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, rtoc_pp.type, rtoc_ap.type, type_params, &subst));
+              END
+            END
+            rtoc_zip_i = rtoc_zip_i + 1;
+          END
+          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, param_fn_value.return_type, UNWRAP (actual_fn).return_type, type_params, &subst));
         ELSE
           RETURN;
         END
@@ -8266,13 +8270,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       subst[p_res] = GenericBinding{ TypeMultiowned: COPY actual_binding };
     ELSE_IF ((type__generic_instance?(param_type) AND type__generic_instance?(actual_type)) AND (type__generic_base(param_type) == type__generic_base(actual_type))) THEN
-      (TRY (type__generic_args(param_type))).zip(TRY (type__generic_args(actual_type))).keys() |> EACH {
-    MUTABLE a_arg = ((TRY (type__generic_args(param_type))).zip(TRY (type__generic_args(actual_type)))[_] OR_ELSE panic("missing hash key"));
-    IF !((_ AND a_arg)) THEN
-      CONTINUE;
-    END
-    TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, _, a_arg, type_params, &subst));
-      };
+      MUTABLE rtoc_p_args = TRY (type__generic_args(param_type));
+      MUTABLE rtoc_a_args = TRY (type__generic_args(actual_type));
+      MUTABLE rtoc_arg_i = 0;
+      WHILE rtoc_arg_i < rtoc_p_args.length() DO
+        MUTABLE p_arg: ?Type = COPY rtoc_p_args[rtoc_arg_i];
+        MUTABLE a_arg: ?Type = COPY rtoc_a_args[rtoc_arg_i];
+        IF p_arg EXISTS AS rtoc_pa THEN
+          IF a_arg EXISTS AS rtoc_aa THEN
+            TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, rtoc_pa, rtoc_aa, type_params, &subst));
+          END
+        END
+        rtoc_arg_i = rtoc_arg_i + 1;
+      END
     END
 }
 END
