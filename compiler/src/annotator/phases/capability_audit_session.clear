@@ -2614,7 +2614,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END)));
       IF sig EXISTS AS sig_value THEN
         IF functionSignature__alloc_fault(sig_value) THEN
-          alloc_fault[callees[rtoc_idx]] = TRUE;
+          alloc_fault[UNWRAP (callees[rtoc_idx])] = TRUE;
       END
       END
     rtoc_idx = rtoc_idx + 1;
