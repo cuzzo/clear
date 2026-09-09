@@ -1766,7 +1766,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE seen_associated: [Set]String = Set[];
     FOR _ IN node.associated_types DO
     IF seen_associated.contains?(_.name) THEN
-        TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ ProtocolRequirement: COPY (IF _.token EXISTS AS rtoc_anchor_tok_1763 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_anchor_tok_1763 } ELSE DiagnosticAnchor{ Locatable: COPY Locatable{ ProtocolDef: COPY node } } END) } }, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_DUPLICATE_TYPE_PARAM }, [], CAST({:param: _.name, :struct: node.name} AS {String@symbol}Any)));
+        TRY (resolutionSession__error_mut(&rtoc_self_view, (IF _.token EXISTS AS rtoc_anchor_tok_1763 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_anchor_tok_1763 } ELSE DiagnosticAnchor{ Locatable: COPY Locatable{ ProtocolDef: COPY node } } END), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_DUPLICATE_TYPE_PARAM }, [], CAST({:param: _.name, :struct: node.name} AS {String@symbol}Any)));
     END
     IF !((_.bounds.length() == 0)) THEN
         TRY (resolutionSession__error_mut(&rtoc_self_view, (IF _.token EXISTS AS rtoc_anchor_tok_1766 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_anchor_tok_1766 } ELSE DiagnosticAnchor{ Locatable: COPY Locatable{ ProtocolDef: COPY node } } END), ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_BINDER_HAS_BOUND }, [], CAST({:name: _.name} AS {String@symbol}Any)));
