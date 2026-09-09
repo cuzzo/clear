@@ -2079,7 +2079,11 @@ module PipeAnalysis
       error!(node.left, :PIPE_SOURCE_OPTIONAL, op: op_name, got: node.left.resolved_type)
     end
     return if node.left.metatype == :array
-    return if lhs_type&.collection?
+    # The gate and the item type must agree. `collection?` admits a map, but
+    # `pipeline_source_fact` derives an item type only for a linear collection,
+    # so a map source used to slip through and leave `_` as Any -- every field
+    # read off it then failed far from the real mistake.
+    return if lhs_type&.linear_collection?
     return if allow_range && node.left.is_a?(AST::RangeLit)
     return if allow_stream && lhs_type&.runtime_stream?
     # SELECT uses "from" in error message for historical reasons
