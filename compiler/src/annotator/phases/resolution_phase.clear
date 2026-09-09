@@ -933,7 +933,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ((names).length() != owner_params.length()) THEN
         TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY declaration } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_BINDERS_CANNOT_INFER }, [], CAST({:owner: owner_name, :expected: owner_params.length(), :got: (names).length()} AS {String@symbol}Any)));
       END
-      binders = names |> SELECT GenericParamDecl{ token: declaration.token, name: COPY _, bounds: List[] };
+      binders = names |> SELECT GenericParamDecl{ token: declaration.token, name: COPY UNWRAP (_), bounds: List[] };
       declaration.binders = binders;
     END
     IF (binders.length() != owner_params.length()) THEN
@@ -1055,7 +1055,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE imported_sig = TRY (functionSignature__import_copy(sig, node.namespace));
     MUTABLE rtoc_mutable_receiver_22 = TRY (resolutionSession__current_scope(rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_22, rtoc_each_1, NIL, imported_sig, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :static));
+    TRY (scope__declare(&rtoc_mutable_receiver_22, rtoc_each_1, NIL, SymbolEntryTypeInput{ FunctionSignatureMultiowned: COPY imported_sig }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :static));
         END
     mod_value.global_scope.types.keys() |> EACH {
     MUTABLE type_entry = (mod_value.global_scope.types[_] OR_ELSE panic("missing hash key"));
@@ -1563,7 +1563,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (resolutionSession__validate_c_boundary_type_mut(&rtoc_self_view, node, UNWRAP (node.return_type), "return", TRUE));
     FOR _ IN node.params DO
-    TRY (resolutionSession__validate_c_boundary_type_mut(&rtoc_self_view, node, param__type(_), "parameter ${_.name}", FALSE));
+    TRY (resolutionSession__validate_c_boundary_type_mut(&rtoc_self_view, node, param__type(_), "parameter ${param__name(_)}", FALSE));
     END
 }
 END
@@ -1648,7 +1648,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF node IS_A ExternFnDecl AS extern_fn_decl THEN (extern_fn_decl.owner_type != NIL) ELSE FALSE END) THEN
       key = "${type__to_s(UNWRAP (node__owner_type(node)))}.${(aST__node_name(UNWRAP (castNodeToLocatable(node))) OR_ELSE "")}";
     ELSE
-      key = aST__node_name(UNWRAP (castNodeToLocatable(node)));
+      key = (aST__node_name(UNWRAP (castNodeToLocatable(node))) OR_ELSE "");
     END
     IF seen.contains?(key) THEN
       TRY (resolutionSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], CAST({:label: label, :name: key} AS {String@symbol}Any)));
@@ -1698,7 +1698,7 @@ PRIVATE FN resolutionSession__reject_duplicate_extern_method_mut(MUTABLE self: R
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE methods: ?{String@symbol}FunctionSignature@multiowned = scopeScopeTypeSchema__methods(type_schema);
-    IF !((UNWRAP (methods) IS_A {}Any AND methods.key?(node.name))) THEN
+    IF !((IF methods EXISTS AS methods_value THEN methods_value.contains?(symbol(node.name)) ELSE FALSE END)) THEN
       RETURN;
     END
     MUTABLE owner = (node.owner_type OR_ELSE "<unknown>");
@@ -1756,7 +1756,7 @@ PRIVATE FN resolutionSession__register_protocol_declaration(MUTABLE self: Resolu
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (resolutionSession__protocol_declared?(rtoc_self_view, node.name) OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_46 = TRY (resolutionSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type_entry(rtoc_local_receiver_46, symbol(node.name))) }) THEN
-      TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ ProtocolRequirement: COPY DiagnosticAnchor{ TokenValue: COPY node.name_token } } }, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], CAST({:label: "protocol", :name: node.name} AS {String@symbol}Any)));
+      TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY node.name_token }, ResolutionCodeOrMessage{ SymbolValue: :DUPLICATE_DECLARATION }, [], CAST({:label: "protocol", :name: node.name} AS {String@symbol}Any)));
     END
     MUTABLE seen_associated: [Set]String = Set[];
     FOR _ IN node.associated_types DO
@@ -1786,9 +1786,9 @@ PRIVATE FN resolutionSession__resolve_recursive_struct_layouts_mut(MUTABLE self:
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = (structs |> SELECT symbol(_.name)) |> DISTINCT _;
     MUTABLE edges: []RecursiveFieldEdge = ( { MUTABLE rtoc_empty_list_47: []RecursiveFieldEdge = List[]; rtoc_empty_list_47 } );
-    FOR _ IN structs DO
-    _.field_decls.keys() |> EACH {
-    MUTABLE field: StructField@multiowned = (_.field_decls[_] OR_ELSE CAST(panic("missing hash key") AS StructField@multiowned));
+    FOR rtoc_struct IN structs DO
+    rtoc_struct.field_decls.keys() |> EACH {
+    MUTABLE field: StructField@multiowned = (rtoc_struct.field_decls[_] OR_ELSE CAST(panic("missing hash key") AS StructField@multiowned));
     MUTABLE target: ?String@symbol = TRY (resolutionSession__inline_recursive_target(rtoc_self_view, structField__type(field), names));
     IF target EXISTS AS target_value THEN
         &edges.append(RecursiveFieldEdge{ owner: COPY symbol(_.name), target: COPY target_value, field_name: COPY _, type: COPY structField__type(field) });
