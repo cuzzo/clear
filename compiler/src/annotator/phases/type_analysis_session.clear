@@ -9712,7 +9712,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         symbol("SNAPSHOT")
       ELSE_IF (syn == :atomic) THEN
         :ATOMIC
-      ELSE_IF ((((TRUE AND node.polymorphic)) AND (((syn == NIL) OR (syn? == :local)))) AND ((((((storage == NIL) OR (storage? == :local)) OR (storage == :multiowned)) OR (storage == :stack)) OR (storage == :heap)))) THEN
+      ELSE_IF ((((TRUE AND (node.polymorphic OR_ELSE FALSE))) AND (((syn == NIL) OR (syn? == :local)))) AND ((((((storage == NIL) OR (storage? == :local)) OR (storage == :multiowned)) OR (storage == :stack)) OR (storage == :heap)))) THEN
         {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE root: ?Identifier = aST__root_identifier(var_node);
@@ -9757,7 +9757,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     MUTABLE audit_root: ?Identifier = aST__root_identifier(var_node);
-    IF ((audit_root != NIL) AND (((fact.capability == symbol("EXCLUSIVE")) OR ((node.polymorphic AND capability__alias_mutable(cap)))))) THEN
+    IF ((audit_root != NIL) AND (((fact.capability == symbol("EXCLUSIVE")) OR (((node.polymorphic OR_ELSE FALSE) AND capability__alias_mutable(cap)))))) THEN
       TRY (typeAnalysisSession__audit_mark_mutated(&rtoc_self_view, audit_root.name));
     END
     IF (IF var_node IS_A GetField AS get_field THEN getField__wildcard?(get_field) ELSE FALSE END) THEN
@@ -12637,7 +12637,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       node.error_kind = TRY (functionSignature__intrinsic_error_kind(method_def_value_mutable));
       node.error_type = TRY (functionSignature__intrinsic_error_type(method_def_value_mutable));
-      IF (method_allocates OR functionSignature__can_fail(method_def_value_mutable)) THEN
+      IF (method_allocates OR (functionSignature__can_fail(method_def_value_mutable) OR_ELSE FALSE)) THEN
         IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
                 MUTABLE rtoc_mutable_receiver_302 = UNWRAP (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
                 functionContext__record_alloc_use_mut(&rtoc_mutable_receiver_302);
@@ -14267,7 +14267,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (locatable__resolved_type(UNWRAP (locatable__condition( Locatable{ WhileLoop: COPY node }))) != :Bool) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WhileLoop: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONDITION_NEEDS_BOOL }, [], CAST({:got: locatable__resolved_type(node.condition)} AS {String@symbol}Any)));
     END
-    IF (((node.condition IS_A Identifier AND (aST__node_name(node.condition) == "TRUE"))) OR ((node.condition IS_A Literal AND locatable__true_boolean?(node.condition)))) THEN
+    IF (((node.condition IS_A Identifier AND (aST__node_name(node.condition) == "TRUE"))) OR ((node.condition IS_A Literal AND (locatable__true_boolean?(node.condition) OR_ELSE FALSE)))) THEN
       TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("LOOP_UNBOUND")));
     END
     MUTABLE pre_loop_states = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_354 = typeAnalysisSession__ownership_graph(&rtoc_self_view);
@@ -16089,7 +16089,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE op_value_mutable = COPY op_value;
       MUTABLE rtoc_return_def = UNWRAP (op_value_mutable.facts.return_def);
       MUTABLE result_type = TRY (functionReturn__resolve(rtoc_return_def, target_type_info, ( { MUTABLE rtoc_empty_list_398: []Locatable = List[]; rtoc_empty_list_398 } )));
-      MUTABLE navigation = ((node.target IS_A OptionalUnwrap AND locatable__safe_navigation?(node.target)) OR implicit_safe_nav);
+      MUTABLE navigation = ((node.target IS_A OptionalUnwrap AND (locatable__safe_navigation?(node.target) OR_ELSE FALSE)) OR implicit_safe_nav);
       IF (_ AND !(type__optional?(result_type))) THEN
         result_type = TRY (type__optional_of(TypeTypeInput{ Type: COPY result_type }));
         node.safe_nav_chain = TRUE;
@@ -16167,7 +16167,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           node.safe_nav_chain = TRUE;
         END
       END
-      navigation = ((node.target IS_A OptionalUnwrap AND locatable__safe_navigation?(node.target)) OR implicit_safe_nav);
+      navigation = ((node.target IS_A OptionalUnwrap AND (locatable__safe_navigation?(node.target) OR_ELSE FALSE)) OR implicit_safe_nav);
       IF (navigation AND !(type__optional?(field_type))) THEN
         field_type = TRY (type__optional_of(TypeTypeInput{ Type: COPY field_type }));
       END
@@ -16241,7 +16241,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         node.safe_nav_chain = TRUE;
       END
     END
-    navigation = ((node.target IS_A OptionalUnwrap AND locatable__safe_navigation?(node.target)) OR implicit_safe_nav);
+    navigation = ((node.target IS_A OptionalUnwrap AND (locatable__safe_navigation?(node.target) OR_ELSE FALSE)) OR implicit_safe_nav);
     IF (navigation AND !(type__optional?(field_type))) THEN
       field_type = TRY (type__optional_of(TypeTypeInput{ Type: COPY field_type }));
       node.safe_nav_chain = TRUE;
