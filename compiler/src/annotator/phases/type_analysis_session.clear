@@ -13545,7 +13545,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (typeAnalysisSession__og_declare(&rtoc_self_view, UNWRAP (pat.fields[rtoc_idx]?.name), NIL, TypeTypeInput{ Type: COPY field_type }));
           END
       ELSE
-          MUTABLE field_expr = patternField__expr(pat.fields[rtoc_idx]?);
+          MUTABLE field_expr: ?Locatable = patternField__expr(pat.fields[rtoc_idx]?);
           TRY (typeAnalysisSession__visit(&rtoc_self_view, field_expr));
           IF schema EXISTS AS schema_value THEN
             MUTABLE field_def = schemaValue__fields(UNWRAP (schema_value))[pat.fields[rtoc_idx]?.name];
@@ -13559,7 +13559,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             ELSE
               ft
             END;
-            MUTABLE val_type = field_expr.resolved_type;
+            MUTABLE val_type = locatable__resolved_type(UNWRAP (field_expr));
             MUTABLE is_numeric_promo = (((val_type == :Int64) AND (((field_type == :Float64) OR (field_type == :Float64)))));
             IF !(((((val_type == field_type) OR (val_type == :Any)) OR (field_type == :Any)) OR is_numeric_promo)) THEN
               TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_FIELD_TYPE_MISMATCH }, [], CAST({:field: pat.fields[rtoc_idx]?.name, :declared: field_type, :got: val_type} AS {String@symbol}Any)));

@@ -55,9 +55,12 @@ end.enable
 at_exit do
   ProbeMultiError::RECORDED.each do |e|
     # The banner the probe scans for is added by the CLI at print time; a
-    # recorded error never reaches it, so it carries its own.
+    # recorded error never reaches it, so it carries its own -- and its own
+    # position, since only the first error's banner is in the build output.
     text = e.message.to_s.gsub(/\e\[[0-9;]*m/, '')
     first = text.lines.map(&:strip).reject(&:empty?).first.to_s
-    warn("[Compiler Error] #{first.sub(/\A\[Compiler Error\]\s*/, '')}")
+    tok = e.respond_to?(:token) ? e.token : nil
+    where = tok ? " @@PL=#{tok.line}@@PC=#{tok.column}" : ''
+    warn("[Compiler Error] #{first.sub(/\A\[Compiler Error\]\s*/, '')}#{where}")
   end
 end

@@ -415,6 +415,9 @@ module SelfhostFnProbe
         all = text.scan(/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*/).uniq
         msg = all.join("\n") unless all.empty?
       end
+      # The extras carry their own position (the banner only describes the
+      # first), so a guidance run can anchor each one.
+      extras = text.scan(/\[Compiler Error\][^\n]*@@PL=(\d+)@@PC=(\d+)/)
       probe_line = text[/^\s*(\d+) \|/, 1] || text[/line (\d+)/, 1]
       # The column is what makes a positional diagnostic anchorable: several
       # rules otherwise have to guess which argument on the line the compiler
@@ -431,7 +434,7 @@ module SelfhostFnProbe
       if (violations = text[/MIR ownership verification failed[^\n]*\n\n(.+)/m, 1])
         msg = "MIR ownership: #{violations.lines.first(2).join(' ').strip}"
       end
-      [status.success?, msg.to_s.gsub(/\e\[[0-9;]*m/, '')[0, 200], probe_line, probe_col]
+      [status.success?, msg.to_s.gsub(/\e\[[0-9;]*m/, '')[0, 4000], probe_line, probe_col]
     end
   end
 
@@ -510,6 +513,13 @@ module SelfhostFnProbe
           end
           # The target is restated verbatim, so a probe line maps straight back.
           line = probe_line ? target.start + (probe_line.to_i - offset) : nil
+          # A guidance run tags each extra diagnostic with its own probe
+          # position; map those the same way so every one is anchorable.
+          if msg && msg.include?('@@PL=')
+            msg = msg.gsub(/@@PL=(\d+)@@PC=(\d+)/) do
+              "@@L=#{target.start + (::Regexp.last_match(1).to_i - offset)}@@C=#{::Regexp.last_match(2)}"
+            end
+          end
           results[idx] = [rel(target.file), target.name, ok, msg, line, probe_col&.to_i]
           # Only the counter and the progress write belong under the lock. The
           # cache sweep used to run here too -- including a `df` BACKTICK, whose
