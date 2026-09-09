@@ -4628,7 +4628,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_STRUCT_MISSING_DEFAULTS }, [], CAST({:name: DiagnosticKwValue{ StringValue: COPY _.name }, :type: _.type, :missing: missing.join(", ")} AS {String@symbol}Any)));
             END
           END
-          TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &param_default, _.type));
+          TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &UNWRAP (param_default), _.type));
         ELSE
           TRY (typeAnalysisSession__visit(&rtoc_self_view, param_default));
           MUTABLE def_type = TRY (aST__full_type_mut(param_default));
@@ -5639,7 +5639,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
       END
       IF UNWRAP (opts["size"]) IS_A Literal THEN
-        MUTABLE v = tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))));
+        MUTABLE v = tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))).value));
         IF (v <= 0) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_POSITIVE }));
         END
@@ -12366,7 +12366,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, result));
     IF (operation == :put) THEN
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-            MUTABLE rtoc_mutable_receiver_290 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
+            MUTABLE rtoc_mutable_receiver_290: ?FunctionContext = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
             functionContext__record_heap_use_mut(&rtoc_mutable_receiver_290);
       END
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
