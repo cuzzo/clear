@@ -8245,7 +8245,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, _.type, a_param.type(), type_params, &subst));
           };
-          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, param_fn_value.return_type, actual_fn.return_type, type_params, &subst));
+          TRY (typeAnalysisSession__extract_type_bindings_mut(&rtoc_self_view, node, UNWRAP (param_fn_value).return_type, actual_fn.return_type, type_params, &subst));
         ELSE
           RETURN;
         END
@@ -9724,7 +9724,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         symbol("SNAPSHOT")
       ELSE_IF (syn == :atomic) THEN
         :ATOMIC
-      ELSE_IF ((((TRUE AND (node.polymorphic OR_ELSE FALSE))) AND (((syn == NIL) OR (syn == :local)))) AND ((((((storage == NIL) OR (storage? == :local)) OR (storage == :multiowned)) OR (storage == :stack)) OR (storage == :heap)))) THEN
+      ELSE_IF ((((TRUE AND (node.polymorphic OR_ELSE FALSE))) AND (((syn == NIL) OR (syn == :local)))) AND ((((((storage == NIL) OR (storage == :local)) OR (storage == :multiowned)) OR (storage == :stack)) OR (storage == :heap)))) THEN
         {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE root: ?Identifier = aST__root_identifier(var_node);
@@ -18454,7 +18454,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE plan_value: TenseOperationPlan = plan?;
       node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY plan_value };
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, plan_value.result_type));
-      node.storage_override = node.right.storage();
+      node.storage_override = aST__node_storage(node.right);
     ELSE
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, TRY (aST__full_type_mut(node.right))));
     END
@@ -18838,7 +18838,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY plan };
     MUTABLE result = COPY plan.result_type;
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, result));
-    node.storage_override = node.target.storage();
+    node.storage_override = aST__node_storage(node.target);
     IF type__error_union?(result) THEN
       node.error_union_type = result;
       node.can_fail = TRUE;
@@ -18873,7 +18873,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE payload = TRY (tenseOperationPlanner__navigation_payload(receiver_type));
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ TenseNavigation: COPY node }, payload));
-    node.storage_override = node.target.storage();
+    node.storage_override = aST__node_storage(node.target);
     IF aST__container_borrow?(node.target) THEN
       node.container_borrow = TRUE;
     END
@@ -19149,7 +19149,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MoveNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GIVE_ON_COPY_TYPE }, [], CAST({:type: node.value.resolved_type} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MoveNode: COPY node }, TRY (aST__full_type_mut(node.value))));
-    node.storage_override = node.value.storage();
+    node.storage_override = aST__node_storage(node.value);
     IF TRUE THEN
       node.value.was_moved = TRUE;
     END
