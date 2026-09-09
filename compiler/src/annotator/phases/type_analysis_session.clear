@@ -4458,11 +4458,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((unique_args).length() < 2) THEN
       RETURN;
     END
-    MUTABLE names = unique_args |> SELECT (IF _ IS_A Identifier THEN
-      aST__node_name(_)
-    ELSE
-      "<expr>"
-    END);
+    MUTABLE names: []String = List[];
+    MUTABLE rtoc_name_i = 0;
+    WHILE rtoc_name_i < unique_args.length() DO
+      MUTABLE rtoc_arg = UNWRAP (unique_args[rtoc_name_i]);
+      IF rtoc_arg IS_A Identifier THEN
+        &names.append(COPY (aST__node_name(rtoc_arg) OR_ELSE "<expr>"));
+      ELSE
+        &names.append("<expr>");
+      END
+      rtoc_name_i = rtoc_name_i + 1;
+    END
     typeAnalysisSession__warning_mut(&rtoc_self_view, castFunctionCallNodeToLocatable(node), "Call to '${node.name()}' reads multiple atomic values independently (${names.join(", ")}). This is not a multi-object-consistent snapshot; default mode allows it as ordinary atomic loads. STRICT/STRICT EXTREME will require an explicit @inconsistent call-site annotation.");
 }
 END
@@ -4943,13 +4949,13 @@ PRIVATE FN typeAnalysisSession__reject_arg_type_matches?(MUTABLE self: TypeAnaly
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE pred: ?Any@multiowned = COPY (CAST({:unsigned_integer: %(t) -> (TRUE AND type__unsigned_integer?(t))} AS {String@symbol}Any@multiowned))[kind];
+    MUTABLE pred: ?String@symbol = (IF (kind == :unsigned_integer) THEN :unsigned_integer ELSE NIL END);
     IF pred EXISTS AS pred_value THEN
       MUTABLE type = TRY (aST__full_type_mut(arg));
       IF !(TRUE) THEN
         RETURN FALSE;
       END
-      RETURN pred_value(type);
+      RETURN (TRUE AND type__unsigned_integer?(type));
     ELSE
       RETURN FALSE;
     END
@@ -6620,7 +6626,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF expr IS_A UnaryOp AS rtoc_neg_op THEN (rtoc_neg_op.op == :SUB) ELSE FALSE END) THEN
         MUTABLE right: ?Locatable = aST__node_right(expr);
         IF UNWRAP (right) IS_A Literal THEN
-          RETURN (-tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (right)))));
+          RETURN (-tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (right))).value)));
         END
     END
     END
@@ -12771,12 +12777,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (held_lock_types.length() == 0) THEN
       RETURN;
     END
-    IF !((TRY (typeAnalysisSession__semantic_function_nodes(&rtoc_self_view))).contains?(node.name)) THEN
+    IF !((TRY (typeAnalysisSession__semantic_function_nodes(&rtoc_self_view))).contains?(callName__string_value(node.name))) THEN
       RETURN;
     END
     MUTABLE fn_name: String = "<top>";
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-      fn_name = ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view))?).name;
+      fn_name = UNWRAP (((typeAnalysisSession__current_fn_ctx(&rtoc_self_view))?).name);
     END
     typeAnalysisSession__record_held_call_mut(&rtoc_self_view, fn_name, node.name, held_lock_types, node.token);
 }
@@ -15539,7 +15545,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(((curr IS_A GetField OR curr IS_A GetIndex) OR curr IS_A OptionalUnwrap)) THEN
         BREAK;
       END
-      curr = accessPathNode__target(curr);
+      curr = UNWRAP (accessPathNode__target(curr));
     END
     RETURN FALSE;
 }
@@ -17856,7 +17862,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__resolve_error_registration_mut(&rtoc_self_view, Node{ Raise: COPY node }, node.kind, node.error_name, node.token));
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
         MUTABLE rtoc_mutable_receiver_435: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
-        functionContext__mark_runtime_used_mut(&rtoc_mutable_reLocatable{ Raise: COPY ceiver_435 });
+        functionContext__mark_runtime_used_mut(&rtoc_mutable_receiver_435);
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, :NoReturn));
     rtoc_self_view.traversal_state.branch_terminated = TRUE;
@@ -19546,7 +19552,7 @@ PRIVATE FN typeAnalysisSession__reject_scoped_assignment_move_mut(MUTABLE self: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier AND ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_478 = ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))))));
+    IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier AND ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_478: ?SymbolEntry@multiowned = ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))))));
     symbolEntry__non_escaping(rtoc_local_receiver_478) }))) THEN
       RETURN;
     END
@@ -20298,7 +20304,7 @@ PRIVATE FN typeAnalysisSession__collect_bg_sources_in_expr(MUTABLE self: TypeAna
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF (((expr != NIL) AND (expr IS_A BgBlock)) OR ((expr != NIL) AND (expr IS_A BgStreamBlock))) THEN
+    IF (IF castBgSourceWalkValueToLocatable(UNWRAP (expr)) EXISTS AS rtoc_bg_node THEN ((rtoc_bg_node IS_A BgBlock) OR (rtoc_bg_node IS_A BgStreamBlock)) ELSE FALSE END) THEN
       RETURN TRY (typeAnalysisSession__bg_sources_for_block(&rtoc_self_view, expr));
     END
     IF (["Identifier", "Literal", "FuncCall", "MethodCall", "GetField", "GetIndex", "BinaryOp", "UnaryOp"] |> DISTINCT _).contains?(locatable__variant_name(expr)) THEN
@@ -20539,7 +20545,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE ti = TRY (aST__full_type_mut(node));
-    IF (ti AND !(TRUE)) THEN
+    IF ((TRUE) AND !(TRUE)) THEN
       ti = TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(ti)));
     END
     IF (TRUE AND type__shared?(ti)) THEN
