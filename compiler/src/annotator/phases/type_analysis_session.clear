@@ -5568,7 +5568,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(&rtoc_self_view, node, "WINDOW"));
     MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, UNWRAP (locatable__size(node.right))));
-    MUTABLE size_type = node.right.length().resolved_type;
+    MUTABLE size_type = locatable__resolved_type(UNWRAP (locatable__size(node.right)));
     IF !(([:Int64, :Float64]).contains?(size_type)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right.length(), TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
     END
@@ -5615,7 +5615,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     END
     IF !((opts.contains?("size") OR opts.contains?("time"))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, bw.token(), TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_NEEDS_SIZE_OR_TIME }));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY locatable__token(bw) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_NEEDS_SIZE_OR_TIME }));
     END
     IF opts["size"] THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, opts["size"]));
@@ -5847,7 +5847,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE item_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     MUTABLE inner_bind_name = NIL;
     MUTABLE expr: ?Locatable@boxed = locatable__expression(node.right);
-    IF (UNWRAP (expr) IS_A BinaryOp AND (UNWRAP (expr).op == :BIND_VAR)) THEN
+    IF (IF UNWRAP (expr) IS_A BinaryOp AS rtoc_bind_op THEN (rtoc_bind_op.op == :BIND_VAR) ELSE FALSE END) THEN
       inner_bind_name = expr.right().name();
     END
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
@@ -5948,7 +5948,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE result_type = TRY (aST__full_type_mut(node.right));
     IF (TRY (typeAnalysisSession__has_catch_blocks?(&rtoc_self_view)) AND TRUE) THEN
-      MUTABLE t = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY result_type }));
+      MUTABLE t = TRY (type__new(TypeConstructionInput{ Type: COPY result_type }));
       IF type__error_union?(t) THEN
         result_type = type__resolved(UNWRAP (TRY (type__payload_type(t))));
       END
@@ -6003,7 +6003,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (TRY (typeAnalysisSession__has_catch_blocks?(&rtoc_self_view)) AND TRUE) THEN
       MUTABLE t = result_type;
       IF type__error_union?(t) THEN
-        result_type = type__resolved( UNWRAP ((TRY (type__payload_type(t)))));
+        result_type = UNWRAP (TRY (type__payload_type(t)));
       END
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, result_type));
@@ -6028,7 +6028,7 @@ PRIVATE FN typeAnalysisSession__propagate_pipeline_recovery_mut(MUTABLE self: Ty
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE error_type = NIL;
     error_type = call.error_union_type;
-    IF (retain_error_union AND error_type) THEN
+    IF (retain_error_union AND (error_type != NIL)) THEN
       node.error_union_type = error_type;
     END
     IF (error_type OR (call.can_fail == TRUE)) THEN
@@ -6439,7 +6439,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           ELSE
             key_name = COPY CAST(key_expr AS String);
           END
-    ((locatable__variant_name(key_expr) + ":") + key_name)
+    ((locatable__variant_name(key_expr) $+ ":") $+ key_name)
         }) |> DISTINCT _ |> SELECT COPY _;
         IF ((key_sources).length() > 1) THEN
           typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH uses ${(key_sources).length()} different key expressions on @sharded map '${map_name}'. Routing is based on the first key; other accesses with different keys may trigger cross-shard remote calls.");
@@ -6615,7 +6615,7 @@ PRIVATE FN typeAnalysisSession__numeric_literal_value(MUTABLE self: TypeAnalysis
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF expr IS_A Literal AS literal THEN
-      RETURN UNWRAP (literal.value).to_f();
+      RETURN tokenValue__to_f(UNWRAP (literal.value));
     ELSE
     IF (expr IS_A UnaryOp AND (expr.op() == :SUB)) THEN
         MUTABLE right = aST__node_right(expr);

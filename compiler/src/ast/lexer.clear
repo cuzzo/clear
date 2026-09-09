@@ -721,3 +721,15 @@ PUB FN padRight(value: String, width: Int64) RETURNS String ->
   END
   RETURN out;
 END
+
+# Ruby calls `to_f` on the literal's value; a number answers with itself, a
+# string parses, and anything else is zero.
+PUB FN tokenValue__to_f(value: TokenValue) RETURNS Float64 ->
+  PARTIAL MATCH value START
+    TokenValue.Float64Value AS item -> RETURN item;,
+    TokenValue.Int64Value AS item -> RETURN CAST(item AS Float64);,
+    TokenValue.StringValue AS item -> RETURN (item.toFloat() OR_ELSE 0.0);,
+    DEFAULT -> RETURN 0.0;
+  END
+  RETURN 0.0;
+END
