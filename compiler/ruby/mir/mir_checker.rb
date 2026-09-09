@@ -2194,11 +2194,17 @@ class MIRChecker
   end
 
   # HPT_LEAK: heap-returning call result discarded.
+  #
+  # An operand is a leak only when nothing above it takes the value. A call
+  # that declares a contract -- a stdlib signature, an ownership consumption
+  # fact -- does take what it is handed, so its operands are not discarded;
+  # `f({k: (m[k] OR_ELSE Lit{...})})` lowers the fallback into the map's own
+  # store, and walking past that contract reported the fallback as a leak.
   sig { params(node: T.nilable(MIR::Node), leaks: T::Array[String]).returns(NilClass) }
   def scan_expr_for_hpt_leak!(node, leaks)
     return unless node
 
-    MIR.each_surface_node(node) do |expr|
+    each_discarded_expr(node) do |expr|
       effect = MIR::OwnershipEffect.of(expr)
       if effect.produces_owned
         leaks << error(:HPT_LEAK, ownership_effect_label(expr),
@@ -2215,6 +2221,26 @@ class MIRChecker
         end
       end
     end
+    nil
+  end
+
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def consumes_operands?(node)
+    # A selector's value IS one of its operands, so the operand is not
+    # separately discarded -- the selector's own effect already reports it.
+    return true if node.is_a?(MIR::Orelse) || node.is_a?(MIR::IfOptional)
+    return true if node.respond_to?(:ownership_consumption) && !T.unsafe(node).ownership_consumption.nil?
+    return true if node.respond_to?(:stdlib_def) && !T.unsafe(node).stdlib_def.nil?
+
+    false
+  end
+
+  sig { params(node: MIR::Node, blk: T.proc.params(arg0: MIR::Node).void).void }
+  def each_discarded_expr(node, &blk)
+    yield node
+    return if node.is_a?(MIR::BlockExpr) || consumes_operands?(node)
+
+    node.child_exprs.each { |child| each_discarded_expr(child, &blk) }
     nil
   end
 

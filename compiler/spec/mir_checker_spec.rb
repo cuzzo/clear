@@ -376,6 +376,21 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("HPT_LEAK") && e.include?("makeList") }).to be true
     end
 
+    it "leaves an owned OR_ELSE fallback alone: the selector forwards it" do
+      fallback = MIR::BlockExpr.new("__lazy_1", [
+        MIR::AllocMark.new("__tmp_1", :heap, Type.new(:String)),
+        MIR::Let.new("__tmp_1", owned_call, true, nil, nil),
+        MIR::TransferMark.new("__tmp_1", :block_result, :heap),
+        MIR::BreakStmt.new("__lazy_1", MIR::Ident.new("__tmp_1")),
+      ])
+      selector = MIR::Orelse.new(MIR::Ident.new("maybe"), fallback)
+      body = [
+        MIR::ExprStmt.new(MIR::Call.new("record", [selector], false), true),
+      ]
+      errors = checker.check_fn!(fn_def("orelse_fallback", body))
+      expect(errors.any? { |e| e.include?("HPT_LEAK") }).to be false
+    end
+
     it "detects discarded registry stdlib call with allocates:true" do
       iz = registry_call("clone", FunctionSignature.intrinsic_signature(return_type: Type.new(:String), allocates: true, return_alloc: :heap))
       body = [
