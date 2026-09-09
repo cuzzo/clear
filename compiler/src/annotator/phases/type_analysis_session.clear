@@ -4551,8 +4551,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE root_name = COPY CAST(path.first() AS String);
-      MUTABLE families: ?Any = COPY requires_map[root_name];
-      IF !((((families != NIL) AND (families IS_A [Set]Any)) AND (families.length() > 1))) THEN
+      MUTABLE families: ?[Set]String@symbol = COPY requires_map[root_name];
+      IF !((((families != NIL) AND TRUE) AND (families.length() > 1))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -4560,7 +4560,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE others = (families - ([:ATOMIC] |> DISTINCT _));
+      MUTABLE others: [Set]String@symbol = families.difference(([:ATOMIC] |> DISTINCT _));
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :LIFETIME_RETURNS_REQUIRES_FAMILY_CONFLICT }, [], CAST({:fn: node.name, :name: root_name, :others: ((others |> SELECT COPY _)).join(" | "), :others_label: ((others |> SELECT COPY _)).join(" / ")} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
@@ -8156,7 +8156,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN TRY (type__value_type(type));
       END
     END
-    RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeProjectionExpression{ owner: COPY type__resolved( TypeExpressionKind{ TypeProjectionExpression: COPY type }), member: COPY member, protocol: NIL }) }));
+    RETURN TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved(type), member: COPY member, protocol: NIL } }) }));
 }
 END
 PRIVATE FN typeAnalysisSession__generic_parameter_has_shared_map_bound?(MUTABLE self: TypeAnalysisSession, name: String@symbol) RETURNS !Bool
