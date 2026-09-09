@@ -8964,7 +8964,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE callee: ?FunctionDef@multiowned = COPY fn_nodes[UNWRAP (callLikeNode__name(node))];
     IF callee EXISTS AS callee_value THEN
       MUTABLE effs: ?[Set]String@symbol = callee_value.effects;
-      RETURN !(!(((effs AND (effs |> ANY (suspends_family |> ANY (_ == _)))))));
+      RETURN ((effs != NIL) AND anySuspendsEffect(UNWRAP (effs)));
     ELSE
       RETURN FALSE;
     END
@@ -12015,7 +12015,7 @@ PRIVATE FN typeAnalysisSession__validate_conformances_mut(MUTABLE self: TypeAnal
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < resolutions.length() DO
-      MUTABLE failures = ((resolutions[rtoc_idx]?.protocol).requirements) |> SELECT:? {
+      MUTABLE failures = ((resolutions[rtoc_idx]?.protocol)?.requirements OR_ELSE List[]) |> SELECT:? {
         MUTABLE member: ?FunctionDef@multiowned = COPY (resolutions[rtoc_idx]?.members)[_.name];
         (  IF (member == NIL) THEN
             "${_.name}: missing"
@@ -17096,7 +17096,7 @@ PRIVATE FN typeAnalysisSession__reject_bare_atomic_ptr_mutation_mut(MUTABLE self
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE root: GetField = COPY field_node;
-    WHILE (TRUE AND !(root IS_A Identifier)) DO
+    WHILE (TRUE AND !(Locatable{ GetField: COPY root } IS_A Identifier)) DO
       root = castLocatableToGetField__type_analysis_session(COPY root.target);
     END
     IF !(root IS_A Identifier) THEN
@@ -17893,7 +17893,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ TokenValue: COPY site_tok }, TypeAnalysisCodeOrMessage{ SymbolValue: :ERROR_TYPE_NOT_REGISTERED }, [], CAST({:name: type_name_str_value} AS {String@symbol}Any)));
           RETURN;
         END
-        node.kind = TRY (aST__kind_of_type(type_sym));
+        node__set_kind_mut(&node, TRY (aST__kind_of_type(type_sym)));
         RETURN;
       END
     ELSE
@@ -19535,7 +19535,7 @@ PRIVATE FN typeAnalysisSession__handle_assign_move(MUTABLE self: TypeAnalysisSes
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plan: ?OwnershipTransportPlan = aST__node_ownership_transport_plan( UNWRAP (castNodeToLocatable(node)));
-    IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND UNWRAP (plan) IS_A OwnershipTransportPlan) AND (plan.action != :move)) THEN
+    IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND (plan != NIL)) AND (UNWRAP (plan).action != :move)) THEN
       RETURN;
     END
     IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND aST__node_value(UNWRAP (castNodeToLocatable(node))) IS_A Identifier) AND (aST__node_value(UNWRAP (castNodeToLocatable(node))).ownership_pending_transfer == TRUE)) THEN
@@ -20022,7 +20022,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF curr IS_A GetIndex THEN
         path = ([symbol("*")] + path);
       END
-      curr = curr.target;
+      curr = UNWRAP (castLocatableToNode__type_analysis_session(UNWRAP (locatable__target(UNWRAP (castNodeToLocatable(curr))))));
     END
     IF !(curr IS_A Identifier) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_504: []String@symbol = List[]; rtoc_empty_list_504 } ) AS []String@symbol);
@@ -20450,7 +20450,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       curr =     IF (aST__node_target( UNWRAP (curr)) EXISTS) THEN
         locatable__target(UNWRAP (curr))
       ELSE_IF (locatable__object( UNWRAP (curr)) != NIL) THEN
-        curr.object
+        locatable__object(UNWRAP (curr))
       ELSE
         NIL
       END;
@@ -20539,7 +20539,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rtoc_ternary_value_517 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(type_info)));
     END
     rtoc_ternary_value_517? };
-    MUTABLE line: ?Int64 = aST__node__token(node).line;
+    MUTABLE line: ?Int64 = aST__node__token(UNWRAP (castNodeToLocatable(UNWRAP (node)))).line;
     RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_518 = typeAnalysisSession__ownership_graph(&rtoc_self_view);
     TRY (ownershipGraph__declare(&rtoc_mutable_receiver_518, name, kind, ti, typeAnalysisSession__ownership_graph(&rtoc_self_view).scope_depth, UNWRAP (line))) };
 }
