@@ -1839,7 +1839,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF (idx == 0) THEN
         label = "(recommended)";
       END
-      MUTABLE line = "    ${(idx + 1).toString()}. ${padRight(label, 15)} ${type_sym}";
+      MUTABLE line = "    ${(idx + 1).toString()}. ${padRight(label, 15)} ${type_sym.toString()}";
       IF note EXISTS AS note_value THEN
         line = (line $+ "  -- ${note_value}");
       END
@@ -2574,7 +2574,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       CONTINUE;
     END
     MUTABLE prop = ((TRY (capabilityAuditSession__function_propagating_callees(&rtoc_self_view)))[rtoc_each_11] OR_ELSE callees);
-    IF prop |> ANY error_fallible[rtoc_each_11] THEN
+    IF prop |> ANY ((error_fallible[_] OR_ELSE FALSE)) THEN
           error_fallible[rtoc_each_11] = TRUE;
           changed = TRUE;
     END
@@ -2829,9 +2829,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
     MUTABLE effs = (fn_node.effects OR_ELSE Set[]);
     MUTABLE reason = NIL;
-    IF (effs.contains?(:REENTRANT) OR fn_node.plain_reentrant?()) THEN
+    IF (effs.contains?(:REENTRANT) OR (fn_node.reentrance_kind == :reentrant)) THEN
         reason = :reentrant;
-    ELSE_IF effs.contains?(extern_value) THEN
+    ELSE_IF effs.contains?(:EXTERN) THEN
         reason = :extern;
     ELSE_IF !anySuspendsEffect(effs) THEN
         reason = :no_suspends;
@@ -2979,12 +2979,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
       END
       &visited.insert(name);
-      MUTABLE fn = fn_nodes[UNWRAP (name)];
+      MUTABLE fn: ?FunctionDef@multiowned = fn_nodes[UNWRAP (name)];
       IF !(fn) THEN
         CONTINUE;
       END
-      MUTABLE effs = (fn.effects() OR_ELSE Set[]);
-      IF (effs.contains?(reentrant) OR fn.plain_reentrant?()) THEN
+      MUTABLE effs = (fn.effects OR_ELSE Set[]);
+      IF (effs.contains?(reentrant) OR (fn.reentrance_kind == :reentrant)) THEN
         RETURN BgSpawnDecision{ spawn_form: :stackful, reason: :reentrant };
       END
       IF effs.contains?(extern_value) THEN
@@ -3767,7 +3767,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (fn.can_fail OR_ELSE FALSE) THEN
       RETURN "can fail";
     END
-    MUTABLE effects = (fn.effects() OR_ELSE Set[]);
+    MUTABLE effects = (fn.effects OR_ELSE Set[]);
     IF effects.empty?() THEN
       RETURN NIL;
     END
