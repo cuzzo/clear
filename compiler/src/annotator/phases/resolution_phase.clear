@@ -1776,7 +1776,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE seen_requirements: [Set]String = Set[];
     FOR _ IN node.requirements DO
     IF seen_requirements.contains?(_.name) THEN
-        TRY (resolutionSession__error_mut(&rtoc_self_view, _, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], CAST({:owner: node.name, :name: _.name} AS {String@symbol}Any)));
+        TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ ProtocolRequirement: COPY _ } }, ResolutionCodeOrMessage{ SymbolValue: :IMPLEMENTATION_DUPLICATE_MEMBER }, [], CAST({:owner: node.name, :name: _.name} AS {String@symbol}Any)));
     END
     &seen_requirements.insert(COPY _.name);
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ProtocolRequirement: COPY _ }, :Void));

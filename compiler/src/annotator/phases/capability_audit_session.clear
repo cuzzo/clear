@@ -753,7 +753,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             pt = castTypeToTypeTypeInput__capability_audit_session(TRY (type__new(castTypeTypeInputToTypeConstructionInput__capability_audit_session(pt))));
           END
           MUTABLE param_admits_shared = ((pt != NIL) AND (IF (typeTypeInput__shared?(pt) != NIL) THEN
-            type__shared?(castTypeTypeInputToType(pt))
+            type__shared?(UNWRAP (castTypeTypeInputToType(pt)))
           ELSE
             FALSE
           END));
@@ -3684,7 +3684,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_26.length() DO
       MUTABLE call = COPY KEEP rtoc_each_items_26[rtoc_idx]?.call;
       MUTABLE callee = COPY rtoc_each_items_26[rtoc_idx]?.callee;
-      MUTABLE reason: ?String = TRY (capabilityAuditSession__predicate_impurity_reason(rtoc_self_view, UNWRAP (castPredicateCallToCapabilityAuditCall(UNWRAP (call))), callee));
+      MUTABLE reason: ?String = TRY (capabilityAuditSession__predicate_impurity_reason(rtoc_self_view, UNWRAP (castPredicateCallToCapabilityAuditCall(UNWRAP (call))), UNWRAP (callee)));
       IF !(reason) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
