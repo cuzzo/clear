@@ -463,7 +463,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     ELSE
       IF requirement.has_default_body THEN
-        resolutionSession__queue_synthetic_function_mut(&rtoc_self_view, FunctionDef{ token: CAST(COPY requirement.token AS Token), name: COPY requirement.name, params: COPY ( { MUTABLE rtoc_map_results = CAST([] AS []Param); requirement.params |> EACH { &rtoc_map_results.append(COPY unionMethodParamRequirement__to_param(_)); }; rtoc_map_results } ), captures: List[], return_type: COPY requirement.return_type, return_lifetime: NIL, body: COPY requirement.body, catch_clauses: List[], default_catch: NIL, visibility: COPY requirement.visibility, deferred_drops: NIL, uses_frame: NIL, explicit_return_type: FALSE, type_params: List[], tail_call: NIL, requires: NIL, arrow_token: NIL, name_token: NIL, effects_decl: NIL, effects_span: NIL, max_depth_n: NIL, tight_reentrance: NIL, requires_clauses: NIL, return_type_token: NIL, pre_clauses: NIL, post_clauses: NIL, is_method: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, effect_set: NIL, inferred_effects: NIL, reentrance_kind: NIL, thunk_plan: NIL, mutual_thunk_plan: NIL, needs_rt: NIL, fn_value_ref: NIL, alloc_fault: NIL, error_fallible: NIL, uses_heap: NIL, uses_alloc: NIL, uses_rt: NIL, effects: NIL, snapshot_types: NIL, stack_tier: NIL, stack_vars_bytes: NIL, moved_guard_info: NIL, cleanup_bindings: NIL, heap_carry_return: NIL, heap_carry_return_vars: NIL, fsm_eligible: NIL, fsm_ineligible_reason: NIL, fsm_suspend_points: NIL, conformance_protocol: NIL, generic_params: List[], implementation_owner: NIL, semantic_with_blocks: List[], source_name: "" });
+        resolutionSession__queue_synthetic_function_mut(&rtoc_self_view, FunctionDef{ token: CAST(COPY requirement.token AS Token), name: COPY requirement.name, params: COPY ( { MUTABLE rtoc_map_results = CAST([] AS []Param); requirement.params |> EACH { &rtoc_map_results.append(COPY unionMethodParamRequirement__to_param(_)); }; rtoc_map_results } ), captures: List[], return_type: COPY requirement.return_type, return_lifetime: NIL, body: COPY requirement.body, catch_clauses: List[], default_catch: NIL, visibility: COPY requirement.visibility, deferred_drops: NIL, uses_frame: NIL, explicit_return_type: FALSE, type_params: List[], tail_call: FALSE, requires: NIL, arrow_token: NIL, name_token: NIL, effects_decl: NIL, effects_span: NIL, max_depth_n: NIL, tight_reentrance: NIL, requires_clauses: NIL, return_type_token: NIL, pre_clauses: NIL, post_clauses: NIL, is_method: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, effect_set: NIL, inferred_effects: NIL, reentrance_kind: NIL, thunk_plan: NIL, mutual_thunk_plan: NIL, needs_rt: NIL, fn_value_ref: NIL, alloc_fault: NIL, error_fallible: NIL, uses_heap: NIL, uses_alloc: NIL, uses_rt: NIL, effects: NIL, snapshot_types: NIL, stack_tier: NIL, stack_vars_bytes: NIL, moved_guard_info: NIL, cleanup_bindings: NIL, heap_carry_return: NIL, heap_carry_return_vars: NIL, fsm_eligible: NIL, fsm_ineligible_reason: NIL, fsm_suspend_points: NIL, conformance_protocol: NIL, generic_params: List[], implementation_owner: NIL, semantic_with_blocks: List[], source_name: "" });
         RETURN;
       END
       TRY (resolutionSession__error_mut(&rtoc_self_view, COPY requirement.token, ResolutionCodeOrMessage{ SymbolValue: :UNION_METHOD_MISSING }, [], CAST({:union: node.name, :method: requirement.name, :fn: requirement.name} AS {String@symbol}Any)));
@@ -776,7 +776,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     FOR _ IN builtinGlobalBindings() DO
     MUTABLE rtoc_mutable_receiver_12 = TRY (resolutionSession__current_scope(rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_12, _.name, NIL, castTypeToOptionalSymbolEntryTypeInput__resolution_phase(UNWRAP (castTypeTypeInputToType(_.type))), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, _.storage));
+    TRY (scope__declare(&rtoc_mutable_receiver_12, _.name, NIL, castTypeToOptionalSymbolEntryTypeInput__resolution_phase(castTypeTypeInputToType(_.type)), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, _.storage));
     END
     FOR _ IN builtinTypeBindings() DO
     MUTABLE rtoc_local_receiver_13 = TRY (resolutionSession__current_scope(rtoc_self_view));
@@ -818,7 +818,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_PROTOCOL }, [], CAST({:protocol: protocol_name} AS {String@symbol}Any)));
     END
     MUTABLE local_owner: ?TypeDeclaration = local_structs[owner_name];
-    MUTABLE owner_params: ?[]GenericParamDecl = TRY (resolutionSession__conformance_owner_params(rtoc_self_view, owner_name, local_owner));
+    MUTABLE owner_params: ?[]GenericParamDecl = TRY (resolutionSession__conformance_owner_params(rtoc_self_view, owner_name, UNWRAP (castTypeDeclarationToStructDef(local_owner))));
     IF !(owner_params) THEN
         TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_UNKNOWN_OWNER }, [], CAST({:owner: owner_name} AS {String@symbol}Any)));
     END
@@ -1069,7 +1069,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
     END
     MUTABLE imported_schema: ?SchemaValue = TRY (resolutionSession__clone_imported_schema(rtoc_self_view, schema));
-    (TRY (resolutionSession__current_scope(rtoc_self_view))).declare_type(rtoc_each_item_1060, imported_schema);
+    scope__declare_type((TRY (resolutionSession__current_scope(rtoc_self_view))), rtoc_each_item_1060, imported_schema);
     IF imported_schema IS_A UnionSchema AS union_schema THEN
         TRY (resolutionSession__import_inline_struct_variants_mut(&rtoc_self_view, rtoc_each_item_1060, union_schema));
     END
