@@ -2941,7 +2941,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE auto_tok: ?Token@multiowned = typeAnalysisSession__auto_token_for(&rtoc_self_view, slot);
-    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, fixes, NIL, :AUTO_AMBIGUOUS_TYPE, :error, FALSE, CAST({:detail: message} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (IF auto_tok EXISTS AS rtoc_anchor_tok2 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_anchor_tok2 } ELSE DiagnosticAnchor{ Locatable: COPY UNWRAP (castAutoConstraintCollectorSlotDeclNodeToLocatable(slot.decl_node)) } END), :type, fixes, NIL, :AUTO_AMBIGUOUS_TYPE, :error, FALSE, CAST({:detail: message} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN typeAnalysisSession__emit_auto_unresolved_finding_mut(MUTABLE self: TypeAnalysisSession, slot: Slot, op_evidence: {AutoSlotId}[Set]String@symbol) RETURNS !Void
@@ -2974,7 +2974,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE auto_tok: ?Token@multiowned = typeAnalysisSession__auto_token_for(&rtoc_self_view, slot);
-    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (auto_tok OR_ELSE slot.decl_node), :type, fixes, NIL, :AUTO_UNRESOLVED_TYPE, :error, FALSE, CAST({:detail: message} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, (IF auto_tok EXISTS AS rtoc_anchor_tok2 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_anchor_tok2 } ELSE DiagnosticAnchor{ Locatable: COPY UNWRAP (castAutoConstraintCollectorSlotDeclNodeToLocatable(slot.decl_node)) } END), :type, fixes, NIL, :AUTO_UNRESOLVED_TYPE, :error, FALSE, CAST({:detail: message} AS {String@symbol}Any)));
 }
 END
 PRIVATE FN typeAnalysisSession__slot_id_for(MUTABLE self: TypeAnalysisSession, slot: Slot) RETURNS ?AutoSlotId@multiowned
@@ -3742,7 +3742,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     args = (args OR_ELSE UNWRAP (functionCallNode__args(node)));
     MUTABLE source_name: String = "";
     IF (IF node IS_A MethodCall AS method_call THEN (methodCall__source_method_name(method_call) != NIL) ELSE FALSE END) THEN
-      source_name = node.source_method_name;
+      source_name = functionCallNode__source_method_name(node);
     ELSE
       source_name = COPY CAST(node.name() AS String);
     END
@@ -3937,7 +3937,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE src_type = (TRY (aST__full_type_mut(arg)));
     MUTABLE carrier: String = "";
-    IF src_type.multiowned?() THEN
+    IF type__multiowned?(src_type) THEN
       carrier = "@multiowned";
     ELSE_IF type__shared?(src_type) THEN
       carrier = "@shared";
@@ -4008,8 +4008,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
       entry_value_mutable.mutable = TRUE;
-      IF TRUE THEN
-        entry_value_mutable.reg.mutable = TRUE;
+      IF entry_value_mutable.reg EXISTS AS MUTABLE rtoc_reg THEN
+        rtoc_reg.mutable = TRUE;
       END
     ELSE
       RETURN;
@@ -4250,7 +4250,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     IF typeAnalysisSession__atomic_cell_to_bare_value_param?(&rtoc_self_view, arg_node, facts.expected_type, facts.param) THEN
-      &atomic_bare_value_args.append(arg_node);
+      &atomic_bare_value_args.append(COPY arg_node);
     END
     IF TRY (typeAnalysisSession__atomic_cell_to_atomic_param?(&rtoc_self_view, arg_node, facts.param, signature)) THEN
       IF arg_node IS_A Identifier AS identifier THEN
@@ -4319,7 +4319,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < encountered_args.length() DO
-      IF !((((typeAnalysisSession__param_mutable?(&rtoc_self_view, facts.param) OR (encountered_args[rtoc_idx]?.mutable OR_ELSE FALSE))) AND typeAnalysisSession__paths_overlap?(&rtoc_self_view, current_path, encountered_args[rtoc_idx]?.path))) THEN
+      IF !((((typeAnalysisSession__param_mutable?(&rtoc_self_view, facts.param) OR (encountered_args[rtoc_idx]?.mutable OR_ELSE FALSE))) AND typeAnalysisSession__paths_overlap?(&rtoc_self_view, current_path, (encountered_args[rtoc_idx]?.path OR_ELSE List[])))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -22891,4 +22891,14 @@ PUB FN castMapStringToMapGenericBinding(source: {String}String) RETURNS {String}
     out[rtoc_cast_key] = GenericBinding{ SymbolValue: COPY UNWRAP (source[rtoc_cast_key]) };
   END
   RETURN out;
+END
+# Ruby asks `respond_to?(:source_method_name)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN functionCallNode__source_method_name(value: FunctionCallNode) RETURNS ?String ->
+  PARTIAL MATCH value START
+    FunctionCallNode.MethodCall AS item -> RETURN COPY item.source_method_name;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END
