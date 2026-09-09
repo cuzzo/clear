@@ -1367,7 +1367,6 @@ PRIVATE FN capabilityAuditSession__emit_with_guard_mutable_mutated_mut(MUTABLE s
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = COPY names_input;
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
-    names = names;
     MUTABLE edits = List[];
     IF (((src != NIL) AND TRUE)) THEN
       MUTABLE with_line = node.token.line;
@@ -1446,16 +1445,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
-    IF (IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END) != NIL THEN
-      decl = UNWRAP (COPY (((IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END)))).reg;
+    IF scope EXISTS AS scope_value THEN
+      IF scope__resolve_entry(scope_value, name) EXISTS AS decl_entry THEN
+        decl = COPY decl_entry.reg;
+      END
     END
     MUTABLE fix: ?Fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
@@ -1614,16 +1607,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
-    IF (IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END) != NIL THEN
-      decl = UNWRAP (COPY (((IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END)))).reg;
+    IF scope EXISTS AS scope_value THEN
+      IF scope__resolve_entry(scope_value, name) EXISTS AS decl_entry THEN
+        decl = COPY decl_entry.reg;
+      END
     END
     IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;
@@ -1654,16 +1641,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = capabilityAuditSession__source_code(rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (capabilityAuditSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
-    IF (IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END) != NIL THEN
-      decl = UNWRAP (COPY (((IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END)))).reg;
+    IF scope EXISTS AS scope_value THEN
+      IF scope__resolve_entry(scope_value, name) EXISTS AS decl_entry THEN
+        decl = COPY decl_entry.reg;
+      END
     END
     IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;

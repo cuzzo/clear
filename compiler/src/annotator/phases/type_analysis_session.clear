@@ -2386,7 +2386,6 @@ PRIVATE FN typeAnalysisSession__emit_with_guard_mutable_mutated_mut(MUTABLE self
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = COPY names_input;
     MUTABLE src: ?String = typeAnalysisSession__source_code(&rtoc_self_view);
-    names = names;
     MUTABLE edits = List[];
     IF (((src != NIL) AND TRUE)) THEN
       MUTABLE with_line = node.token.line;
@@ -2465,16 +2464,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = typeAnalysisSession__source_code(&rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
-    IF (IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END) != NIL THEN
-      decl = UNWRAP (COPY (((IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END)))).reg;
+    IF scope EXISTS AS scope_value THEN
+      IF scope__resolve_entry(scope_value, name) EXISTS AS decl_entry THEN
+        decl = COPY decl_entry.reg;
+      END
     END
     MUTABLE fix: ?Fix = NIL;
     IF ((decl != NIL) AND (src != NIL)) THEN
@@ -2633,16 +2626,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = typeAnalysisSession__source_code(&rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
-    IF (IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END) != NIL THEN
-      decl = UNWRAP (COPY (((IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END)))).reg;
+    IF scope EXISTS AS scope_value THEN
+      IF scope__resolve_entry(scope_value, name) EXISTS AS decl_entry THEN
+        decl = COPY decl_entry.reg;
+      END
     END
     IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;
@@ -2673,16 +2660,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE src: ?String = typeAnalysisSession__source_code(&rtoc_self_view);
     MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, name));
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
-    IF (IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END) != NIL THEN
-      decl = UNWRAP (COPY (((IF scope != NIL THEN
-      scope__resolve_entry(scope, name)
-    ELSE
-      NIL
-    END)))).reg;
+    IF scope EXISTS AS scope_value THEN
+      IF scope__resolve_entry(scope_value, name) EXISTS AS decl_entry THEN
+        decl = COPY decl_entry.reg;
+      END
     END
     IF !((((decl != NIL) AND TRUE) AND TRUE)) THEN
       RETURN NIL;
@@ -3523,7 +3504,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         MUTABLE type_params = TRY (functionSignature__type_params(signature));
         IF (type_params.length() > 0) THEN
-          comptime_type_args = comptime_type_args;
           IF (functionSignature__extern(signature) AND ((comptime_type_args.length() > 0))) THEN
             subst = {};
             MUTABLE rtoc_idx = 0;
@@ -12338,7 +12318,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(operation) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MAP_METHOD_UNKNOWN }, [], CAST({:name: node.name, :available: "put, delete, contains?, count, length, empty?, any?"} AS {String@symbol}Any)));
     END
-    operation = operation;
     MUTABLE expected_arity = IF ([:count, :empty, :any]).contains?(operation) THEN
       0
     ELSE

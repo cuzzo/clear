@@ -458,7 +458,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         TRY (ownershipDataflow__join_predecessors(rtoc_self_view, block))
       END;
-      new_in = new_in;
       rtoc_self_view.block_in[block.id] = new_in;
       MUTABLE new_out = TRY (ownershipDataflow__apply_transfer(&rtoc_self_view, block, TRY (ownershipDataflow__dup_state(rtoc_self_view, new_in))));
       MUTABLE old_out: ?{PlaceId}OwnerEntry = COPY rtoc_self_view.block_out[block.id];
