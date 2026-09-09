@@ -13480,7 +13480,7 @@ PRIVATE FN typeAnalysisSession__if_bind_unwrapped_type_mut(MUTABLE self: TypeAna
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (binding.predicate == :is_ok) THEN
       IF !(type__error_union?(type)) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (binding).expr, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_OK_REQUIRES_FALLIBLE }, [], CAST({:got: locatable__resolved_type((binding).expr)} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY (binding).expr }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_OK_REQUIRES_FALLIBLE }, [], CAST({:got: locatable__resolved_type((binding).expr)} AS {String@symbol}Any)));
       END
       RETURN TRY (type__success_type(type));
     END
@@ -14800,7 +14800,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       prefix
     END)] AS []Edit) + ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_374: ?[]Edit = NIL;
     IF wraps_expression THEN
-      rtoc_ternary_value_374 = [edit__new(span__new(NIL, (UNWRAP (value_range)).end_line, value_range.end_column, 0), ")")];
+      rtoc_ternary_value_374 = [edit__new(span__new(NIL, (UNWRAP (value_range)).end_line, UNWRAP (value_range).end_column, 0), ")")];
     ELSE
       rtoc_ternary_value_374 = List[];
     END
