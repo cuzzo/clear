@@ -1797,9 +1797,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE n_ops = ops.length();
-    MUTABLE intersection = agg |> WHERE (_._1.count == n_ops);
-    MUTABLE ordered = intersection |> ORDER_BY _._1.rank_sum;
-    RETURN ordered.keys() |> SELECT AutoCandidate{ type_sym: COPY CAST(_ AS String@symbol), note: COPY ((UNWRAP (ordered[_])).notes |> DISTINCT _).first() };
+    MUTABLE intersection = agg.keys() |> WHERE ((UNWRAP (agg[_])).count == n_ops);
+    MUTABLE ordered = intersection |> ORDER_BY (UNWRAP (agg[_])).rank_sum;
+    RETURN ordered |> SELECT AutoCandidate{ type_sym: COPY CAST(_ AS String@symbol), note: COPY ((UNWRAP (agg[_])).notes |> DISTINCT _ |> SELECT COPY _).first() };
 }
 END
 PUB STRUCT AutoCandidateStat {
@@ -2862,10 +2862,10 @@ PRIVATE FN capabilityAuditSession__finalize_async_execution_shapes_mut(MUTABLE s
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE _ = COPY program_node;
+    MUTABLE rtoc_held_2865 = COPY program_node;
     FOR _ IN (TRY (capabilityAuditSession__async_body_facts(rtoc_self_view))) DO
-    MUTABLE node = COPY _.node;
-    MUTABLE body_scan = COPY _.summary;
+    MUTABLE node = COPY rtoc_held_2865.node;
+    MUTABLE body_scan = COPY rtoc_held_2865.summary;
     IF (node IS_A BgBlock) THEN
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, castAsyncBodyNodeToAsyncSpawnNode(node), body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), UNWRAP (asyncBodyNode__can_smash(node)), UNWRAP (castAsyncBodyNodeToAsyncValidationNode(node))));
@@ -2874,7 +2874,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, &rtoc_open_0, body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), FALSE, UNWRAP (castAsyncBodyNodeToAsyncValidationNode(node))));
     ELSE_IF (node IS_A DoBranch) THEN
-        TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), UNWRAP (asyncBodyNode__can_smash(node)), _.validation_node));
+        TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), UNWRAP (asyncBodyNode__can_smash(node)), rtoc_held_2865.validation_node));
     END
     END
 }
