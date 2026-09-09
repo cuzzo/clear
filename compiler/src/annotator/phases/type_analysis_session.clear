@@ -3702,8 +3702,7 @@ PRIVATE FN typeAnalysisSession__verify_function_signature_mut(MUTABLE self: Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE args = COPY args_input;
-    args = (args OR_ELSE UNWRAP (functionCallNode__args(node)));
+    MUTABLE args: []Locatable = (COPY args_input OR_ELSE UNWRAP (functionCallNode__args(node)));
     MUTABLE site = typeAnalysisSession__call_signature_site(&rtoc_self_view, node, args);
     callSignatureSite__assign_signature_mut(&site, signature);
     MUTABLE plan = TRY (typeAnalysisSession__call_arity_plan(&rtoc_self_view, site, signature));
@@ -3738,13 +3737,12 @@ PRIVATE FN typeAnalysisSession__call_signature_site(MUTABLE self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE args = COPY args_input;
-    args = (args OR_ELSE UNWRAP (functionCallNode__args(node)));
+    MUTABLE args: []Locatable = (COPY args_input OR_ELSE UNWRAP (functionCallNode__args(node)));
     MUTABLE source_name: String = "";
     IF (IF node IS_A MethodCall AS method_call THEN (methodCall__source_method_name(method_call) != NIL) ELSE FALSE END) THEN
       source_name = UNWRAP (functionCallNode__source_method_name(node));
     ELSE
-      source_name = COPY CAST(node.name() AS String);
+      source_name = COPY CAST(functionCallNode__name(node) AS String);
     END
     RETURN CallSignatureSite{ node: COPY node, name: COPY source_name, args: COPY args };
 }
@@ -4499,7 +4497,7 @@ PRIVATE FN typeAnalysisSession__verify_lifetime_mut(MUTABLE self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE rl: ?ClearParserReturnLifetime = COPY node.return_lifetime;
+    MUTABLE rl: ?ClearParserReturnLifetime = locatable__return_lifetime(Locatable{ FunctionDef: COPY node });
     IF (rl == NIL) THEN
       RETURN TRUE;
     END
@@ -4609,8 +4607,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
           MUTABLE field_names = schemaValue__fields(UNWRAP (schema)).keys();
           IF !(field_names.empty?()) THEN
-            MUTABLE field_defaults = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_86 = CAST(schema AS StructSchema);
-            TRY (structSchema__field_defaults(rtoc_local_receiver_86)) } OR_ELSE {});
+            MUTABLE field_defaults = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_86 = CAST(schema AS StructSchema);
+            TRY (structSchema__field_defaults(rtoc_local_receiver_86)) };
             MUTABLE missing = field_names |> WHERE !(field_defaults.key?(_));
             IF (missing).any?() THEN
               TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_STRUCT_MISSING_DEFAULTS }, [], CAST({:name: _.name(), :type: _.type, :missing: missing.join(", ")} AS {String@symbol}Any)));
@@ -4696,7 +4694,7 @@ PRIVATE FN typeAnalysisSession__verify_captures_mut(MUTABLE self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE captures: Any = NIL;
+    MUTABLE captures: []Capture = List[];
     PARTIAL MATCH node START
       RoutineNode.FunctionDefMultiowned AS item ->
         captures = COPY item.captures;,
@@ -4741,7 +4739,7 @@ PRIVATE FN typeAnalysisSession__declare_captures(MUTABLE self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE captures: Any = NIL;
+    MUTABLE captures: []Capture = List[];
     PARTIAL MATCH node START
       RoutineNode.FunctionDefMultiowned AS item ->
         captures = COPY item.captures;,
@@ -4844,15 +4842,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE type_info: ?Type = locatable__type_object(node);
     MUTABLE has_lifetime = !((lifetime_paths.length() == 0));
     MUTABLE schema_resolver = %(t: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, t));
-    MUTABLE is_copyable = (((IF type_info != NIL THEN
-      type__copyable?(type_info, schema_resolver)
+    MUTABLE is_copyable = (IF type_info != NIL THEN
+      (type__copyable?(type_info, schema_resolver) OR TRY (type__implicitly_copyable?(type_info, schema_resolver)))
     ELSE
-      NIL
-    END) OR_ELSE (IF type_info != NIL THEN
-      TRY (type__implicitly_copyable?(type_info, schema_resolver))
-    ELSE
-      NIL
-    END)));
+      FALSE
+    END);
     MUTABLE is_type_param = TRY (typeAnalysisSession__current_function_type_param?(&rtoc_self_view, (IF type_info != NIL THEN
       type_info.resolved()
     ELSE
@@ -4988,7 +4982,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE rtoc_indexed_output_105 = TRUE;
         MUTABLE rtoc_indexed_i_104 = 0;
         WHILE rtoc_indexed_i_104 < rtoc_indexed_items_103.length() AND rtoc_indexed_output_105 DO
-          rtoc_indexed_output_105 = TRY (typeAnalysisSession__intrinsic_arg_matches?(&rtoc_self_view, UNWRAP (specs[rtoc_indexed_i_104]), &UNWRAP (rtoc_indexed_items_103[rtoc_indexed_i_104])));
+          rtoc_indexed_output_105 = TRY (typeAnalysisSession__intrinsic_arg_matches?(&rtoc_self_view, UNWRAP (specs[rtoc_indexed_i_104]), UNWRAP (rtoc_indexed_items_103[rtoc_indexed_i_104])));
           rtoc_indexed_i_104 = rtoc_indexed_i_104 + 1;
         END
         rtoc_indexed_output_105
@@ -5035,7 +5029,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF intrinsicArgSpec__unconstrained_any?(spec) THEN
       RETURN TRUE;
     END
-    IF ((spec.type == symbol("Any[]")) AND TRY (typeAnalysisSession__any_array_intrinsic_arg?(&rtoc_self_view, castTypeToStringSymbol(spec.type), &arg))) THEN
+    IF ((spec.type == symbol("Any[]")) AND TRY (typeAnalysisSession__any_array_intrinsic_arg?(&rtoc_self_view, spec.type, &arg))) THEN
       RETURN TRUE;
     END
     MUTABLE cast_source = arg.resolved_type;
@@ -5112,7 +5106,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               MUTABLE rtoc_mutable_receiver_109: FunctionContext@multiowned = UNWRAP ((typeAnalysisSession__current_fn_ctx(&rtoc_self_view)));
               functionContext__record_frame_use_mut(&rtoc_mutable_receiver_109);
         END
-        IF ((node.storage == :heap) OR type__heap?( UNWRAP (result_ti))) THEN
+        IF ((locatable__storage(Locatable{ BinaryOp: COPY node }) == :heap) OR type__heap?( UNWRAP (result_ti))) THEN
           IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
                   MUTABLE rtoc_mutable_receiver_110 = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
                   functionContext__record_heap_use_mut(&rtoc_mutable_receiver_110);
@@ -5139,7 +5133,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           found = TRUE;
         END
     ELSE_IF node IS_A StructLit AS struct_lit THEN
-        MUTABLE constructed = (TRY (inlineAllocMetadata__values(struct_lit.fields))) |> ANY ((((_ IS_A CopyNode OR _ IS_A MoveNode) OR _ IS_A FuncCall) OR _ IS_A MethodCall) OR _ IS_A StringConcat);
+        MUTABLE constructed = (struct_lit.fields.values()) |> ANY ((((_ IS_A CopyNode OR _ IS_A MoveNode) OR _ IS_A FuncCall) OR _ IS_A MethodCall) OR _ IS_A StringConcat);
         IF constructed THEN
           found = TRUE;
         END
@@ -22900,6 +22894,16 @@ END
 PUB FN functionCallNode__source_method_name(value: FunctionCallNode) RETURNS ?String ->
   PARTIAL MATCH value START
     FunctionCallNode.MethodCall AS item -> RETURN COPY item.source_method_name;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby asks `respond_to?(:name)` and then reads it. A union variant
+# either carries the field or it does not, so the question is answered here:
+# the variants that have it return it, the rest return NIL.
+PUB FN functionCallNode__name(value: FunctionCallNode) RETURNS ?String ->
+  PARTIAL MATCH value START
+    FunctionCallNode.MethodCall AS item -> RETURN COPY item.name;,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
