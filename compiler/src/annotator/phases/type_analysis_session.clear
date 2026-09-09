@@ -87,7 +87,6 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f726567
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572655f72657475726e732e636c656172" AS function_signature_returns
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f72657475726e2e636c656172" AS function_return
 REQUIRE "pkg:rtoc_6173742f6572726f725f72656769737472792e636c656172" AS error_registry
-
 # Ruby: source_dir ? File.expand_path(source_dir) : Dir.pwd
 # path's expand preMirTypeCheck__leaves() a relative path alone without a base, so the working
 # directory is the base, which is what File.expand_path resolves against.
@@ -146,7 +145,6 @@ PUB STRUCT TypeAnalysisSession {
   # was narrowed by, saved and restored around each nested IF.
   current_if_is_a_condition: ?Locatable
 }
-
 PUB STRUCT StreamYieldFrame {
   node: BgStreamBlock,
   expected_type: ?Type,
@@ -10537,7 +10535,6 @@ PUB STRUCT CollectionMethodConfig {
   tag: String@symbol,
   label_container: String
 }
-
 # Ruby COLLECTION_METHOD_CONFIGS. The label was a lambda over the receiver;
 # every arm prints "Container<element-or-value>", so the container name is the
 # only thing that varies.
@@ -10556,7 +10553,6 @@ PUB FN collectionMethodConfig__for(dispatch_key: String@symbol) RETURNS ?Collect
   END
   RETURN NIL;
 END
-
 # A receiver whose element/value type has not resolved must still produce a
 # message, so an unresolved part reads "Unknown" rather than failing.
 PUB FN collectionMethodConfig__label(self: CollectionMethodConfig, obj_type: Type) RETURNS !String ->
@@ -10571,7 +10567,6 @@ PUB FN collectionMethodConfig__label(self: CollectionMethodConfig, obj_type: Typ
   END
   RETURN "${self.label_container}<Unknown>";
 END
-
 PRIVATE FN typeAnalysisSession__resolve_typed_method(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, obj_type: Type, registry: {RegistryKey}RawRegistryEntry, tag_field: String@symbol, type_label: String) RETURNS !?Bool
   REQUIRES self: LOCAL
 ->
@@ -10991,19 +10986,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE held_locks = TRY (typeAnalysisSession__current_held_locks(&rtoc_self_view));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < lock_capabilities.length() DO
-      MUTABLE vn = COPY lock_capabilities[rtoc_idx]?.var_name;
+      MUTABLE vn: ?String = COPY lock_capabilities[rtoc_idx]?.var_name;
       IF !(held_locks.contains?(UNWRAP (vn))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE outer_tok: ?Token@multiowned = KEEP (UNWRAP (held_locks[UNWRAP (vn)])).token;
+      MUTABLE outer_tok: ?Token = COPY (UNWRAP (held_locks[UNWRAP (vn)])).token;
       MUTABLE escape: ?DeadlockEscape = COPY node.deadlock_escape;
       IF (escape AND (escape.kind == :deadlock)) THEN
-          typeAnalysisSession__note_mut(&rtoc_self_view, lock_capabilities[rtoc_idx]?.var_node, "POSSIBLE_DEADLOCK accepted: '${(vn OR_ELSE "")}' already held by an enclosing WITH (outer line ${(IF outer_tok != NIL THEN
-            outer_tok.line.toString()
-          ELSE
-            "?"
-          END)}). Reviewer: verify this cannot actually self-acquire at runtime (distinct instances, sorted acquire, etc.).");
+          MUTABLE rtoc_outer_line: String = COPY "?";
+          IF outer_tok EXISTS AS rtoc_ot THEN
+            rtoc_outer_line = rtoc_ot.line.toString();
+          END
+          typeAnalysisSession__note_mut(&rtoc_self_view, UNWRAP (lock_capabilities[rtoc_idx]?.var_node), "POSSIBLE_DEADLOCK accepted: '${(vn OR_ELSE "")}' already held by an enclosing WITH (outer line ${rtoc_outer_line}). Reviewer: verify this cannot actually self-acquire at runtime (distinct instances, sorted acquire, etc.).");
       ELSE
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (lock_capabilities[rtoc_idx]?.var_node) }, TypeAnalysisCodeOrMessage{ SymbolValue: :LOCK_NESTED_REACQUIRE }, [], CAST({:name: vn, :outer_line: (IF outer_tok != NIL THEN
             outer_tok.line
@@ -11626,11 +11621,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       WHILE rtoc_restore_idx_0 < frames.length() DO
         MUTABLE rtoc_snap_0: ?BodyFactContext = snapshots[rtoc_restore_idx_0];
         IF frames[rtoc_restore_idx_0] EXISTS AS MUTABLE rtoc_frame_0 THEN
-
           IF rtoc_snap_0 != NIL THEN
-
             bodyFactFrame__restore_context(&rtoc_frame_0, rtoc_snap_0);
-
           END
         END
         rtoc_restore_idx_0 = rtoc_restore_idx_0 + 1;
@@ -11657,11 +11649,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       WHILE rtoc_restore_idx_1 < frames.length() DO
         MUTABLE rtoc_snap_1: ?BodyFactContext = snapshots[rtoc_restore_idx_1];
         IF frames[rtoc_restore_idx_1] EXISTS AS MUTABLE rtoc_frame_1 THEN
-
           IF rtoc_snap_1 != NIL THEN
-
             bodyFactFrame__restore_context(&rtoc_frame_1, rtoc_snap_1);
-
           END
         END
         rtoc_restore_idx_1 = rtoc_restore_idx_1 + 1;
@@ -11687,11 +11676,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       WHILE rtoc_restore_idx_2 < frames.length() DO
         MUTABLE rtoc_snap_2: ?BodyFactContext = snapshots[rtoc_restore_idx_2];
         IF frames[rtoc_restore_idx_2] EXISTS AS MUTABLE rtoc_frame_2 THEN
-
           IF rtoc_snap_2 != NIL THEN
-
             bodyFactFrame__restore_context(&rtoc_frame_2, rtoc_snap_2);
-
           END
         END
         rtoc_restore_idx_2 = rtoc_restore_idx_2 + 1;
@@ -11719,11 +11705,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       WHILE rtoc_restore_idx_3 < frames.length() DO
         MUTABLE rtoc_snap_3: ?BodyFactContext = snapshots[rtoc_restore_idx_3];
         IF frames[rtoc_restore_idx_3] EXISTS AS MUTABLE rtoc_frame_3 THEN
-
           IF rtoc_snap_3 != NIL THEN
-
             bodyFactFrame__restore_context(&rtoc_frame_3, rtoc_snap_3);
-
           END
         END
         rtoc_restore_idx_3 = rtoc_restore_idx_3 + 1;
@@ -11748,11 +11731,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       WHILE rtoc_restore_idx_4 < frames.length() DO
         MUTABLE rtoc_snap_4: ?BodyFactContext = snapshots[rtoc_restore_idx_4];
         IF frames[rtoc_restore_idx_4] EXISTS AS MUTABLE rtoc_frame_4 THEN
-
           IF rtoc_snap_4 != NIL THEN
-
             bodyFactFrame__restore_context(&rtoc_frame_4, rtoc_snap_4);
-
           END
         END
         rtoc_restore_idx_4 = rtoc_restore_idx_4 + 1;
@@ -13602,10 +13582,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             IF ft EXISTS AS rtoc_ft_v THEN
               field_type = type__resolved(rtoc_ft_v);
             END
-
-
-
-
             MUTABLE val_type: ?String@symbol = locatable__resolved_type(UNWRAP (field_expr));
             MUTABLE is_numeric_promo = (((val_type == :Int64) AND (((field_type == :Float64) OR (field_type == :Float64)))));
             IF !(((((val_type == field_type) OR (val_type == :Any)) OR (field_type == :Any)) OR is_numeric_promo)) THEN
@@ -15764,11 +15740,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__consume_generic_map_value_mut(&rtoc_self_view, &assignment_node.value, assign_type));
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ Assignment: COPY assignment_node }, assign_type));
-    IF ((IF TRUE THEN
-      type__map?(target_type)
-    ELSE
-      NIL
-    END) OR_ELSE protocol_map) THEN
+    IF (type__map?(target_type) OR protocol_map) THEN
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
             MUTABLE rtoc_mutable_receiver_388 = UNWRAP (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
             functionContext__record_heap_use_mut(&rtoc_mutable_receiver_388);
@@ -22820,7 +22792,6 @@ FN castTypeAnalysisRegToLocatable(value: TypeAnalysisReg) RETURNS ?Locatable ->
   END
   RETURN NIL;
 END
-
 # Ruby asks `respond_to?(:value)` and then reads it. A union variant
 # either carries the field or it does not, so the question is answered here:
 # the variants that have it return it, the rest return NIL.
@@ -22854,7 +22825,6 @@ PUB FN typeAnalysisBodyFacts__return_nodes(value: TypeAnalysisBodyFacts) RETURNS
   END
   RETURN NIL;
 END
-
 # Ruby writes straight through the accessor; the CLEAR accessor returns a COPY,
 # so the write needs a path to the real field. Mirrors the capability audit
 # session's setters.
@@ -22867,7 +22837,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-
 PRIVATE FN typeAnalysisSession__set_call_site_context_mut(MUTABLE self: TypeAnalysisSession, caller_name: String, value: {String}{String@symbol}Bool) RETURNS Void
   REQUIRES self: LOCAL
 ->
@@ -22877,7 +22846,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-
 PRIVATE FN typeAnalysisSession__set_call_site_arg_families_mut(MUTABLE self: TypeAnalysisSession, caller_name: String, value: {String}[][][Set]String@symbol) RETURNS Void
   REQUIRES self: LOCAL
 ->
@@ -22887,7 +22855,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-
 # The schema_lookup callback is declared FN(String@symbol) -> ?TypeSchemaLookupResult
 # by every callee. The scope answers with SchemaValue, so the lookup
 # is wrapped here rather than at each call site; NIL stays NIL.
@@ -22900,7 +22867,6 @@ PRIVATE FN typeAnalysisSession__schema_lookup_result(MUTABLE self: TypeAnalysisS
   END
   RETURN NIL;
 END
-
 # Ruby asks `respond_to?(:type_params)` and then reads it. A union variant
 # either carries the field or it does not, so the question is answered here:
 # the variants that have it return it, the rest return NIL.
@@ -22915,7 +22881,6 @@ PUB FN typeAnalysisSchema__type_params(value: TypeAnalysisSchema) RETURNS ?[]Str
   END
   RETURN NIL;
 END
-
 FN castTypeAnalysisSessionReturnValueItemToFunctionSignatureLifetimeSource(value: TypeAnalysisSessionReturnValueItem) RETURNS FunctionSignatureLifetimeSource ->
   PARTIAL MATCH value START
     TypeAnalysisSessionReturnValueItem.StringValue AS cast_payload -> RETURN FunctionSignatureLifetimeSource{ SymbolValue: symbol(cast_payload) };,
@@ -22924,7 +22889,6 @@ FN castTypeAnalysisSessionReturnValueItemToFunctionSignatureLifetimeSource(value
   END
   panic("Invalid cast to FunctionSignatureLifetimeSource");
 END
-
 # Ruby pushes and pops the session's own frame stack. The reader accessor
 # returns a COPY, so mutating THAT is a silent no-op; reach the owned field.
 PRIVATE FN typeAnalysisSession__push_body_fact_frame_mut(MUTABLE self: TypeAnalysisSession, frame: BodyFactFrame) RETURNS Void
@@ -22934,7 +22898,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     &rtoc_self_view.traversal_state.body_fact_frames.append(COPY frame);
 }
 END
-
 PRIVATE FN typeAnalysisSession__pop_body_fact_frame_mut(MUTABLE self: TypeAnalysisSession) RETURNS ?BodyFactFrame
   REQUIRES self: LOCAL
 ->
@@ -22942,7 +22905,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN &rtoc_self_view.traversal_state.body_fact_frames.pop();
 }
 END
-
 # The diagnostic entry points take their kwargs as {String@symbol}Any; the
 # callers hold a map of DiagnosticKwValue. The single-value cast cannot convert
 # a map, so this converts entry by entry.
@@ -22953,7 +22915,6 @@ FN castDiagnosticKwValueMapToAnyMap__type_analysis_session(values: {String@symbo
   END
   RETURN out;
 END
-
 PUB FN castMapTypeToMapGenericBinding(source: {String}Type) RETURNS {String}GenericBinding ->
   MUTABLE out: {String}GenericBinding = {};
   FOR rtoc_cast_key IN source.keys() DO
@@ -22961,7 +22922,6 @@ PUB FN castMapTypeToMapGenericBinding(source: {String}Type) RETURNS {String}Gene
   END
   RETURN out;
 END
-
 PUB FN castMapStringToMapGenericBinding(source: {String}String) RETURNS {String}GenericBinding ->
   MUTABLE out: {String}GenericBinding = {};
   FOR rtoc_cast_key IN source.keys() DO
@@ -23105,7 +23065,6 @@ FN castNodesToLocatable(value: Nodes) RETURNS ?Locatable ->
   END
   RETURN NIL;
 END
-
 # Ruby walks the same nodes; the walker takes the AST union, so each entry is
 # named as the locatable it already is.
 FN nodes__locatable_list(values: []Nodes) RETURNS []Locatable ->
@@ -23127,7 +23086,6 @@ FN castLocatableToTypeAnalysisCallNode(value: Locatable) RETURNS ?TypeAnalysisCa
   END
   RETURN NIL;
 END
-
 # Associated types arrive as plain Types; a substitution map holds them as the
 # binding union, one entry at a time.
 FN castTypeMapToGenericBindingMap__type_analysis_session(values: {String@symbol}Type) RETURNS {String@symbol}GenericBinding ->
@@ -23137,7 +23095,6 @@ FN castTypeMapToGenericBindingMap__type_analysis_session(values: {String@symbol}
   END
   RETURN out;
 END
-
 # Ruby hands the node straight to a callee that wants one specific shape.
 # The union either holds that variant or it does not.
 PUB FN castFinalTypeToType(value: FinalType) RETURNS ?Type EFFECTS REENTRANT ->
