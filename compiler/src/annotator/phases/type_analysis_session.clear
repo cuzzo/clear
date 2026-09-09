@@ -12488,7 +12488,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(schemas__struct?(schema)) THEN
       RETURN FALSE;
     END
-    IF !(schemaValue__methods(UNWRAP (schema)).key?(node.name)) THEN
+    IF !(schemaValue__methods(UNWRAP (schema)).contains?(node.name)) THEN
       RETURN FALSE;
     END
     MUTABLE source_name = COPY node.name;
@@ -18851,7 +18851,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE last: ?Locatable = COPY branch.last();
-    IF last? IS_A IfStatement AS if_statement THEN
+    IF UNWRAP (last) IS_A IfStatement AS if_statement THEN
       RETURN COPY if_statement.then_result_type;
     END
     IF !((last != NIL)) THEN
