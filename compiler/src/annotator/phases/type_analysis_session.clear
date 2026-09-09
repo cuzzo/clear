@@ -11975,7 +11975,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRUE;
     END
     END
-    RETURN (TRY (aST__full_type_mut(node))).error_union?();
+    RETURN type__error_union?(TRY (aST__full_type_mut(UNWRAP (castNodeToLocatable(node)))));
 }
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
