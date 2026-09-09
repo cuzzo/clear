@@ -1379,7 +1379,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     };
     MUTABLE resolved = type__resolved(type);
     IF compilerRegexMatch((CAST(resolved AS String)), compilerRegexCompile("\\A[A-Z]\\z")) THEN
-      &names.add(resolved);
+      &names.append(resolved);
     END
     RETURN names;
 }
