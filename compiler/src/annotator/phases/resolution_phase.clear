@@ -2027,7 +2027,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructDef: COPY node } }, ResolutionCodeOrMessage{ SymbolValue: :GENERIC_IDENTITY_FIELD_UNSUPPORTED }, [], {:struct: node.name, :field: rtoc_each_item_2016, :param: CAST(type__resolved(ft) AS String)}));
     END
     TRY (resolutionSession__stamp_field_defaults_mut(&rtoc_self_view, node.field_decls));
-    TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ StructDef: COPY node }, symbol(node.name), SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(node.field_decls, TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.generic_params, {}, {}, node.visibility)) }));
+    TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ StructDef: COPY node }, symbol(node.name), SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(castMapStructFieldToMapSchemasStructSchemaFieldInput(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.generic_params, {}, {}, node.visibility)) }));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, &node, :Void));
 }
 END
@@ -2685,4 +2685,12 @@ FN castResolutionSessionReturnValueToLocatable(value: ResolutionSessionReturnVal
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
+END
+
+PUB FN castMapStructFieldToMapSchemasStructSchemaFieldInput(source: {String}StructField) RETURNS {String}SchemasStructSchemaFieldInput ->
+  MUTABLE out: {String}SchemasStructSchemaFieldInput = {};
+  FOR rtoc_cast_key IN source.keys() DO
+    out[rtoc_cast_key] = SchemasStructSchemaFieldInput{ StructField: COPY UNWRAP (source[rtoc_cast_key]) };
+  END
+  RETURN out;
 END

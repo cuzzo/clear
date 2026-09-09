@@ -12461,7 +12461,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     acc[symbol(_.name)] = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of( TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved(receiver), member: COPY symbol(_.name), protocol: COPY symbol(protocol.name) } }) }));
     acc
     };
-    RETURN TRY (functionSignature__new(requirement.params |> SELECT Param{ name: COPY _.name, type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(_.type), substitutions)) AS Type), required: TRUE, mutable: _.mutable, takes: _.takes, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }, TypeTypeInput{ Type: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(requirement.return_type), substitutions)) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_296: []String@symbol = List[]; rtoc_empty_list_296 } ), {}, (requirement.effects_decl == :reentrant), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_297: []String@symbol = List[]; rtoc_empty_list_297 } ), NIL, ( { MUTABLE rtoc_empty_list_298: []String@symbol = List[]; rtoc_empty_list_298 } )));
+    RETURN TRY (functionSignature__new(requirement.params |> SELECT Param{ name: COPY _.name, type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(_.type), castMapTypeToMapGenericBinding(substitutions))) AS Type), required: TRUE, mutable: _.mutable, takes: _.takes, default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }, TypeTypeInput{ Type: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(requirement.return_type), substitutions)) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_296: []String@symbol = List[]; rtoc_empty_list_296 } ), {}, (requirement.effects_decl == :reentrant), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_297: []String@symbol = List[]; rtoc_empty_list_297 } ), NIL, ( { MUTABLE rtoc_empty_list_298: []String@symbol = List[]; rtoc_empty_list_298 } )));
 }
 END
 PRIVATE FN typeAnalysisSession__verify_protocol_method_argument_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, index_value: Int64, expected: Type) RETURNS !Void
@@ -13489,7 +13489,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN UNWRAP (TRY (type__stream_step_item_type(type)));
     END
     IF !(type__optional?(type)) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, binding.expr, TypeAnalysisCodeOrMessage{ SymbolValue: :IF_AS_NEEDS_OPTIONAL }, [], CAST({:got: locatable__resolved_type(binding.expr)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY binding.expr }, TypeAnalysisCodeOrMessage{ SymbolValue: :IF_AS_NEEDS_OPTIONAL }, [], CAST({:got: locatable__resolved_type(binding.expr)} AS {String@symbol}Any)));
     END
     RETURN UNWRAP (TRY (type__wrapped_type(type)));
 }
@@ -13592,7 +13592,7 @@ PRIVATE FN typeAnalysisSession__normalized_match_payload(MUTABLE self: TypeAnaly
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF payload? IS_A Type AS type THEN
-      RETURN MatchPayload{ StringValue: CAST(type__resolved((TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(type), union_subst)))) AS String) };
+      RETURN MatchPayload{ StringValue: CAST(type__resolved((TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(type), castMapStringToMapGenericBinding(union_subst))))) AS String) };
     END
     IF payload? IS_A String@symbol AS string_symbol THEN
       RETURN MatchPayload{ SymbolValue: COPY (union_subst[string_symbol] OR_ELSE string_symbol) };
@@ -13605,7 +13605,7 @@ PRIVATE FN typeAnalysisSession__normalized_runtime_match_payload(MUTABLE self: T
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF payload? IS_A Type AS type THEN
-      RETURN MatchPayload{ TypeMultiowned: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(type), union_subst)) };
+      RETURN MatchPayload{ TypeMultiowned: COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(type), castMapStringToMapGenericBinding(union_subst))) };
     END
     IF payload? IS_A String@symbol AS string_symbol THEN
       RETURN MatchPayload{ SymbolValue: COPY (union_subst[string_symbol] OR_ELSE string_symbol) };
@@ -13912,7 +13912,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE inner_type = COPY payload;
       matchPayload__strip_layout_mut(&inner_type);
       match_case.indirect_payload_as = TRUE;
-      RETURN CAST(TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castMatchPayloadToTypeTypeInput(inner_type), plan.union_subst)) AS Type);
+      RETURN CAST(TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castMatchPayloadToTypeTypeInput(inner_type), castMapStringToMapGenericBinding(plan.union_subst))) AS Type);
     END
     RETURN CAST(TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castMatchPayloadToTypeTypeInput(payload), plan.union_subst)) AS Type);
 }
@@ -22876,6 +22876,22 @@ FN castDiagnosticKwValueMapToAnyMap__type_analysis_session(values: {String@symbo
   MUTABLE out: {String@symbol}Any = {};
   FOR key IN values.keys() DO
     out[key] = castDiagnosticKwValueToAnyMultiowned__type_analysis_session((values[key] OR_ELSE panic("missing hash key")));
+  END
+  RETURN out;
+END
+
+PUB FN castMapTypeToMapGenericBinding(source: {String}Type) RETURNS {String}GenericBinding ->
+  MUTABLE out: {String}GenericBinding = {};
+  FOR rtoc_cast_key IN source.keys() DO
+    out[rtoc_cast_key] = GenericBinding{ Type: COPY UNWRAP (source[rtoc_cast_key]) };
+  END
+  RETURN out;
+END
+
+PUB FN castMapStringToMapGenericBinding(source: {String}String) RETURNS {String}GenericBinding ->
+  MUTABLE out: {String}GenericBinding = {};
+  FOR rtoc_cast_key IN source.keys() DO
+    out[rtoc_cast_key] = GenericBinding{ SymbolValue: COPY UNWRAP (source[rtoc_cast_key]) };
   END
   RETURN out;
 END

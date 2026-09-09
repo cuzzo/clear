@@ -2607,7 +2607,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_Type_multiowned_X__capability_audit_session((IF scope__resolve_entry(scope, UNWRAP (callees[rtoc_idx])) != NIL THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_17 = (scope__resolve_entry(scope, UNWRAP (callees[rtoc_idx])));
+          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_17: ?SymbolEntry@multiowned = (scope__resolve_entry(scope, UNWRAP (callees[rtoc_idx])));
       symbolEntry__type(rtoc_local_receiver_17) }
         ELSE
           NIL
@@ -4223,7 +4223,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          MUTABLE storage = (IF UNWRAP locatable__symbol((var_node)) != NIL THEN
+          MUTABLE storage = (IF UNWRAP locatable__symbol(UNWRAP ((var_node))) != NIL THEN
             (var_node.symbol).storage()
           ELSE
             NIL
