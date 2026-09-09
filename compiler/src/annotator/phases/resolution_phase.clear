@@ -2045,7 +2045,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (resolutionSession__error_mut(&rtoc_self_view, (IF (IF COPY _.bounds[rtoc_idx]?.token != NIL THEN COPY _.bounds[rtoc_idx]?.token ELSE COPY _.token END) EXISTS AS rtoc_wrap_2040 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_2040 } ELSE NIL END), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_PROTOCOL }, [], CAST({:protocol: TRY (type__surface_name(castTypeToTypeTypeInput__resolution_phase( UNWRAP (_.bounds[rtoc_idx]?.type))))} AS {String@symbol}Any)));
+      TRY (resolutionSession__error_mut(&rtoc_self_view, (IF (COPY _.bounds[rtoc_idx]?.token OR_ELSE COPY _.token) EXISTS AS rtoc_wrap_2040 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_2040 } ELSE NIL END), ResolutionCodeOrMessage{ SymbolValue: :GENERIC_UNKNOWN_PROTOCOL }, [], CAST({:protocol: TRY (type__surface_name(castTypeToTypeTypeInput__resolution_phase( UNWRAP (_.bounds[rtoc_idx]?.type))))} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
     END
