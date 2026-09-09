@@ -31,3 +31,12 @@ PUB FN stdLibTypeBinding__schema_factory_call(self: StdLibTypeBinding) RETURNS A
   MUTABLE fn_value = self.schema_factory;
   RETURN fn_value();
 END
+
+# `BUILTIN_GLOBAL_BINDINGS`. A module constant does not cross a CLEAR file.
+PUB FN builtinGlobalBindings() RETURNS [1]StdLibGlobalBinding EFFECTS REENTRANT ->
+  RETURN builtin_global_bindings;
+END
+
+PUB FN builtinTypeBindings() RETURNS [4]StdLibTypeBinding EFFECTS REENTRANT ->
+  RETURN builtin_type_bindings;
+END
