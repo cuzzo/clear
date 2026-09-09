@@ -8500,7 +8500,7 @@ PRIVATE FN typeAnalysisSession__propagate_declared_type_to_value_mut(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE value_type = NIL;
+    MUTABLE value_type: TypeConstructionInput = NIL;
     IF !(declarationNode__type(node)) THEN
       RETURN;
     END
@@ -13537,8 +13537,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF patternField__bind?(pat.fields[rtoc_idx]?) THEN
           IF (TRUE AND schemaValue__fields(UNWRAP (schema)).contains?(UNWRAP (pat.fields[rtoc_idx]?.name))) THEN
-            MUTABLE field_def: ?{String@symbol}StructField = schemaValue__fields(UNWRAP (schema))[UNWRAP (pat.fields[rtoc_idx]?.name)];
-            MUTABLE field_type = field_def.type();
+            MUTABLE field_def: ?StructField = schemaValue__fields(UNWRAP (schema))[UNWRAP (pat.fields[rtoc_idx]?.name)];
+            MUTABLE field_type = structField__type(UNWRAP (field_def));
             MUTABLE rtoc_mutable_receiver_328 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
             TRY (scope__declare(&rtoc_mutable_receiver_328, pat.fields[rtoc_idx]?.name, NIL, field_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
             TRY (typeAnalysisSession__og_declare(&rtoc_self_view, pat.fields[rtoc_idx]?.name, NIL, field_type));
@@ -13549,7 +13549,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF schema EXISTS AS schema_value THEN
             MUTABLE field_def = schemaValue__fields(UNWRAP (schema_value))[pat.fields[rtoc_idx]?.name];
             MUTABLE ft = (IF field_def != NIL THEN
-              field_def.type()
+              structField__type(UNWRAP (field_def))
             ELSE
               NIL
             END);
@@ -19585,7 +19585,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(ownershipGraph__get_index(rtoc_graph_19487, graph_path)) THEN
       TRY (typeAnalysisSession__declare_assignment_graph_path_mut(&rtoc_self_view, graph_path, value_type));
     END
-    TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, graph_path, aST__node_value(UNWRAP (castNodeToLocatable(node))).token(), :move));
+    TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, graph_path, locatable__token(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))), :move));
 }
 END
 PRIVATE FN typeAnalysisSession__declare_assignment_graph_path_mut(MUTABLE self: TypeAnalysisSession, graph_path: String, value_type: Type) RETURNS !Void
