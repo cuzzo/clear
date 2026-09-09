@@ -5624,7 +5624,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
       END
       IF UNWRAP (opts["size"]) IS_A Literal THEN
-        MUTABLE v = tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))).value));
+        MUTABLE v = tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))));
         IF (v <= 0) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, opts["size"], TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_POSITIVE }));
         END
@@ -6619,7 +6619,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
     IF (IF expr IS_A UnaryOp AS rtoc_neg_op THEN (rtoc_neg_op.op == :SUB) ELSE FALSE END) THEN
         MUTABLE right: ?Locatable = aST__node_right(expr);
-        IF right IS_A Literal THEN
+        IF UNWRAP (right) IS_A Literal THEN
           RETURN (-aST__node_value( UNWRAP (right)).to_f());
         END
     END
@@ -11030,7 +11030,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE acquirer_opt = !((escape == NIL));
       FOR _ IN held_stack DO
       IF state.direct_edges[fn_name] EXISTS AS rtoc_map_slot_251 THEN
-        &rtoc_map_slot_251.append(LockEdge{ held: castTypeToStringSymbol(COPY _.type), acquired: COPY t_value, site_token: site_tok, fn_name: COPY fn_name, opted_out: (acquirer_opt OR _.opted_out) });
+        &rtoc_map_slot_251.append(LockEdge{ held: COPY _.type, acquired: COPY t_value, site_token: site_tok, fn_name: COPY fn_name, opted_out: (acquirer_opt OR _.opted_out) });
       ELSE
         panic("T.must: map slot is NIL");
       END
@@ -11047,7 +11047,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE state = COPY typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).lock_analysis;
     FOR _ IN held_stack DO
     IF state.held_calls[fn_name] EXISTS AS rtoc_map_slot_252 THEN
-      &rtoc_map_slot_252.append(LockHeldCallSite{ held: castTypeToStringSymbol(COPY _.type), callee: COPY callee_name, site_token: site_token, opted_out: _.opted_out });
+      &rtoc_map_slot_252.append(LockHeldCallSite{ held: COPY _.type, callee: COPY callee_name, site_token: site_token, opted_out: _.opted_out });
     ELSE
       panic("T.must: map slot is NIL");
     END
@@ -11787,11 +11787,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__with_body_fact_scopes_cleared(&rtoc_self_view, %() -> block()));
     rubyToClearVoid__type_analysis_session()
     });
-    TRY (typeAnalysisSession__record_async_body_fact_mut(&rtoc_self_view, &node, summary, validation_node));
+    TRY (typeAnalysisSession__record_async_body_fact_mut(&rtoc_self_view, &node, TRY (summary), validation_node));
     RETURN summary;
 }
 END
-PRIVATE FN typeAnalysisSession__record_local_binding_fact_mut(MUTABLE self: TypeAnalysisSession, frame: BodyFactFrame, MUTABLE node: BindingNode, name: String) RETURNS Void
+PRIVATE FN typeAnalysisSession__record_local_binding_fact_mut(MUTABLE self: TypeAnalysisSession, MUTABLE frame: BodyFactFrame, MUTABLE node: BindingNode, name: String) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -11980,7 +11980,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(clause) THEN
       RETURN FALSE;
     END
-    RETURN (([ErrorActionKind.Raise, ErrorActionKind.Exit]).contains(clause.action) OR !(clause.bubble_types.empty?()));
+    RETURN (((clause.action == ErrorActionKind.Raise) OR (clause.action == ErrorActionKind.Exit)) OR !(clause.bubble_types.empty?()));
 }
 END
 PRIVATE FN typeAnalysisSession__analyze_program_bodies_mut(MUTABLE self: TypeAnalysisSession, declarations: DeclarationIndex, MUTABLE program: Program) RETURNS !Void
@@ -13069,7 +13069,7 @@ PRIVATE FN typeAnalysisSession__visit_IsA(MUTABLE self: TypeAnalysisSession, MUT
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !(TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, castNodeToNodeOrType(castLocatableToNode)(node.left)))) THEN
+    IF !(TRY (typeAnalysisSession__static_type_expr?(&rtoc_self_view, castNodeToNodeOrType(castLocatableToNode(node.left))))) THEN
       TRY (typeAnalysisSession__annotate_runtime_is_a_mut(&rtoc_self_view, &node));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ IsA: COPY node }, :Bool));
       RETURN NIL;
