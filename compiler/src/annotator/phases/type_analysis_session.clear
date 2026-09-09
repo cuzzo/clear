@@ -13182,7 +13182,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF node IS_A GetField AS get_field THEN
       RETURN (typeAnalysisSession__runtime_is_a_target_segments(rtoc_self_view, castLocatableToNode__type_analysis_session(castLocatableToLocatable__type_analysis_session(get_field.target))) + [CAST(get_field.field AS String)]);
     ELSE
-      RETURN CAST([CAST(node.token_value() AS String)] AS []String);
+      RETURN CAST([CAST(UNWRAP (locatable__token(UNWRAP (castNodeToLocatable(node)))).value AS String)] AS []String);
     END
 }
 END
@@ -15913,7 +15913,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRY (aST__full_type_mut(UNWRAP ((locatable__items(value) OR_ELSE List[])[index_value])));
     END
     IF type__tuple?((TRY (aST__full_type_mut(node.value)))) THEN
-      RETURN COPY (TRY (type__generic_args((TRY (aST__full_type_mut(node.value))))))[index_value];
+      RETURN COPY UNWRAP ((TRY (type__generic_args((TRY (aST__full_type_mut(node.value))))))[index_value]);
     END
     RETURN COPY fallback;
 }
@@ -19508,7 +19508,7 @@ PRIVATE FN typeAnalysisSession__collect_body_identifier_names(MUTABLE self: Type
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = Set[];
-    aST__each_locatable_list(nodes__locatable_list(nodes), FALSE, %(node: Locatable) USE(MUTABLE names) -> {
+    aST__each_locatable_list(nodes__locatable_list([nodes]), FALSE, %(node: Locatable) USE(MUTABLE names) -> {
     IF node IS_A Identifier AS identifier THEN
         &names.insert(identifier__name(identifier));
     END
@@ -19546,7 +19546,7 @@ PRIVATE FN typeAnalysisSession__reject_scoped_assignment_move_mut(MUTABLE self: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier AND ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_478 = ((locatable__symbol(aST__node_value(UNWRAP (castNodeToLocatable(node)))))?);
+    IF !((UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))) IS_A Identifier AND ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))))) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_478 = ((locatable__symbol(UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node)))))));
     symbolEntry__non_escaping(rtoc_local_receiver_478) }))) THEN
       RETURN;
     END
