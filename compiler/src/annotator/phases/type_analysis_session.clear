@@ -10370,14 +10370,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_mutable_receiver_238 = (TRY (aST__full_type_mut( castAllocDeclarationNodeToLocatable(node))));
     type__mark_stack_value_mut(&rtoc_mutable_receiver_238);
     allocDeclarationNode__set_storage_override_mut(&node, :stack);
-    MUTABLE value_node: Any = NIL;
+    MUTABLE value_node: ?Locatable@boxed = NIL;
     MATCH node START
       AllocDeclarationNode.VarDecl AS item ->
         value_node = COPY item.value;,
       AllocDeclarationNode.BindExpr AS item ->
         value_node = COPY item.value;,
     END
-    value_node.storage = :stack;
+    IF value_node EXISTS AS MUTABLE rtoc_value_node_v THEN
+      locatable__set_storage_override_mut(&rtoc_value_node_v, :stack);
+    END
     RETURN :stack;
 }
 END
@@ -10778,8 +10780,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (type__copy_element_capabilities_from_mut(&new_type, obj_type));
     IF node.object IS_A Identifier THEN
       MUTABLE entry: ?SymbolEntry@multiowned = locatable__symbol(node.object);
-      IF entry THEN
-        entry.type = new_type;
+      IF entry EXISTS AS MUTABLE rtoc_entry_v THEN
+        TRY (symbolEntry__set_type(&rtoc_entry_v, SymbolEntryTypeInput{ Type: COPY new_type }));
         TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node.object, new_type));
       END
     END
@@ -12498,7 +12500,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE source_name = COPY node.name;
     node.source_method_name = source_name;
-    node.name = ImplementationRegistration.function_name(CAST(owner AS String), source_name);
+    node.name = implementationRegistration__function_name(CAST(owner AS String), source_name);
     TRY (typeAnalysisSession__resolve_call(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, ([node.object] + node.args)));
     TRY (typeAnalysisSession__reject_mutating_borrowed_receiver_mut(&rtoc_self_view, &node));
     TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ MethodCall: COPY node }));
@@ -13716,13 +13718,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN {};
     END
     MUTABLE subst: {String@symbol}String@symbol = {};
-    (type_params.zip(TRY (type__generic_args(expr_t)))).keys() |> EACH {
-    MUTABLE a = ((type_params.zip(TRY (type__generic_args(expr_t))))[_] OR_ELSE panic("missing hash key"));
-    IF !(a) THEN
-      CONTINUE;
+    MUTABLE rtoc_zip_args = TRY (type__generic_args(expr_t));
+    MUTABLE rtoc_zip_i = 0;
+    WHILE rtoc_zip_i < type_params.length() DO
+      MUTABLE a: ?Type = COPY rtoc_zip_args[rtoc_zip_i];
+      IF a EXISTS AS rtoc_a_value THEN
+        subst[UNWRAP (type_params[rtoc_zip_i])] = type__resolved(rtoc_a_value);
+      END
+      rtoc_zip_i = rtoc_zip_i + 1;
     END
-    subst[_] = a.resolved();
-    };
     RETURN subst;
 }
 END
