@@ -1187,7 +1187,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       }
       MUTABLE result = PARTIAL MATCH node_value_mutable START
-        AnnotationNode.StructDef -> {
+        Locatable.StructDef -> {
           MUTABLE rtoc_value_block_marker = 0;
           MUTABLE rtoc_local_receiver_17 = TRY (typeAnalysisSession__local_resolution_session(&rtoc_self_view));
         TRY (resolutionSession__register_local_declaration_mut(&rtoc_local_receiver_17, castLocatableToNode__type_analysis_session(node_value_mutable)));
@@ -1373,18 +1373,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
       END
       IF (node IS_A FuncCall OR node IS_A MethodCall) THEN
+        MUTABLE actuals: []Locatable = List[];
+        IF node IS_A MethodCall THEN
+          &actuals.append(COPY UNWRAP (locatable__object(node)));
+        END
+        FOR rtoc_actual IN (locatable__args(node) OR_ELSE List[]) DO
+          &actuals.append(COPY rtoc_actual);
+        END
         MUTABLE signature: ?FunctionSignature@multiowned = locatable__matched_signature(node);
-        MUTABLE actuals = IF node IS_A MethodCall THEN
-          ([UNWRAP (locatable__object(node))] + (locatable__args(node) OR_ELSE List[]))
-        ELSE
-          locatable__args(node)
-        END;
         IF signature THEN
-          MUTABLE rtoc_each_items_26 = functionSignature__params(signature);
+          MUTABLE rtoc_each_items_26 = TRY (functionSignature__params(signature));
           MUTABLE rtoc_idx = 0;
-          WHILE rtoc_idx < rtoc_mutable_block_param_25.length() DO
-      MUTABLE argument = actuals[rtoc_idx];
-      IF (UNWRAP (rtoc_each_items_26[rtoc_idx]).mutable() AND argument) THEN
+          WHILE rtoc_idx < rtoc_each_items_26.length() DO
+      MUTABLE argument: ?Locatable = COPY actuals[rtoc_idx];
+      IF ((UNWRAP (rtoc_each_items_26[rtoc_idx]).mutable OR_ELSE FALSE) AND (argument != NIL)) THEN
                 MUTABLE root: ?Identifier = aST__root_identifier(argument);
                 IF (root != NIL) THEN
                   FOR MUTABLE rtoc_mutable_block_param_27 IN fact_frames DO
@@ -1396,9 +1398,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         MUTABLE rtoc_idx = 0;
-        WHILE rtoc_idx < rtoc_mutable_block_param_27.length() DO
-    IF (actuals[rtoc_idx] IS_A Identifier AND (actuals[rtoc_idx].ownership_pending_transfer == TRUE)) THEN
-            ownershipTransportFacts__record_transfer(&facts_value_mutable, node, OwnershipTransportSlot{ Int64Value: rtoc_idx }, UNWRAP (actuals[rtoc_idx]));
+        WHILE rtoc_idx < actuals.length() DO
+    IF actuals[rtoc_idx] EXISTS AS rtoc_actual_v THEN
+      IF rtoc_actual_v IS_A Identifier AS rtoc_actual_ident THEN
+        IF (locatable__ownership_pending_transfer(rtoc_actual_v) == TRUE) THEN
+            ownershipTransportFacts__record_transfer(&facts_value_mutable, node, OwnershipTransportSlot{ Int64Value: rtoc_idx }, rtoc_actual_ident);
+        END
+      END
     END
     rtoc_idx = rtoc_idx + 1;
         END
