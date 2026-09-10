@@ -3452,11 +3452,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (cycle_names.length() < 2) THEN
       RETURN FALSE;
     END
-    MUTABLE concrete_cycle_fns: []FunctionDef = List[];
+    MUTABLE concrete_cycle_fns: []FunctionDef@multiowned = List[];
     MUTABLE rtoc_cycle_i = 0;
     WHILE rtoc_cycle_i < cycle_names.length() DO
       IF fn_nodes[UNWRAP (cycle_names[rtoc_cycle_i])] EXISTS AS rtoc_cycle_fn THEN
-        &concrete_cycle_fns.append(COPY rtoc_cycle_fn);
+        &concrete_cycle_fns.append(KEEP rtoc_cycle_fn);
       END
       rtoc_cycle_i = rtoc_cycle_i + 1;
     END
@@ -3474,22 +3474,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END) |> DISTINCT _) AS []?String);
-    IF !((ret_types.size == 1)) THEN
+    IF !((ret_types.length() == 1)) THEN
       RETURN FALSE;
     END
     MUTABLE plans: {String}MutualPlan = {};
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < concrete_cycle_fns.length() DO
-      MUTABLE partners = (cycle_names - [(UNWRAP (concrete_cycle_fns[rtoc_idx])).name]);
-      MUTABLE mp: ?MutualPlan = recursiveSplitter__split_mutual(concrete_cycle_fns[rtoc_idx]?.body, (UNWRAP (concrete_cycle_fns[rtoc_idx])).name, partners);
+      MUTABLE partners = cycle_names |> WHERE (_ != (UNWRAP (concrete_cycle_fns[rtoc_idx])).name);
+      MUTABLE mp: ?MutualPlan = recursiveSplitter__split_mutual(UNWRAP (concrete_cycle_fns[rtoc_idx]).body, (UNWRAP (concrete_cycle_fns[rtoc_idx])).name, partners);
       IF (mp == NIL) THEN
           RETURN FALSE;
       END
       MUTABLE rtoc_key_1: String = COPY UNWRAP (concrete_cycle_fns[rtoc_idx]).name;
-      plans[rtoc_key_1] = UNWRAP (mp);
+      plans[rtoc_key_1] = mp;
     rtoc_idx = rtoc_idx + 1;
     END
-    FOR _ IN concrete_cycle_fns DO
+    FOR MUTABLE _ IN concrete_cycle_fns DO
     _.mutual_thunk_plan = MutualThunkPlan{ cycle_fns: concrete_cycle_fns, own_plan: COPY UNWRAP (plans[_.name]) };
     END
     RETURN TRUE;
