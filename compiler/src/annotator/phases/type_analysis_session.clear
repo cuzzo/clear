@@ -15193,25 +15193,27 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_377 = (TRY (ownershipTransportFacts__decisions(facts)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_377.length() DO
-      MUTABLE node: ?Any = COPY KEEP (rtoc_each_items_377[rtoc_idx]?.alias_fact).declaration;
-      node?.ownership_transport_plan = COPY rtoc_each_items_377[rtoc_idx]?.plan;
-      IF ((rtoc_each_items_377[rtoc_idx]?.plan).action == :move) THEN
-          TRY (typeAnalysisSession__handle_assign_move(&rtoc_self_view, node));
+      MUTABLE rtoc_decision = UNWRAP (rtoc_each_items_377[rtoc_idx]);
+      MUTABLE node: DeclarationNode = COPY rtoc_decision.alias_fact.declaration;
+      declarationNode__set_ownership_transport_plan_mut(&node, COPY rtoc_decision.plan);
+      IF (rtoc_decision.plan.action == :move) THEN
+          TRY (typeAnalysisSession__handle_assign_move(&rtoc_self_view, UNWRAP (castDeclarationNodeToNode(node))));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE previous_value = node.value();
+      MUTABLE previous_value: ?Locatable@boxed = declarationNode__value(node);
       TRY (typeAnalysisSession__prepare_implicit_ownership_transport_mut(&rtoc_self_view, &node));
-      IF !(node.value().equal?(previous_value)) THEN
-          MUTABLE wrapper = node.value();
-          typeAnalysisSession__record_capture_site_mut(&rtoc_self_view, &wrapper, TRUE);
-          IF wrapper IS_A KeepNode THEN
-            TRY (typeAnalysisSession__finish_previsited_keep_mut(&rtoc_self_view, &wrapper));
-          ELSE
-            TRY (typeAnalysisSession__finish_previsited_copy_mut(&rtoc_self_view, CAST(wrapper AS CopyNode)));
+      IF !((aST__node_identity(UNWRAP (declarationNode__value(node))) == aST__node_identity(UNWRAP (previous_value)))) THEN
+          MUTABLE wrapper = UNWRAP (declarationNode__value(node));
+          MUTABLE rtoc_capture_site = UNWRAP (castLocatableToCaptureSiteNode(wrapper));
+          typeAnalysisSession__record_capture_site_mut(&rtoc_self_view, &rtoc_capture_site, TRUE);
+          IF wrapper IS_A KeepNode AS MUTABLE rtoc_keep_w THEN
+            TRY (typeAnalysisSession__finish_previsited_keep_mut(&rtoc_self_view, &rtoc_keep_w));
+          ELSE_IF wrapper IS_A CopyNode AS MUTABLE rtoc_copy_w THEN
+            TRY (typeAnalysisSession__finish_previsited_copy_mut(&rtoc_self_view, &rtoc_copy_w));
           END
       END
-      MUTABLE symbol: ?SymbolEntry@multiowned = aST__node__symbol(castBindingNodeToLocatable(node));
+      MUTABLE symbol: ?SymbolEntry@multiowned = declarationNode__symbol(node);
       IF symbol != NIL THEN
           TRY (typeAnalysisSession__establish_inferred_alias_mut(&rtoc_self_view, &node, &symbol));
       END

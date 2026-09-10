@@ -180,3 +180,13 @@ PUB FN castPredicateCallToLocatable(value: PredicateCall) RETURNS ?Locatable ->
   END
   RETURN NIL;
 END
+PUB FN castLocatableToCaptureSiteNode(value: Locatable) RETURNS ?CaptureSiteNode ->
+  PARTIAL MATCH value START
+    Locatable.Copy AS item -> RETURN CaptureSiteNode{ Copy: COPY item };,
+    Locatable.MoveNode AS item -> RETURN CaptureSiteNode{ MoveNode: COPY item };,
+    Locatable.CopyNode AS item -> RETURN CaptureSiteNode{ CopyNode: COPY item };,
+    Locatable.KeepNode AS item -> RETURN CaptureSiteNode{ KeepNode: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
