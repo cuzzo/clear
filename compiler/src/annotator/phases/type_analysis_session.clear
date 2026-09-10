@@ -11087,7 +11087,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__record_with_acquire_mut(MUTABLE self: TypeAnalysisSession, fn_name: String, cap: CapabilityTransition, held_stack: []HeldLockTypeEntry, escape: ?{String@symbol}AnnotatorPhasesTypeAnalysisSessionDeadlockEscapeValue) RETURNS Void
+PRIVATE FN typeAnalysisSession__record_with_acquire_mut(MUTABLE self: TypeAnalysisSession, fn_name: String, cap: CapabilityTransition, held_stack: []HeldLockTypeEntry, escape: ?DeadlockEscape) RETURNS Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -16960,9 +16960,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     END
     MUTABLE is_snapshot_txn_body = ((node.snapshot_mode == :transaction));
-    MUTABLE with_body = (%() USE(expanded_capabilities, is_snapshot_txn_body, node, MUTABLE rtoc_self_view) -> {
+    MUTABLE with_body = (%() USE(expanded_capabilities, is_snapshot_txn_body, MUTABLE node, MUTABLE rtoc_self_view) -> {
     TRY (typeAnalysisSession__record_body_fact_with_block_mut(&rtoc_self_view, &node));
-    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(&rtoc_self_view), %() USE(expanded_capabilities, is_snapshot_txn_body, node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(&rtoc_self_view), %() USE(expanded_capabilities, is_snapshot_txn_body, MUTABLE node, MUTABLE rtoc_self_view) -> {
       FOR _ IN expanded_capabilities DO
       TRY (typeAnalysisSession__declare_capability_scope_mut(&rtoc_self_view, _));
       END
@@ -16991,7 +16991,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             snapshot_branch_value = NIL;
           END
           MUTABLE snapshot: ?[Set]String@symbol = snapshot_branch_value;
-          MUTABLE per_arm_effects = List[];
+          MUTABLE per_arm_effects: [][Set]String@symbol = List[];
           FOR _ IN arms_value_mutable DO
         MUTABLE before_branch_value: ?[Set]String@symbol = NIL;
             IF fn_ctx_name EXISTS AS fn_ctx_name_value THEN
@@ -17005,22 +17005,47 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         typeAnalysisSession__with_new_scope(&rtoc_self_view, typeAnalysisSession__current_scope(&rtoc_self_view), %() USE(node, _, MUTABLE rtoc_self_view) -> {
           typeAnalysisSession__with_body_fact_scope(&rtoc_self_view, node, %() USE(_, MUTABLE rtoc_self_view) -> {
-            rtoc_lambda_result_413 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, _.body()));
-            rtoc_lambda_result_413
+            TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, _.body));
+            rubyToClearVoid__type_analysis_session()
           });
           TRY (typeAnalysisSession__finalize_scope(&rtoc_self_view, Locatable{ WithBlock: COPY node }))
         });
         IF fn_ctx_name EXISTS AS fn_ctx_name_value THEN
               MUTABLE after = TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, fn_ctx_name_value));
-              MUTABLE arm_delta = (after - before?);
-              &per_arm_effects.append(arm_delta);
+              MUTABLE arm_delta: [Set]String@symbol = Set[];
+              FOR rtoc_after_effect IN after DO
+                IF !(UNWRAP (before).contains?(rtoc_after_effect)) THEN
+                  &arm_delta.insert(COPY rtoc_after_effect);
+                END
+              END
+              &per_arm_effects.append(COPY arm_delta);
               direct_effects[fn_ctx_name_value] = COPY UNWRAP (snapshot);
         END
           END
           IF ((fn_ctx_name != NIL) AND !((per_arm_effects.length() == 0))) THEN
-            MUTABLE concrete = ((per_arm_effects |> REDUCE(per_arm_effects[0]) (ruby_set_intersection(acc, _))) OR_ELSE Set[]);
-            MUTABLE all_union = per_arm_effects |> REDUCE(Set[]) (ruby_set_union(acc, _));
-            MUTABLE maybe_set = (all_union - concrete);
+            MUTABLE concrete: [Set]String@symbol = COPY (per_arm_effects[0] OR_ELSE Set[]);
+            MUTABLE all_union: [Set]String@symbol = Set[];
+            MUTABLE rtoc_arm_i = 0;
+            WHILE rtoc_arm_i < per_arm_effects.length() DO
+              MUTABLE rtoc_arm_set: [Set]String@symbol = COPY UNWRAP (per_arm_effects[rtoc_arm_i]);
+              MUTABLE rtoc_kept: [Set]String@symbol = Set[];
+              FOR rtoc_concrete_effect IN concrete DO
+                IF rtoc_arm_set.contains?(rtoc_concrete_effect) THEN
+                  &rtoc_kept.insert(COPY rtoc_concrete_effect);
+                END
+              END
+              concrete = rtoc_kept;
+              FOR rtoc_union_effect IN rtoc_arm_set DO
+                &all_union.insert(COPY rtoc_union_effect);
+              END
+              rtoc_arm_i = rtoc_arm_i + 1;
+            END
+            MUTABLE maybe_set: [Set]String@symbol = Set[];
+            FOR rtoc_union_effect IN all_union DO
+              IF !(concrete.contains?(rtoc_union_effect)) THEN
+                &maybe_set.insert(COPY rtoc_union_effect);
+              END
+            END
             MUTABLE maybe_projection = {symbol("CONTENTION"): symbol("CONTENTION_MAYBE"), symbol("BLOCKING"): symbol("BLOCKING_MAYBE")};
             MUTABLE target_effects = TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, fn_ctx_name));
             FOR _ IN concrete DO
