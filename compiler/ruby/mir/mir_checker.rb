@@ -2869,6 +2869,9 @@ class MIRChecker
     return node.spec.callee if node.is_a?(MIR::RuntimeCall)
     return node.callee.to_s if node.is_a?(MIR::Call) || node.is_a?(MIR::TailCall)
     return node.method.to_s if node.is_a?(MIR::MethodCall)
+    # A reassignment names the binding it overwrites; without that the label
+    # is the bare class name and the diagnostic points at nothing.
+    return node.name.to_s if node.is_a?(MIR::ReassignWithCleanup)
     return "MIR::BgBlock" if node.is_a?(MIR::BgBlock)
     return "MIR::StreamSpawn" if node.is_a?(MIR::StreamSpawn)
     reason = case node
@@ -3115,7 +3118,7 @@ class MIRChecker
         next unless binding.is_a?(Hash)
         expr = binding[:expr]
         capture = binding[:capture]
-        if capture && binder_capture_cleanup?(node.then_body, capture.to_s)
+        if capture && (binder_capture_cleanup?(node.then_body, capture.to_s) || block_expr_transfers_result?(expr))
           check_owned_expr_position_for_unhoisted(expr, "IfBind capture")
         else
           check_expr_for_unhoisted(expr)

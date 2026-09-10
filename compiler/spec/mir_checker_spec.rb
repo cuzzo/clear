@@ -1211,6 +1211,20 @@ RSpec.describe MIRChecker do
       expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
     end
 
+    it "passes: an IfBind capture whose subject block transfers its result" do
+      # A block that hands its result to the binder IS an ownership-binding
+      # position -- the same one a While capture's subject sits in. Hoisting
+      # it out is impossible: the block exists to build the value the binder
+      # names.
+      block = MIR::BlockExpr.new("__blk", [
+        MIR::TransferMark.new("__tmp", :block_result),
+        MIR::BreakStmt.new("__blk", MIR::DupeSlice.new(MIR::Ident.new("src"), :heap)),
+      ])
+      if_bind = MIR::IfBindStmt.new([{ expr: block, capture: "cap" }], [], [])
+      errors = checker.check_fn!(fn_def("ifbind_transfer", [if_bind]), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
     it "flags: DupeSlice as Call argument" do
       inner = MIR::DupeSlice.new(MIR::Ident.new("s"), :heap)
       body = [
