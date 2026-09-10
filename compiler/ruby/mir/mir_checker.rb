@@ -954,8 +954,13 @@ class MIRChecker
     states.each { |state| names.merge(state.released) }
     states.each { |state| names.merge(state.maybe_released) }
     names.each do |name|
-      released_count = states.count { |state| state.released.include?(name) || state.maybe_released.include?(name) }
-      next if released_count == 0 || released_count == states.length
+      # Definite and maybe releases are different states, so counting them
+      # together read "every path released it" for a join of one path that did
+      # and one that only might -- and the mismatch surfaced as an unprovable
+      # rejoin instead of the maybe the guard already covers.
+      definite = states.count { |state| state.released.include?(name) }
+      any_release = states.count { |state| state.released.include?(name) || state.maybe_released.include?(name) }
+      next if any_release == 0 || definite == states.length
       next unless states.all? { |state| state.guarded_finalizers.include?(name) }
 
       states.each do |state|

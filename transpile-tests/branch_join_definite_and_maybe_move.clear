@@ -1,0 +1,29 @@
+# Test: three-way branch where two arms move the same guarded binding and one
+# does not. The join counted a definite release and a maybe release as the same
+# thing, read "every path released it", and rejected the rejoin -- the very case
+# the `_moved` guard exists for.
+
+STRUCT Box { items: []String }
+
+FN consume(TAKES boxes: []Box) RETURNS Int64 ->
+    RETURN boxes.length();
+END
+
+FN pick(code: Int64) RETURNS Int64 ->
+    b = Box{ items: [COPY "a"] };
+    MUTABLE seen = 0;
+    IF code == 1 THEN
+        seen = consume([b]);
+    ELSE_IF code == 2 THEN
+        seen = consume([b]) + 10;
+    ELSE
+        seen = -1;
+    END
+    RETURN seen;
+END
+
+FN main() RETURNS Void ->
+    ASSERT pick(1) == 1, "the first arm moved the box";
+    ASSERT pick(2) == 11, "the second arm moved the box";
+    ASSERT pick(3) == -1, "the third arm left the box alone";
+END

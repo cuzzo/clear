@@ -1190,14 +1190,8 @@ PRIVATE FN capabilityAuditSession__emit_match_partial_fix_mut(MUTABLE self: Capa
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE tok = COPY match_node.token;
-    MUTABLE fix: ?Fix = NIL;
-    IF tok THEN
-      fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_MATCH_WITH_PARTIAL)), [edit__new(span__new(NIL, tok.line, tok.column, 0), "PARTIAL ")], :auto));
-    END
-    IF !(fix) THEN
-      RETURN TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, CapabilityAuditCodeOrMessage{ SymbolValue: COPY code }, [], castDiagnosticKwValueMapToAnyMap__capability_audit_session(kwargs)));
-    END
+    MUTABLE rtoc_tok: Token = COPY match_node.token;
+    MUTABLE fix: Fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_MATCH_WITH_PARTIAL)), [edit__new(span__new(NIL, rtoc_tok.line, rtoc_tok.column, 0), "PARTIAL ")], :auto));
     IF (code == :MATCH_NEEDS_ENUM_OR_UNION) THEN
       TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, :type, [fix], NIL, code, :error, FALSE, CAST({:type: (kwargs[:type] OR_ELSE DiagnosticKwValue{ StringValue: COPY "" })} AS {String@symbol}DiagnosticKwValue)));
     ELSE_IF (code == :MATCH_NON_EXHAUSTIVE) THEN
