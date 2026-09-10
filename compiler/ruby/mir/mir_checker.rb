@@ -411,6 +411,7 @@ class MIRChecker
     @captured_names = T.let(captured_names.map(&:to_s).to_set, T.nilable(T::Set[String]))
     @errors = []
     nodes = T.let(MIR.nodes(fn_def.body), T::Array[MIR::Node])
+    @line_by_name = T.let(source_lines_by_binding(nodes), T.nilable(T::Hash[String, Integer]))
 
     allocs = T.let({}, AllocMarksByName)
     cleanups = T.let({}, CleanupMarksByName)
@@ -3018,7 +3019,36 @@ class MIRChecker
       raise "Internal Compiler Error: unregistered MIR diagnostic code :#{kind}. " \
             "Add an entry in src/ast/diagnostic_registry.rb (category: :mir)."
     end
-    "[#{kind}] #{@fn_name}::#{name} -- #{msg}"
+    # Ownership errors name a binding, never a place. The `CLR:` markers the
+    # lowering already emits say where each binding was introduced, so the
+    # reader gets a line instead of a whole function to search.
+    line = @line_by_name&.[](name.to_s)
+    suffix = line ? " @@PL=#{line}@@PC=1" : ""
+    "[#{kind}] #{@fn_name}::#{name} -- #{msg}#{suffix}"
+  end
+
+  # Map every binding name to the source line of the statement that introduced
+  # it, read off the `CLR:` comments the lowering interleaves with the body.
+  sig { params(nodes: T::Array[MIR::Node]).returns(T::Hash[String, Integer]) }
+  def source_lines_by_binding(nodes)
+    lines = T.let({}, T::Hash[String, Integer])
+    current = T.let(nil, T.nilable(Integer))
+    nodes.each do |node|
+      if node.is_a?(MIR::Comment) && node.text.to_s.start_with?("CLR:")
+        digits = node.text.to_s.delete_prefix("CLR:")
+        current = digits.to_i if digits.to_i.to_s == digits
+        next
+      end
+      next unless current
+      name = if node.is_a?(MIR::Let) || node.is_a?(MIR::AllocMark) ||
+                node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+        T.unsafe(node).name
+      end
+      next unless name
+
+      lines[name.to_s] ||= current
+    end
+    lines
   end
 
   # ================================================================

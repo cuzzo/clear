@@ -2299,7 +2299,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(([:reentrant, :reentrant_tail_call, :reentrant_thunk, :reentrant_max_depth]).contains?(kind)) THEN
         CONTINUE;
     END
-    MUTABLE resolved_entry = COPY (resolved[rtoc_each_6] OR_ELSE Set[]);
+    MUTABLE resolved_entry: [Set]String@symbol = CAST(Set[] AS [Set]String@symbol);
+    IF resolved[rtoc_each_6] EXISTS AS rtoc_prev THEN
+      resolved_entry = COPY rtoc_prev;
+    END
     &resolved_entry.insert(:YIELD);
     resolved[rtoc_each_6] = COPY resolved_entry;
         END
@@ -2308,7 +2311,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       changed = FALSE;
       FOR rtoc_each_7 IN (TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view))).keys() DO
     MUTABLE callees: [Set]String = ((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[rtoc_each_7] OR_ELSE CAST(panic("missing hash key") AS [Set]String));
-    resolved[rtoc_each_7] = (resolved[rtoc_each_7] OR_ELSE Set[]);
+    IF !(resolved.contains?(rtoc_each_7)) THEN
+      resolved[rtoc_each_7] = CAST(Set[] AS [Set]String@symbol);
+    END
     IF resolved[rtoc_each_7] EXISTS AS MUTABLE current THEN
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < callees.length() DO
@@ -2329,10 +2334,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
             END
     END
-    fn_nodes.keys() |> EACH {
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
-    fn_node.effects = ((resolved[_] OR_ELSE Set[]));
-    };
+    FOR rtoc_each_8 IN fn_nodes.keys() DO
+    MUTABLE fn_node2: FunctionDef@multiowned = (fn_nodes[rtoc_each_8] OR_ELSE panic("missing hash key"));
+    MUTABLE rtoc_effs2: [Set]String@symbol = CAST(Set[] AS [Set]String@symbol);
+    IF resolved[rtoc_each_8] EXISTS AS rtoc_have THEN
+      rtoc_effs2 = COPY rtoc_have;
+    END
+    fn_node2.effects = COPY rtoc_effs2;
+    END
     RETURN NIL;
 }
 END
@@ -2524,15 +2533,14 @@ PRIVATE FN capabilityAuditSession__compute_can_fail_mut(MUTABLE self: Capability
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE error_fallible: {String}Bool = {};
-    fn_nodes.keys() |> EACH {
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
-    MUTABLE declared_fallible = ({
-      MUTABLE rtoc_value_block_marker = 0;
-      MUTABLE rt: ?Type = fn_node.return_type;
-      ((rt != NIL AND TRUE) AND type__error_union?(rt))
-    });
-    error_fallible[_] = ((TRY (capabilityAuditSession__function_raises_directly?(rtoc_self_view, _)) OR declared_fallible) OR (_ == entrypointName()));
-    };
+    FOR rtoc_fn_key IN fn_nodes.keys() DO
+    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_fn_key] OR_ELSE panic("missing hash key"));
+    MUTABLE declared_fallible = FALSE;
+    IF fn_node.return_type EXISTS AS rtoc_rt THEN
+      declared_fallible = type__error_union?(rtoc_rt);
+    END
+    error_fallible[rtoc_fn_key] = ((TRY (capabilityAuditSession__function_raises_directly?(rtoc_self_view, rtoc_fn_key)) OR declared_fallible) OR (rtoc_fn_key == entrypointName()));
+    END
     FOR rtoc_each_10 IN (TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view))).keys() DO
     MUTABLE callees: [Set]String = ((TRY (capabilityAuditSession__function_call_graph(&rtoc_self_view)))[rtoc_each_10] OR_ELSE CAST(panic("missing hash key") AS [Set]String));
     MUTABLE rtoc_idx = 0;
