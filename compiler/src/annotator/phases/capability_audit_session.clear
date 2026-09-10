@@ -4068,11 +4068,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE sym: ?SymbolEntry@multiowned = COPY KEEP _.source_entry;
     ((((sym != NIL) AND symbolEntry__atomic?(sym)) AND TRUE) AND symbolEntry__indirect?(sym))
       };
-      possible = ( { MUTABLE rtoc_pipe_src = [IF has_atomic_ptr THEN
-        :AtomicConflict
+      possible = Set[];
+      IF has_atomic_ptr THEN
+        &possible.insert(:AtomicConflict);
       ELSE
-        :MvccConflict
-      END]; rtoc_pipe_src |> DISTINCT _ } );
+        &possible.insert(:MvccConflict);
+      END
     ELSE
       possible = Set[];
       IF (site.cap_types.length() > 0) THEN
@@ -4093,18 +4094,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_38 = clause.selectors;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_38.length() DO
-      MUTABLE expansion = PARTIAL MATCH UNWRAP (rtoc_each_items_38[rtoc_idx]).form START
-          :kind -> (TRY (aST__types_for_kind(UNWRAP (rtoc_each_items_38[rtoc_idx]).name()))) |> DISTINCT _,
-          :type -> ( { MUTABLE rtoc_pipe_src = [UNWRAP (rtoc_each_items_38[rtoc_idx]).name()]; rtoc_pipe_src |> DISTINCT _ } ),
-          DEFAULT -> Set[]
-        END;
+      MUTABLE expansion: [Set]String@symbol = Set[];
+      IF UNWRAP (rtoc_each_items_38[rtoc_idx]).form == :kind THEN
+        expansion = (TRY (aST__types_for_kind(UNWRAP (rtoc_each_items_38[rtoc_idx]).name))) |> DISTINCT _;
+      ELSE_IF UNWRAP (rtoc_each_items_38[rtoc_idx]).form == :type THEN
+        &expansion.insert(COPY UNWRAP (rtoc_each_items_38[rtoc_idx]).name);
+      END
       MUTABLE reachable = ruby_set_intersection_String_symbol_set(expansion, possible);
       IF !(reachable.empty?()) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE label = COPY CAST(UNWRAP (rtoc_each_items_38[rtoc_idx]).name() AS String);
-      TRY (capabilityAuditSession__error_mut(&rtoc_self_view, (UNWRAP (rtoc_each_items_38[rtoc_idx]).token() OR node), CapabilityAuditCodeOrMessage{ SymbolValue: :SELECTOR_NOT_POSSIBLE }, [], CAST({:label: label} AS {String@symbol}Any)));
+      MUTABLE label = COPY CAST(UNWRAP (rtoc_each_items_38[rtoc_idx]).name AS String);
+      TRY (capabilityAuditSession__error_mut(&rtoc_self_view, (IF UNWRAP (rtoc_each_items_38[rtoc_idx]).token EXISTS AS rtoc_sel_tok THEN DiagnosticAnchor{ TokenValue: COPY rtoc_sel_tok } ELSE DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } } END), CapabilityAuditCodeOrMessage{ SymbolValue: :SELECTOR_NOT_POSSIBLE }, [], CAST({:label: label} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
     NIL;
