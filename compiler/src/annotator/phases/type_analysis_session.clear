@@ -6895,7 +6895,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_157 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_157, "_", NIL, (IF item_type EXISTS AS rtoc_wrap_6915 THEN SymbolEntryTypeInput{ Type: COPY rtoc_wrap_6915 } ELSE NIL END), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, UNWRAP (item_type), %() USE(node, MUTABLE rtoc_self_view) -> {
-        rtoc_lambda_result_158 = TRY (typeAnalysisSession__visit(&rtoc_self_view, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
+        MUTABLE rtoc_lambda_result_158: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
         rtoc_lambda_result_158
       }))
     });
@@ -6951,7 +6951,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_mutable_receiver_161 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_161, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
-        rtoc_lambda_result_162 = TRY (typeAnalysisSession__visit(&rtoc_self_view, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
+        MUTABLE rtoc_lambda_result_162: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
         rtoc_lambda_result_162
       }))
     });
@@ -18288,7 +18288,7 @@ PRIVATE FN typeAnalysisSession__visit_OrElse(MUTABLE self: TypeAnalysisSession, 
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rhs_propagates = (((node.right IS_A OrElseRaise OR node.right IS_A OrElseExit) OR node.right IS_A ThrowNode) OR node.right IS_A ReturnNode);
     typeAnalysisSession__with_body_fact_failure_absorbed(&rtoc_self_view, !(rhs_propagates), %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_442 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.left));
+    MUTABLE rtoc_lambda_result_442: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.left));
     rtoc_lambda_result_442
     });
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
@@ -18550,7 +18550,7 @@ PRIVATE FN typeAnalysisSession__visit_UnaryOp(MUTABLE self: TypeAnalysisSession,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.op == :IS_OK) THEN
       typeAnalysisSession__with_body_fact_failure_absorbed(&rtoc_self_view, TRUE, %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_444 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
+    MUTABLE rtoc_lambda_result_444: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
     rtoc_lambda_result_444
       });
     ELSE
@@ -18683,7 +18683,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((node.op == symbol("AND")) OR (node.op == symbol("OR"))) THEN
       MUTABLE refinements = TRY (typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, node.left, (node.op == symbol("AND"))));
       typeAnalysisSession__with_value_type_refinements(&rtoc_self_view, refinements, %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_445 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
+    MUTABLE rtoc_lambda_result_445: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.right));
     rtoc_lambda_result_445
       });
     ELSE
@@ -19266,7 +19266,7 @@ PRIVATE FN typeAnalysisSession__visit_MoveNode(MUTABLE self: TypeAnalysisSession
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__record_capture_site_mut(&rtoc_self_view, CaptureSiteNode{ MoveNode: COPY node }, FALSE);
     typeAnalysisSession__without_capture_moves(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_457 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
+    MUTABLE rtoc_lambda_result_457: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
     rtoc_lambda_result_457
     });
     IF !(node.value IS_A Identifier) THEN
@@ -19387,7 +19387,7 @@ PRIVATE FN typeAnalysisSession__visit_CopyNode(MUTABLE self: TypeAnalysisSession
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__record_capture_site_mut(&rtoc_self_view, CaptureSiteNode{ CopyNode: COPY node }, TRUE);
     typeAnalysisSession__without_capture_moves(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_464 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
+    MUTABLE rtoc_lambda_result_464: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
     rtoc_lambda_result_464
     });
     RETURN TRY (typeAnalysisSession__finish_previsited_copy_mut(&rtoc_self_view, &node));
@@ -19492,7 +19492,7 @@ PRIVATE FN typeAnalysisSession__visit_Copy(MUTABLE self: TypeAnalysisSession, MU
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__record_capture_site_mut(&rtoc_self_view, CaptureSiteNode{ Copy: COPY node }, TRUE);
     typeAnalysisSession__without_capture_moves(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_469 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
+    MUTABLE rtoc_lambda_result_469: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
     rtoc_lambda_result_469
     });
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ Copy: COPY node }, TRY (aST__full_type_mut(node.value))));
@@ -19579,7 +19579,7 @@ PRIVATE FN typeAnalysisSession__visit_KeepNode(MUTABLE self: TypeAnalysisSession
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__record_capture_site_mut(&rtoc_self_view, CaptureSiteNode{ KeepNode: COPY node }, TRUE);
     typeAnalysisSession__without_capture_moves(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_471 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
+    MUTABLE rtoc_lambda_result_471: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
     rtoc_lambda_result_471
     });
     TRY (typeAnalysisSession__reject_keep_on_known_carrier_mut(&rtoc_self_view, node));
