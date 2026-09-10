@@ -313,163 +313,158 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
       kept_contracts[rtoc_key] = by_index;
   END
   END
-  FOR _ IN body_summaries.values() DO
-  MUTABLE owner_fn: ?FunctionDef = COPY fn_nodes[_.name];
-  MUTABLE liveness: ?KeptEdgeLiveness@multiowned = NIL;
-  MUTABLE local_entries = _.binding_nodes.each_with_object({}, %(node: BindingNode, map: {String}SymbolEntry@multiowned) -> {
-    MUTABLE sym = aST__node__symbol(castBindingNodeToLocatable(node));
-    IF sym IS_A SymbolEntry THEN
-      map[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
+  FOR rtoc_summary IN body_summaries.values() DO
+    MUTABLE owner_fn: ?FunctionDef = COPY fn_nodes[rtoc_summary.name];
+    MUTABLE liveness: ?KeptEdgeLiveness@multiowned = NIL;
+    MUTABLE local_entries: {String}SymbolEntry@multiowned = {};
+    FOR rtoc_binding IN rtoc_summary.binding_nodes DO
+      IF aST__node__symbol(castBindingNodeToLocatable(rtoc_binding)) EXISTS AS rtoc_binding_sym THEN
+        local_entries[escapeAnalysis__bindingNodeName(rtoc_binding)] = COPY rtoc_binding_sym;
+      END
+    END
+    FOR MUTABLE rtoc_site IN rtoc_summary.call_site_facts DO
+      IF kept_contracts[rtoc_site.callee_name] EXISTS AS rtoc_kept THEN
+        FOR rtoc_arg_index IN rtoc_kept.keys() DO
+          TRY (escapeAnalysis__plan_kept_edge_mut(rtoc_summary, &rtoc_site, rtoc_arg_index, UNWRAP (rtoc_kept[rtoc_arg_index]), fn_nodes, local_entries, &liveness, owner_fn, on_mutable_violation, on_family_violation));
+        END
+      END
+    END
+  END
+END
+
+# Ruby plans one kept edge per argument inside the call-site loop and leaves
+# with `next`; a CLEAR loop cannot, so each argument gets its own function and
+# `next` becomes a plain RETURN.
+PRIVATE FN escapeAnalysis__plan_kept_edge_mut(summary: FunctionBodySummary, MUTABLE site: CallSiteFact, idx: Int64, contract: KeptIdentityContract, fn_nodes: {String}FunctionDef, local_entries: {String}SymbolEntry, MUTABLE liveness: ?KeptEdgeLiveness, owner_fn: ?FunctionDef, on_mutable_violation: ?FN(SymbolEntry, Identifier, String) -> Void, on_family_violation: ?FN(Locatable, String@symbol, String@symbol, String) -> Void) RETURNS !Void ->
+  IF site.args[idx] == NIL THEN
+    RETURN;
+  END
+  MUTABLE raw_arg: Locatable = COPY UNWRAP (site.args[idx]);
+  IF (aST__node_kept_edge_plan(raw_arg) != NIL) THEN
+    RETURN;
+  END
+  MUTABLE family: String@symbol = COPY contract.family;
+  MUTABLE given: Bool = raw_arg IS_A MoveNode;
+  MUTABLE arg: Locatable = COPY raw_arg;
+  IF raw_arg IS_A MoveNode AS rtoc_move THEN
+    arg = COPY rtoc_move.value;
+  END
+
+  # Per-site COPY override: force an independent identity. Later rewrites may
+  # unwrap the COPY node, so the plan rides the inner value too.
+  IF arg IS_A CopyNode AS rtoc_copy THEN
+    MUTABLE rtoc_copy_plan = CallEdgeOwnershipPlan{ op: :copy_wrap, family: COPY family };
+    escapeAnalysis__stamp_kept_edge_plan_mut(&site, idx, rtoc_copy_plan);
+    MUTABLE rtoc_inner: Locatable = COPY rtoc_copy.value;
+    locatable__set_kept_edge_plan_mut(&rtoc_inner, rtoc_copy_plan);
+    RETURN;
+  END
+  # Omitted / NIL optional edge.
+  IF arg IS_A Literal AS rtoc_literal THEN
+    IF (rtoc_literal.type == symbol("NIL")) THEN
+      escapeAnalysis__stamp_kept_edge_plan_mut(&site, idx, CallEdgeOwnershipPlan{ op: :pass_null, family: COPY family });
       RETURN;
     END
-    NIL
-  });
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < _.call_site_facts.length() DO
-      MUTABLE kept: ?{Int64}KeptIdentityContract = COPY kept_contracts[UNWRAP (_.call_site_facts[rtoc_idx]).callee_name];
-      IF !(_) THEN
-          rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      FOR rtoc_key IN _.keys() DO
-        MUTABLE contract: KeptIdentityContract = COPY UNWRAP (kept[rtoc_key]);
-        MUTABLE raw_arg = _.call_site_facts[rtoc_idx].args[rtoc_key];
-        IF !((aST__node_kept_edge_plan(raw_arg) EXISTS)) THEN
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-        END
-        IF raw_arg.kept_edge_plan THEN
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-        END
-        MUTABLE stamp_plan: FN(CallEdgeOwnershipPlan) -> Void = %(plan) USE(raw_arg, rtoc_idx, rtoc_key) -> {
-          raw_arg.kept_edge_plan = plan;
-          MUTABLE call_node = COPY _.call_site_facts[rtoc_idx].node;
-          call_node.kept_edge_plans = TRY (ownershipGraph__merge(((call_node.kept_edge_plans OR_ELSE {})), {rtoc_key: plan}));
-          NIL
-        };
-        MUTABLE given = raw_arg IS_A MoveNode;
-        MUTABLE arg = IF raw_arg IS_A MoveNode THEN
-            raw_arg.value()
-          ELSE
-            raw_arg
-          END;
-        MUTABLE family = contract.family;
-        IF arg IS_A CopyNode THEN
-            MUTABLE plan = CallEdgeOwnershipPlan{ op: :copy_wrap, family: COPY family };
-            stamp_plan(plan);
-            MUTABLE inner_value = arg.value();
-            IF (aST__node_kept_edge_plan(inner_value) EXISTS) THEN
-              inner_value.kept_edge_plan = plan;
-            END
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-        END
-        IF (arg IS_A Literal AND (arg.type() == symbol("NIL"))) THEN
-            stamp_plan(CallEdgeOwnershipPlan{ op: :pass_null, family: COPY family });
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-        END
-        IF !(arg IS_A Identifier) THEN
-            MUTABLE arg_type = TRY (escapeAnalysis__kept_edge_arg_type(arg));
-            MUTABLE conflict: ?String@symbol = escapeAnalysis__kept_family_conflict(arg_type, family);
-            IF conflict EXISTS AS conflict_value THEN
-              (IF on_family_violation != NIL THEN
-                on_family_violation(arg, conflict_value, family, _.call_site_facts[rtoc_idx].callee_name)
-              ELSE
-                NIL
-              END);
-              rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-            END
-            MUTABLE op = IF (IF arg_type != NIL THEN
-              TRY (type__any_rc?(arg_type))
-            ELSE
-              NIL
-            END) THEN
-              :retain_handle
-            ELSE
-              :move_payload_wrap
-            END;
-            stamp_plan(CallEdgeOwnershipPlan{ op: COPY op, family: COPY family });
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-        END
-        MUTABLE entry: ?SymbolEntry@multiowned = arg.symbol;
-        IF !((entry != NIL)) THEN
-            entry = local_entries[arg.name()];
-        END
-        IF !((entry != NIL)) THEN
-            arg_type = TRY (escapeAnalysis__kept_edge_arg_type(arg));
-            op = IF (IF arg_type != NIL THEN
-              TRY (type__any_rc?(arg_type))
-            ELSE
-              NIL
-            END) THEN
-              :retain_handle
-            ELSE
-              :move_payload_wrap
-            END;
-            stamp_plan(CallEdgeOwnershipPlan{ op: COPY op, family: COPY family });
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-        END
-        conflict = escapeAnalysis__kept_family_conflict(CAST(symbolEntry__type(entry) AS ?Type), family);
-        IF conflict EXISTS AS conflict_value THEN
-            (IF on_family_violation != NIL THEN
-              on_family_violation(arg, conflict_value, family, _.call_site_facts[rtoc_idx].callee_name)
-            ELSE
-              NIL
-            END);
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-        END
-        MUTABLE owner_body: []Locatable = List[];
-        IF owner_fn EXISTS AS owner_fn_value THEN
-          owner_body = COPY owner_fn_value.body;
-        END
-        liveness = (liveness OR_ELSE keptEdgeLiveness__new(owner_body));
-        MUTABLE last_use = (given OR { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_6 = NIL;
-        keptEdgeLiveness__last_use?(rtoc_local_receiver_6, arg) });
-        IF symbolEntry__is_param(entry) THEN
-            op = IF last_use THEN
-              :move_handle
-            ELSE
-              :retain_handle
-            END;
-            IF (last_use AND !(given)) THEN
-              arg.was_moved = TRUE;
-            END
-            stamp_plan(CallEdgeOwnershipPlan{ op: COPY op, family: COPY family });
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-        END
-        MUTABLE already_rc = (symbolEntry__rc_stored?(entry) OR TRY (type__any_rc?(symbolEntry__type(entry))));
-        IF ((!(already_rc) AND entry.mutable) AND !(last_use)) THEN
-            (IF on_mutable_violation != NIL THEN
-              on_mutable_violation(entry, arg, _.call_site_facts[rtoc_idx].callee_name)
-            ELSE
-              NIL
-            END);
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-        END
-        IF !(already_rc) THEN
-            TRY (escapeAnalysis__promote_kept_binding_mut(_, fn_nodes, &entry, &arg));
-        END
-        op = IF last_use THEN
-            :move_handle
-          ELSE
-            :retain_handle
-          END;
-        IF (last_use AND !(given)) THEN
-            arg.was_moved = TRUE;
-        END
-        stamp_plan(CallEdgeOwnershipPlan{ op: COPY op, family: COPY family });
-      END
-    rtoc_idx = rtoc_idx + 1;
   END
+
+  IF !(arg IS_A Identifier) THEN
+    # An rc-typed projection retains the identity it views; any owned payload
+    # result moves into a fresh handle.
+    MUTABLE rtoc_expr_type: ?Type = TRY (escapeAnalysis__kept_edge_arg_type(arg));
+    IF escapeAnalysis__kept_family_conflict(rtoc_expr_type, family) EXISTS AS rtoc_expr_conflict THEN
+      IF on_family_violation EXISTS AS rtoc_family_handler THEN
+        rtoc_family_handler(arg, rtoc_expr_conflict, family, site.callee_name);
+      END
+      RETURN;
+    END
+    escapeAnalysis__stamp_kept_edge_plan_mut(&site, idx, CallEdgeOwnershipPlan{ op: TRY (escapeAnalysis__kept_edge_op(rtoc_expr_type)), family: COPY family });
+    RETURN;
   END
+
+  MUTABLE rtoc_ident: Identifier = COPY UNWRAP (castLocatableToIdentifier(arg));
+  MUTABLE entry: ?SymbolEntry@multiowned = locatable__symbol(arg);
+  IF (entry == NIL) THEN
+    entry = COPY local_entries[CAST(rtoc_ident.name AS String)];
+  END
+  IF (entry == NIL) THEN
+    MUTABLE rtoc_ident_type: ?Type = TRY (escapeAnalysis__kept_edge_arg_type(arg));
+    escapeAnalysis__stamp_kept_edge_plan_mut(&site, idx, CallEdgeOwnershipPlan{ op: TRY (escapeAnalysis__kept_edge_op(rtoc_ident_type)), family: COPY family });
+    RETURN;
+  END
+  MUTABLE rtoc_entry: SymbolEntry@multiowned = KEEP entry;
+
+  IF escapeAnalysis__kept_family_conflict(symbolEntry__type(rtoc_entry), family) EXISTS AS rtoc_conflict THEN
+    IF on_family_violation EXISTS AS rtoc_family_handler2 THEN
+      rtoc_family_handler2(arg, rtoc_conflict, family, site.callee_name);
+    END
+    RETURN;
+  END
+
+  IF (liveness == NIL) THEN
+    MUTABLE owner_body: []Locatable = [];
+    IF owner_fn EXISTS AS owner_fn_value THEN
+      owner_body = COPY owner_fn_value.body;
+    END
+    liveness = keptEdgeLiveness__new(owner_body);
+  END
+  MUTABLE last_use: Bool = given;
+  IF !(last_use) THEN
+    IF liveness EXISTS AS rtoc_liveness THEN
+      last_use = keptEdgeLiveness__last_use?(rtoc_liveness, rtoc_ident);
+    END
+  END
+
+  IF symbolEntry__is_param(rtoc_entry) THEN
+    # A kept param already holds an owned handle: move it at its last use,
+    # retain when it stays live.
+    IF (last_use AND !(given)) THEN
+      locatable__set_was_moved_mut(&arg, TRUE);
+    END
+    escapeAnalysis__stamp_kept_edge_plan_mut(&site, idx, CallEdgeOwnershipPlan{ op: escapeAnalysis__kept_edge_move_op(last_use), family: COPY family });
+    RETURN;
+  END
+
+  MUTABLE already_rc: Bool = (symbolEntry__rc_stored?(rtoc_entry) OR TRY (type__any_rc?(symbolEntry__type(rtoc_entry))));
+  IF ((!(already_rc) AND rtoc_entry.mutable) AND !(last_use)) THEN
+    IF on_mutable_violation EXISTS AS rtoc_mutable_handler THEN
+      rtoc_mutable_handler(rtoc_entry, rtoc_ident, site.callee_name);
+    END
+    RETURN;
+  END
+  IF !(already_rc) THEN
+    TRY (escapeAnalysis__promote_kept_binding_mut(summary, fn_nodes, &rtoc_entry, &rtoc_ident));
+  END
+  IF (last_use AND !(given)) THEN
+    locatable__set_was_moved_mut(&arg, TRUE);
+  END
+  escapeAnalysis__stamp_kept_edge_plan_mut(&site, idx, CallEdgeOwnershipPlan{ op: escapeAnalysis__kept_edge_move_op(last_use), family: COPY family });
+END
+
+PRIVATE FN escapeAnalysis__kept_edge_op(arg_type: ?Type) RETURNS !String@symbol ->
+  IF arg_type EXISTS AS rtoc_arg_type THEN
+    IF TRY (type__any_rc?(rtoc_arg_type)) THEN
+      RETURN :retain_handle;
+    END
+  END
+  RETURN :move_payload_wrap;
+END
+
+PRIVATE FN escapeAnalysis__kept_edge_move_op(last_use: Bool) RETURNS String@symbol ->
+  IF last_use THEN
+    RETURN :move_handle;
+  END
+  RETURN :retain_handle;
+END
+
+# The plan rides the argument node AND the call node keyed by index: rewrite
+# passes may clone argument nodes, but the call node survives.
+PRIVATE FN escapeAnalysis__stamp_kept_edge_plan_mut(MUTABLE site: CallSiteFact, idx: Int64, plan: CallEdgeOwnershipPlan) RETURNS Void ->
+  IF site.args[idx] EXISTS AS MUTABLE rtoc_arg THEN
+    locatable__set_kept_edge_plan_mut(&rtoc_arg, plan);
+  END
+  MUTABLE rtoc_plans: {Int64}CallEdgeOwnershipPlan = COPY (locatable__kept_edge_plans(site.node) OR_ELSE {});
+  rtoc_plans[idx] = COPY plan;
+  locatable__set_kept_edge_plans_mut(&site.node, rtoc_plans);
 END
 PUB FN escapeAnalysis__kept_edge_arg_type(arg: Locatable) RETURNS !?Type ->
   IF !((TRUE AND locatable__typed?(arg))) THEN
@@ -497,13 +492,18 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
   TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
   symbolEntry__set_storage(&entry, :multiowned);
-  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(castBindingNodeToLocatable(_)) EXISTS) AND ((aST__node__symbol( UNWRAP (castBindingNodeToLocatable(_)))).binding_id == entry.binding_id));
-  IF decl EXISTS AS decl_value THEN
-    MUTABLE decl_value_mutable = COPY decl_value;
-    MUTABLE stamped = (decl_value_mutable.full_type());
-    IF (stamped IS_A Type) THEN
-      TRY (type__set_ownership(&stamped, :multiowned));
+  # Ruby's `find` compares the declaration's symbol to this entry by identity.
+  MUTABLE decl: ?BindingNode = NIL;
+  FOR rtoc_binding_node IN summary.binding_nodes DO
+    IF aST__node__symbol(castBindingNodeToLocatable(rtoc_binding_node)) EXISTS AS rtoc_binding_symbol THEN
+      IF (rtoc_binding_symbol.binding_id == entry.binding_id) THEN
+        decl = COPY rtoc_binding_node;
+      END
     END
+  END
+  IF decl EXISTS AS decl_value THEN
+    MUTABLE stamped: Type = TRY (aST__full_type_mut(castBindingNodeToLocatable(decl_value)));
+    TRY (type__set_ownership(&stamped, :multiowned));
   END
   MUTABLE owner_fn: ?FunctionDef = COPY fn_nodes[summary.name];
   IF owner_fn EXISTS AS owner_fn_value THEN
@@ -589,10 +589,13 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
     RETURN;
   END
   IF (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == name) ELSE FALSE END) THEN
-    MUTABLE sym: ?SymbolEntry@multiowned = locatable__symbol(node);
-    IF (!(TRUE) OR ((UNWRAP (sym)).binding_id == entry.binding_id)) THEN
-      MUTABLE stamp = (node.full_type());
-      IF ((stamp IS_A Type) AND !(TRY (type__any_rc?(stamp)))) THEN
+    MUTABLE rtoc_same_binding: Bool = TRUE;
+    IF locatable__symbol(node) EXISTS AS sym THEN
+      rtoc_same_binding = (sym.binding_id == entry.binding_id);
+    END
+    IF rtoc_same_binding THEN
+      MUTABLE stamp: Type = TRY (aST__full_type_mut(node));
+      IF !(TRY (type__any_rc?(stamp))) THEN
         TRY (type__set_ownership(&stamp, :multiowned));
       END
     END
