@@ -8,6 +8,8 @@ EXTERN FN compilerRegexMatchData(subject: String, regex: CompilerRegex) RETURNS 
 EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+# Ruby `str.index(/re/, start)`; -1 when there is no match at or after start.
+EXTERN FN compilerRegexIndexFrom(subject: String, regex: CompilerRegex, start: Int64) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 # Ruby's Digest::SHA256.hexdigest and JSON.generate's string escaping. Both are
 # byte-exactness primitives: a fingerprint written differently would stop the
 # incremental build from reusing artifacts the Ruby compiler produced.

@@ -101,6 +101,7 @@ END
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN STRUCT CompilerRegexScanner {} CLOSE "deinit" FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexIndexFrom(subject: String, regex: CompilerRegex, start: Int64) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatch(subject: String, regex: CompilerRegex) RETURNS Bool EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexMatchData(subject: String, regex: CompilerRegex) RETURNS ?CompilerRegexScanner EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexFirstMatch(subject: String, regex: CompilerRegex) RETURNS subject:?String EFFECTS :safe FROM "compiler_regex";
@@ -17611,12 +17612,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((source != NIL) AND TRUE) THEN
       MUTABLE line: ?String = COPY source.split("\n")[(token.line - 1)];
       MUTABLE start = (token.column - 1);
-      MUTABLE stream_at: ?Int64 = (IF line != NIL THEN
-        line.indexOf(compilerRegexCompile("\\bSTREAM\\b"), start)
-      ELSE
-        NIL
-      END);
-      IF stream_at EXISTS AS stream_at_value THEN
+      MUTABLE stream_at: Int64 = -1;
+      IF line EXISTS AS rtoc_contract_line THEN
+        stream_at = compilerRegexIndexFrom(rtoc_contract_line, compilerRegexCompile("\\bSTREAM\\b"), start);
+      END
+      IF (stream_at >= 0) THEN
+        MUTABLE stream_at_value: Int64 = stream_at;
         MUTABLE insert_col = ((stream_at_value + "STREAM".codepointCount()) + 1);
         fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :ADD_STREAM_YIELDS_CONTRACT, CAST({:type: DiagnosticKwValue{ StringValue: COPY contract_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, token.line, insert_col, 0), " YIELDS ${contract_name}")], :auto));
       END

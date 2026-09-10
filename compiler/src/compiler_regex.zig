@@ -570,7 +570,25 @@ const MatchResult = struct {
     }
 };
 
+// Ruby `str.index(/re/, start)`: the byte offset of the first match at or
+// after `start`, or -1 when there is none. The offset goes to PCRE2 rather
+// than slicing the subject, so `\b` and lookbehind still see what precedes it.
+pub fn compilerRegexIndexFrom(subject: []const u8, regex: CompilerRegex, start: i64) i64 {
+    if (start < 0) return -1;
+    const from: usize = @intCast(start);
+    if (from > subject.len) return -1;
+    var result = matchRegexFrom(regex, subject, from, false) orelse return -1;
+    defer result.deinit();
+    const whole = result.ranges[0];
+    if (!whole.matched) return -1;
+    return @intCast(whole.start);
+}
+
 fn matchRegex(regex: CompilerRegex, subject: []const u8, anchored: bool) ?MatchResult {
+    return matchRegexFrom(regex, subject, 0, anchored);
+}
+
+fn matchRegexFrom(regex: CompilerRegex, subject: []const u8, offset: usize, anchored: bool) ?MatchResult {
     var error_number: c_int = 0;
     var error_offset: usize = 0;
     const code = c.pcre2_compile_8(
@@ -587,7 +605,7 @@ fn matchRegex(regex: CompilerRegex, subject: []const u8, anchored: bool) ?MatchR
     errdefer c.pcre2_match_data_free_8(match_data);
 
     const options: u32 = if (anchored) c.PCRE2_ANCHORED else 0;
-    const rc = c.pcre2_match_8(code, subject.ptr, subject.len, 0, options, match_data, null);
+    const rc = c.pcre2_match_8(code, subject.ptr, subject.len, offset, options, match_data, null);
     if (rc < 0) {
         c.pcre2_match_data_free_8(match_data);
         return null;
@@ -815,4 +833,15 @@ test "compiler json quote matches Ruby JSON.generate string escaping" {
     try std.testing.expectEqualStrings("\"a\\nb\"", compilerJsonQuote("a\nb"));
     try std.testing.expectEqualStrings("\"a\\u0001b\"", compilerJsonQuote("a\x01b"));
     try std.testing.expectEqualStrings("\"caf\u{00e9}\"", compilerJsonQuote("caf\u{00e9}"));
+}
+
+test "compiler regex index from honours the start offset and word boundaries" {
+    const re = compilerRegexCompile("\\bSTREAM\\b");
+    try std.testing.expectEqual(@as(i64, 4), compilerRegexIndexFrom("BG  STREAM {", re, 0));
+    // Ruby scans forward from `start`; the earlier match is skipped.
+    try std.testing.expectEqual(@as(i64, 17), compilerRegexIndexFrom("BG  STREAM {} BG STREAM {", re, 11));
+    // A start inside a word must not create a boundary that is not there.
+    try std.testing.expectEqual(@as(i64, -1), compilerRegexIndexFrom("BG XSTREAMX {", re, 0));
+    try std.testing.expectEqual(@as(i64, -1), compilerRegexIndexFrom("BG STREAM {", re, 99));
+    try std.testing.expectEqual(@as(i64, -1), compilerRegexIndexFrom("BG STREAM {", re, -1));
 }
