@@ -6290,7 +6290,7 @@ PRIVATE FN typeAnalysisSession__analyze_shard_each_op(MUTABLE self: TypeAnalysis
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE conc = castLocatableToConcurrentOp__type_analysis_session(COPY node.right);
-    MUTABLE each_op: ?ClearParserConcurrentPipelineOp = conc.op;
+    MUTABLE each_op: ?ClearParserConcurrentPipelineOp = COPY conc.op;
     MUTABLE ti = TRY (aST__full_type_mut( UNWRAP (shard_node.target_map)));
     MUTABLE key_type: String@symbol = (IF type__numeric_map?(ti) THEN type__resolved(TRY (type__key_type(ti))) ELSE :String END);
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(each_op, key_type, MUTABLE rtoc_self_view) -> {
@@ -6301,9 +6301,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     NIL
     });
-    MUTABLE ctx: ?PipelineShardContext = conc.shard_context;
-    IF ctx THEN
-      conc.shard_context = COPY pipelineShardContext__with_frame_allocations((CAST(ctx AS PipelineShardContext)), FALSE, FALSE);
+    IF conc.shard_context EXISTS AS rtoc_ctx THEN
+      PARTIAL MATCH node.right START
+        Locatable.ConcurrentOp AS MUTABLE rtoc_conc_node ->
+          rtoc_conc_node.shard_context = COPY pipelineShardContext__with_frame_allocations(rtoc_ctx, FALSE, FALSE);,
+        DEFAULT -> NIL;
+      END
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, :Void));
     node.storage_override = :stack;
@@ -10928,9 +10931,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__reject_borrowed_value_mut(&rtoc_self_view, &val_node, "${node.union_name}.${node.variant_name}.${rtoc_each_key}"));
     MUTABLE owned: ?Locatable = TRY (typeAnalysisSession__ensure_owned_value_mut(&rtoc_self_view, &val_node, castOptionalTypeToOptionalTypeTypeInput(expected_fields[rtoc_each_key]), "${node.union_name}.${node.variant_name}.${rtoc_each_key}"));
     IF owned EXISTS AS owned_value THEN
-        MUTABLE owned_value_mutable = COPY owned_value;
-        node.fields[rtoc_each_key] = owned_value_mutable;
-        MUTABLE val_node = owned_value_mutable;
+        node.fields[rtoc_each_key] = COPY owned_value;
+        val_node = COPY owned_value;
     END
     MUTABLE ef: ?Type = COPY expected_fields[rtoc_each_key];
     IF ((ef != NIL) AND type__indirect?(ef)) THEN
@@ -14815,7 +14817,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &rtoc_self_view.traversal_state.deferred_copy_wrapper_bindings.append(node);
       RETURN;
     END
-    MUTABLE rtoc_open_1 = UNWRAP (value);
+    MUTABLE rtoc_open_1 = COPY UNWRAP (value);
     MUTABLE error_type: ?Type@multiowned = TRY (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &rtoc_open_1, "inferred wrapper binding"));
     MUTABLE error_success_type_branch_value: ?Type = NIL;
     IF error_type EXISTS AS error_type_value THEN
