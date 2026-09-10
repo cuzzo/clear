@@ -6399,39 +6399,31 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF scope EXISTS AS scope_value THEN
         MUTABLE scope_value_mutable = COPY scope_value;
         MUTABLE entry: ?SymbolEntry@multiowned = scope__resolve_entry(scope_value_mutable, map_name);
-        MUTABLE map_type: ?Type@multiowned = NIL;
-        IF entry != NIL THEN
-          map_type = COPY symbolEntry__type(entry);
+        IF (entry == NIL) THEN
+          RETURN;
         END
-        IF !((map_type != NIL)) THEN
-          map_type = TRY (type__new( TypeConstructionInput{ Type: COPY UNWRAP (map_type) }));
-        END
-        IF !((type__sharded?(UNWRAP (map_type)) AND ((IF entry != NIL THEN
-          symbolEntry__sync(entry)
-        ELSE
-          NIL
-        END) == NIL))) THEN
+        MUTABLE map_type: Type = COPY symbolEntry__type(entry);
+        IF !((type__sharded?(map_type) AND (symbolEntry__sync(entry) == NIL))) THEN
           RETURN;
         END
         MUTABLE this_map_accesses = sharded_accesses |> WHERE (_.map_name == map_name);
-        MUTABLE key_sources = (this_map_accesses |> SELECT {
-    MUTABLE key_expr = COPY _.key_expr;
-    MUTABLE key_name: String = "";
-          IF key_expr IS_A Identifier AS identifier THEN
-            key_name = identifier__name(identifier);
-          ELSE
-            key_name = COPY CAST(key_expr AS String);
+        MUTABLE rtoc_key_names: []String = [];
+        FOR rtoc_acc IN this_map_accesses DO
+          MUTABLE rtoc_ke: Locatable = COPY rtoc_acc.key_expr;
+          MUTABLE key_name: String = compilerInspectValue();
+          IF rtoc_ke IS_A Identifier AS identifier THEN
+            key_name = COPY (locatable__name(rtoc_ke) OR_ELSE "");
           END
-    ((locatable__variant_name(key_expr) $+ ":") $+ key_name)
-        }) |> DISTINCT _ |> SELECT COPY _;
+          &rtoc_key_names.append(COPY "${locatable__variant_name(rtoc_ke)}:${key_name}");
+        END
+        MUTABLE key_sources = rtoc_key_names |> DISTINCT _;
         IF ((key_sources).length() > 1) THEN
           typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ ConcurrentOp: COPY conc }, "CONCURRENT EACH uses ${(key_sources).length().toString()} different key expressions on @sharded map '${map_name}'. Routing is based on the first key; other accesses with different keys may trigger cross-shard remote calls.");
         END
-        MUTABLE key_expr = (UNWRAP (this_map_accesses.first())).key_expr;
+        MUTABLE key_expr: Locatable = COPY (UNWRAP (this_map_accesses.first())).key_expr;
         MUTABLE map_ident = Identifier{ token: CAST(COPY first_access_value_mutable.map_token AS Token), name: COPY map_name, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
-        TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ Identifier: COPY map_ident }, map_type));
-        each_op = conc.op;
-        conc.shard_context = PipelineShardContext{ map_var: Locatable{ Identifier: COPY map_ident }, shard_count: type__shard_count(UNWRAP (map_type)), key_expr: COPY key_expr, auto_detected: TRUE, key_allocates_frame: FALSE, body_allocates_frame: FALSE };
+        TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ Identifier: COPY map_ident }, COPY map_type));
+        conc.shard_context = PipelineShardContext{ map_var: Locatable{ Identifier: COPY map_ident }, shard_count: type__shard_count(map_type), key_expr: COPY key_expr, auto_detected: TRUE, key_allocates_frame: FALSE, body_allocates_frame: FALSE };
       ELSE
         RETURN;
       END
@@ -14964,11 +14956,12 @@ PRIVATE FN typeAnalysisSession__observable_binding_drop_fixes(MUTABLE self: Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE obs_tok: ?Token@multiowned = NIL;
     MUTABLE fixes: []Fix = ( { MUTABLE rtoc_empty_list_375: []Fix = List[]; rtoc_empty_list_375 } );
-    IF (MATCH node START DeclarationNode.VarDecl AS item -> TRUE, DeclarationNode.BindExpr AS item -> TRUE END) THEN
-      obs_tok = (MATCH node START DeclarationNode.VarDecl AS item -> type__observable_token( UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__observable_token( UNWRAP (item.type)) END);
+    MUTABLE rtoc_decl_type: ?Type = declarationNode__type(node);
+    IF (rtoc_decl_type == NIL) THEN
+      RETURN fixes;
     END
+    MUTABLE obs_tok: ?Token@multiowned = type__observable_token(COPY rtoc_decl_type);
     IF obs_tok EXISTS AS obs_tok_value THEN
       MUTABLE tok_text = COPY CAST(obs_tok_value.value AS String);
       &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :DROP_OBSERVABLE_CAPABILITY, CAST({:token: DiagnosticKwValue{ StringValue: COPY tok_text }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, obs_tok_value.line, obs_tok_value.column, tok_text.codepointCount()), "")], :interactive)));
