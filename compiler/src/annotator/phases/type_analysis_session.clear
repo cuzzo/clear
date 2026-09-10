@@ -13247,7 +13247,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY "";
 }
 END
-PRIVATE FN typeAnalysisSession__runtime_is_a_target_names(self: TypeAnalysisSession, MUTABLE node: Node) RETURNS ![]String
+PRIVATE FN typeAnalysisSession__runtime_is_a_target_names(self: TypeAnalysisSession, MUTABLE node: NodeOrType) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -13260,7 +13260,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN CAST((names |> DISTINCT _) AS []String);
 }
 END
-PRIVATE FN typeAnalysisSession__runtime_is_a_target_segments(self: TypeAnalysisSession, MUTABLE node: Node) RETURNS ![]String
+PRIVATE FN typeAnalysisSession__runtime_is_a_target_segments(self: TypeAnalysisSession, MUTABLE node: NodeOrType) RETURNS ![]String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -13270,13 +13270,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF node IS_A Identifier AS identifier THEN
       RETURN CAST([identifier__name(identifier)] AS []String);
     ELSE_IF node IS_A GetField AS get_field THEN
-      RETURN (typeAnalysisSession__runtime_is_a_target_segments(rtoc_self_view, castLocatableToNode__type_analysis_session(castLocatableToLocatable__type_analysis_session(get_field.target))) + [CAST(get_field.field AS String)]);
+      RETURN (TRY (typeAnalysisSession__runtime_is_a_target_segments(rtoc_self_view, castNodeToNodeOrType(castLocatableToNode__type_analysis_session(castLocatableToLocatable__type_analysis_session(get_field.target))))) + [CAST(get_field.field AS String)]);
     ELSE
-      RETURN CAST([CAST(UNWRAP (locatable__token(UNWRAP (castNodeToLocatable(node)))).value AS String)] AS []String);
+      RETURN CAST([CAST(UNWRAP (locatable__token(UNWRAP (castNodeToLocatable(castNodeOrTypeToNode(node))))).value AS String)] AS []String);
     END
 }
 END
-PRIVATE FN typeAnalysisSession__runtime_is_a_target_label(MUTABLE self: TypeAnalysisSession, MUTABLE node: Node) RETURNS !String
+PRIVATE FN typeAnalysisSession__runtime_is_a_target_label(MUTABLE self: TypeAnalysisSession, MUTABLE node: NodeOrType) RETURNS !String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13439,7 +13439,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A Identifier AS identifier THEN
       RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(identifier__name(identifier)) }));
     ELSE_IF node IS_A GetField AS get_field THEN
-      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, Node{ GetField: COPY get_field }))) }));
+      RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, NodeOrType{ GetField: COPY get_field }))) }));
     ELSE
       RETURN NIL;
     END
