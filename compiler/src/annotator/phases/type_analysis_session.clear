@@ -20649,42 +20649,44 @@ PRIVATE FN typeAnalysisSession__get_lifetime_paths(MUTABLE self: TypeAnalysisSes
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rl: ?ClearParserReturnLifetime = COPY func_node.return_lifetime;
-    IF (rl == NIL) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_514: []TypeAnalysisSessionReturnValueItem = List[]; rtoc_empty_list_514 } ) AS []TypeAnalysisSessionReturnValueItem);
+    MUTABLE rtoc_paths: []TypeAnalysisSessionReturnValueItem = List[];
+    IF rl == NIL THEN
+      RETURN rtoc_paths;
     END
-    IF ((IF rl IS_A String@symbol AS rl_payload THEN (rl_payload == :wildcard) ELSE FALSE END)) THEN
-      RETURN (CAST([TypeAnalysisSessionReturnValueItem{ SymbolValue: :wildcard }] AS []TypeAnalysisSessionReturnValueItem) |> SELECT TypeAnalysisSessionReturnValueItem{ StringValue: COPY _ });
+    MUTABLE sources: []Locatable = List[];
+    PARTIAL MATCH rl START
+      ClearParserReturnLifetime.SymbolValue AS rtoc_rl_symbol ->
+      IF (rtoc_rl_symbol == :wildcard) THEN
+        &rtoc_paths.append(TypeAnalysisSessionReturnValueItem{ SymbolValue: :wildcard });
+        RETURN rtoc_paths;
+      END,
+      ClearParserReturnLifetime.ArrayValue AS rtoc_rl_items ->
+      sources = COPY rtoc_rl_items;,
     END
-    MUTABLE sources: []Any = List[];
-    IF rl IS_A ArrayValue AS rl_items THEN
-      sources = CAST(rl_items AS []Any);
-    ELSE
-      sources = [CAST(rl AS Any)];
+    MUTABLE rtoc_source_i = 0;
+    WHILE rtoc_source_i < sources.length() DO
+      MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (sources[rtoc_source_i]))));
+      IF !((path.length() == 0)) THEN
+        &rtoc_paths.append(TypeAnalysisSessionReturnValueItem{ StringValue: COPY path.join(".") });
+      END
+      rtoc_source_i = rtoc_source_i + 1;
     END
-    RETURN sources |> SELECT:? {
-    MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, _));
-    (IF !((path.length() == 0)) THEN
-        path.join(".")
-      ELSE
-        NIL
-      END)
-    } |> WHERE _ != NIL;
+    RETURN rtoc_paths;
 }
 END
 PRIVATE FN typeAnalysisSession__get_lifetime_path(MUTABLE self: TypeAnalysisSession, func_node: FunctionDef) RETURNS !?String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE paths = UNWRAP (castTypeAnalysisSessionReturnValueItemToFunctionSignatureLifetimeSource(UNWRAP (TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, func_node)))));
-    IF ((paths.length() != 1) OR ruby_union_scalar_equal_optional_LifetimesReturnValueItem_String_symbol(UNWRAP (castTypeAnalysisSessionReturnValueItemToFunctionSignatureLifetimeSource(UNWRAP (paths.first()))), :wildcard)) THEN
+    MUTABLE paths: []TypeAnalysisSessionReturnValueItem = TRY (typeAnalysisSession__get_lifetime_paths(&rtoc_self_view, func_node));
+    IF (paths.length() != 1) THEN
       RETURN NIL;
     END
-    MUTABLE first: ?FunctionSignatureLifetimeSource = COPY paths.first();
-    IF first? IS_A String AS string THEN
-      RETURN COPY string;
-    ELSE
-      RETURN NIL;
+    PARTIAL MATCH UNWRAP (paths.first()) START
+      TypeAnalysisSessionReturnValueItem.StringValue AS rtoc_path_string -> RETURN COPY rtoc_path_string;,
+      DEFAULT -> RETURN NIL;
     END
+    RETURN NIL;
 }
 END
 PRIVATE FN typeAnalysisSession__root_variable_name(MUTABLE self: TypeAnalysisSession, node: ?Locatable) RETURNS ?String
@@ -20768,21 +20770,25 @@ PRIVATE FN typeAnalysisSession__og_declare(MUTABLE self: TypeAnalysisSession, na
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE entry: ?SymbolEntry = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_515 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
     scope__resolve_entry(rtoc_local_receiver_515, name) });
-    MUTABLE kind = TRY (typeAnalysisSession__classify_og_kind(&rtoc_self_view, type_info, (IF entry != NIL THEN
-      symbolEntry__sync(entry)
-    ELSE
-      NIL
-    END)));
-    MUTABLE ti = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_517: ?TypeTypeInput = NIL;
-    IF type_info IS_A Type THEN
-      rtoc_ternary_value_517 = COPY type_info;
-    ELSE
-      rtoc_ternary_value_517 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(type_info)));
+    MUTABLE rtoc_entry_sync: ?String@symbol = NIL;
+    IF entry EXISTS AS rtoc_og_entry THEN
+      rtoc_entry_sync = COPY symbolEntry__sync(rtoc_og_entry);
     END
-    rtoc_ternary_value_517? };
-    MUTABLE line: ?Int64 = aST__node__token(UNWRAP (castNodeToLocatable(UNWRAP (node)))).line;
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_518 = typeAnalysisSession__ownership_graph(&rtoc_self_view);
-    TRY (ownershipGraph__declare(&rtoc_mutable_receiver_518, name, kind, UNWRAP (castTypeTypeInputToType(ti)), typeAnalysisSession__ownership_graph(&rtoc_self_view).scope_depth, UNWRAP (line))) };
+    MUTABLE kind: String@symbol = TRY (typeAnalysisSession__classify_og_kind(&rtoc_self_view, type_info, rtoc_entry_sync));
+    MUTABLE ti: ?Type = NIL;
+    IF type_info IS_A Type AS rtoc_type_info_type THEN
+      ti = COPY rtoc_type_info_type;
+    ELSE
+      ti = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(type_info)));
+    END
+    MUTABLE line: Int64 = 0;
+    IF node EXISTS AS rtoc_og_node THEN
+      line = aST__node__token(UNWRAP (castNodeToLocatable(rtoc_og_node))).line;
+    END
+    MUTABLE rtoc_og_graph: OwnershipGraph@multiowned = typeAnalysisSession__ownership_graph(&rtoc_self_view);
+    MUTABLE rtoc_og_depth: Int64 = rtoc_og_graph.scope_depth;
+    TRY (ownershipGraph__declare(&rtoc_og_graph, name, kind, UNWRAP (ti), rtoc_og_depth, line));
+    RETURN NIL;
 }
 END
 PRIVATE FN typeAnalysisSession__share_consumes_source?(MUTABLE self: TypeAnalysisSession, MUTABLE node: Locatable) RETURNS !Bool
