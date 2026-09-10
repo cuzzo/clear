@@ -1839,9 +1839,10 @@ PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, 
   CONTINUE;
     END
     MUTABLE changed = escapeAnalysis__mark_symbol_heap_mut(sym);
-    MUTABLE decl: ?SymbolEntryRegInput = COPY sym.reg;
-    IF (changed AND (aST__node__container_borrow(castSymbolEntryRegInputToLocatable(decl)) EXISTS)) THEN
-        decl.container_borrow = FALSE;
+    IF changed THEN
+      IF sym.reg EXISTS AS MUTABLE rtoc_decl THEN
+        symbolEntryRegInput__set_container_borrow_mut(&rtoc_decl, FALSE);
+      END
     END
   rtoc_idx = rtoc_idx + 1;
   END
@@ -1856,17 +1857,22 @@ END
 PUB FN escapeAnalysis__collect_identifier_names_mut(expr: Locatable, MUTABLE names: [Set]String) RETURNS !Void ->
   MUTABLE stack: []Locatable = [expr];
   WHILE !((stack.length() == 0)) DO
-    MUTABLE node = escapeAnalysis__unwrap_value(&stack.pop());
-    IF !(node IS_A Locatable) THEN
+    MUTABLE rtoc_popped: ?Locatable = &stack.pop();
+    MUTABLE rtoc_unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value(castOptionalLocatableToOptionalDynamicValue(rtoc_popped));
+    MUTABLE rtoc_loc: ?Locatable = castOptionalDynamicValueToOptionalLocatable(rtoc_unwrapped);
+    IF (rtoc_loc == NIL) THEN
       CONTINUE;
     END
+    MUTABLE node: Locatable = COPY rtoc_loc;
     IF node IS_A Identifier THEN
-      &names.insert(COPY CAST(node.name() AS String));
+      &names.insert(COPY (locatable__name(node) OR_ELSE ""));
       CONTINUE;
     END
-    IF node IS_A BlockExpr THEN
-      IF node.result THEN
-        &stack.append(node.result);
+    # Only a value-block's RESULT flows out of it -- identifiers in its body
+    # statements are not part of the returned value.
+    IF node IS_A BlockExpr AS rtoc_block THEN
+      IF rtoc_block.result EXISTS AS rtoc_block_result THEN
+        &stack.append(COPY rtoc_block_result);
       END
       CONTINUE;
     END
