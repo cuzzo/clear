@@ -17909,7 +17909,7 @@ PRIVATE FN typeAnalysisSession__validate_sync_policy_body_mut(MUTABLE self: Type
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE seen = List[];
+    MUTABLE seen: []String@symbol = List[];
     FOR _ IN ((decl.handlers)) DO
     MUTABLE rtoc_each_items_429 = _.selectors;
     MUTABLE rtoc_idx = 0;
@@ -17918,16 +17918,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        MUTABLE name = UNWRAP (rtoc_each_items_429[rtoc_idx]).name;
+        MUTABLE name: String@symbol = COPY UNWRAP (rtoc_each_items_429[rtoc_idx]).name;
         IF errors__sync_policy_inline_only_errors().contains?(name) THEN
-            TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF UNWRAP (rtoc_each_items_429[rtoc_idx]).token != NIL THEN (IF UNWRAP (rtoc_each_items_429[rtoc_idx]).token EXISTS AS rtoc_wrap_17631 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_17631 } ELSE NIL END) ELSE DiagnosticAnchor{ Locatable: Locatable{ SyncPolicyDecl: COPY decl } } END), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INLINE_ONLY }, [], CAST({:name: name, :escape: (IF (name == :Deadlock) THEN
+            TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF UNWRAP (rtoc_each_items_429[rtoc_idx]).token EXISTS AS rtoc_wrap_17631 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_17631 } ELSE DiagnosticAnchor{ Locatable: Locatable{ SyncPolicyDecl: COPY decl } } END), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INLINE_ONLY }, [], CAST({:name: name, :escape: (IF (name == :Deadlock) THEN
               "DEADLOCK"
             ELSE
               "LOCK_CYCLE"
             END)} AS {String@symbol}Any)));
         END
         IF !(errors__sync_policy_required_errors().contains?(name)) THEN
-            TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF UNWRAP (rtoc_each_items_429[rtoc_idx]).token != NIL THEN DiagnosticAnchor{ TokenValue: COPY UNWRAP (rtoc_each_items_429[rtoc_idx]).token } ELSE DiagnosticAnchor{ Locatable: Locatable{ SyncPolicyDecl: COPY decl } } END), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INVALID_ERROR }, [], CAST({:name: name, :required: errors__sync_policy_required_errors().join(", ")} AS {String@symbol}Any)));
+            TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF UNWRAP (rtoc_each_items_429[rtoc_idx]).token EXISTS AS rtoc_wrap_17930 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_17930 } ELSE DiagnosticAnchor{ Locatable: Locatable{ SyncPolicyDecl: COPY decl } } END), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_INVALID_ERROR }, [], CAST({:name: name, :required: errors__sync_policy_required_errors().join(", ")} AS {String@symbol}Any)));
         END
         &seen.append(name);
       rtoc_idx = rtoc_idx + 1;
@@ -17939,7 +17939,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (UNWRAP (rtoc_each_items_430[rtoc_idx]).token OR decl), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_NEEDS_TYPE_NOT_KIND }, [], CAST({:name: UNWRAP (rtoc_each_items_430[rtoc_idx]).name} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF UNWRAP (rtoc_each_items_430[rtoc_idx]).token EXISTS AS rtoc_wrap_17942 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_wrap_17942 } ELSE DiagnosticAnchor{ Locatable: Locatable{ SyncPolicyDecl: COPY decl } } END), TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_NEEDS_TYPE_NOT_KIND }, [], CAST({:name: UNWRAP (rtoc_each_items_430[rtoc_idx]).name} AS {String@symbol}Any)));
       rtoc_idx = rtoc_idx + 1;
     END
     END
@@ -18294,16 +18294,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRUE;
     END
     MUTABLE layout_ok = ((type__layout(expected_t) == type__layout(actual_t)) OR type__indirect?(expected_t));
-    MUTABLE elem_own: RuntimeCallSpec = %(t) -> {
-    IF (type__elem_ownership(t) == :affine) THEN
-      RETURN NIL;
-    ELSE
-      RETURN type__elem_ownership(t);
-    END
-    NIL
-    };
-    RETURN (((((((type__ownership(expected_t) == type__ownership(actual_t)) AND (type__sync(expected_t) == type__sync(actual_t))) AND layout_ok) AND (runtimeCallSpec__call(elem_own, expected_t) == runtimeCallSpec__call(elem_own, actual_t))) AND (type__elem_sync(expected_t) == type__elem_sync(actual_t)))) == TRUE);
+    RETURN ((((typeAnalysisSession__non_affine(type__ownership(expected_t)) == typeAnalysisSession__non_affine(type__ownership(actual_t))) AND (type__sync(expected_t) == type__sync(actual_t))) AND layout_ok) AND ((typeAnalysisSession__non_affine(type__elem_ownership(expected_t)) == typeAnalysisSession__non_affine(type__elem_ownership(actual_t))) AND (type__elem_sync(expected_t) == type__elem_sync(actual_t))));
 }
+END
+
+# Ruby normalizes :affine to nil in a lambda before comparing; a declared
+# return type stamps :affine while a pipeline-built one leaves it nil, and
+# both mean the same thing.
+PRIVATE FN typeAnalysisSession__non_affine(value: ?String@symbol) RETURNS ?String@symbol ->
+  IF (value == :affine) THEN
+    RETURN NIL;
+  END
+  RETURN COPY value;
 END
 PRIVATE FN typeAnalysisSession__type_display(MUTABLE self: TypeAnalysisSession, type: Type) RETURNS !String
   REQUIRES self: LOCAL
