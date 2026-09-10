@@ -32,7 +32,7 @@ PRIVATE FN concurrencyChecks__check_hold_across_yield_mut(fn_value: FunctionDef,
       MUTABLE offender_token = NIL;
       MUTABLE reason = NIL;
       IF (scope[rtoc_idx]? IS_A BgBlock) THEN
-          offender_token = scope[rtoc_idx]?.token();
+          offender_token = locatable__token(scope[rtoc_idx]?);
           reason = "BG";
       ELSE_IF scope[rtoc_idx]? IS_A NextExpr AS next_expr THEN
           offender_token = next_expr.token;

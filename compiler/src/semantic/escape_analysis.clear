@@ -153,7 +153,7 @@ PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schem
     rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :loop_receiver_backing_storage, %() USE(body) -> {
-    TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(body));
+    TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(((body |> SELECT UNWRAP (castLocatableToNode(_))) |> SELECT UNWRAP (castLocatableToNode(_)))));
     rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :assignment_ownership, %() USE(facts_by_name, fn_nodes, schema_lookup, _) -> {
@@ -248,7 +248,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
           MUTABLE t = s.type();
           t.sync()
             });
-            IF ((unified AND (symbolEntry__sync( UNWRAP (entry)) != unified)) AND escapeAnalysis__param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, UNWRAP (unified))) THEN
+            IF ((rtoc_key AND (symbolEntry__sync( UNWRAP (entry)) != rtoc_key)) AND escapeAnalysis__param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, UNWRAP (rtoc_key))) THEN
               symbolEntry__set_sync(&entry, unified);
               changed = TRUE;
             END
@@ -301,7 +301,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
       IF keptIdentityContract__rc?( contract) THEN
           entry.storage = :multiowned;
       END
-      by_index[rtoc_idx] = UNWRAP (contract);
+      by_index[rtoc_idx] = contract;
     rtoc_idx = rtoc_idx + 1;
   END
   IF !((by_index.count() == 0)) THEN
@@ -312,7 +312,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
   MUTABLE owner_fn: ?FunctionDef = COPY fn_nodes[_.name];
   MUTABLE liveness: ?KeptEdgeLiveness@multiowned = NIL;
   MUTABLE local_entries = _.binding_nodes.each_with_object({}, %(node: BindingNode, map: {String}SymbolEntry@multiowned) -> {
-    MUTABLE sym = aST__node__symbol(node);
+    MUTABLE sym = aST__node__symbol(UNWRAP (castBindingNodeToLocatable(node)));
     IF sym IS_A SymbolEntry THEN
       map[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
       RETURN;
@@ -321,12 +321,12 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
   });
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < _.call_site_facts.length() DO
-      MUTABLE kept: ?{Int64}KeptIdentityContract = COPY kept_contracts[_.call_site_facts[rtoc_idx].callee_name];
-      IF !(kept) THEN
+      MUTABLE kept: ?{Int64}KeptIdentityContract = COPY kept_contracts[UNWRAP (_.call_site_facts[rtoc_idx]).callee_name];
+      IF !(_) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      FOR rtoc_key IN kept.keys() DO
+      FOR rtoc_key IN _.keys() DO
         MUTABLE contract: KeptIdentityContract = COPY UNWRAP (kept[rtoc_key]);
         MUTABLE raw_arg = _.call_site_facts[rtoc_idx].args[rtoc_key];
         IF !((aST__node_kept_edge_plan(raw_arg) EXISTS)) THEN
@@ -493,7 +493,7 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
   TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
   symbolEntry__set_storage(&entry, :multiowned);
-  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(_) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable(_))))).binding_id == entry.binding_id));
+  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(UNWRAP (castBindingNodeToLocatable(_))) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable(_))))).binding_id == entry.binding_id));
   IF decl EXISTS AS decl_value THEN
     MUTABLE decl_value_mutable = COPY decl_value;
     MUTABLE stamped = (decl_value_mutable.full_type());
@@ -599,7 +599,7 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
   });
 END
 PUB FN escapeAnalysis__unify_caller_attr(sites: []CallSiteFact, idx: Int64, project: FN(SymbolEntry) -> ?String@symbol) RETURNS ?String@symbol ->
-  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY _.args[idx]; (IF !(((arg != NIL) AND (aST__node__symbol(arg) EXISTS))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol: ?SymbolEntry@multiowned = locatable__symbol(arg); (IF !(TRUE) THEN NIL ELSE project(symbol) END) } END) };
+  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY _.args[idx]; (IF !(((arg != NIL) AND (aST__node__symbol(arg) EXISTS))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol: ?SymbolEntry@multiowned = locatable__symbol(arg); (IF !(TRUE) THEN NIL ELSE project(UNWRAP (symbol)) END) } END) };
   IF (observed.length() == 0) THEN
     RETURN NIL;
   END
@@ -712,7 +712,7 @@ PUB FN escapeAnalysis__apply_destructuring_escape_sink_mut(node: DestructuringAs
 END
 PUB FN escapeAnalysis__propagate_value_block_placements_mut(facts: FunctionFacts) RETURNS Void ->
   MUTABLE body = COPY facts.fn.body;
-  escapeAnalysis__walk_body(body, %(node) -> {
+  escapeAnalysis__walk_body(body, %(node) USE(MUTABLE ti) -> {
   IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
       RETURN;
   END
@@ -766,7 +766,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
     IF (nodes[rtoc_idx]? IS_A MethodCall) THEN
         MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
         IF (locatable__matched_signature(nodes[rtoc_idx]?) != NIL) THEN
-          sig_branch_value = functionSignature__unwrap(nodes[rtoc_idx]?.matched_signature);
+          sig_branch_value = functionSignature__unwrap(locatable__matched_signature(nodes[rtoc_idx]?));
         ELSE
           sig_branch_value = NIL;
         END
@@ -839,8 +839,8 @@ PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionF
   IF !(((((node != NIL) AND (node IS_A VarDecl)) OR ((node != NIL) AND (node IS_A DestructureTarget))) OR ((IF node? IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :decl) ELSE FALSE END)))) THEN
       CONTINUE;
   END
-  MUTABLE ti = TRY (aST__full_type_mut(node));
-  IF !((TRY (escapeAnalysis__aggregate_owner_requires_heap?(ti, schema_lookup)) OR (values |> ANY escapeAnalysis__aggregate_contains_heap_owned_value?(_)))) THEN
+  MUTABLE ti = TRY (aST__full_type_mut(UNWRAP (castSymbolEntryRegInputToLocatable(UNWRAP (node)))));
+  IF !((TRY (escapeAnalysis__aggregate_owner_requires_heap?(rtoc_key, schema_lookup)) OR (values |> ANY escapeAnalysis__aggregate_contains_heap_owned_value?(_)))) THEN
       CONTINUE;
   END
   escapeAnalysis__mark_symbol_heap_mut(sym);
@@ -952,7 +952,7 @@ END
 PUB FN escapeAnalysis__mark_loop_method_value_params_heap_mut(node: MethodCall, value_params: []Param) RETURNS !Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < value_params.length() DO
-    IF !(((value_params[rtoc_idx]?.takes OR_ELSE FALSE) OR value_params[rtoc_idx]?.mutable)) THEN
+    IF !(((value_params[rtoc_idx]?.takes OR_ELSE FALSE) OR (value_params[rtoc_idx]?.mutable OR_ELSE FALSE))) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -970,7 +970,7 @@ PUB FN escapeAnalysis__mark_expr_roots_heap_mut(expr: ?Locatable) RETURNS Void -
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
   MUTABLE root_branch_value: ?Identifier = NIL;
   IF castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS THEN
-    root_branch_value = aST__root_identifier(unwrapped);
+    root_branch_value = aST__root_identifier(UNWRAP (castDynamicValueToLocatable(UNWRAP (unwrapped))));
   ELSE
     root_branch_value = NIL;
   END
@@ -1099,7 +1099,7 @@ PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Par
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE arg_type = IF (arg != NIL) THEN
+    MUTABLE arg_type: ?Type = IF (arg != NIL) THEN
         TRY (aST__full_type_mut(arg))
       ELSE
         NIL
@@ -1176,22 +1176,22 @@ PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Lo
   END
   MUTABLE value: ?Locatable = aST__node_value(node);
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(value));
-  IF (castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
+  IF (castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS AND escapeAnalysis__string_concat_expr?(UNWRAP (castDynamicValueToLocatable(UNWRAP (unwrapped))))) THEN
     RETURN TRUE;
   END
   MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(node);
-  IF (((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_14 = UNWRAP (entry);
+  IF (((entry != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_14 = entry;
   cleanupEntry__present?(rtoc_local_receiver_14) }) AND cleanupEntry__frame?(entry)) THEN
     RETURN TRUE;
   END
   MUTABLE ti = TRY (aST__full_type_mut(node));
-  RETURN (ti.needs_cleanup?() AND (TRY (type__cleanup_allocator(ti)) == :frame));
+  RETURN (type__needs_cleanup?(ti) AND (TRY (type__cleanup_allocator(ti)) == :frame));
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
 PUB FN escapeAnalysis__loop_body_declared_names(body: []Node) RETURNS ![Set]String ->
   MUTABLE names: [Set]String = Set[];
-  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(MUTABLE names) -> {
+  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(MUTABLE names, MUTABLE ti, MUTABLE stack) -> {
   MUTABLE name: ?String = localBindingAnalysis__binding_decl_name(node);
   IF name EXISTS AS name_value THEN
     RETURN &names.insert(name_value);
@@ -1246,7 +1246,7 @@ PUB FN escapeAnalysis__heap_owned_transfer_source?(arg: ?Locatable) RETURNS Bool
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(arg));
   MUTABLE root_branch_value: ?Identifier = NIL;
   IF castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS THEN
-    root_branch_value = aST__root_identifier(unwrapped);
+    root_branch_value = aST__root_identifier(UNWRAP (castDynamicValueToLocatable(UNWRAP (unwrapped))));
   ELSE
     root_branch_value = NIL;
   END
@@ -1267,7 +1267,7 @@ PUB FN escapeAnalysis__mark_receiver_scope_escapes_mut(receiver: Locatable, args
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < params.length() DO
-    IF !(((params[rtoc_idx]?.takes OR_ELSE FALSE) OR params[rtoc_idx]?.mutable)) THEN
+    IF !(((params[rtoc_idx]?.takes OR_ELSE FALSE) OR (params[rtoc_idx]?.mutable OR_ELSE FALSE))) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1276,7 +1276,7 @@ PUB FN escapeAnalysis__mark_receiver_scope_escapes_mut(receiver: Locatable, args
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE arg_root: ?Identifier = aST__root_identifier(UNWRAP (arg));
+    MUTABLE arg_root: ?Identifier = aST__root_identifier(arg);
     MUTABLE arg_depth: ?Int64 = arg_root?.symbol?.scope_depth;
     IF !(((arg_depth != NIL) AND (arg_depth > receiver_depth))) THEN
         rtoc_idx = rtoc_idx + 1;
@@ -1315,7 +1315,7 @@ PUB FN escapeAnalysis__heap_binding_carries_sources?(value: Locatable) RETURNS B
   IF (node IS_A CopyNode OR node IS_A KeepNode) THEN
     RETURN FALSE;
   END
-  node = escapeAnalysis__unwrap_value(node);
+  node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(node)));
   IF node IS_A Identifier AS identifier THEN
     RETURN TRUE;
   END
@@ -1359,7 +1359,7 @@ PUB FN escapeAnalysis__assigned_binding_name(node: AssignmentNode) RETURNS ?Stri
     RETURN NIL;
   END
   IF node IS_A Assignment AS assignment THEN
-    MUTABLE target = escapeAnalysis__unwrap_value(assignment.name);
+    MUTABLE target = escapeAnalysis__unwrap_value(UNWRAP (castAssignmentNameToDynamicValue(assignment.name)));
     IF (target IS_A String OR target IS_A String@symbol) THEN
       RETURN COPY CAST(target AS String);
     END
@@ -1380,16 +1380,16 @@ PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes
     RETURN TRUE;
   END
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(value));
-  IF (castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
+  IF (castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS AND escapeAnalysis__string_concat_expr?(UNWRAP (castDynamicValueToLocatable(UNWRAP (unwrapped))))) THEN
     RETURN FALSE;
   END
   IF TRY (escapeAnalysis__expr_has_owned_inline_value?(value)) THEN
     RETURN TRUE;
   END
-  RETURN TRY (escapeAnalysis__call_result_is_heap?(value, fn_nodes, schema_lookup, facts_by_name));
+  RETURN TRY (escapeAnalysis__call_result_is_heap?(UNWRAP (value), fn_nodes, schema_lookup, facts_by_name));
 END
 PUB FN escapeAnalysis__ownership_transferring_expr?(expr: ?Locatable, include_allocating_expr: Bool) RETURNS !Bool ->
-  MUTABLE value: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
+  MUTABLE value: SymbolEntry = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
   IF (UNWRAP (value) IS_A BinaryOp AND (UNWRAP (value).op == symbol("OR_ELSE"))) THEN
     value = escapeAnalysis__unwrap_value(value.left());
   END
@@ -1405,14 +1405,14 @@ PUB FN escapeAnalysis__ownership_transferring_expr?(expr: ?Locatable, include_al
   IF (TRUE AND symbolEntry__heap_storage?(value)) THEN
     RETURN TRUE;
   END
-  IF ((aST__node__symbol(value) EXISTS) AND ((value.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = ((value.symbol)?);
+  IF ((aST__node__symbol(UNWRAP (castDynamicValueToLocatable(UNWRAP (value)))) EXISTS) AND ((value.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = ((value.symbol)?);
   symbolEntry__heap_storage?(rtoc_local_receiver_19) })) THEN
     RETURN TRUE;
   END
   IF !(value IS_A Locatable) THEN
     RETURN FALSE;
   END
-  MUTABLE ti = TRY (aST__full_type_mut(value));
+  MUTABLE ti = TRY (aST__full_type_mut(UNWRAP (castDynamicValueToLocatable(UNWRAP (value)))));
   RETURN !(!(((((!(TRY (type__string?(ti))) AND !(ti.rodata?())) AND (ti.provenance() != :borrow)) AND TRY (type__heap_ptr?(ti))))));
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
@@ -1439,7 +1439,7 @@ PUB FN escapeAnalysis__borrow_return_expr?(expr: ?Locatable) RETURNS !Bool ->
     RETURN FALSE;
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF (aST__node__matched_signature(call) EXISTS) THEN
+  IF (aST__node__matched_signature(UNWRAP (castDynamicValueToLocatable(UNWRAP (call)))) EXISTS) THEN
     sig_branch_value = functionSignature__unwrap(call.matched_signature);
   ELSE
     sig_branch_value = NIL;
@@ -1450,7 +1450,7 @@ END
 PUB FN escapeAnalysis__expr_has_heap_identifier?(expr: ?Locatable) RETURNS Bool ->
   MUTABLE found: Bool = FALSE;
   aST__each_locatable_list(expr, FALSE, %(raw: Locatable) -> {
-  MUTABLE node = escapeAnalysis__unwrap_value(raw);
+  MUTABLE node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(raw)));
   IF node IS_A Identifier THEN
       IF escapeAnalysis__symbol_heap?(node.symbol) THEN
         found = TRUE;
@@ -1463,7 +1463,7 @@ END
 PUB FN escapeAnalysis__expr_has_owned_inline_value?(expr: ?Locatable) RETURNS !Bool ->
   MUTABLE root: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
   aST__each_locatable_list(expr, FALSE, %(raw: Locatable) USE(root) -> {
-  MUTABLE node = escapeAnalysis__unwrap_value(raw);
+  MUTABLE node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(raw)));
   IF !(node IS_A Locatable) THEN
       RETURN;
   END
@@ -1617,7 +1617,7 @@ PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg
 END
 PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{Int64}[]Identifier ->
   MUTABLE refs: {Int64}[]Identifier = {};
-  aST__each_locatable(body, FALSE, %(node: Locatable) USE(MUTABLE refs) -> {
+  aST__each_locatable(body, FALSE, %(node: Locatable) USE(MUTABLE refs, MUTABLE ti, MUTABLE call, MUTABLE node) -> {
   IF !(node IS_A LambdaLit) THEN
       RETURN;
   END
@@ -1699,7 +1699,7 @@ PUB FN escapeAnalysis__borrowed_return?(fn_value: FunctionDef, expr: Locatable) 
   END
   MUTABLE returned: [Set]String = Set[];
   TRY (escapeAnalysis__collect_identifier_names_mut(expr, &returned));
-  IF (fn_value.return_lifetime == :wildcard) THEN
+  IF ((IF fn_value.return_lifetime IS_A String@symbol AS fn_valuereturn_lifetime_payload THEN (fn_valuereturn_lifetime_payload == :wildcard) ELSE FALSE END)) THEN
     MUTABLE param_names: [Set]String = Set[];
     FOR _ IN fn_value.params DO
     &param_names.insert(COPY _.name);
@@ -1723,11 +1723,11 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
     RETURN FALSE;
   END
   MUTABLE top_heap_ptr = TRY (type__heap_ptr?( ti));
-  ti = TRY (type__value_payload_type( UNWRAP (ti)));
+  ti = TRY (type__value_payload_type( ti));
   IF !(ti) THEN
     RETURN FALSE;
   END
-  IF ( UNWRAP ((type__primitive?(ti) OR type__void?(ti)) OR type__any?( UNWRAP (ti)))) THEN
+  IF ( (type__primitive?(ti) OR type__void?(ti)) OR type__any?( ti)) THEN
     RETURN FALSE;
   END
   IF (IF expr IS_A Identifier AS identifier THEN escapeAnalysis__symbol_heap?(identifier.symbol) ELSE FALSE END) THEN
@@ -1736,10 +1736,10 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
     END
   END
   MUTABLE expr_t = TRY (aST__full_type_mut(expr));
-  IF (!(expr IS_A Identifier) AND ((expr_t != NIL) AND UNWRAP (expr_t).rodata?())) THEN
+  IF (!(expr IS_A Identifier) AND ((TRUE) AND UNWRAP (expr_t).rodata?())) THEN
     RETURN FALSE;
   END
-  IF (ti.rodata?() OR type__borrowed_reference?(ti)) THEN
+  IF (type__rodata?(ti) OR type__borrowed_reference?(ti)) THEN
     RETURN FALSE;
   END
   RETURN (((top_heap_ptr OR (type__ownership(ti) != :affine)) OR TRY (type__ownership_bearing?(ti, schema_lookup))) OR TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup)));
@@ -1753,7 +1753,7 @@ PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, expr: Locatabl
   IF !(fn.return_lifetime.empty?()) THEN
     RETURN;
   END
-  MUTABLE ret = functionDef__declared_return_type(fn);
+  MUTABLE ret: ?Type = functionDef__declared_return_type(fn);
   IF ret THEN
     ret = TRY (type__value_payload_type(ret));
   END
@@ -1776,14 +1776,14 @@ PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, expr: Locatabl
   escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts, names);
 END
 PUB FN escapeAnalysis__materializing_pipeline_expr?(expr: Locatable) RETURNS Bool ->
-  MUTABLE node = escapeAnalysis__unwrap_value(expr);
+  MUTABLE node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(expr)));
   IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
     node = escapeAnalysis__unwrap_value(node.left());
   END
   RETURN ((IF node IS_A BinaryOp AS rtoc_smooth_n THEN binaryOp__smooth?(rtoc_smooth_n) ELSE FALSE END) AND !(node.right() IS_A SkipOp));
 END
 PUB FN escapeAnalysis__returned_call_result?(expr: Locatable) RETURNS Bool ->
-  MUTABLE node = escapeAnalysis__unwrap_value(expr);
+  MUTABLE node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(expr)));
   IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
     node = escapeAnalysis__unwrap_value(node.left());
   END
@@ -1799,7 +1799,7 @@ PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, 
     END
     MUTABLE changed = escapeAnalysis__mark_symbol_heap_mut(sym);
     MUTABLE decl: ?SymbolEntryRegInput = COPY sym.reg;
-    IF (changed AND (aST__node__container_borrow(decl) EXISTS)) THEN
+    IF (changed AND (aST__node__container_borrow(UNWRAP (castSymbolEntryRegInputToLocatable(UNWRAP (decl)))) EXISTS)) THEN
         decl.container_borrow = FALSE;
     END
   rtoc_idx = rtoc_idx + 1;
@@ -1862,7 +1862,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
 PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, facts_by_name: {String}FunctionFacts) RETURNS !Bool ->
-  MUTABLE call = escapeAnalysis__unwrap_value(value);
+  MUTABLE call = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(value)));
   IF (call IS_A BinaryOp AND (call.op() == symbol("OR_ELSE"))) THEN
     call = escapeAnalysis__unwrap_value(call.left());
   END
@@ -1921,7 +1921,7 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
       MUTABLE by_name: {String}Int64 = {};
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < params.length() DO
-  by_name[(emittable__name(UNWRAP (params[rtoc_idx])))] = rtoc_idx;
+  by_name[((UNWRAP (params[rtoc_idx])).name)] = rtoc_idx;
   rtoc_idx = rtoc_idx + 1;
       END
       MUTABLE has_param_return: Bool = FALSE;
@@ -1939,7 +1939,7 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
   rtoc_idx = rtoc_idx + 1;
       END
       IF has_param_return THEN
-        MUTABLE ret: ?Type = TRY (type__from_node(return_type));
+        MUTABLE ret: ?Type = TRY (type__from_node(UNWRAP (castTypeTypeInputToType(return_type))));
         IF ret EXISTS AS ret_value THEN
           MUTABLE ret_value = TRY (type__success_type(ret_value));
         END
@@ -1969,11 +1969,11 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
   END
 END
 PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
-  MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
+  MUTABLE node: SymbolEntry = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
   IF (UNWRAP (node) IS_A BinaryOp AND (UNWRAP (node).op == symbol("OR_ELSE"))) THEN
     node = escapeAnalysis__unwrap_value(node.left());
   END
-  IF ((aST__node_storage(node) EXISTS) AND ([:rodata, :borrow]).contains?(node.storage())) THEN
+  IF ((aST__node_storage(UNWRAP (castDynamicValueToLocatable(UNWRAP (node)))) EXISTS) AND ([:rodata, :borrow]).contains?(symbolEntry__storage(node))) THEN
     RETURN FALSE;
   END
   IF (TRUE AND symbolEntry__rodata_provenance?(node)) THEN
@@ -1985,7 +1985,7 @@ PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
   IF (TRUE AND symbolEntry__heap_storage?(node)) THEN
     RETURN TRUE;
   END
-  IF ((aST__node__symbol(node) EXISTS) AND ((node.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_34 = ((node.symbol)?);
+  IF ((aST__node__symbol(UNWRAP (castDynamicValueToLocatable(UNWRAP (node)))) EXISTS) AND ((node.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_34 = ((node.symbol)?);
   symbolEntry__heap_storage?(rtoc_local_receiver_34) })) THEN
     RETURN TRUE;
   END
@@ -1998,7 +1998,7 @@ PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
   IF !(node IS_A Locatable) THEN
     RETURN FALSE;
   END
-  MUTABLE ti = TRY (aST__full_type_mut(node));
+  MUTABLE ti = TRY (aST__full_type_mut(UNWRAP (castDynamicValueToLocatable(UNWRAP (node)))));
   RETURN (TRY (type__heap_ptr?(ti)) OR TRY (type__recursive_cleanup_shape?(ti, NIL)));
 END
 PUB FN escapeAnalysis__function_def_has_return_lifetime?(fn_value: FunctionDef) RETURNS Bool ->
@@ -2006,7 +2006,7 @@ PUB FN escapeAnalysis__function_def_has_return_lifetime?(fn_value: FunctionDef) 
   IF (rl == NIL) THEN
     RETURN FALSE;
   END
-  IF (rl == :wildcard) THEN
+  IF ((IF rl IS_A String@symbol AS rl_payload THEN (rl_payload == :wildcard) ELSE FALSE END)) THEN
     RETURN TRUE;
   END
   RETURN !(rl.empty?());
@@ -2027,7 +2027,7 @@ PUB FN escapeAnalysis__mark_symbol_heap_mut(sym: ?SymbolEntry, MUTABLE names: ?[
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF ( symbolEntry__heap_storage?( sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
+  IF ( symbolEntry__heap_storage( sym_entry) OR symbolEntry__borrow_provenance?( sym_entry)) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :heap;
@@ -2057,7 +2057,7 @@ PUB FN escapeAnalysis__mark_symbol_borrow_mut(sym: ?SymbolEntry) RETURNS Bool ->
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF ( symbolEntry__heap_storage?( sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
+  IF ( symbolEntry__heap_storage( sym_entry) OR symbolEntry__borrow_provenance?( sym_entry)) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :borrow;
@@ -2935,4 +2935,268 @@ FN castAssignmentTargetToLocatable(value: AssignmentTarget) RETURNS Locatable ->
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
+END
+FN castDynamicValueToLocatable(value: DynamicValue) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    DynamicValue.RequireNode AS item -> RETURN Locatable{ RequireNode: COPY item };,
+    DynamicValue.ProtocolRequirement AS item -> RETURN Locatable{ ProtocolRequirement: COPY item };,
+    DynamicValue.ProtocolDef AS item -> RETURN Locatable{ ProtocolDef: COPY item };,
+    DynamicValue.FunctionDefMultiowned AS item -> RETURN Locatable{ FunctionDef: COPY item };,
+    DynamicValue.ImplementationDef AS item -> RETURN Locatable{ ImplementationDef: COPY item };,
+    DynamicValue.ConformanceDef AS item -> RETURN Locatable{ ConformanceDef: COPY item };,
+    DynamicValue.VarDecl AS item -> RETURN Locatable{ VarDecl: COPY item };,
+    DynamicValue.Assignment AS item -> RETURN Locatable{ Assignment: COPY item };,
+    DynamicValue.DestructuringAssignment AS item -> RETURN Locatable{ DestructuringAssignment: COPY item };,
+    DynamicValue.BindExpr AS item -> RETURN Locatable{ BindExpr: COPY item };,
+    DynamicValue.BinaryOp AS item -> RETURN Locatable{ BinaryOp: COPY item };,
+    DynamicValue.IsA AS item -> RETURN Locatable{ IsA: COPY item };,
+    DynamicValue.CallSiteOverride AS item -> RETURN Locatable{ CallSiteOverride: COPY item };,
+    DynamicValue.Identifier AS item -> RETURN Locatable{ Identifier: COPY item };,
+    DynamicValue.Literal AS item -> RETURN Locatable{ Literal: COPY item };,
+    DynamicValue.ListLit AS item -> RETURN Locatable{ ListLit: COPY item };,
+    DynamicValue.TupleLit AS item -> RETURN Locatable{ TupleLit: COPY item };,
+    DynamicValue.DefaultArrayLit AS item -> RETURN Locatable{ DefaultArrayLit: COPY item };,
+    DynamicValue.HashLit AS item -> RETURN Locatable{ HashLit: COPY item };,
+    DynamicValue.DefaultLit AS item -> RETURN Locatable{ DefaultLit: COPY item };,
+    DynamicValue.StructLit AS item -> RETURN Locatable{ StructLit: COPY item };,
+    DynamicValue.LambdaLit AS item -> RETURN Locatable{ LambdaLit: COPY item };,
+    DynamicValue.IfStatement AS item -> RETURN Locatable{ IfStatement: COPY item };,
+    DynamicValue.IfBind AS item -> RETURN Locatable{ IfBind: COPY item };,
+    DynamicValue.WhileLoop AS item -> RETURN Locatable{ WhileLoop: COPY item };,
+    DynamicValue.WhileBindLoop AS item -> RETURN Locatable{ WhileBindLoop: COPY item };,
+    DynamicValue.BreakNode AS item -> RETURN Locatable{ BreakNode: COPY item };,
+    DynamicValue.ContinueNode AS item -> RETURN Locatable{ ContinueNode: COPY item };,
+    DynamicValue.FuncCall AS item -> RETURN Locatable{ FuncCall: COPY item };,
+    DynamicValue.GetField AS item -> RETURN Locatable{ GetField: COPY item };,
+    DynamicValue.GetIndex AS item -> RETURN Locatable{ GetIndex: COPY item };,
+    DynamicValue.ReturnNode AS item -> RETURN Locatable{ ReturnNode: COPY item };,
+    DynamicValue.Assert AS item -> RETURN Locatable{ Assert: COPY item };,
+    DynamicValue.ThrowNode AS item -> RETURN Locatable{ ThrowNode: COPY item };,
+    DynamicValue.DieNode AS item -> RETURN Locatable{ DieNode: COPY item };,
+    DynamicValue.Slice AS item -> RETURN Locatable{ Slice: COPY item };,
+    DynamicValue.Require AS item -> RETURN Locatable{ Require: COPY item };,
+    DynamicValue.WithBlockMultiowned AS item -> RETURN Locatable{ WithBlock: COPY item };,
+    DynamicValue.SyncPolicyDecl AS item -> RETURN Locatable{ SyncPolicyDecl: COPY item };,
+    DynamicValue.SelectOpMultiowned AS item -> RETURN Locatable{ SelectOp: COPY item };,
+    DynamicValue.WhereOpMultiowned AS item -> RETURN Locatable{ WhereOp: COPY item };,
+    DynamicValue.IndexOpMultiowned AS item -> RETURN Locatable{ IndexOp: COPY item };,
+    DynamicValue.ReduceOpMultiowned AS item -> RETURN Locatable{ ReduceOp: COPY item };,
+    DynamicValue.OrderByOpMultiowned AS item -> RETURN Locatable{ OrderByOp: COPY item };,
+    DynamicValue.LimitOp AS item -> RETURN Locatable{ LimitOp: COPY item };,
+    DynamicValue.UnnestOpMultiowned AS item -> RETURN Locatable{ UnnestOp: COPY item };,
+    DynamicValue.DistinctOpMultiowned AS item -> RETURN Locatable{ DistinctOp: COPY item };,
+    DynamicValue.EachOp AS item -> RETURN Locatable{ EachOp: COPY item };,
+    DynamicValue.TapOp AS item -> RETURN Locatable{ TapOp: COPY item };,
+    DynamicValue.SkipOp AS item -> RETURN Locatable{ SkipOp: COPY item };,
+    DynamicValue.CollectOp AS item -> RETURN Locatable{ CollectOp: COPY item };,
+    DynamicValue.TakeWhileOpMultiowned AS item -> RETURN Locatable{ TakeWhileOp: COPY item };,
+    DynamicValue.WindowOpMultiowned AS item -> RETURN Locatable{ WindowOp: COPY item };,
+    DynamicValue.BatchWindowOpMultiowned AS item -> RETURN Locatable{ BatchWindowOp: COPY item };,
+    DynamicValue.JoinOp AS item -> RETURN Locatable{ JoinOp: COPY item };,
+    DynamicValue.FindOpMultiowned AS item -> RETURN Locatable{ FindOp: COPY item };,
+    DynamicValue.AnyOpMultiowned AS item -> RETURN Locatable{ AnyOp: COPY item };,
+    DynamicValue.AllOpMultiowned AS item -> RETURN Locatable{ AllOp: COPY item };,
+    DynamicValue.CountOpMultiowned AS item -> RETURN Locatable{ CountOp: COPY item };,
+    DynamicValue.SumOpMultiowned AS item -> RETURN Locatable{ SumOp: COPY item };,
+    DynamicValue.AverageOpMultiowned AS item -> RETURN Locatable{ AverageOp: COPY item };,
+    DynamicValue.MinOpMultiowned AS item -> RETURN Locatable{ MinOp: COPY item };,
+    DynamicValue.MaxOpMultiowned AS item -> RETURN Locatable{ MaxOp: COPY item };,
+    DynamicValue.ShardOp AS item -> RETURN Locatable{ ShardOp: COPY item };,
+    DynamicValue.ConcurrentOp AS item -> RETURN Locatable{ ConcurrentOp: COPY item };,
+    DynamicValue.Placeholder AS item -> RETURN Locatable{ Placeholder: COPY item };,
+    DynamicValue.Copy AS item -> RETURN Locatable{ Copy: COPY item };,
+    DynamicValue.TenseNavigation AS item -> RETURN Locatable{ TenseNavigation: COPY item };,
+    DynamicValue.MutableBorrow AS item -> RETURN Locatable{ MutableBorrow: COPY item };,
+    DynamicValue.CatchBlock AS item -> RETURN Locatable{ CatchBlock: COPY item };,
+    DynamicValue.RecoverOp AS item -> RETURN Locatable{ RecoverOp: COPY item };,
+    DynamicValue.StringConcat AS item -> RETURN Locatable{ StringConcat: COPY item };,
+    DynamicValue.CapabilityWrap AS item -> RETURN Locatable{ CapabilityWrap: COPY item };,
+    DynamicValue.MoveNode AS item -> RETURN Locatable{ MoveNode: COPY item };,
+    DynamicValue.CopyNode AS item -> RETURN Locatable{ CopyNode: COPY item };,
+    DynamicValue.KeepNode AS item -> RETURN Locatable{ KeepNode: COPY item };,
+    DynamicValue.ShareNode AS item -> RETURN Locatable{ ShareNode: COPY item };,
+    DynamicValue.LinkNode AS item -> RETURN Locatable{ LinkNode: COPY item };,
+    DynamicValue.ResolveNode AS item -> RETURN Locatable{ ResolveNode: COPY item };,
+    DynamicValue.FreezeNode AS item -> RETURN Locatable{ FreezeNode: COPY item };,
+    DynamicValue.PassStmt AS item -> RETURN Locatable{ PassStmt: COPY item };,
+    DynamicValue.StructPattern AS item -> RETURN Locatable{ StructPattern: COPY item };,
+    DynamicValue.ExternFnDecl AS item -> RETURN Locatable{ ExternFnDecl: COPY item };,
+    DynamicValue.ExternStructDecl AS item -> RETURN Locatable{ ExternStructDecl: COPY item };,
+    DynamicValue.UnionDef AS item -> RETURN Locatable{ UnionDef: COPY item };,
+    DynamicValue.UnionVariantLit AS item -> RETURN Locatable{ UnionVariantLit: COPY item };,
+    DynamicValue.StaticCall AS item -> RETURN Locatable{ StaticCall: COPY item };,
+    DynamicValue.ThenChain AS item -> RETURN Locatable{ ThenChain: COPY item };,
+    DynamicValue.BgStreamBlock AS item -> RETURN Locatable{ BgStreamBlock: COPY item };,
+    DynamicValue.YieldExpr AS item -> RETURN Locatable{ YieldExpr: COPY item };,
+    DynamicValue.CloseStream AS item -> RETURN Locatable{ CloseStream: COPY item };,
+    DynamicValue.NextExpr AS item -> RETURN Locatable{ NextExpr: COPY item };,
+    DynamicValue.MatchStatement AS item -> RETURN Locatable{ MatchStatement: COPY item };,
+    DynamicValue.ForRange AS item -> RETURN Locatable{ ForRange: COPY item };,
+    DynamicValue.ForEach AS item -> RETURN Locatable{ ForEach: COPY item };,
+    DynamicValue.TestBlock AS item -> RETURN Locatable{ TestBlock: COPY item };,
+    DynamicValue.WhenBlock AS item -> RETURN Locatable{ WhenBlock: COPY item };,
+    DynamicValue.LetBinding AS item -> RETURN Locatable{ LetBinding: COPY item };,
+    DynamicValue.TestThat AS item -> RETURN Locatable{ TestThat: COPY item };,
+    DynamicValue.AssertRaisesMultiowned AS item -> RETURN Locatable{ AssertRaises: COPY item };,
+    DynamicValue.BenchmarkStmtMultiowned AS item -> RETURN Locatable{ BenchmarkStmt: COPY item };,
+    DynamicValue.SmashStmtMultiowned AS item -> RETURN Locatable{ SmashStmt: COPY item };,
+    DynamicValue.ProfileStmtMultiowned AS item -> RETURN Locatable{ ProfileStmt: COPY item };,
+    DynamicValue.StubDecl AS item -> RETURN Locatable{ StubDecl: COPY item };,
+    DynamicValue.Drop AS item -> RETURN Locatable{ Drop: COPY item };,
+    DynamicValue.SuppressCleanup AS item -> RETURN Locatable{ SuppressCleanup: COPY item };,
+    DynamicValue.Return AS item -> RETURN Locatable{ Return: COPY item };,
+    DynamicValue.ReassignCleanup AS item -> RETURN Locatable{ ReassignCleanup: COPY item };,
+    DynamicValue.FieldCleanup AS item -> RETURN Locatable{ FieldCleanup: COPY item };,
+    DynamicValue.FunctionDef AS item -> RETURN Locatable{ FunctionDef: COPY item };,
+    DynamicValue.WithBlock AS item -> RETURN Locatable{ WithBlock: COPY item };,
+    DynamicValue.SelectOp AS item -> RETURN Locatable{ SelectOp: COPY item };,
+    DynamicValue.WhereOp AS item -> RETURN Locatable{ WhereOp: COPY item };,
+    DynamicValue.IndexOp AS item -> RETURN Locatable{ IndexOp: COPY item };,
+    DynamicValue.ReduceOp AS item -> RETURN Locatable{ ReduceOp: COPY item };,
+    DynamicValue.OrderByOp AS item -> RETURN Locatable{ OrderByOp: COPY item };,
+    DynamicValue.UnnestOp AS item -> RETURN Locatable{ UnnestOp: COPY item };,
+    DynamicValue.DistinctOp AS item -> RETURN Locatable{ DistinctOp: COPY item };,
+    DynamicValue.TakeWhileOp AS item -> RETURN Locatable{ TakeWhileOp: COPY item };,
+    DynamicValue.WindowOp AS item -> RETURN Locatable{ WindowOp: COPY item };,
+    DynamicValue.BatchWindowOp AS item -> RETURN Locatable{ BatchWindowOp: COPY item };,
+    DynamicValue.FindOp AS item -> RETURN Locatable{ FindOp: COPY item };,
+    DynamicValue.AnyOp AS item -> RETURN Locatable{ AnyOp: COPY item };,
+    DynamicValue.AllOp AS item -> RETURN Locatable{ AllOp: COPY item };,
+    DynamicValue.CountOp AS item -> RETURN Locatable{ CountOp: COPY item };,
+    DynamicValue.SumOp AS item -> RETURN Locatable{ SumOp: COPY item };,
+    DynamicValue.AverageOp AS item -> RETURN Locatable{ AverageOp: COPY item };,
+    DynamicValue.MinOp AS item -> RETURN Locatable{ MinOp: COPY item };,
+    DynamicValue.MaxOp AS item -> RETURN Locatable{ MaxOp: COPY item };,
+    DynamicValue.AssertRaises AS item -> RETURN Locatable{ AssertRaises: COPY item };,
+    DynamicValue.BenchmarkStmt AS item -> RETURN Locatable{ BenchmarkStmt: COPY item };,
+    DynamicValue.SmashStmt AS item -> RETURN Locatable{ SmashStmt: COPY item };,
+    DynamicValue.ProfileStmt AS item -> RETURN Locatable{ ProfileStmt: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+FN castLocatableToDynamicValue(value: Locatable) RETURNS ?DynamicValue ->
+  PARTIAL MATCH value START
+    Locatable.RequireNode AS item -> RETURN DynamicValue{ RequireNode: COPY item };,
+    Locatable.ProtocolRequirement AS item -> RETURN DynamicValue{ ProtocolRequirement: COPY item };,
+    Locatable.ProtocolDef AS item -> RETURN DynamicValue{ ProtocolDef: COPY item };,
+    Locatable.FunctionDef AS item -> RETURN DynamicValue{ FunctionDef: COPY item };,
+    Locatable.ImplementationDef AS item -> RETURN DynamicValue{ ImplementationDef: COPY item };,
+    Locatable.ConformanceDef AS item -> RETURN DynamicValue{ ConformanceDef: COPY item };,
+    Locatable.VarDecl AS item -> RETURN DynamicValue{ VarDecl: COPY item };,
+    Locatable.Assignment AS item -> RETURN DynamicValue{ Assignment: COPY item };,
+    Locatable.DestructuringAssignment AS item -> RETURN DynamicValue{ DestructuringAssignment: COPY item };,
+    Locatable.BindExpr AS item -> RETURN DynamicValue{ BindExpr: COPY item };,
+    Locatable.BinaryOp AS item -> RETURN DynamicValue{ BinaryOp: COPY item };,
+    Locatable.IsA AS item -> RETURN DynamicValue{ IsA: COPY item };,
+    Locatable.CallSiteOverride AS item -> RETURN DynamicValue{ CallSiteOverride: COPY item };,
+    Locatable.Identifier AS item -> RETURN DynamicValue{ Identifier: COPY item };,
+    Locatable.Literal AS item -> RETURN DynamicValue{ Literal: COPY item };,
+    Locatable.ListLit AS item -> RETURN DynamicValue{ ListLit: COPY item };,
+    Locatable.TupleLit AS item -> RETURN DynamicValue{ TupleLit: COPY item };,
+    Locatable.DefaultArrayLit AS item -> RETURN DynamicValue{ DefaultArrayLit: COPY item };,
+    Locatable.HashLit AS item -> RETURN DynamicValue{ HashLit: COPY item };,
+    Locatable.DefaultLit AS item -> RETURN DynamicValue{ DefaultLit: COPY item };,
+    Locatable.StructLit AS item -> RETURN DynamicValue{ StructLit: COPY item };,
+    Locatable.LambdaLit AS item -> RETURN DynamicValue{ LambdaLit: COPY item };,
+    Locatable.IfStatement AS item -> RETURN DynamicValue{ IfStatement: COPY item };,
+    Locatable.IfBind AS item -> RETURN DynamicValue{ IfBind: COPY item };,
+    Locatable.WhileLoop AS item -> RETURN DynamicValue{ WhileLoop: COPY item };,
+    Locatable.WhileBindLoop AS item -> RETURN DynamicValue{ WhileBindLoop: COPY item };,
+    Locatable.BreakNode AS item -> RETURN DynamicValue{ BreakNode: COPY item };,
+    Locatable.ContinueNode AS item -> RETURN DynamicValue{ ContinueNode: COPY item };,
+    Locatable.FuncCall AS item -> RETURN DynamicValue{ FuncCall: COPY item };,
+    Locatable.GetField AS item -> RETURN DynamicValue{ GetField: COPY item };,
+    Locatable.GetIndex AS item -> RETURN DynamicValue{ GetIndex: COPY item };,
+    Locatable.ReturnNode AS item -> RETURN DynamicValue{ ReturnNode: COPY item };,
+    Locatable.Assert AS item -> RETURN DynamicValue{ Assert: COPY item };,
+    Locatable.ThrowNode AS item -> RETURN DynamicValue{ ThrowNode: COPY item };,
+    Locatable.DieNode AS item -> RETURN DynamicValue{ DieNode: COPY item };,
+    Locatable.Slice AS item -> RETURN DynamicValue{ Slice: COPY item };,
+    Locatable.Require AS item -> RETURN DynamicValue{ Require: COPY item };,
+    Locatable.WithBlock AS item -> RETURN DynamicValue{ WithBlock: COPY item };,
+    Locatable.SyncPolicyDecl AS item -> RETURN DynamicValue{ SyncPolicyDecl: COPY item };,
+    Locatable.SelectOp AS item -> RETURN DynamicValue{ SelectOp: COPY item };,
+    Locatable.WhereOp AS item -> RETURN DynamicValue{ WhereOp: COPY item };,
+    Locatable.IndexOp AS item -> RETURN DynamicValue{ IndexOp: COPY item };,
+    Locatable.ReduceOp AS item -> RETURN DynamicValue{ ReduceOp: COPY item };,
+    Locatable.OrderByOp AS item -> RETURN DynamicValue{ OrderByOp: COPY item };,
+    Locatable.LimitOp AS item -> RETURN DynamicValue{ LimitOp: COPY item };,
+    Locatable.UnnestOp AS item -> RETURN DynamicValue{ UnnestOp: COPY item };,
+    Locatable.DistinctOp AS item -> RETURN DynamicValue{ DistinctOp: COPY item };,
+    Locatable.EachOp AS item -> RETURN DynamicValue{ EachOp: COPY item };,
+    Locatable.TapOp AS item -> RETURN DynamicValue{ TapOp: COPY item };,
+    Locatable.SkipOp AS item -> RETURN DynamicValue{ SkipOp: COPY item };,
+    Locatable.CollectOp AS item -> RETURN DynamicValue{ CollectOp: COPY item };,
+    Locatable.TakeWhileOp AS item -> RETURN DynamicValue{ TakeWhileOp: COPY item };,
+    Locatable.WindowOp AS item -> RETURN DynamicValue{ WindowOp: COPY item };,
+    Locatable.BatchWindowOp AS item -> RETURN DynamicValue{ BatchWindowOp: COPY item };,
+    Locatable.JoinOp AS item -> RETURN DynamicValue{ JoinOp: COPY item };,
+    Locatable.FindOp AS item -> RETURN DynamicValue{ FindOp: COPY item };,
+    Locatable.AnyOp AS item -> RETURN DynamicValue{ AnyOp: COPY item };,
+    Locatable.AllOp AS item -> RETURN DynamicValue{ AllOp: COPY item };,
+    Locatable.CountOp AS item -> RETURN DynamicValue{ CountOp: COPY item };,
+    Locatable.SumOp AS item -> RETURN DynamicValue{ SumOp: COPY item };,
+    Locatable.AverageOp AS item -> RETURN DynamicValue{ AverageOp: COPY item };,
+    Locatable.MinOp AS item -> RETURN DynamicValue{ MinOp: COPY item };,
+    Locatable.MaxOp AS item -> RETURN DynamicValue{ MaxOp: COPY item };,
+    Locatable.ShardOp AS item -> RETURN DynamicValue{ ShardOp: COPY item };,
+    Locatable.ConcurrentOp AS item -> RETURN DynamicValue{ ConcurrentOp: COPY item };,
+    Locatable.Placeholder AS item -> RETURN DynamicValue{ Placeholder: COPY item };,
+    Locatable.Copy AS item -> RETURN DynamicValue{ Copy: COPY item };,
+    Locatable.TenseNavigation AS item -> RETURN DynamicValue{ TenseNavigation: COPY item };,
+    Locatable.MutableBorrow AS item -> RETURN DynamicValue{ MutableBorrow: COPY item };,
+    Locatable.CatchBlock AS item -> RETURN DynamicValue{ CatchBlock: COPY item };,
+    Locatable.RecoverOp AS item -> RETURN DynamicValue{ RecoverOp: COPY item };,
+    Locatable.StringConcat AS item -> RETURN DynamicValue{ StringConcat: COPY item };,
+    Locatable.CapabilityWrap AS item -> RETURN DynamicValue{ CapabilityWrap: COPY item };,
+    Locatable.MoveNode AS item -> RETURN DynamicValue{ MoveNode: COPY item };,
+    Locatable.CopyNode AS item -> RETURN DynamicValue{ CopyNode: COPY item };,
+    Locatable.KeepNode AS item -> RETURN DynamicValue{ KeepNode: COPY item };,
+    Locatable.ShareNode AS item -> RETURN DynamicValue{ ShareNode: COPY item };,
+    Locatable.LinkNode AS item -> RETURN DynamicValue{ LinkNode: COPY item };,
+    Locatable.ResolveNode AS item -> RETURN DynamicValue{ ResolveNode: COPY item };,
+    Locatable.FreezeNode AS item -> RETURN DynamicValue{ FreezeNode: COPY item };,
+    Locatable.PassStmt AS item -> RETURN DynamicValue{ PassStmt: COPY item };,
+    Locatable.StructPattern AS item -> RETURN DynamicValue{ StructPattern: COPY item };,
+    Locatable.ExternFnDecl AS item -> RETURN DynamicValue{ ExternFnDecl: COPY item };,
+    Locatable.ExternStructDecl AS item -> RETURN DynamicValue{ ExternStructDecl: COPY item };,
+    Locatable.UnionDef AS item -> RETURN DynamicValue{ UnionDef: COPY item };,
+    Locatable.UnionVariantLit AS item -> RETURN DynamicValue{ UnionVariantLit: COPY item };,
+    Locatable.StaticCall AS item -> RETURN DynamicValue{ StaticCall: COPY item };,
+    Locatable.ThenChain AS item -> RETURN DynamicValue{ ThenChain: COPY item };,
+    Locatable.BgStreamBlock AS item -> RETURN DynamicValue{ BgStreamBlock: COPY item };,
+    Locatable.YieldExpr AS item -> RETURN DynamicValue{ YieldExpr: COPY item };,
+    Locatable.CloseStream AS item -> RETURN DynamicValue{ CloseStream: COPY item };,
+    Locatable.NextExpr AS item -> RETURN DynamicValue{ NextExpr: COPY item };,
+    Locatable.MatchStatement AS item -> RETURN DynamicValue{ MatchStatement: COPY item };,
+    Locatable.ForRange AS item -> RETURN DynamicValue{ ForRange: COPY item };,
+    Locatable.ForEach AS item -> RETURN DynamicValue{ ForEach: COPY item };,
+    Locatable.TestBlock AS item -> RETURN DynamicValue{ TestBlock: COPY item };,
+    Locatable.WhenBlock AS item -> RETURN DynamicValue{ WhenBlock: COPY item };,
+    Locatable.LetBinding AS item -> RETURN DynamicValue{ LetBinding: COPY item };,
+    Locatable.TestThat AS item -> RETURN DynamicValue{ TestThat: COPY item };,
+    Locatable.AssertRaises AS item -> RETURN DynamicValue{ AssertRaises: COPY item };,
+    Locatable.BenchmarkStmt AS item -> RETURN DynamicValue{ BenchmarkStmt: COPY item };,
+    Locatable.SmashStmt AS item -> RETURN DynamicValue{ SmashStmt: COPY item };,
+    Locatable.ProfileStmt AS item -> RETURN DynamicValue{ ProfileStmt: COPY item };,
+    Locatable.StubDecl AS item -> RETURN DynamicValue{ StubDecl: COPY item };,
+    Locatable.Drop AS item -> RETURN DynamicValue{ Drop: COPY item };,
+    Locatable.SuppressCleanup AS item -> RETURN DynamicValue{ SuppressCleanup: COPY item };,
+    Locatable.Return AS item -> RETURN DynamicValue{ Return: COPY item };,
+    Locatable.ReassignCleanup AS item -> RETURN DynamicValue{ ReassignCleanup: COPY item };,
+    Locatable.FieldCleanup AS item -> RETURN DynamicValue{ FieldCleanup: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+FN castAssignmentNameToDynamicValue(value: AssignmentName) RETURNS ?DynamicValue ->
+  PARTIAL MATCH value START
+    AssignmentName.StringValue AS item -> RETURN DynamicValue{ StringValue: COPY item };,
+    AssignmentName.Identifier AS item -> RETURN DynamicValue{ Identifier: COPY item };,
+    AssignmentName.GetField AS item -> RETURN DynamicValue{ GetField: COPY item };,
+    AssignmentName.GetIndex AS item -> RETURN DynamicValue{ GetIndex: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END

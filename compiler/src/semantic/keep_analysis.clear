@@ -14,14 +14,14 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
   MUTABLE params: {String}SymbolEntry@multiowned = {};
   FOR _ IN fn_value.params DO
     MUTABLE entry = _.symbol;
-    IF entry THEN
+    IF _ THEN
         params[_.name] = entry;
     END
   END
   caller_params[rtoc_key] = params;
   END
   MUTABLE kept_param_indexes: {String}[]Int64 = {};
-  MUTABLE refresh_kept: FN() -> Void = %() USE(fn_nodes, MUTABLE kept_param_indexes) -> {
+  MUTABLE refresh_kept: FN() -> Void = %() USE(fn_nodes, MUTABLE kept_param_indexes, MUTABLE entry) -> {
   &kept_param_indexes.clear();
   FOR rtoc_key IN fn_nodes.keys() DO
     MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
@@ -29,7 +29,7 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < fn_value.params.length() DO
         MUTABLE entry = fn_value.params[rtoc_idx]?.symbol;
-        IF (IF entry != NIL THEN
+        IF (IF rtoc_key != NIL THEN
             { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = CAST(entry AS SymbolEntry);
         symbolEntry__kept_identity(rtoc_local_receiver_2) }
           ELSE
@@ -51,7 +51,7 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
   FOR rtoc_key IN body_summaries.keys() DO
     MUTABLE summary: FunctionBodySummary = COPY UNWRAP (body_summaries[rtoc_key]);
     MUTABLE params: ?{String}SymbolEntry@multiowned = COPY caller_params[rtoc_key];
-    IF ((params == NIL) OR (UNWRAP (params).count == 0)) THEN
+    IF ((params == NIL) OR (params.count == 0)) THEN
         CONTINUE;
     END
     MUTABLE rtoc_idx = 0;
@@ -60,13 +60,13 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
           rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        MUTABLE kept: ?[]Int64 = COPY kept_param_indexes[summary.call_site_facts[rtoc_idx]?.callee_name];
-        IF !(kept) THEN
+        MUTABLE kept: ?[]Int64 = COPY kept_param_indexes[UNWRAP (summary.call_site_facts[rtoc_idx]?.callee_name)];
+        IF !(rtoc_key) THEN
             rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
         MUTABLE rtoc_idx_2 = 0;
-        WHILE rtoc_idx_2 < kept.length() DO
+        WHILE rtoc_idx_2 < rtoc_key.length() DO
             MUTABLE arg: ?Locatable = COPY (summary.call_site_facts[rtoc_idx]?.args)[kept[rtoc_idx_2]];
             IF !(((arg != NIL) AND (arg IS_A Identifier))) THEN
                 rtoc_idx_2 = rtoc_idx_2 + 1;

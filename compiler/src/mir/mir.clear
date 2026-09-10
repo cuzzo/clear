@@ -19822,3 +19822,10 @@ PUB FN fsmDestroyAction__destroy_order_bucket(value: FsmDestroyAction) RETURNS ?
   END
   RETURN NIL;
 END
+FN castLocatableToEmittable(value: Locatable) RETURNS ?Emittable ->
+  PARTIAL MATCH value START
+
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

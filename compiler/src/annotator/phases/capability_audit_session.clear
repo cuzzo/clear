@@ -2714,8 +2714,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           :ADD_ERROR_UNION_TO_RETURN
         END;
-        MUTABLE fixes: []Edit = [TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, description_key)), edits, :auto))];
-        TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :type, fixes, NIL, :FALLIBLE_RETURN_NEEDS_ERROR_UNION, :error, FALSE, CAST({:fn: rtoc_each_14, :hint: hint, :return_type: return_type} AS {String@symbol}Any)));
+        MUTABLE fixes: [1]Fix = [TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, description_key)), edits, :auto))];
+        TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, :type, rtoc_each_14, NIL, :FALLIBLE_RETURN_NEEDS_ERROR_UNION, :error, FALSE, CAST({:fn: rtoc_each_14, :hint: hint, :return_type: return_type} AS {String@symbol}Any)));
     ELSE
         TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FunctionDef: COPY fn_node } }, CapabilityAuditCodeOrMessage{ SymbolValue: :FALLIBLE_RETURN_NEEDS_ERROR_UNION }, [], CAST({:fn: rtoc_each_14, :hint: hint, :return_type: return_type} AS {String@symbol}Any)));
     END
@@ -2875,7 +2875,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN (TRY (capabilityAuditSession__async_body_facts(rtoc_self_view))) DO
     MUTABLE node = COPY rtoc_held_2865.node;
     MUTABLE body_scan = COPY rtoc_held_2865.summary;
-    IF (node IS_A BgBlock) THEN
+    IF (_ IS_A BgBlock) THEN
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&rtoc_self_view, castAsyncBodyNodeToAsyncSpawnNode(node), body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&rtoc_self_view, &node, body_scan.callees, asyncBodyNode__stack_size(node), UNWRAP (asyncBodyNode__can_smash(node)), UNWRAP (castAsyncBodyNodeToAsyncValidationNode(node))));
     ELSE_IF (node IS_A BgStreamBlock) THEN

@@ -20109,3 +20109,12 @@ PRIVATE FN aST__coerce_base_mut(MUTABLE node: Locatable, declared_type: ?Type) R
   locatable__set_coerced_type_object_mut(&node, COPY rtoc_declared_type);
   RETURN CoerceOutcome{ type: COPY rtoc_declared_type, error: NIL };
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castLocatableToUnaryOp(value: Locatable) RETURNS ?UnaryOp EFFECTS REENTRANT ->
+  IF value IS_A UnaryOp AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
