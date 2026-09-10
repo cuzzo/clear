@@ -1,0 +1,34 @@
+# Test: an optional binding initialized from a call OWNS its payload the same
+# way a non-optional one does.
+#
+# `?String` owns exactly what `String` owns -- the optional adds a tag, not a
+# buffer -- but the ensure-owns step asked `string?`, which spells the wrapper
+# out and answered false. The binding then held whatever slice the callee
+# returned while its cleanup still freed it, so a function returning a literal
+# handed the frame allocator a .rodata address.
+
+FN pick_literal(n: Int64) RETURNS ?String ->
+  IF n > 0 THEN
+    RETURN "v";
+  END
+  RETURN NIL;
+END
+
+FN pick_built(n: Int64) RETURNS ?String ->
+  IF n > 0 THEN
+    MUTABLE s = "v${n.toString()}";
+    RETURN s;
+  END
+  RETURN NIL;
+END
+
+FN main() RETURNS Void ->
+  literal: ?String = pick_literal(1);
+  ASSERT literal != NIL;
+
+  absent: ?String = pick_literal(0);
+  ASSERT absent == NIL;
+
+  built: ?String = pick_built(2);
+  ASSERT built != NIL;
+END

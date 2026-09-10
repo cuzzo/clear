@@ -3118,8 +3118,13 @@ class Formatter::Emitter
     # Inferred-binding tense annotations are intentionally type-less:
     # `value:?`, `value:!`, `value:!?`, and `value:~`. Keep the sigil flank
     # attached to the annotation colon just like an ordinary named type.
+    #
+    # A sigil that DOES name a type is an ordinary annotation and keeps the
+    # space: `v: ?String` is not the type-less `v:?`. Closing the space there
+    # made the output differ from its own input, and the lint pre-pass then
+    # read the reformatted line differently -- the corpus idempotency drift.
     if a.type == :SYM && a.raw == ':' && b.type == :SYM && %w[! ? % ~].include?(b.raw)
-      return false
+      return false unless typed_tense_annotation?(line, b_idx)
     end
 
     # Tense sigils (`!` `?` `%` `~`) attach to following type / sigil.
@@ -3146,6 +3151,20 @@ class Formatter::Emitter
 
     # Default: one space.
     true
+  end
+
+  # True when the sigil run starting at `idx` is followed by a type, which
+  # makes it an ordinary annotation (`v: ?String`) rather than the type-less
+  # inferred form (`v:?`).
+  sig { params(line: Array, idx: Integer).returns(T::Boolean) }
+  def typed_tense_annotation?(line, idx)
+    j = idx
+    j += 1 while j < line.length && line[j].type == :SYM && %w[! ? % ~].include?(line[j].raw)
+    return false if j >= line.length
+
+    tok = line[j]
+    return true if tok.type == :TYPE_ID
+    tok.type == :SYM && ['[', '{'].include?(tok.raw)
   end
 
   # Walk back from a `:` at `colon_idx` through alternating

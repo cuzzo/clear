@@ -1,0 +1,34 @@
+# Test: `IF x.nil?() THEN RETURN ... END` narrows the rest of the block, the
+# same way `IF x == NIL THEN ... END` already did. The predicate spelling is
+# the one `clear fmt` canonicalizes to, so without this the formatter could
+# turn a compiling file into one that does not.
+
+FN pick(n: Int64) RETURNS ?String ->
+  IF n > 0 THEN
+    RETURN "v";
+  END
+  RETURN NIL;
+END
+
+FN by_predicate(n: Int64) RETURNS Int64 ->
+  v: ?String = pick(n);
+  IF v.nil?() THEN
+    RETURN 0;
+  END
+  RETURN v.length();
+END
+
+FN by_comparison(n: Int64) RETURNS Int64 ->
+  v: ?String = pick(n);
+  IF v == NIL THEN
+    RETURN 0;
+  END
+  RETURN v.length();
+END
+
+FN main() RETURNS Void ->
+  ASSERT by_predicate(1) == 1;
+  ASSERT by_predicate(0) == 0;
+  ASSERT by_comparison(1) == 1;
+  ASSERT by_comparison(0) == 0;
+END

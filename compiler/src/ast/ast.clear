@@ -6516,11 +6516,9 @@ PRIVATE FN aST__walk_children_TupleLit_mut(MUTABLE item: TupleLit, MUTABLE desce
   item.items = COPY items_items;
 END
 PRIVATE FN aST__walk_children_LambdaLit_mut(MUTABLE item: LambdaLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  IF item.deferred_drops EXISTS THEN
-    MUTABLE deferred_drops_items: []Locatable = COPY UNWRAP (item.deferred_drops);
-    aST__each_locatable_list_mut(&deferred_drops_items, &descend_functions, visitor);
-    item.deferred_drops = COPY deferred_drops_items;
-  END
+  # Ruby's generic walk descends into every Struct member but only YIELDS a
+  # Locatable. A DeferredDrop is name/type/resource -- it holds none, so the
+  # walk visits nothing here.
 END
 PRIVATE FN aST__walk_children_IfStatement_mut(MUTABLE item: IfStatement, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
   MUTABLE condition_child: Locatable = COPY item.condition;
@@ -6985,11 +6983,9 @@ PRIVATE FN aST__walk_children_ForRange_mut(MUTABLE item: ForRange, MUTABLE desce
   MUTABLE body_items: []Locatable = COPY item.body;
   aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
   item.body = COPY body_items;
-  IF item.deferred_drops EXISTS THEN
-    MUTABLE deferred_drops_items: []Locatable = COPY UNWRAP (item.deferred_drops);
-    aST__each_locatable_list_mut(&deferred_drops_items, &descend_functions, visitor);
-    item.deferred_drops = COPY deferred_drops_items;
-  END
+  # Ruby's generic walk descends into every Struct member but only YIELDS a
+  # Locatable. A DeferredDrop is name/type/resource -- it holds none, so the
+  # walk visits nothing here.
 END
 PRIVATE FN aST__walk_children_ForEach_mut(MUTABLE item: ForEach, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
   MUTABLE collection_child: Locatable = COPY item.collection;
@@ -6998,11 +6994,9 @@ PRIVATE FN aST__walk_children_ForEach_mut(MUTABLE item: ForEach, MUTABLE descend
   MUTABLE body_items: []Locatable = COPY item.body;
   aST__each_locatable_list_mut(&body_items, &descend_functions, visitor);
   item.body = COPY body_items;
-  IF item.deferred_drops EXISTS THEN
-    MUTABLE deferred_drops_items: []Locatable = COPY UNWRAP (item.deferred_drops);
-    aST__each_locatable_list_mut(&deferred_drops_items, &descend_functions, visitor);
-    item.deferred_drops = COPY deferred_drops_items;
-  END
+  # Ruby's generic walk descends into every Struct member but only YIELDS a
+  # Locatable. A DeferredDrop is name/type/resource -- it holds none, so the
+  # walk visits nothing here.
 END
 PRIVATE FN aST__walk_children_TestBlock_mut(MUTABLE item: TestBlock, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
   IF item.setup EXISTS THEN

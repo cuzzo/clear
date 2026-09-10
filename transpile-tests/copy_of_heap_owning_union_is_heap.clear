@@ -11,7 +11,7 @@ FN names(node: Decl) RETURNS ![]String ->
   IF (lifetime_opt == NIL) THEN
     RETURN List[];
   END
-  MUTABLE lifetime: Lifetime = COPY UNWRAP (lifetime_opt);
+  MUTABLE lifetime: Lifetime = COPY lifetime_opt;
   IF lifetime IS_A String@symbol AS sym THEN
     RETURN [COPY "wildcard"];
   END

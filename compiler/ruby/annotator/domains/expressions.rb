@@ -280,6 +280,15 @@ module Annotator
         # reaches its body only when x is there. (`?Bool` is rejected earlier as
         # ambiguous, so this cannot confuse presence with payload.)
         return identifier_non_nil_refinement(node) if truthy && node.is_a?(AST::Identifier)
+
+        # `x.nil?()` is the predicate spelling of `x == NIL` and proves the same
+        # fact: when the test is FALSE, x is present. Without this a guard
+        # written `IF x.nil?() THEN RETURN ... END` narrowed nothing while the
+        # `==` form did.
+        if node.is_a?(AST::MethodCall) && node.name.to_s == "nil?" && !truthy &&
+           node.object.is_a?(AST::Identifier)
+          return identifier_non_nil_refinement(node.object)
+        end
         return {} unless node.is_a?(AST::BinaryOp)
 
         if (node.op == :AND && truthy) || (node.op == :OR && !truthy)

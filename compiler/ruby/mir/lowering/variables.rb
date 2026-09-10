@@ -323,13 +323,23 @@ module MIRLoweringVariables
     # eventual caller cleans the transferred result.
     owns_storage = facts.has_mir_drop || facts.binding_entry.lifecycle_plan&.needs_drop?
     return init unless owns_storage
-    return init unless facts.ft.string?
+    # `?String` owns exactly what `String` owns -- the optional adds a tag, not
+    # a buffer -- but `string?` spells the wrapper out. Asking the wrapper left
+    # an optional binding holding whatever slice the initializer produced,
+    # while its cleanup freed that slice: `v: ?String = pick(1)` handed the
+    # frame allocator a .rodata literal.
+    payload = facts.ft.non_optional_type
+    return init unless payload.string?
     # Symbols are interned: the binding never owns storage.
-    return init if facts.ft.symbol?
+    return init if payload.symbol?
 
     effect = MIR::OwnershipEffect.of(init)
     return init if effect.produces_owned
     return init if ast_value.is_a?(AST::Identifier) && AST.moved?(ast_value)
+
+    # An optional cannot go through the raw slice dupe: `alloc.dupe(u8, opt)`
+    # is not typed. dupeValue carries the absent case through unchanged.
+    return MIR::DeepCopy.new(init, facts.ft.zig_type, nil, :full_value, facts.decl_alloc) if facts.ft.optional?
 
     MIR::DupeSlice.new(init, facts.decl_alloc)
   end

@@ -1442,7 +1442,11 @@ when 'test'
   if File.directory?(source)
     gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
     puts "Generating tests..."
-    system("#{frame_env}ruby #{gen_script}")
+    # gen.rb exits non-zero when a test fails to TRANSPILE, and it leaves that
+    # file out of the generated suite. Ignoring the status therefore reported a
+    # clean run over a suite that silently lost tests -- the same hole the leak
+    # check below was already closed against.
+    error "Test generation failed" unless system("#{frame_env}ruby #{gen_script}")
     puts "Running tests..."
     passed = 0
     failed = 0

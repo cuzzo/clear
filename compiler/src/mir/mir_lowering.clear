@@ -17649,20 +17649,24 @@ PRIVATE FN mIRLowering__ensure_cleanup_binding_owns_string_init(self: MIRLowerin
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE owns_storage = (facts.has_mir_drop OR (IF { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_656 = (COPY facts.binding_entry);
-    cleanupEntry__lifecycle_plan(rtoc_local_receiver_656) } != NIL THEN
-      lifecyclePlan__needs_drop?( UNWRAP (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_656 = (COPY facts.binding_entry);
-    cleanupEntry__lifecycle_plan(rtoc_local_receiver_656) })))
-    ELSE
-      NIL
-    END));
+    MUTABLE rtoc_binding_entry: CleanupEntry = COPY facts.binding_entry;
+    MUTABLE rtoc_plan_needs_drop: Bool = FALSE;
+    IF cleanupEntry__lifecycle_plan(rtoc_binding_entry) EXISTS AS rtoc_lifecycle_plan THEN
+      rtoc_plan_needs_drop = lifecyclePlan__needs_drop?(rtoc_lifecycle_plan);
+    END
+    MUTABLE owns_storage: Bool = (facts.has_mir_drop OR rtoc_plan_needs_drop);
     IF !(owns_storage) THEN
       RETURN COPY init;
     END
-    IF !(TRY (type__string?(facts.ft))) THEN
+    # `?String` owns exactly what `String` owns -- the optional adds a tag, not
+    # a buffer -- but `string?` spells the wrapper out. Asking the wrapper left
+    # an optional binding holding whatever slice the initializer produced while
+    # its cleanup freed that slice.
+    MUTABLE rtoc_payload: Type = COPY type__non_optional_type(facts.ft);
+    IF !(TRY (type__string?(rtoc_payload))) THEN
       RETURN COPY init;
     END
-    IF type__symbol?(facts.ft) THEN
+    IF type__symbol?(rtoc_payload) THEN
       RETURN COPY init;
     END
     MUTABLE effect = TRY (ownershipEffect__of(init));
@@ -17671,6 +17675,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF (IF ast_value IS_A Identifier AS identifier THEN aST__moved?(Locatable{ Identifier: COPY identifier }) ELSE FALSE END) THEN
       RETURN COPY init;
+    END
+    # An optional cannot go through the raw slice dupe: `alloc.dupe(u8, opt)`
+    # is not typed. dupeValue carries the absent case through unchanged.
+    IF type__optional?(facts.ft) THEN
+      RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY init, zig_type: COPY TRY (type__zig_type(facts.ft)), elem_type: NIL, strategy: :full_value, alloc: COPY facts.decl_alloc, copy_shape: COPY deepCopy__copy_shape_for_zig_type(TRY (type__zig_type(facts.ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     RETURN Emittable{ DupeSlice: COPY DupeSlice{ source: COPY init, alloc: COPY facts.decl_alloc, lowered_node_id: NIL, ownership_consumption: NIL } };
 }
