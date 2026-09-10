@@ -107,33 +107,33 @@ PUB FN result__has_fresh_heap_copy?(self: FiberCtxBuilderResult) RETURNS Bool ->
   RETURN self.specs |> ANY (captureCleanupPlan__captured_value?(_.cleanup_plan) AND captureSpec__requires_setup?(_));
 END
 PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: String, promoted_names: {String}String, fresh_heap_alloc: ?String = NIL, fresh_heap_id: Int64 = 0, source_overrides: {String}String, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !FiberCtxBuilderResult ->
-  MUTABLE captured: {Any}Any = {};
+  MUTABLE captured: {String}Type = {};
   IF analysis != NIL THEN
     captured = COPY analysis.captures;
   END
-  MUTABLE strategies: {Any}Any = {};
+  MUTABLE strategies: {String}Strategy = {};
   IF analysis != NIL THEN
     strategies = COPY analysis.strategies;
   END
-  MUTABLE pointer_captures: [Set]Any = Set[];
+  MUTABLE pointer_captures: [Set]String = Set[];
   IF analysis != NIL THEN
     pointer_captures = COPY analysis.pointer_captures;
   END
   MUTABLE specs = captured.keys() |> SELECT {
-  MUTABLE strat: ?Any = COPY strategies[_];
+  MUTABLE strat: ?Strategy = COPY strategies[_];
   (  IF promoted_names[_] THEN
-      CaptureSpec{ name: COPY _, field_type_zig: "[]const u8", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY promoted_names[_], lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } ), cleanup_plan: COPY captureCleanupPlan__none() }
+      CaptureSpec{ name: COPY _, field_type_zig: "[]const u8", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY (promoted_names[_] OR_ELSE ""), lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } ), cleanup_plan: COPY captureCleanupPlan__none() }
     ELSE_IF (((strat != NIL) AND (strat IS_A FreshHeapCopy)) AND (fresh_heap_alloc != NIL)) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE dupe_var = "__fc_${fresh_heap_id.toString()}_${_}";
     MUTABLE source_ref = (source_overrides[_] OR_ELSE _);
     MUTABLE source_mir = Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE capture_symbol = analysis?.capture_symbols[_];
+    MUTABLE capture_symbol: ?SymbolEntry@multiowned = COPY analysis?.capture_symbols[_];
     MUTABLE needs_cleanup = TRY (fiberCtxBuilder__needs_fresh_heap_capture_cleanup?((captured[_] OR_ELSE panic("missing hash key")), schema_lookup, capture_symbol));
-    MUTABLE setup_mir: []Emittable = [Emittable{ Let: COPY Let{ name: COPY dupe_var, init: castCallToEmittable(COPY Call{ callee: "CheatLib.dupeCaptured", args: [Emittable{ TypeOf: COPY TypeOf{ expr: Emittable{ Ident: COPY source_mir }, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY source_mir }, Emittable{ Ident: COPY Ident{ name: COPY fresh_heap_alloc, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: TRUE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL }), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
+    MUTABLE setup_mir: []Emittable = [Emittable{ Let: COPY Let{ name: COPY dupe_var, init: castCallToEmittable(COPY Call{ callee: "CheatLib.dupeCaptured", args: [Emittable{ TypeOf: COPY TypeOf{ expr: Emittable{ Ident: COPY source_mir }, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY source_mir }, Emittable{ Ident: COPY Ident{ name: COPY (fresh_heap_alloc OR_ELSE ""), lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: TRUE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL }), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
     IF needs_cleanup THEN
-      &setup_mir.append(Emittable{ ErrDeferStmt: COPY ErrDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY Call{ callee: "CheatLib.cleanup", args: [Emittable{ TypeOf: COPY TypeOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY dupe_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: COPY fresh_heap_alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY dupe_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+      &setup_mir.append(Emittable{ ErrDeferStmt: COPY ErrDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY Call{ callee: "CheatLib.cleanup", args: [Emittable{ TypeOf: COPY TypeOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY dupe_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: COPY (fresh_heap_alloc OR_ELSE ""), lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY dupe_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
   END
     MUTABLE cleanup_plan_branch_value: ?CaptureCleanupPlan = NIL;
     IF needs_cleanup THEN
@@ -149,16 +149,14 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE retain_var = "__fc_${fresh_heap_id.toString()}_${_}_retain";
     source_ref = (source_overrides[_] OR_ELSE _);
-    MUTABLE ti_branch_value: ?Type = NIL;
-    IF (captured[_] OR_ELSE panic("missing hash key")) IS_A Type THEN
-      ti_branch_value = (captured[_] OR_ELSE panic("missing hash key"));
-    ELSE
-      ti_branch_value = TRY (type__new((captured[_] OR_ELSE panic("missing hash key"))));
-    END
-  MUTABLE ti: Type = ti_branch_value?;
-    MUTABLE sym = analysis?.capture_symbols[_];
+    MUTABLE ti: Type = COPY (captured[_] OR_ELSE panic("missing hash key"));
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY analysis?.capture_symbols[_];
     MUTABLE atomic_ptr_capture = type__atomic_ptr?(ti);
-    MUTABLE shared_capture = ((atomic_ptr_capture OR type__shared?(ti)) OR ((sym != NIL) AND (sym.storage() == :shared)));
+    MUTABLE rtoc_sym_shared: Bool = FALSE;
+    IF sym EXISTS AS rtoc_shared_sym THEN
+      rtoc_sym_shared = (symbolEntry__storage(rtoc_shared_sym) == :shared);
+    END
+    MUTABLE shared_capture = ((atomic_ptr_capture OR type__shared?(ti)) OR rtoc_sym_shared);
     MUTABLE rc_kind =   IF atomic_ptr_capture THEN
       CaptureRcKind.AtomicPtr
     ELSE_IF shared_capture THEN
@@ -168,27 +166,21 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
     END;
     MUTABLE payload_type_zig = TRY (fiberCtxBuilder__rc_payload_zig_type(ti));
     MUTABLE retain_setup_mir: []Emittable = [Emittable{ Let: COPY Let{ name: COPY retain_var, init: castCallToEmittable(COPY Call{ callee: "CheatLib.${captureRcKind__retain_func(rc_kind)}", args: [Emittable{ Ident: COPY Ident{ name: COPY payload_type_zig, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(2)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL }), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }];
-    CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY retain_var, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: COPY retain_setup_mir, cleanup_plan: COPY CaptureCleanupPlan{ kind: COPY CaptureCleanupKind.RcRelease, mirror_type: COPY (TRY (type__new(castTypeToTypeConstructionInput__fiber_ctx_builder(ti)))).tap(%(t) USE(shared_capture) -> {
-    rtoc_lambda_result_9 = TRY (type__apply_reference_ownership_mut(&t, IF shared_capture THEN
+    MUTABLE rtoc_mirror_type: Type = TRY (type__new(castTypeToTypeConstructionInput__fiber_ctx_builder(ti)));
+    TRY (type__apply_reference_ownership_mut(&rtoc_mirror_type, IF shared_capture THEN
       :shared
     ELSE
       :multiowned
     END));
-    rtoc_lambda_result_9
-  }), rc_kind: COPY rc_kind, rc_payload_type_zig: COPY payload_type_zig } }
+    CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY retain_var, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: COPY retain_setup_mir, cleanup_plan: COPY CaptureCleanupPlan{ kind: COPY CaptureCleanupKind.RcRelease, mirror_type: COPY rtoc_mirror_type, rc_kind: COPY rc_kind, rc_payload_type_zig: COPY payload_type_zig } }
   }
     ELSE_IF ((strat != NIL) AND (strat IS_A MoveInto)) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
     source_ref = (source_overrides[_] OR_ELSE _);
+    MUTABLE cleanup_plan: CaptureCleanupPlan = captureCleanupPlan__none();
       IF TRY (fiberCtxBuilder__needs_move_capture_cleanup?((captured[_] OR_ELSE panic("missing hash key")), schema_lookup)) THEN
-      cleanup_plan = CaptureCleanupPlan{ kind: COPY CaptureCleanupKind.UniformValue, mirror_type: COPY TRY (type__new(castTypeToTypeConstructionInput__fiber_ctx_builder({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_10: ?Type = NIL;
-      IF (captured[_] OR_ELSE panic("missing hash key")) IS_A Type THEN
-        rtoc_ternary_value_10 = (captured[_] OR_ELSE panic("missing hash key"));
-      ELSE
-        rtoc_ternary_value_10 = TRY (type__new((captured[_] OR_ELSE panic("missing hash key"))));
-      END
-      rtoc_ternary_value_10? }))), rc_kind: NIL, rc_payload_type_zig: NIL };
+      cleanup_plan = CaptureCleanupPlan{ kind: COPY CaptureCleanupKind.UniformValue, mirror_type: COPY TRY (type__new(castTypeToTypeConstructionInput__fiber_ctx_builder((captured[_] OR_ELSE panic("missing hash key"))))), rc_kind: NIL, rc_payload_type_zig: NIL };
     ELSE
       cleanup_plan = captureCleanupPlan__none();
     END
@@ -198,12 +190,12 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
       {
     MUTABLE rtoc_value_block_marker = 0;
     source_ref = (source_overrides[_] OR_ELSE _);
-    sym = analysis?.capture_symbols[_];
-    (IF (IF sym != NIL THEN
-      symbolEntry__is_param(sym)
-    ELSE
-      NIL
-    END) THEN
+    sym = COPY analysis?.capture_symbols[_];
+    MUTABLE rtoc_sym_is_param: Bool = FALSE;
+    IF sym EXISTS AS rtoc_param_sym THEN
+      rtoc_sym_is_param = symbolEntry__is_param(rtoc_param_sym);
+    END
+    (IF rtoc_sym_is_param THEN
       CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_14: []Emittable = List[]; rtoc_empty_list_14 } ), cleanup_plan: COPY captureCleanupPlan__none() }
     ELSE
       CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(&${source_ref})", init_value_mir: Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_15: []Emittable = List[]; rtoc_empty_list_15 } ), cleanup_plan: COPY captureCleanupPlan__none() }
@@ -217,17 +209,14 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
   }
     END)
   };
-  MUTABLE map = captured.keys().to_h(%(n) USE(body_access_prefix) -> [n, "${body_access_prefix}.${n}"]);
+  MUTABLE map: {String}String = {};
+  FOR rtoc_capture_name IN captured.keys() DO
+    map[rtoc_capture_name] = "${body_access_prefix}.${rtoc_capture_name}";
+  END
   RETURN FiberCtxBuilderResult{ specs: COPY specs, capture_map: COPY map, capture_symbols: (analysis?.capture_symbols OR_ELSE {}) };
 END
 PUB FN fiberCtxBuilder__needs_move_capture_cleanup?(type_obj: ?Type, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Bool ->
-  MUTABLE ti_branch_value: ?Type = NIL;
-  IF TRUE THEN
-    ti_branch_value = COPY type_obj;
-  ELSE
-    ti_branch_value = TRY (type__new( (IF type_obj EXISTS AS rtoc_wrap_227 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_227 } ELSE NIL END)));
-  END
-  MUTABLE ti: Type = ti_branch_value?;
+  MUTABLE ti: Type = COPY UNWRAP (type_obj);
   IF ((((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) OR type__rodata?(ti)) OR type__borrowed_reference?(ti)) THEN
     RETURN FALSE;
   END
@@ -257,13 +246,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
 PUB FN fiberCtxBuilder__needs_capture_value_cleanup?(type_obj: ?Type, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, capture_symbol: ?SymbolEntry = NIL) RETURNS !Bool ->
-  MUTABLE ti_branch_value: ?Type = NIL;
-  IF TRUE THEN
-    ti_branch_value = COPY type_obj;
-  ELSE
-    ti_branch_value = TRY (type__new( (IF type_obj EXISTS AS rtoc_wrap_263 THEN TypeConstructionInput{ Type: COPY rtoc_wrap_263 } ELSE NIL END)));
-  END
-  MUTABLE ti: Type = ti_branch_value?;
+  MUTABLE ti: Type = COPY UNWRAP (type_obj);
   IF (((type__void?(ti) OR type__any?(ti)) OR type__rodata?(ti)) OR type__borrowed_reference?(ti)) THEN
     RETURN FALSE;
   END

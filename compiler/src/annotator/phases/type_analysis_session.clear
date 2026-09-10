@@ -20422,23 +20422,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         declared = COPY rtoc_lifetime_nodes;,
       END
     END
-    MUTABLE declared_names: []String = List[];
-    MUTABLE rtoc_declared_i = 0;
-    WHILE rtoc_declared_i < declared.length() DO
-      MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (declared[rtoc_declared_i]))));
-      IF path.first() EXISTS AS rtoc_path_root THEN
-        &declared_names.append(CAST(rtoc_path_root AS String));
-      END
-      rtoc_declared_i = rtoc_declared_i + 1;
-    END
-    MUTABLE source_names: []String = List[];
-    MUTABLE rtoc_source_i = 0;
-    WHILE rtoc_source_i < sources.length() DO
-      IF TRY (typeAnalysisSession__lookup_source_name(&rtoc_self_view, UNWRAP (sources[rtoc_source_i]))) EXISTS AS rtoc_source_name THEN
-        &source_names.append(COPY rtoc_source_name);
-      END
-      rtoc_source_i = rtoc_source_i + 1;
-    END
+    MUTABLE declared_names: []String = CAST((declared |> SELECT:? (TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(_)))).first() |> WHERE _ != NIL) AS []String);
+    MUTABLE source_names: []String = CAST((sources |> SELECT:? TRY (typeAnalysisSession__lookup_source_name(&rtoc_self_view, _)) |> WHERE _ != NIL) AS []String);
     MUTABLE matched = source_names |> ANY declared_names.contains?(_);
     IF matched THEN
       RETURN;
@@ -20617,10 +20602,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF ((if_statement.else_branch OR_ELSE List[])).last() EXISTS AS rtoc_else_tail THEN
           &tails.append(COPY rtoc_else_tail);
         END
-        IF (tails.length() != 2) THEN
-          RETURN FALSE;
-        END
-        RETURN TRY (typeAnalysisSession__init_tails_contents_heap?(&rtoc_self_view, tails));
+        RETURN ((tails.length() == 2) AND (tails |> ALL TRY (typeAnalysisSession__init_value_contents_heap?(&rtoc_self_view, _))));
       ELSE_IF init_value IS_A MatchStatement AS match_statement THEN
         MUTABLE tails: []Locatable = List[];
         MUTABLE rtoc_case_i = 0;
@@ -20635,10 +20617,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             &tails.append(COPY rtoc_default_tail);
           END
         END
-        IF tails.empty?() THEN
-          RETURN FALSE;
-        END
-        RETURN TRY (typeAnalysisSession__init_tails_contents_heap?(&rtoc_self_view, tails));
+        RETURN ((tails).any?() AND (tails |> ALL TRY (typeAnalysisSession__init_value_contents_heap?(&rtoc_self_view, _))));
       ELSE
         RETURN FALSE;
       END
@@ -20673,21 +20652,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 
-PRIVATE FN typeAnalysisSession__init_tails_contents_heap?(MUTABLE self: TypeAnalysisSession, tails: []Locatable) RETURNS !Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE rtoc_tail_i = 0;
-    WHILE rtoc_tail_i < tails.length() DO
-      IF !(TRY (typeAnalysisSession__init_value_contents_heap?(&rtoc_self_view, tails[rtoc_tail_i]))) THEN
-        RETURN FALSE;
-      END
-      rtoc_tail_i = rtoc_tail_i + 1;
-    END
-    RETURN TRUE;
-}
-END
 PRIVATE FN typeAnalysisSession__collect_bg_sources_in_expr(MUTABLE self: TypeAnalysisSession, expr: ?BgSourceWalkValue) RETURNS ![]SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
@@ -20708,19 +20672,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF expr EXISTS AS rtoc_expr THEN
       IF castBgSourceWalkValueToLocatable(rtoc_expr) EXISTS AS rtoc_node THEN
-        MUTABLE rtoc_child_sources: []SymbolEntry@multiowned = List[];
-        MUTABLE rtoc_children: []Locatable = locatable__child_nodes(rtoc_node);
-        MUTABLE rtoc_child_i = 0;
-        WHILE rtoc_child_i < rtoc_children.length() DO
-          MUTABLE rtoc_walked: []SymbolEntry@multiowned = TRY (typeAnalysisSession__collect_bg_sources_walk(&rtoc_self_view, castLocatableToBgSourceWalkValue(UNWRAP (rtoc_children[rtoc_child_i]))));
-          MUTABLE rtoc_walk_i = 0;
-          WHILE rtoc_walk_i < rtoc_walked.length() DO
-            &rtoc_child_sources.append(KEEP UNWRAP (rtoc_walked[rtoc_walk_i]));
-            rtoc_walk_i = rtoc_walk_i + 1;
-          END
-          rtoc_child_i = rtoc_child_i + 1;
-        END
-        RETURN rtoc_child_sources;
+        RETURN locatable__child_nodes(rtoc_node) |> UNNEST TRY (typeAnalysisSession__collect_bg_sources_walk(&rtoc_self_view, castLocatableToBgSourceWalkValue(_)));
       END
     END
     RETURN CAST(( { MUTABLE rtoc_empty_list_511: []SymbolEntry@multiowned = List[]; rtoc_empty_list_511 } ) AS []SymbolEntry@multiowned);
@@ -20815,15 +20767,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ClearParserReturnLifetime.ArrayValue AS rtoc_rl_items ->
       sources = COPY rtoc_rl_items;,
     END
-    MUTABLE rtoc_source_i = 0;
-    WHILE rtoc_source_i < sources.length() DO
-      MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (sources[rtoc_source_i]))));
-      IF !((path.length() == 0)) THEN
-        &rtoc_paths.append(TypeAnalysisSessionReturnValueItem{ StringValue: COPY path.join(".") });
-      END
-      rtoc_source_i = rtoc_source_i + 1;
-    END
-    RETURN rtoc_paths;
+    RETURN CAST((sources |> SELECT:? { MUTABLE rtoc_path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(_)));
+      (IF !((rtoc_path.length() == 0)) THEN TypeAnalysisSessionReturnValueItem{ StringValue: COPY rtoc_path.join(".") } ELSE NIL END) } |> WHERE _ != NIL) AS []TypeAnalysisSessionReturnValueItem);
 }
 END
 PRIVATE FN typeAnalysisSession__get_lifetime_path(MUTABLE self: TypeAnalysisSession, func_node: FunctionDef) RETURNS !?String

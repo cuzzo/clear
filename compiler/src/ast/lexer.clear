@@ -485,7 +485,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ch == NIL THEN
         BREAK;
       END
-      ch_present: String = (ch OR_ELSE "");
+      ch_present: String = COPY ch;
       IF (state == :comment) THEN
         content = (content $+ COPY ch_present);
         lexer__advance_pos(&rtoc_self_view, COPY ch_present);

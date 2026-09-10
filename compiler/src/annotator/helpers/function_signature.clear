@@ -324,6 +324,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN functionSignature__requires(self: FunctionSignature) RETURNS !{String}[Set]String@symbol
+  REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -554,6 +555,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN functionSignature__intrinsic_suspends?(self: FunctionSignature) RETURNS !Bool
+  REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).suspends;
