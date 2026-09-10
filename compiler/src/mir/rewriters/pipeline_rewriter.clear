@@ -1364,7 +1364,7 @@ FN castOptionalLookupResultToOptionalX__pipeline_rewriter(value: ?LookupResult) 
   IF value == NIL THEN
     panic("Invalid cast to ?X");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     LookupResult.FunctionSignatureMultiowned AS cast_payload -> RETURN X{ FunctionSignatureMultiowned: COPY cast_payload };,
     LookupResult.ArrayValue AS cast_payload -> RETURN X{ ArrayValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to ?X");

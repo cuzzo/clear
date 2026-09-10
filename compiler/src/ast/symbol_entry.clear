@@ -1039,7 +1039,7 @@ FN castOptionalSymbolEntryLifetimeInputToSymbolEntryLifetimeSourceInput(value: ?
   IF value == NIL THEN
     panic("Invalid cast to SymbolEntryLifetimeSourceInput");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     SymbolEntryLifetimeInput.SymbolValue AS cast_payload -> RETURN SymbolEntryLifetimeSourceInput{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to SymbolEntryLifetimeSourceInput");
   END

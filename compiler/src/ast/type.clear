@@ -4896,7 +4896,7 @@ FN castOptionalSchemasUnionSchemaVariantValueToTypeTypeInput(value: ?SchemasUnio
   IF value == NIL THEN
     panic("Invalid cast to TypeTypeInput");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     SchemasUnionSchemaVariantValue.FunctionType AS cast_payload -> RETURN TypeTypeInput{ FunctionType: COPY cast_payload };,
     SchemasUnionSchemaVariantValue.Type AS cast_payload -> RETURN TypeTypeInput{ Type: COPY cast_payload };,
     SchemasUnionSchemaVariantValue.SymbolValue AS cast_payload -> RETURN TypeTypeInput{ SymbolValue: COPY cast_payload };,
@@ -4925,7 +4925,7 @@ FN castOptionalTypeArrayCapacityToTypeExpressionDimension(value: ?TypeArrayCapac
   IF value == NIL THEN
     panic("Invalid cast to TypeExpressionDimension");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     TypeArrayCapacity.Int64Value AS cast_payload -> RETURN TypeExpressionDimension{ Int64Value: COPY cast_payload };,
     TypeArrayCapacity.SymbolValue AS cast_payload -> RETURN TypeExpressionDimension{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to TypeExpressionDimension");
@@ -4944,7 +4944,7 @@ FN castOptionalTypeExpressionDimensionToOptionalTypeArrayCapacity(value: ?TypeEx
   IF value == NIL THEN
     panic("Invalid cast to ?TypeArrayCapacity");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     TypeExpressionDimension.Int64Value AS cast_payload -> RETURN TypeArrayCapacity{ Int64Value: COPY cast_payload };,
     TypeExpressionDimension.SymbolValue AS cast_payload -> RETURN TypeArrayCapacity{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to ?TypeArrayCapacity");

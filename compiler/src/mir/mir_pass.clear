@@ -889,7 +889,7 @@ FN castOptionalLocatableToBgNode(value: ?Locatable) RETURNS BgNode ->
   IF value == NIL THEN
     panic("Invalid cast to BgNode");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     Locatable.BgStreamBlock AS cast_payload -> RETURN BgNode{ BgStreamBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to BgNode");
   END
@@ -899,7 +899,7 @@ FN castOptionalSymbolEntryRegInputToOptionalLocatable(value: ?SymbolEntryRegInpu
   IF value == NIL THEN
     panic("Invalid cast to ?Locatable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     SymbolEntryRegInput.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     SymbolEntryRegInput.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
     SymbolEntryRegInput.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,

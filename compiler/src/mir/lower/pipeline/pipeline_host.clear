@@ -1398,7 +1398,7 @@ FN castOptionalPipelineEachResultToOptionalPipelineLoweringResult(value: ?Pipeli
   IF value == NIL THEN
     panic("Invalid cast to ?PipelineLoweringResult");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     PipelineEachResult.ForStmt AS cast_payload -> RETURN PipelineLoweringResult{ ForStmt: COPY cast_payload };,
     PipelineEachResult.ScopeBlock AS cast_payload -> RETURN PipelineLoweringResult{ ScopeBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to ?PipelineLoweringResult");
@@ -1409,7 +1409,7 @@ FN castOptionalPipelineEachResultToPipelineConcurrentResult(value: ?PipelineEach
   IF value == NIL THEN
     panic("Invalid cast to PipelineConcurrentResult");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     PipelineEachResult.ForStmt AS cast_payload -> RETURN PipelineConcurrentResult{ ForStmt: COPY cast_payload };,
     PipelineEachResult.ScopeBlock AS cast_payload -> RETURN PipelineConcurrentResult{ ScopeBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to PipelineConcurrentResult");
@@ -1420,7 +1420,7 @@ FN castOptionalPipelineLoweringResultToPromises(value: ?PipelineLoweringResult) 
   IF value == NIL THEN
     panic("Invalid cast to Promises");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     PipelineLoweringResult.MIRBgBlock AS cast_payload -> RETURN Promises{ MIRBgBlock: COPY cast_payload };,
     PipelineLoweringResult.MIRBlockExpr AS cast_payload -> RETURN Promises{ MIRBlockExpr: COPY cast_payload };,
     PipelineLoweringResult.ForStmt AS cast_payload -> RETURN Promises{ ForStmt: COPY cast_payload };,

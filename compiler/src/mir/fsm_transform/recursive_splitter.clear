@@ -870,7 +870,7 @@ FN castOptionalSegmentStmtToLocatable(value: ?SegmentStmt) RETURNS Locatable ->
   IF value == NIL THEN
     panic("Invalid cast to Locatable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     SegmentStmt.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
     SegmentStmt.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     SegmentStmt.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

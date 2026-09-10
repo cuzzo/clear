@@ -163,7 +163,7 @@ PRIVATE FN emit__ordered_fsm_destroy_actions(ctx: FsmEmitContext) RETURNS ![]Fsm
   }) |> SELECT _.first();
 END
 PUB FN emit__fsm_destroy_cleanup_names(actions: []FsmDestroyAction) RETURNS ![]String ->
-  RETURN CAST(((actions |> SELECT:? fsmDestroyAction__cleanup_name(_) |> WHERE _ != NIL) |> DISTINCT _) AS []String);
+  RETURN (actions |> SELECT:? fsmDestroyAction__cleanup_name(_) |> WHERE _ != NIL).compact() |> DISTINCT _ |> SELECT COPY _;
 END
 PRIVATE FN emit__tail_resume_target(tail: SegmentTail) RETURNS ?Int64 ->
   IF tail IS_A IoSuspend AS io_suspend THEN
@@ -287,7 +287,7 @@ PRIVATE FN emit__decimal_digits?(value: String) RETURNS Bool ->
   RETURN value.each_char() |> ALL ((_ >= "0") AND (_ <= "9"));
 END
 PRIVATE FN emit__collect_ctx_field_reads(nodes: []Emittable, id: Int64) RETURNS ![]String ->
-  RETURN CAST(((nodes |> SELECT:? emit__ctx_field_name(_, id) |> WHERE _ != NIL) |> DISTINCT _) AS []String);
+  RETURN (nodes |> SELECT:? emit__ctx_field_name(_, id) |> WHERE _ != NIL).compact() |> DISTINCT _ |> SELECT COPY _;
 END
 PRIVATE FN emit__collect_fsm_nodes(roots: []Emittable) RETURNS ![]Emittable ->
   MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_10: []Emittable = List[]; rtoc_empty_list_10 } );

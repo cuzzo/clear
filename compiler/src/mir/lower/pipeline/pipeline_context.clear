@@ -895,7 +895,7 @@ FN castOptionalPipelineRewriteNodeToLocatable(value: ?PipelineRewriteNode) RETUR
   IF value == NIL THEN
     panic("Invalid cast to Locatable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     PipelineRewriteNode.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     PipelineRewriteNode.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
     PipelineRewriteNode.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,

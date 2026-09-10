@@ -22371,7 +22371,7 @@ FN castOptionalLocatableToLocatable(value: ?Locatable) RETURNS Locatable ->
   IF value == NIL THEN
     panic("Invalid cast to Locatable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
     Locatable.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
@@ -22489,7 +22489,7 @@ FN castOptionalLocatableToMIRLoweringLowerableStmt(value: ?Locatable) RETURNS MI
   IF value == NIL THEN
     panic("Invalid cast to MIRLoweringLowerableStmt");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN MIRLoweringLowerableStmt{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ProtocolRequirement: COPY cast_payload };,
     Locatable.ProtocolDef AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ProtocolDef: COPY cast_payload };,
@@ -22607,7 +22607,7 @@ FN castOptionalLookupResultToOptionalX__mir_lowering(value: ?LookupResult) RETUR
   IF value == NIL THEN
     panic("Invalid cast to ?X");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     LookupResult.FunctionSignatureMultiowned AS cast_payload -> RETURN X{ FunctionSignatureMultiowned: COPY cast_payload };,
     LookupResult.ArrayValue AS cast_payload -> RETURN X{ ArrayValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to ?X");
@@ -22626,7 +22626,7 @@ FN castOptionalMIRLoweringUnionVariantPayloadToOptionalSchemasUnionSchemaVariant
   IF value == NIL THEN
     panic("Invalid cast to ?SchemasUnionSchemaVariantValue");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     MIRLoweringUnionVariantPayload.FunctionType AS cast_payload -> RETURN SchemasUnionSchemaVariantValue{ FunctionType: COPY cast_payload };,
     MIRLoweringUnionVariantPayload.SymbolValue AS cast_payload -> RETURN SchemasUnionSchemaVariantValue{ SymbolValue: COPY cast_payload };,
     MIRLoweringUnionVariantPayload.StringValue AS cast_payload -> RETURN SchemasUnionSchemaVariantValue{ StringValue: COPY cast_payload };,
@@ -22640,7 +22640,7 @@ FN castOptionalPipelineLoweringResultToOptionalEmittable(value: ?PipelineLowerin
   IF value == NIL THEN
     panic("Invalid cast to ?Emittable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     PipelineLoweringResult.MIRBgBlock AS cast_payload -> RETURN Emittable{ MIRBgBlock: COPY cast_payload };,
     PipelineLoweringResult.MIRBlockExpr AS cast_payload -> RETURN Emittable{ MIRBlockExpr: COPY cast_payload };,
     PipelineLoweringResult.ForStmt AS cast_payload -> RETURN Emittable{ ForStmt: COPY cast_payload };,
@@ -22662,7 +22662,7 @@ FN castOptionalStructLitFieldTypeToOptionalTypeTypeInput(value: ?StructLitFieldT
   IF value == NIL THEN
     panic("Invalid cast to ?TypeTypeInput");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     StructLitFieldType.FunctionType AS cast_payload -> RETURN TypeTypeInput{ FunctionType: COPY cast_payload };,
     StructLitFieldType.SymbolValue AS cast_payload -> RETURN TypeTypeInput{ SymbolValue: COPY cast_payload };,
     StructLitFieldType.StringValue AS cast_payload -> RETURN TypeTypeInput{ StringValue: COPY cast_payload };,
@@ -22674,7 +22674,7 @@ FN castOptionalStructLitFieldTypeToTypeTypeInput(value: ?StructLitFieldType) RET
   IF value == NIL THEN
     panic("Invalid cast to TypeTypeInput");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     StructLitFieldType.FunctionType AS cast_payload -> RETURN TypeTypeInput{ FunctionType: COPY cast_payload };,
     StructLitFieldType.SymbolValue AS cast_payload -> RETURN TypeTypeInput{ SymbolValue: COPY cast_payload };,
     StructLitFieldType.StringValue AS cast_payload -> RETURN TypeTypeInput{ StringValue: COPY cast_payload };,

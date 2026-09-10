@@ -4641,7 +4641,7 @@ FN castOptionalMIRReturnValueToName(value: ?MIRReturnValue) RETURNS Name ->
   IF value == NIL THEN
     panic("Invalid cast to Name");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     MIRReturnValue.StringValue AS cast_payload -> RETURN Name{ StringValue: COPY cast_payload };,
     MIRReturnValue.SymbolValue AS cast_payload -> RETURN Name{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to Name");

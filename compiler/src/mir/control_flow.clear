@@ -2590,7 +2590,7 @@ FN castOptionalNodeToOptionalLocatable(value: ?Node) RETURNS ?Locatable ->
   IF value == NIL THEN
     panic("Invalid cast to ?Locatable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
     Node.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
@@ -2708,7 +2708,7 @@ FN castOptionalStmtToLocatable(value: ?Stmt) RETURNS Locatable ->
   IF value == NIL THEN
     panic("Invalid cast to Locatable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
@@ -2717,7 +2717,7 @@ FN castOptionalStmtToLoopNode(value: ?Stmt) RETURNS LoopNode ->
   IF value == NIL THEN
     panic("Invalid cast to LoopNode");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to LoopNode");
   END
   panic("Invalid cast to LoopNode");

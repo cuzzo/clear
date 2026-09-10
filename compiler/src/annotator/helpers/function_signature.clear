@@ -761,7 +761,7 @@ FN castOptionalIntrinsicEmitStrOrSymToOptionalFunctionSignatureReturnValue(value
   IF value == NIL THEN
     panic("Invalid cast to ?FunctionSignatureReturnValue");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     IntrinsicEmitStrOrSym.StringValue AS cast_payload -> RETURN FunctionSignatureReturnValue{ StringValue: COPY cast_payload };,
     IntrinsicEmitStrOrSym.SymbolValue AS cast_payload -> RETURN FunctionSignatureReturnValue{ SymbolValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to ?FunctionSignatureReturnValue");
@@ -786,25 +786,30 @@ END
 PUB FN functionSignature__sync_from_function_def_mut(MUTABLE self: FunctionSignature, fn: FunctionSignatureSyncSource) RETURNS !Void
   REQUIRES self: LOCAL
 ->
-  MUTABLE source: ?FunctionDef@multiowned = NIL;
   PARTIAL MATCH fn START
-    FunctionSignatureSyncSource.FunctionDefMultiowned AS rtoc_owned -> source = rtoc_owned;,
-    FunctionSignatureSyncSource.FunctionDef AS rtoc_plain -> source = rtoc_plain @multiowned;,
-    DEFAULT -> source = NIL;
+    FunctionSignatureSyncSource.FunctionDefMultiowned AS rtoc_owned -> RETURN TRY (functionSignature__sync_from_definition_mut(&self, rtoc_owned));,
+    FunctionSignatureSyncSource.FunctionDef AS rtoc_plain -> RETURN TRY (functionSignature__sync_from_definition_mut(&self, rtoc_plain));,
+    DEFAULT -> RETURN;
   END
-  IF source EXISTS AS rtoc_fn THEN
-    self.facts.needs_rt = rtoc_fn.needs_rt;
-    self.facts.can_fail = rtoc_fn.can_fail;
-    self.facts.alloc_fault = rtoc_fn.alloc_fault;
-    self.facts.error_fallible = rtoc_fn.error_fallible;
-    self.facts.effects = COPY rtoc_fn.effects;
-    TRY (functionSignature__replace_requires_storage_mut(&self, rtoc_fn.requires));
-    IF rtoc_fn.return_type EXISTS AS rtoc_declared THEN
-      self.contract.return_type = TRY (functionSignature__coerce_return_type(self, TypeTypeInput{ Type: COPY rtoc_declared }));
-    END
-    self.facts.stack_tier = rtoc_fn.stack_tier;
-    self.facts.heap_carry_return = rtoc_fn.heap_carry_return;
+  RETURN;
+END
+
+# Ruby reads the definition's fields straight off `fn`; the union arms differ
+# only in the carrier, so both hand the same borrowed definition to one body.
+PRIVATE FN functionSignature__sync_from_definition_mut(MUTABLE self: FunctionSignature, rtoc_fn: FunctionDef) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+  self.facts.needs_rt = rtoc_fn.needs_rt;
+  self.facts.can_fail = rtoc_fn.can_fail;
+  self.facts.alloc_fault = rtoc_fn.alloc_fault;
+  self.facts.error_fallible = rtoc_fn.error_fallible;
+  self.facts.effects = COPY rtoc_fn.effects;
+  TRY (functionSignature__replace_requires_storage_mut(&self, rtoc_fn.requires));
+  IF rtoc_fn.return_type EXISTS AS rtoc_declared THEN
+    self.contract.return_type = TRY (functionSignature__coerce_return_type(self, TypeTypeInput{ Type: COPY rtoc_declared }));
   END
+  self.facts.stack_tier = rtoc_fn.stack_tier;
+  self.facts.heap_carry_return = rtoc_fn.heap_carry_return;
   RETURN;
 END
 

@@ -243,7 +243,7 @@ FN castOptionalTransformValueToEmittable(value: ?TransformValue) RETURNS Emittab
   IF value == NIL THEN
     panic("Invalid cast to Emittable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Emittable");
   END
   panic("Invalid cast to Emittable");

@@ -11006,7 +11006,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(node.lock_error_clause) THEN
       RETURN;
     END
-    MUTABLE cap_types = CAST(((lock_capabilities |> SELECT:? capabilityTransition__lock_identity(_) |> WHERE _ != NIL) |> SELECT UNWRAP (_)) AS []String@symbol);
+    MUTABLE cap_types: []String@symbol = (lock_capabilities |> SELECT:? capabilityTransition__lock_identity(_) |> WHERE _ != NIL).compact();
     &rtoc_self_view.audit_inputs.lock_analysis.clause_sites.append(COPY LockClauseSite{ node: COPY node, cap_types: COPY cap_types });
     NIL;
 }
@@ -20422,8 +20422,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         declared = COPY rtoc_lifetime_nodes;,
       END
     END
-    MUTABLE declared_names: []String = CAST((declared |> SELECT:? (TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(_)))).first() |> WHERE _ != NIL) AS []String);
-    MUTABLE source_names: []String = CAST((sources |> SELECT:? TRY (typeAnalysisSession__lookup_source_name(&rtoc_self_view, _)) |> WHERE _ != NIL) AS []String);
+    MUTABLE declared_names: []String = declared |> UNNEST { MUTABLE rtoc_declared_path: []String@symbol = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(_)));
+      MUTABLE rtoc_declared_root: []String = List[];
+      IF !((rtoc_declared_path.length() == 0)) THEN
+        &rtoc_declared_root.append(CAST(COPY UNWRAP (rtoc_declared_path.first()) AS String));
+      END
+      rtoc_declared_root };
+    MUTABLE source_names: []String = (sources |> SELECT:? TRY (typeAnalysisSession__lookup_source_name(&rtoc_self_view, _)) |> WHERE _ != NIL).compact();
     MUTABLE matched = source_names |> ANY declared_names.contains?(_);
     IF matched THEN
       RETURN;
@@ -20767,8 +20772,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ClearParserReturnLifetime.ArrayValue AS rtoc_rl_items ->
       sources = COPY rtoc_rl_items;,
     END
-    RETURN CAST((sources |> SELECT:? { MUTABLE rtoc_path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(_)));
-      (IF !((rtoc_path.length() == 0)) THEN TypeAnalysisSessionReturnValueItem{ StringValue: COPY rtoc_path.join(".") } ELSE NIL END) } |> WHERE _ != NIL) AS []TypeAnalysisSessionReturnValueItem);
+    RETURN (sources |> SELECT:? { MUTABLE rtoc_path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(_)));
+      (IF !((rtoc_path.length() == 0)) THEN TypeAnalysisSessionReturnValueItem{ StringValue: COPY rtoc_path.join(".") } ELSE NIL END) } |> WHERE _ != NIL).compact();
 }
 END
 PRIVATE FN typeAnalysisSession__get_lifetime_path(MUTABLE self: TypeAnalysisSession, func_node: FunctionDef) RETURNS !?String
