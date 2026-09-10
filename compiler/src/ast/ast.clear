@@ -19255,7 +19255,7 @@ END
 # Ruby asks `respond_to?(:async_result_shape)` and then reads it. A union variant
 # either carries the field or it does not, so the question is answered here:
 # the variants that have it return it, the rest return NIL.
-PUB FN locatable__async_result_shape(value: Locatable) RETURNS ?String@symbol ->
+PUB FN locatable__async_result_shape(value: Locatable) RETURNS ?AsyncResultShape ->
   PARTIAL MATCH value START
     Locatable.BgBlock AS item -> RETURN COPY item.async_result_shape;,
     DEFAULT -> RETURN NIL;
@@ -20005,4 +20005,107 @@ PUB FN castClearParserConcurrentPipelineOpToLocatable(value: ClearParserConcurre
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
+END
+
+# Ruby: Locatable#coerce! (and the ListLit / TupleLit overrides). Resolves the
+# final type of a declaration's value against its declared type, returning the
+# type and, when the coercion is illegal, the reason.
+PUB STRUCT CoerceOutcome {
+  type: ?Type,
+  error: ?String
+}
+
+PUB FN aST__coerce_mut(MUTABLE node: Locatable, declared_type: ?Type) RETURNS !CoerceOutcome
+  EFFECTS REENTRANT
+->
+  MUTABLE declared_any: Bool = TRUE;
+  IF declared_type EXISTS AS rtoc_declared THEN
+    declared_any = (type__resolved(rtoc_declared) == :Any);
+  END
+
+  # A tuple target coerces element by element; arity is part of the type.
+  IF ((node IS_A TupleLit) AND !(declared_any)) THEN
+    MUTABLE rtoc_target: Type = COPY UNWRAP (declared_type);
+    IF type__tuple?(rtoc_target) THEN
+      RETURN TRY (aST__coerce_tuple_mut(&node, rtoc_target));
+    END
+  END
+
+  MUTABLE rtoc_base: CoerceOutcome = TRY (aST__coerce_base_mut(&node, declared_type));
+  IF rtoc_base.error != NIL THEN
+    RETURN rtoc_base;
+  END
+
+  # A coerced container passes its element type down: reducing to `resolved`
+  # would turn a `T@multiowned[]` literal into a request to cast Rc(T) back to
+  # plain T after construction.
+  IF node IS_A ListLit THEN
+    IF rtoc_base.type EXISTS AS rtoc_res THEN
+      MUTABLE rtoc_elem: ?Type = TRY (type__element_type(rtoc_res));
+      IF rtoc_elem EXISTS AS rtoc_elem_value THEN
+        MATCH node START
+          Locatable.ListLit AS MUTABLE rtoc_lit ->
+            FOR MUTABLE rtoc_item IN rtoc_lit.items DO
+              TRY (aST__coerce_mut(&rtoc_item, COPY rtoc_elem_value));
+            END,
+          DEFAULT -> NIL;
+        END
+      END
+    END
+  END
+  RETURN rtoc_base;
+END
+
+PRIVATE FN aST__coerce_tuple_mut(MUTABLE node: Locatable, target: Type) RETURNS !CoerceOutcome
+  EFFECTS REENTRANT
+->
+  MUTABLE rtoc_args: []Type = TRY (type__generic_args(target));
+  MUTABLE rtoc_items: []Locatable = COPY (locatable__items(node) OR_ELSE List[]);
+  IF (rtoc_args.length() != rtoc_items.length()) THEN
+    RETURN CoerceOutcome{ type: NIL, error: COPY "Tuple arity mismatch: expected ${rtoc_args.length().toString()}, got ${rtoc_items.length().toString()}" };
+  END
+  MUTABLE rtoc_error: ?String = NIL;
+  MATCH node START
+    Locatable.TupleLit AS MUTABLE rtoc_lit ->
+      MUTABLE rtoc_idx = 0;
+      WHILE rtoc_idx < rtoc_lit.items.length() DO
+        IF rtoc_lit.items[rtoc_idx] EXISTS AS MUTABLE rtoc_item THEN
+          MUTABLE rtoc_sub: CoerceOutcome = TRY (aST__coerce_mut(&rtoc_item, COPY rtoc_args[rtoc_idx]));
+          IF rtoc_sub.error EXISTS AS rtoc_sub_error THEN
+            rtoc_error = COPY rtoc_sub_error;
+          END
+        END
+        rtoc_idx = rtoc_idx + 1;
+      END,
+    DEFAULT -> NIL;
+  END
+  IF rtoc_error EXISTS AS rtoc_error_value THEN
+    RETURN CoerceOutcome{ type: NIL, error: COPY rtoc_error_value };
+  END
+  locatable__set_coerced_type_object_mut(&node, COPY target);
+  RETURN CoerceOutcome{ type: COPY target, error: NIL };
+END
+
+PRIVATE FN aST__coerce_base_mut(MUTABLE node: Locatable, declared_type: ?Type) RETURNS !CoerceOutcome ->
+  MUTABLE rtoc_type_obj: ?Type = locatable__type_object(node);
+  MUTABLE declared_any: Bool = TRUE;
+  IF declared_type EXISTS AS rtoc_declared THEN
+    declared_any = (type__resolved(rtoc_declared) == :Any);
+  END
+
+  # An inferred value already owns the authoritative semantic Type; flattening
+  # it to `resolved` would lose collection topology and element capabilities.
+  IF declared_any THEN
+    RETURN CoerceOutcome{ type: COPY rtoc_type_obj, error: NIL };
+  END
+
+  MUTABLE rtoc_declared_type: Type = COPY UNWRAP (declared_type);
+  IF rtoc_type_obj EXISTS AS rtoc_source THEN
+    MUTABLE rtoc_error: ?String = TRY (type__coerce_error(rtoc_source, TypeTypeInput{ Type: COPY rtoc_declared_type }));
+    IF rtoc_error EXISTS AS rtoc_error_value THEN
+      RETURN CoerceOutcome{ type: NIL, error: COPY rtoc_error_value };
+    END
+  END
+  locatable__set_coerced_type_object_mut(&node, COPY rtoc_declared_type);
+  RETURN CoerceOutcome{ type: COPY rtoc_declared_type, error: NIL };
 END

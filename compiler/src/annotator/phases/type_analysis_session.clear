@@ -14558,9 +14558,9 @@ PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE value = UNWRAP (declarationNode__value(node));
-    TRY (typeAnalysisSession__verify_unrestricted_mut(&rtoc_self_view, castDeclarationNodeToNode(node)));
-    TRY (typeAnalysisSession__handle_assign_move(&rtoc_self_view, castDeclarationNodeToNode(node)));
-    TRY (typeAnalysisSession__handle_assign_borrow(&rtoc_self_view, castDeclarationNodeToNode(node)));
+    TRY (typeAnalysisSession__verify_unrestricted_mut(&rtoc_self_view, UNWRAP (castDeclarationNodeToNode(node))));
+    TRY (typeAnalysisSession__handle_assign_move(&rtoc_self_view, UNWRAP (castDeclarationNodeToNode(node))));
+    TRY (typeAnalysisSession__handle_assign_borrow(&rtoc_self_view, UNWRAP (castDeclarationNodeToNode(node))));
     MUTABLE declared_type: ?Type = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
@@ -14581,8 +14581,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(TRY (typeAnalysisSession__validate_observable_binding_initializer_mut(&rtoc_self_view, &node))) THEN
       RETURN;
     END
-    MUTABLE final_type, error = &value.coerce_mut(declarationNode__type(node));
-    IF error THEN
+    MUTABLE rtoc_coerced: CoerceOutcome = TRY (aST__coerce_mut(&value, declarationNode__type(node)));
+    MUTABLE final_type: ?Type = COPY rtoc_coerced.type;
+    MUTABLE error: ?String = COPY rtoc_coerced.error;
+    IF error != NIL THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_COERCION_FAILED }, [], CAST({:detail: error} AS {String@symbol}Any)));
     END
     IF (value IS_A CapabilityWrap AND (((locatable__ownership(value) OR locatable__sync(value)) OR locatable__layout(value)))) THEN
@@ -14595,50 +14597,51 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE capability_target: Type = capability_target_branch_value?;
       TRY (type__merge_capabilities_from_mut(&capability_target, TRY (aST__full_type_mut(value))));
       locatable__set_coerced_type_object_mut(&value, capability_target);
-      final_type = capability_target;
+      final_type = COPY capability_target;
     END
     IF aST__empty_auto_collection_literal_decl?(UNWRAP (castDeclarationNodeToOptionalLocatable(node))) THEN
       final_type = locatable__type_object(value);
     END
-    TRY (typeAnalysisSession__check_prefixed_int_range_mut(&rtoc_self_view, value, (value.coerced_type_info() OR final_type)));
-    TRY (typeAnalysisSession__propagate_declared_type_to_value_mut(&rtoc_self_view, node, castTypeToAnnotationTypeShape(final_type)));
-    MUTABLE storage = TRY (typeAnalysisSession__finalize_decl_storage_mut(&rtoc_self_view, castDeclarationNodeToAllocDeclarationNode(node), castTypeToFinalType(final_type)));
-    TRY (typeAnalysisSession__propagate_collection_metadata_mut(&rtoc_self_view, &node, castTypeToAnnotationTypeShape(final_type)));
+    MUTABLE rtoc_final: Type = COPY (final_type OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })));
+    TRY (typeAnalysisSession__check_prefixed_int_range_mut(&rtoc_self_view, value, TypeTypeInput{ Type: COPY (locatable__coerced_type_info(value) OR_ELSE COPY rtoc_final) }));
+    TRY (typeAnalysisSession__propagate_declared_type_to_value_mut(&rtoc_self_view, node, castTypeToAnnotationTypeShape(COPY rtoc_final)));
+    MUTABLE storage = TRY (typeAnalysisSession__finalize_decl_storage_mut(&rtoc_self_view, castDeclarationNodeToAllocDeclarationNode(node), castTypeToFinalType(COPY rtoc_final)));
+    TRY (typeAnalysisSession__propagate_collection_metadata_mut(&rtoc_self_view, &node, castTypeToAnnotationTypeShape(COPY rtoc_final)));
     typeAnalysisSession__propagate_call_flags_mut(&rtoc_self_view, castDeclarationNodeToAnnotationNode(node));
-    TRY (typeAnalysisSession__set_cleanup_alloc_mut(&rtoc_self_view, castDeclarationNodeToNode(node)));
+    TRY (typeAnalysisSession__set_cleanup_alloc_mut(&rtoc_self_view, UNWRAP (castDeclarationNodeToNode(node))));
     MUTABLE resource_result = TRY (typeAnalysisSession__resolve_resource_close(&rtoc_self_view, UNWRAP (castDeclarationNodeToLocatable(node))));
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         MUTABLE item_mutable = COPY item;
-        item_mutable.resource_close_plan = COPY KEEP resource_result.close_plan;
+        item_mutable.resource_close_plan = COPY resource_result.close_plan;
         MUTABLE node = DeclarationNode{ VarDecl: item_mutable };,
       DeclarationNode.BindExpr AS item ->
         MUTABLE item_mutable = COPY item;
-        item_mutable.resource_close_plan = COPY KEEP resource_result.close_plan;
+        item_mutable.resource_close_plan = COPY resource_result.close_plan;
         MUTABLE node = DeclarationNode{ BindExpr: item_mutable };,
     END
-    MUTABLE node_type = TRY (aST__full_type_mut(node));
+    MUTABLE node_type = TRY (aST__full_type_mut(UNWRAP (castDeclarationNodeToLocatable(node))));
     IF (resource_result.is_resource AND TRUE) THEN
       node_type.is_resource = TRUE;
     END
-    TRY (capabilities__validate_mut(castDeclarationNodeToLocatable(node), node_type, %(n, msg) USE(MUTABLE rtoc_self_view, MUTABLE storage, MUTABLE node_type) -> {
+    TRY (capabilities__validate_mut(UNWRAP (castDeclarationNodeToLocatable(node)), node_type, %(n, msg) USE(MUTABLE rtoc_self_view, MUTABLE storage, MUTABLE node_type) -> {
     TRY (typeAnalysisSession__error_mut(&rtoc_self_view, n, TypeAnalysisCodeOrMessage{ SymbolValue: :CAPABILITY_INVALID }, [], CAST({:detail: msg} AS {String@symbol}Any)));
     rubyToClearVoid__type_analysis_session()
     }));
-    MUTABLE node_sync = node_type.sync();
-    MUTABLE node_layout = node_type.layout();
+    MUTABLE node_sync: ?String@symbol = type__sync(node_type);
+    MUTABLE node_layout: ?String@symbol = type__layout(node_type);
     MUTABLE scope_type_branch_value: ?Type = NIL;
     IF TRY (type__collection_value?(node_type)) THEN
-      MUTABLE ft = TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(final_type)));
+      MUTABLE ft = TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(COPY rtoc_final)));
       TRY (type__copy_collection_shape_from_mut(&ft, node_type));
       TRY (type__copy_element_capabilities_from_mut(&ft, node_type));
       scope_type_branch_value = ft;
     ELSE
-      scope_type_branch_value = final_type;
+      scope_type_branch_value = COPY rtoc_final;
     END
     MUTABLE scope_type: Type = scope_type_branch_value?;
     MUTABLE rtoc_mutable_receiver_368 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_368, UNWRAP (declarationNode__name(node)), castDeclarationNodeToOptionalSymbolEntryRegInput(node), castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(scope_type), ScopeMutabilityInput{ BoolValue: mutable_flag }, FALSE, declarationNode__slot_size(node), storage, Set[], ( { MUTABLE rtoc_empty_list_367: []SymbolEntry@multiowned = List[]; rtoc_empty_list_367 } ), node_sync, node_layout, resource_result.is_resource, KEEP resource_result.close_plan));
+    TRY (scope__declare(&rtoc_mutable_receiver_368, UNWRAP (declarationNode__name(node)), castDeclarationNodeToOptionalSymbolEntryRegInput(node), castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(scope_type), ScopeMutabilityInput{ BoolValue: mutable_flag }, FALSE, declarationNode__slot_size(node), storage, Set[], ( { MUTABLE rtoc_empty_list_367: []SymbolEntry@multiowned = List[]; rtoc_empty_list_367 } ), node_sync, node_layout, resource_result.is_resource, COPY resource_result.close_plan));
     typeAnalysisSession__record_capture_local_mut(&rtoc_self_view, (MATCH node START DeclarationNode.VarDecl AS item -> CAST(item.name AS String), DeclarationNode.BindExpr AS item -> CAST(item.name AS String) END));
     MATCH node START
       DeclarationNode.VarDecl AS item ->
@@ -14654,38 +14657,36 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE sym = UNWRAP (declarationNode__symbol(node));
     IF value IS_A BgBlock THEN
-      symbolEntry__set_async_result_shape(&sym, value.async_result_shape());
+      symbolEntry__set_async_result_shape(&sym, locatable__async_result_shape(value));
     END
-    MUTABLE val_ti = TRY (aST__full_type_mut(value));
-    IF val_ti EXISTS AS val_ti_value THEN
-      IF type__link?(val_ti_value) THEN
-      MUTABLE link_src = val_ti.link_source();
-      IF link_src THEN
+    MUTABLE val_ti: Type = TRY (aST__full_type_mut(value));
+    IF type__link?(val_ti) THEN
+      IF type__link_source(val_ti) EXISTS AS link_src THEN
         symbolEntry__set_link_source(&sym, link_src);
       END
-    END
     END
     IF type__observable?(node_type) THEN
       symbolEntry__mark_non_escaping_mut(&sym);
     END
     IF (type__versioned?(node_type) AND (type__ownership(node_type) == :affine)) THEN
-      MUTABLE cap_tok = IF value IS_A CapabilityWrap THEN
-        value.token()
-      ELSE
-        NIL
-      END;
-      MUTABLE fixes = List[];
-      IF (TRUE AND (CAST(cap_tok.value() AS String) == "@versioned")) THEN
-        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :UPGRADE_VERSIONED_TO_SHARED)), [edit__new(span__new(NIL, cap_tok.line, cap_tok.column, "@versioned".codepointCount()), "@shared:versioned")], :auto)));
+      MUTABLE cap_tok: ?Token = NIL;
+      IF value IS_A CapabilityWrap THEN
+        cap_tok = locatable__token(value);
+      END
+      MUTABLE fixes: []Fix = [];
+      IF cap_tok EXISTS AS cap_tok_value THEN
+        IF (CAST(cap_tok_value.value AS String) == "@versioned") THEN
+          &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :UPGRADE_VERSIONED_TO_SHARED)), [edit__new(span__new(NIL, cap_tok_value.line, cap_tok_value.column, "@versioned".codepointCount()), "@shared:versioned")], :auto)));
+        END
       END
       IF (fixes.length() > 0) THEN
         TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :lint, fixes, NIL, :BARE_VERSIONED_UNSHARED, :warning, FALSE, CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any)));
       ELSE
-        typeAnalysisSession__note_mut(&rtoc_self_view, castDeclarationNodeToLocatable(node), TRY (typeAnalysisSession__diagnostic_message(rtoc_self_view, :BARE_VERSIONED_UNSHARED, [], CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any))));
+        typeAnalysisSession__note_mut(&rtoc_self_view, UNWRAP (castDeclarationNodeToLocatable(node)), TRY (typeAnalysisSession__diagnostic_message(rtoc_self_view, :BARE_VERSIONED_UNSHARED, [], CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any))));
       END
     END
     TRY (typeAnalysisSession__classify_ownership_mut(&rtoc_self_view, &sym));
-    TRY (typeAnalysisSession__og_declare(&rtoc_self_view, UNWRAP (declarationNode__name(node)), castDeclarationNodeToOptionalNode(node), node_type));
+    TRY (typeAnalysisSession__og_declare(&rtoc_self_view, UNWRAP (declarationNode__name(node)), castDeclarationNodeToOptionalNode(node), TypeTypeInput{ Type: COPY node_type }));
     TRY (typeAnalysisSession__establish_inferred_alias_mut(&rtoc_self_view, &node, &sym));
     TRY (typeAnalysisSession__register_container_borrow_mut(&rtoc_self_view, &node));
     IF !(TRY (type__implicitly_copyable?(node_type, %(t: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, t))))) THEN
@@ -14696,7 +14697,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     typeAnalysisSession__accumulate_stack_bytes(&rtoc_self_view, storage, &node);
     TRY (typeAnalysisSession__track_union_alias(&rtoc_self_view, UNWRAP (declarationNode__name(node)), &value));
-    TRY (typeAnalysisSession__record_capability_binding(&rtoc_self_view, UNWRAP (declarationNode__name(node)), castDeclarationNodeToLocatable(node), castTypeToFinalType(final_type), storage));
+    TRY (typeAnalysisSession__record_capability_binding(&rtoc_self_view, UNWRAP (declarationNode__name(node)), UNWRAP (castDeclarationNodeToLocatable(node)), castTypeToFinalType(COPY rtoc_final), storage));
     NIL;
 }
 END
