@@ -1,0 +1,28 @@
+# Test: compact() drops the absent slots of a `[]?T`.
+#
+# `SELECT:?` preserves the optional, so a map-then-drop-nils needs a step that
+# CHANGES the element type. `[]?T` and `[]T` are different Zig types, so the
+# `CAST((… |> WHERE _ != NIL) AS []T)` the corpus was using emitted Zig the
+# compiler rejected -- it has to build a new list.
+
+FN maybe(n: Int64) RETURNS ?String ->
+  IF n > 1 THEN
+    RETURN "kept";
+  END
+  RETURN NIL;
+END
+
+FN main() RETURNS Void ->
+  MUTABLE xs: []Int64 = [1, 2, 3];
+  MUTABLE names: []String = (xs |> SELECT:? maybe(_)).compact();
+  ASSERT names.length() == 2;
+  ASSERT names[0] == "kept";
+
+  MUTABLE ones: []Int64 = [1];
+  MUTABLE none: []String = (ones |> SELECT:? maybe(_)).compact();
+  ASSERT none.length() == 0;
+
+  MUTABLE nums: []Int64 = (xs |> SELECT:? (IF _ > 2 THEN _ ELSE NIL END)).compact();
+  ASSERT nums.length() == 1;
+  ASSERT nums[0] == 3;
+END

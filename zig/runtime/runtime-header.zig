@@ -1080,6 +1080,42 @@ pub const CheatLib = struct {
         return null;
     }
 
+    // Ruby's Array#compact: a new list holding only the present payloads.
+    // `[]?T` and `[]T` are DIFFERENT Zig types -- `?[]const u8` is not
+    // `[]const u8` -- so dropping the absent slots cannot be a cast; it copies.
+    // The receiver is a slice of optionals or an ArrayList of them depending on
+    // where the pipeline materialized it, exactly as sliceIndexOf handles.
+    pub fn compactList(allocator: std.mem.Allocator, container: anytype) !std.ArrayListUnmanaged(CompactPayload(@TypeOf(container))) {
+        const T = CompactPayload(@TypeOf(container));
+        const c0 = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const c = if (@typeInfo(@TypeOf(c0)) == .pointer and @typeInfo(@TypeOf(c0)).pointer.size == .one) c0.* else c0;
+        const slice = if (@typeInfo(@TypeOf(c)) == .@"struct") c.items else c;
+        var list: std.ArrayListUnmanaged(T) = .empty;
+        errdefer list.deinit(allocator);
+        try list.ensureTotalCapacity(allocator, slice.len);
+        for (slice) |slot| {
+            const present = slot orelse continue;
+            list.appendAssumeCapacity(present);
+        }
+        return list;
+    }
+
+    // The payload the compacted list holds: the receiver's element type with
+    // its optional wrapper removed.
+    fn CompactPayload(comptime Container: type) type {
+        const c0 = if (@typeInfo(Container) == .optional) @typeInfo(Container).optional.child else Container;
+        const c = if (@typeInfo(c0) == .pointer and @typeInfo(c0).pointer.size == .one) @typeInfo(c0).pointer.child else c0;
+        const element = switch (@typeInfo(c)) {
+            // `src[0..]` on a mutable array is a POINTER TO ARRAY, not a slice.
+            .array => |a| a.child,
+            .pointer => |ptr| ptr.child,
+            // An ArrayList receiver names its payload through `items`.
+            .@"struct" => @typeInfo(@FieldType(c, "items")).pointer.child,
+            else => @compileError("compact expects a list"),
+        };
+        return @typeInfo(element).optional.child;
+    }
+
     // Byte-level character access: returns a single-byte slice ([]const u8).
     // Used by CLEAR's String@raw buf[i] indexing.
     pub noinline fn charAt(str: []const u8, index: anytype) []const u8 {

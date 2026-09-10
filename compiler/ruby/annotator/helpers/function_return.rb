@@ -165,6 +165,8 @@ class FunctionReturn
       infer_optional_element_type(args)
     when :infer_to_list
       infer_to_list(args)
+    when :infer_compacted_element_list
+      infer_compacted_element_list(args)
     when :infer_receiver_type
       infer_receiver_type(args)
     else
@@ -200,6 +202,15 @@ class FunctionReturn
     Type.optional_of(infer_element_type(args))
   end
 
+  # `compact` drops the absent slots, so a `[]?T` receiver yields a `[]T`.
+  # The two shapes differ in their Zig representation -- `?[]const u8` is not
+  # `[]const u8` -- which is why this cannot be spelled as a cast.
+  sig { params(args: T::Array[AST::Node]).returns(Type) }
+  def infer_compacted_element_list(args)
+    element = infer_element_type(args)
+    element_list(element.non_optional_type)
+  end
+
   sig { params(args: T::Array[AST::Node]).returns(Type) }
   def infer_to_list(args)
     receiver = T.must(args.first)
@@ -225,6 +236,7 @@ class FunctionReturn
     list
   end
 
+  private :infer_compacted_element_list
   private :infer_element_type
   private :infer_optional_element_type
   private :infer_to_list

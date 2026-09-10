@@ -675,6 +675,26 @@ module GenericAnalysis
         next unless p_arg && a_arg
         extract_type_bindings!(node, p_arg, a_arg, type_params, subst)
       end
+    elsif param_type.optional? && actual_type.optional?
+      # `?T` against `?String` binds T. The wrapper is the same on both sides,
+      # so what identifies the parameter is the payload.
+      extract_type_bindings!(node, param_type.non_optional_type, actual_type.non_optional_type, type_params, subst)
+    elsif (param_element = param_type.element_type) && (actual_element = actual_type.element_type)
+      # `[]T` against `[]String` binds T. Without this a helper could only name
+      # its type parameter through a scalar or a function parameter, so
+      # `compact(items: []?T)` reported "no parameter uses type 'T'".
+      #
+      # The element's capabilities belong to the container the caller already
+      # matched (`[]T@boxed` against `[]Foo@boxed`), not to T. Binding them
+      # would make the same T read as `Foo` from one argument and `Foo@boxed`
+      # from another, and the call would fail as a conflict.
+      param_payload = param_element.non_optional_type
+      actual_payload = actual_element.non_optional_type
+      if type_params.include?(param_payload.resolved)
+        extract_type_bindings!(node, Type.new(param_payload.resolved), Type.new(actual_payload.resolved), type_params, subst)
+      else
+        extract_type_bindings!(node, param_element, actual_element, type_params, subst)
+      end
     end
   end
 

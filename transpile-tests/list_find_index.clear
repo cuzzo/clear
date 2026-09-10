@@ -1,0 +1,18 @@
+# Test: pkg:list find_index reports the POSITION of the first match, which no
+# pipeline operator spells -- `|> INDEX` groups by a key instead.
+REQUIRE "pkg:list";
+
+STRUCT P { name: String }
+
+FN main() RETURNS !Void ->
+  MUTABLE ps: []P = [P{ name: "a" }, P{ name: "b" }, P{ name: "c" }];
+  MUTABLE found: ?Int64 = TRY (find_index(ps, %(p: P) -> p.name == "b"));
+  ASSERT found == 1;
+
+  MUTABLE missing: ?Int64 = TRY (find_index(ps, %(p: P) -> p.name == "zz"));
+  ASSERT missing == NIL;
+
+  MUTABLE ns: []Int64 = [10, 20, 30];
+  MUTABLE big: ?Int64 = TRY (find_index(ns, %(n: Int64) -> n > 15));
+  ASSERT big == 1;
+END

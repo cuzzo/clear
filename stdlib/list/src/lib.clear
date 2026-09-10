@@ -1,0 +1,25 @@
+# pkg:list - list helpers the pipeline operators cannot spell.
+#
+# The pipeline covers map/filter/fold (SELECT / WHERE / REDUCE) and short-
+# circuit search (FIND / ANY / ALL), all of which accept a fallible body. What
+# it has no operator for is a POSITION: `|> INDEX` groups by a key, it does not
+# report where a match sits. Ruby (`Array#find_index`) and Elixir
+# (`Enum.find_index/2`) agree on the name; Rust (`position`), Kotlin
+# (`indexOfFirst`) and Swift (`firstIndex(where:)`) each say something
+# different, so there is no cross-language consensus to prefer over Ruby's.
+#
+# The predicate is called through a function parameter, which rides the uniform
+# fallible ABI, so the result is `!?Int64`: absent means no element matched.
+
+PUB FN find_index<T>(items: []T, predicate: FN(T) -> Bool) RETURNS !?Int64 ->
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    IF items[i] EXISTS AS item THEN
+      IF predicate(item) THEN
+        RETURN i;
+      END
+    END
+    i = i + 1;
+  END
+  RETURN NIL;
+END

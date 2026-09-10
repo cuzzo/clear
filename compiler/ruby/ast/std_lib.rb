@@ -103,6 +103,21 @@ STD_LIB = T.let({
     is_method: true,
   },
 
+  # Ruby's Array#compact: drop the absent slots. `[]?T` and `[]T` are different
+  # Zig types (`?[]const u8` is not `[]const u8`), so this cannot be spelled as
+  # a cast the way the pipeline's `WHERE _ != NIL` result was being coerced --
+  # that produced Zig the compiler rejected. It builds a new list instead.
+  "compact" => {
+    args: [:"Any[]"],
+    return: :infer_compacted_element_list,
+    return_alloc: :node_storage,
+    zig: "try CheatLib.compactList({alloc}, {0})",
+    allocates: true,
+    alloc: :node_storage,
+    borrows: :all,
+    is_method: true,
+  },
+
   "clear" => {
     args: [:"Any[]"],
     return: :Void,

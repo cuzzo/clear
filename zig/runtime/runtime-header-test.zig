@@ -1107,3 +1107,33 @@ test "cwd reports an absolute working directory" {
     try std.testing.expect(std.fs.path.isAbsolute(here));
     try std.testing.expect(here.len > 0);
 }
+
+
+test "compactList drops the absent slots and keeps order" {
+    const ta = std.testing.allocator;
+    var src: [4]?i64 = .{ 1, null, 3, null };
+    var out = try CheatLib.compactList(ta, src[0..]);
+    defer out.deinit(ta);
+    try std.testing.expectEqual(@as(usize, 2), out.items.len);
+    try std.testing.expectEqual(@as(i64, 1), out.items[0]);
+    try std.testing.expectEqual(@as(i64, 3), out.items[1]);
+
+    // An ArrayList receiver goes through the .items branch, the shape a
+    // pipeline leaves behind.
+    var list: std.ArrayListUnmanaged(?[]const u8) = .empty;
+    defer list.deinit(ta);
+    try list.append(ta, "a");
+    try list.append(ta, null);
+    try list.append(ta, "c");
+    var names = try CheatLib.compactList(ta, list);
+    defer names.deinit(ta);
+    try std.testing.expectEqual(@as(usize, 2), names.items.len);
+    try std.testing.expectEqualStrings("a", names.items[0]);
+    try std.testing.expectEqualStrings("c", names.items[1]);
+
+    // Every slot absent yields an empty list, not a null.
+    var empty_src: [2]?i64 = .{ null, null };
+    var empty = try CheatLib.compactList(ta, empty_src[0..]);
+    defer empty.deinit(ta);
+    try std.testing.expectEqual(@as(usize, 0), empty.items.len);
+}
