@@ -20511,43 +20511,52 @@ PRIVATE FN typeAnalysisSession__init_value_contents_heap?(MUTABLE self: TypeAnal
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF init EXISTS AS init_value THEN
       IF init_value IS_A StructLit AS struct_lit THEN
-        RETURN struct_lit.fields.values() |> ALL (IF !(_) THEN TRUE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE fti: ?Type = TRY (type__from_node_mut(_, "heap init field")); (IF !((TRY (type__string?( UNWRAP (fti))) OR type__collection?( UNWRAP (fti)))) THEN TRUE ELSE (_ IS_A Locatable AND symbolEntry__heap_storage?(_)) END) } END);
+        RETURN TRY (typeAnalysisSession__init_fields_contents_heap?(&rtoc_self_view, struct_lit.fields.values()));
       ELSE_IF init_value IS_A UnionVariantLit AS union_variant_lit THEN
-        RETURN union_variant_lit.fields |> ALL (IF !(_._1) THEN TRUE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE fti = TRY (type__from_node_mut(_._1, "heap init field")); (IF !((TRY (type__string?( UNWRAP (fti))) OR type__collection?( UNWRAP (fti)))) THEN TRUE ELSE (_._1 IS_A Locatable AND symbolEntry__heap_storage?(_._1)) END) } END);
+        RETURN TRY (typeAnalysisSession__init_fields_contents_heap?(&rtoc_self_view, union_variant_lit.fields.values()));
       ELSE_IF (init_value IS_A FuncCall) OR (init_value IS_A MethodCall) THEN
-        RETURN (TRUE AND init_value.heap_storage?());
+        RETURN aST__node_heap_storage?(init_value);
       ELSE_IF init_value IS_A Identifier AS identifier THEN
-        RETURN !(!((IF identifier.symbol != NIL THEN
-          symbolEntry__init_contents_heap(UNWRAP (identifier.symbol))
-        ELSE
-          NIL
-        END)));
+        IF identifier.symbol EXISTS AS rtoc_init_symbol THEN
+          RETURN symbolEntry__init_contents_heap(rtoc_init_symbol);
+        END
+        RETURN FALSE;
       ELSE_IF init_value IS_A CopyNode AS copy_node THEN
         RETURN TRUE;
       ELSE_IF init_value IS_A KeepNode AS keep_node THEN
         RETURN TRUE;
       ELSE_IF init_value IS_A Cast AS rtoc_cast THEN
-        RETURN typeAnalysisSession__init_value_contents_heap?(&rtoc_self_view, rtoc_cast.value);
+        RETURN TRY (typeAnalysisSession__init_value_contents_heap?(&rtoc_self_view, rtoc_cast.value));
       ELSE_IF init_value IS_A IfStatement AS if_statement THEN
-        MUTABLE then_tail: ?Locatable = COPY (if_statement.then_branch).last();
-        MUTABLE else_tail: ?Locatable = COPY ((if_statement.else_branch OR_ELSE List[])).last();
-        MUTABLE tails = ([then_tail, else_tail]);
-        RETURN ((tails.length() == 2) AND (tails |> ALL typeAnalysisSession__init_value_contents_heap?(&rtoc_self_view, _)));
-      ELSE_IF init_value IS_A MatchStatement AS match_statement THEN
-        MUTABLE cases = (match_statement.cases |> SELECT (TRY (matchCase__body(_))).last()) |> WHERE _ != NIL;
-        MUTABLE default_tail = (IF match_statement.default_case != NIL THEN
-          match_statement.default_case.last()
-        ELSE
-          NIL
-        END);
-        MUTABLE tails = (cases + ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_509: ?[]Any = NIL;
-        IF default_tail THEN
-          rtoc_ternary_value_509 = [default_tail];
-        ELSE
-          rtoc_ternary_value_509 = List[];
+        MUTABLE tails: []Locatable = List[];
+        IF (if_statement.then_branch).last() EXISTS AS rtoc_then_tail THEN
+          &tails.append(COPY rtoc_then_tail);
         END
-        rtoc_ternary_value_509? }));
-        RETURN ((tails).any?() AND (tails |> ALL typeAnalysisSession__init_value_contents_heap?(&rtoc_self_view, _)));
+        IF ((if_statement.else_branch OR_ELSE List[])).last() EXISTS AS rtoc_else_tail THEN
+          &tails.append(COPY rtoc_else_tail);
+        END
+        IF (tails.length() != 2) THEN
+          RETURN FALSE;
+        END
+        RETURN TRY (typeAnalysisSession__init_tails_contents_heap?(&rtoc_self_view, tails));
+      ELSE_IF init_value IS_A MatchStatement AS match_statement THEN
+        MUTABLE tails: []Locatable = List[];
+        MUTABLE rtoc_case_i = 0;
+        WHILE rtoc_case_i < match_statement.cases.length() DO
+          IF (TRY (matchCase__body(UNWRAP (match_statement.cases[rtoc_case_i])))).last() EXISTS AS rtoc_case_tail THEN
+            &tails.append(COPY rtoc_case_tail);
+          END
+          rtoc_case_i = rtoc_case_i + 1;
+        END
+        IF match_statement.default_case EXISTS AS rtoc_default_body THEN
+          IF rtoc_default_body.last() EXISTS AS rtoc_default_tail THEN
+            &tails.append(COPY rtoc_default_tail);
+          END
+        END
+        IF tails.empty?() THEN
+          RETURN FALSE;
+        END
+        RETURN TRY (typeAnalysisSession__init_tails_contents_heap?(&rtoc_self_view, tails));
       ELSE
         RETURN FALSE;
       END
@@ -20556,19 +20565,80 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
+
+# Ruby asks `fields.all?` and `tails.all?` inline; a CLEAR pipeline cannot
+# carry the fallible recursion, so each fold is its own function.
+PRIVATE FN typeAnalysisSession__init_fields_contents_heap?(MUTABLE self: TypeAnalysisSession, fields: []Locatable) RETURNS !Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE rtoc_field_i = 0;
+    WHILE rtoc_field_i < fields.length() DO
+      IF fields[rtoc_field_i] EXISTS AS rtoc_field_value THEN
+        MUTABLE fti: ?Type = TRY (type__from_node_mut(rtoc_field_value, "heap init field"));
+        IF fti EXISTS AS rtoc_fti THEN
+          IF (TRY (type__string?(rtoc_fti)) OR type__collection?(rtoc_fti)) THEN
+            IF !(aST__node_heap_storage?(rtoc_field_value)) THEN
+              RETURN FALSE;
+            END
+          END
+        END
+      END
+      rtoc_field_i = rtoc_field_i + 1;
+    END
+    RETURN TRUE;
+}
+END
+
+PRIVATE FN typeAnalysisSession__init_tails_contents_heap?(MUTABLE self: TypeAnalysisSession, tails: []Locatable) RETURNS !Bool
+  REQUIRES self: LOCAL
+  EFFECTS REENTRANT
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE rtoc_tail_i = 0;
+    WHILE rtoc_tail_i < tails.length() DO
+      IF !(TRY (typeAnalysisSession__init_value_contents_heap?(&rtoc_self_view, tails[rtoc_tail_i]))) THEN
+        RETURN FALSE;
+      END
+      rtoc_tail_i = rtoc_tail_i + 1;
+    END
+    RETURN TRUE;
+}
+END
 PRIVATE FN typeAnalysisSession__collect_bg_sources_in_expr(MUTABLE self: TypeAnalysisSession, expr: ?BgSourceWalkValue) RETURNS ![]SymbolEntry@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF (IF castBgSourceWalkValueToLocatable(UNWRAP (expr)) EXISTS AS rtoc_bg_node THEN ((rtoc_bg_node IS_A BgBlock) OR (rtoc_bg_node IS_A BgStreamBlock)) ELSE FALSE END) THEN
+    MUTABLE rtoc_bg_variant: String = "";
+    MUTABLE rtoc_is_bg_block: Bool = FALSE;
+    IF expr EXISTS AS rtoc_bg_expr THEN
+      IF castBgSourceWalkValueToLocatable(rtoc_bg_expr) EXISTS AS rtoc_bg_node THEN
+        rtoc_is_bg_block = ((rtoc_bg_node IS_A BgBlock) OR (rtoc_bg_node IS_A BgStreamBlock));
+        rtoc_bg_variant = COPY locatable__variant_name(rtoc_bg_node);
+      END
+    END
+    IF rtoc_is_bg_block THEN
       RETURN TRY (typeAnalysisSession__bg_sources_for_block(&rtoc_self_view, expr));
     END
-    IF (["Identifier", "Literal", "FuncCall", "MethodCall", "GetField", "GetIndex", "BinaryOp", "UnaryOp"] |> DISTINCT _).contains?(locatable__variant_name(UNWRAP (castBgSourceWalkValueToLocatable(UNWRAP (expr))))) THEN
+    IF (["Identifier", "Literal", "FuncCall", "MethodCall", "GetField", "GetIndex", "BinaryOp", "UnaryOp"]).contains?(rtoc_bg_variant) THEN
       RETURN CAST(( { MUTABLE rtoc_empty_list_510: []SymbolEntry@multiowned = List[]; rtoc_empty_list_510 } ) AS []SymbolEntry@multiowned);
     END
     IF expr EXISTS AS rtoc_expr THEN
       IF castBgSourceWalkValueToLocatable(rtoc_expr) EXISTS AS rtoc_node THEN
-        RETURN locatable__child_nodes(rtoc_node) |> UNNEST TRY (typeAnalysisSession__collect_bg_sources_walk(&rtoc_self_view, castLocatableToBgSourceWalkValue(_)));
+        MUTABLE rtoc_child_sources: []SymbolEntry@multiowned = List[];
+        MUTABLE rtoc_children: []Locatable = locatable__child_nodes(rtoc_node);
+        MUTABLE rtoc_child_i = 0;
+        WHILE rtoc_child_i < rtoc_children.length() DO
+          MUTABLE rtoc_walked: []SymbolEntry@multiowned = TRY (typeAnalysisSession__collect_bg_sources_walk(&rtoc_self_view, castLocatableToBgSourceWalkValue(UNWRAP (rtoc_children[rtoc_child_i]))));
+          MUTABLE rtoc_walk_i = 0;
+          WHILE rtoc_walk_i < rtoc_walked.length() DO
+            &rtoc_child_sources.append(KEEP UNWRAP (rtoc_walked[rtoc_walk_i]));
+            rtoc_walk_i = rtoc_walk_i + 1;
+          END
+          rtoc_child_i = rtoc_child_i + 1;
+        END
+        RETURN rtoc_child_sources;
       END
     END
     RETURN CAST(( { MUTABLE rtoc_empty_list_511: []SymbolEntry@multiowned = List[]; rtoc_empty_list_511 } ) AS []SymbolEntry@multiowned);
