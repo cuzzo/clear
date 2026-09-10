@@ -4908,7 +4908,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(has_lifetime) THEN
       RETURN TRUE;
     END
-    MUTABLE is_wildcard = ((lifetime_paths.length() == 1) AND (lifetime_paths[0] == FunctionContextLifetimeSource{ SymbolValue: :wildcard }));
+    MUTABLE is_wildcard = ((lifetime_paths.length() == 1) AND (castOptionalFunctionContextLifetimeSourceToString(lifetime_paths[0]) == "wildcard"));
     IF is_wildcard THEN
       RETURN TRUE;
     END
@@ -4917,19 +4917,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE actual_path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(node)));
     IF (actual_path.length() == 0) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_LIFETIME_NOT_ASSOCIATED }, [], CAST({:sources: lifetime_paths.join(", ")} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_LIFETIME_NOT_ASSOCIATED }, [], CAST({:sources: (lifetime_paths |> SELECT castOptionalFunctionContextLifetimeSourceToString(_)).join(", ")} AS {String@symbol}Any)));
       RETURN TRUE;
     END
-    MUTABLE matched = lifetime_paths |> ANY {
-    MUTABLE lifetime_syms = (CAST(_ AS String)).split(".") |> SELECT symbol(_);
-    (actual_path.substr(0, (lifetime_syms.length() - 0)) == lifetime_syms)
-    };
+    MUTABLE matched: Bool = FALSE;
+    MUTABLE rtoc_actual_strs = actual_path |> SELECT COPY CAST(_ AS String);
+    FOR rtoc_lp IN lifetime_paths DO
+      MUTABLE lifetime_syms = (castOptionalFunctionContextLifetimeSourceToString(rtoc_lp)).split(".");
+      IF ((rtoc_actual_strs |> LIMIT lifetime_syms.length()) == lifetime_syms) THEN
+        matched = TRUE;
+      END
+    END
     IF !(matched) THEN
       MUTABLE sources_msg: String = "";
       IF (lifetime_paths.length() == 1) THEN
         sources_msg = "derived from: ${castOptionalFunctionContextLifetimeSourceToString(lifetime_paths.first())}";
       ELSE
-        sources_msg = "derived from one of: ${lifetime_paths.join(" | ")}";
+        sources_msg = "derived from one of: ${(lifetime_paths |> SELECT castOptionalFunctionContextLifetimeSourceToString(_)).join(" | ")}";
       END
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_LIFETIME_MISMATCH }, [], CAST({:sources_msg: sources_msg, :actual: actual_path.join(".")} AS {String@symbol}Any)));
     END
