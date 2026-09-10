@@ -299,7 +299,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
     CONTINUE;
       END
       IF keptIdentityContract__rc?( contract) THEN
-          entry.storage = :multiowned;
+          symbolEntry__set_storage(&entry, :multiowned);
       END
       by_index[rtoc_idx] = contract;
     rtoc_idx = rtoc_idx + 1;
@@ -893,13 +893,16 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
 PUB FN escapeAnalysis__mark_loop_receiver_allocations_heap_mut(body: []Node) RETURNS !Void EFFECTS REENTRANT ->
-  FOR _ IN body DO
-  FOR _ IN (TRY (aST__child_bodies(castNodeToLocatable__escape_analysis(_)))) DO
-  IF aST__loop_node?(castNodeToLocatable__escape_analysis(_)) THEN
-      TRY (escapeAnalysis__mark_receiver_allocations_in_loop_mut(_));
-  END
-  TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(_));
-  END
+  FOR rtoc_stmt IN body DO
+    MUTABLE rtoc_stmt_loc: Locatable = castNodeToLocatable__escape_analysis(rtoc_stmt);
+    MUTABLE rtoc_is_loop: Bool = aST__loop_node?(rtoc_stmt_loc);
+    FOR rtoc_child_body IN aST__child_bodies(rtoc_stmt_loc) DO
+      MUTABLE rtoc_child_nodes: []Node = rtoc_child_body |> SELECT castLocatableToNode(_);
+      IF rtoc_is_loop THEN
+        TRY (escapeAnalysis__mark_receiver_allocations_in_loop_mut(rtoc_child_nodes));
+      END
+      TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(rtoc_child_nodes));
+    END
   END
 END
 PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETURNS !Void ->
@@ -1203,27 +1206,40 @@ PUB FN escapeAnalysis__loop_body_declared_names(body: []Node) RETURNS ![Set]Stri
   }));
   RETURN names;
 END
-PUB FN escapeAnalysis__each_loop_body_node(body: []Node, block: FN(Locatable) -> Void) RETURNS !Void ->
-  MUTABLE stack: []Locatable = body.reverse();
-  WHILE !((stack.length() == 0)) DO
-    MUTABLE node: ?Locatable = &stack.pop();
-    IF !((node != NIL)) THEN
-      CONTINUE;
-    END
-    block(node);
-    IF (((((node != NIL) AND (node IS_A FunctionDef)) OR ((node != NIL) AND (node IS_A LambdaLit))) OR ((node != NIL) AND (node IS_A BgBlock))) OR ((node != NIL) AND (node IS_A BgStreamBlock))) THEN
-      CONTINUE;
-    END
-    MUTABLE rtoc_reverse_items_15: [List, List]Node = (TRY (aST__child_bodies(UNWRAP (node))));
-    MUTABLE rtoc_reverse_i_16 = rtoc_reverse_items_15.length() - 1;
-    WHILE rtoc_reverse_i_16 >= 0 DO
-  MUTABLE rtoc_reverse_items_17: []Node = ((rtoc_reverse_items_15[rtoc_reverse_i_16])?);
-  MUTABLE rtoc_reverse_i_18 = rtoc_reverse_items_17.length() - 1;
-  WHILE rtoc_reverse_i_18 >= 0 DO
-    &stack.append(castNodeToLocatable__escape_analysis(COPY (rtoc_reverse_items_17[rtoc_reverse_i_18])?));
-    rtoc_reverse_i_18 = rtoc_reverse_i_18 - 1;
+# Ruby seeds the walk stack with `body.reverse`; CLEAR lists have no reverse,
+# so the seed is built back to front by index.
+PUB FN escapeAnalysisReversedLocatables(items: []Locatable) RETURNS []Locatable ->
+  MUTABLE out: []Locatable = [];
+  MUTABLE rtoc_idx: Int64 = (items.length() - 1);
+  WHILE rtoc_idx >= 0 DO
+    &out.append(COPY UNWRAP (items[rtoc_idx]));
+    rtoc_idx = rtoc_idx - 1;
   END
-  rtoc_reverse_i_16 = rtoc_reverse_i_16 - 1;
+  RETURN out;
+END
+
+PUB FN escapeAnalysis__each_loop_body_node(body: []Node, block: FN(Locatable) -> Void) RETURNS !Void ->
+  MUTABLE stack: []Locatable = escapeAnalysisReversedLocatables(body |> SELECT castNodeToLocatable__escape_analysis(_));
+  WHILE !((stack.length() == 0)) DO
+    MUTABLE rtoc_popped: ?Locatable = &stack.pop();
+    IF (rtoc_popped == NIL) THEN
+      CONTINUE;
+    END
+    MUTABLE node: Locatable = COPY rtoc_popped;
+    block(node);
+    IF ((((node IS_A FunctionDef OR node IS_A LambdaLit) OR node IS_A BgBlock) OR node IS_A BgStreamBlock)) THEN
+      CONTINUE;
+    END
+    MUTABLE rtoc_child_bodies = aST__child_bodies(node);
+    MUTABLE rtoc_body_i: Int64 = (rtoc_child_bodies.length() - 1);
+    WHILE rtoc_body_i >= 0 DO
+      MUTABLE rtoc_child_body = COPY UNWRAP (rtoc_child_bodies[rtoc_body_i]);
+      MUTABLE rtoc_child_i: Int64 = (rtoc_child_body.length() - 1);
+      WHILE rtoc_child_i >= 0 DO
+        &stack.append(COPY UNWRAP (rtoc_child_body[rtoc_child_i]));
+        rtoc_child_i = rtoc_child_i - 1;
+      END
+      rtoc_body_i = rtoc_body_i - 1;
     END
   END
   NIL;
@@ -1651,14 +1667,17 @@ PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{In
 END
 PUB FN escapeAnalysis__collect_lambda_body_identifiers(node: LambdaLit) RETURNS ![]Identifier ->
   MUTABLE out: []Identifier = ( { MUTABLE rtoc_empty_list_24: []Identifier = List[]; rtoc_empty_list_24 } );
-  MUTABLE stack: []Locatable = (TRY (aST__lambda_body_nodes(node.body))).reverse();
+  MUTABLE stack: []Locatable = escapeAnalysisReversedLocatables(TRY (aST__lambda_body_nodes(node.body)));
   WHILE !((stack.length() == 0)) DO
-    MUTABLE current = escapeAnalysis__unwrap_value(&stack.pop());
-    IF !(current IS_A Locatable) THEN
+    MUTABLE rtoc_popped: ?Locatable = &stack.pop();
+    MUTABLE rtoc_unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value(castOptionalLocatableToOptionalDynamicValue(rtoc_popped));
+    MUTABLE rtoc_current_loc: ?Locatable = castOptionalDynamicValueToOptionalLocatable(rtoc_unwrapped);
+    IF (rtoc_current_loc == NIL) THEN
       CONTINUE;
     END
-    IF current IS_A Identifier THEN
-      &out.append(current);
+    MUTABLE current: Locatable = COPY rtoc_current_loc;
+    IF current IS_A Identifier AS rtoc_current_ident THEN
+      &out.append(COPY rtoc_current_ident);
       CONTINUE;
     END
     IF (current IS_A FunctionDef OR current IS_A LambdaLit) THEN
@@ -1667,16 +1686,16 @@ PUB FN escapeAnalysis__collect_lambda_body_identifiers(node: LambdaLit) RETURNS 
     MUTABLE rtoc_reverse_items_25: []Locatable = (aST__expression_children(current));
     MUTABLE rtoc_reverse_i_26 = rtoc_reverse_items_25.length() - 1;
     WHILE rtoc_reverse_i_26 >= 0 DO
-  &stack.append(COPY (rtoc_reverse_items_25[rtoc_reverse_i_26])?);
+  &stack.append(COPY UNWRAP (rtoc_reverse_items_25[rtoc_reverse_i_26]));
   rtoc_reverse_i_26 = rtoc_reverse_i_26 - 1;
     END
-    MUTABLE rtoc_reverse_items_27: [List, List]Node = (TRY (aST__child_bodies(current)));
+    MUTABLE rtoc_reverse_items_27 = aST__child_bodies(current);
     MUTABLE rtoc_reverse_i_28 = rtoc_reverse_items_27.length() - 1;
     WHILE rtoc_reverse_i_28 >= 0 DO
-  MUTABLE rtoc_reverse_items_29: []Node = ((rtoc_reverse_items_27[rtoc_reverse_i_28])?);
+  MUTABLE rtoc_reverse_items_29: []Locatable = COPY UNWRAP (rtoc_reverse_items_27[rtoc_reverse_i_28]);
   MUTABLE rtoc_reverse_i_30 = rtoc_reverse_items_29.length() - 1;
   WHILE rtoc_reverse_i_30 >= 0 DO
-    &stack.append(castNodeToLocatable__escape_analysis(COPY (rtoc_reverse_items_29[rtoc_reverse_i_30])?));
+    &stack.append(COPY UNWRAP (rtoc_reverse_items_29[rtoc_reverse_i_30]));
     rtoc_reverse_i_30 = rtoc_reverse_i_30 - 1;
   END
   rtoc_reverse_i_28 = rtoc_reverse_i_28 - 1;
@@ -1759,7 +1778,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
     END
   END
   MUTABLE expr_t = TRY (aST__full_type_mut(expr));
-  IF (!(expr IS_A Identifier) AND ((TRUE) AND expr_t.rodata())) THEN
+  IF (!(expr IS_A Identifier) AND type__rodata?(expr_t)) THEN
     RETURN FALSE;
   END
   IF (type__rodata?(ti) OR type__borrowed_reference?(ti)) THEN
@@ -2095,10 +2114,10 @@ PUB FN escapeAnalysis__mark_symbol_heap_mut(sym: ?SymbolEntry, MUTABLE names: ?[
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF ( symbolEntry__heap_storage( sym_entry) OR symbolEntry__borrow_provenance?( sym_entry)) THEN
+  IF ( symbolEntry__heap_storage?( sym_entry) OR symbolEntry__borrow_provenance?( sym_entry)) THEN
     RETURN FALSE;
   END
-  sym_entry.storage = :heap;
+  symbolEntry__set_storage(&sym_entry, :heap);
   IF ((names != NIL) AND (name != NIL)) THEN
     &names.insert(COPY name);
   END
@@ -2125,7 +2144,7 @@ PUB FN escapeAnalysis__mark_symbol_borrow_mut(sym: ?SymbolEntry) RETURNS Bool ->
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF ( symbolEntry__heap_storage( sym_entry) OR symbolEntry__borrow_provenance?( sym_entry)) THEN
+  IF ( symbolEntry__heap_storage?( sym_entry) OR symbolEntry__borrow_provenance?( sym_entry)) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :borrow;
@@ -2139,7 +2158,7 @@ PUB FN escapeAnalysis__mark_reassigned_symbol_heap_mut(sym: ?SymbolEntry) RETURN
   IF symbolEntry__heap_storage?( sym_entry) THEN
     RETURN FALSE;
   END
-  sym_entry.storage = :heap;
+  symbolEntry__set_storage(&sym_entry, :heap);
   RETURN TRUE;
 END
 PUB FN escapeAnalysis__canonical_symbol(sym: ?SymbolEntry) RETURNS ?SymbolEntry@multiowned ->
