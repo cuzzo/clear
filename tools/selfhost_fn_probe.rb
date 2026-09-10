@@ -44,6 +44,13 @@ module SelfhostFnProbe
     ParserCompat.package_groups(SRC).max_by { |_n, m| m.length }.last
   end
 
+  # The largest SCC is one package of many: the lexer, the parser and every
+  # singleton file live outside it, so a run over `members` alone reports a
+  # percentage of a subset. This is every translated file.
+  def all_files
+    Dir.glob(File.join(SRC, '**', '*.clear')).sort.map { |p| p.delete_prefix("#{SRC}/") }
+  end
+
   # Split a file into its requires, its type declarations, and its functions.
   def dissect(path)
     lines = File.readlines(path)
@@ -255,13 +262,18 @@ module SelfhostFnProbe
   # as the functions it calls: `FOR c IN conflicts` reads one. Without them the
   # probe reports "Undefined variable" for something the real build resolves --
   # a harness artifact, not a translation defect.
+  # A file's module scope is its constants AND its module-level MUTABLE
+  # variables. Carrying only the constants made every function that reads a
+  # file-level mutable (`enabled`, a registry cache) report an undefined
+  # variable the source does not have -- a probe artifact counted as a blocker.
   def module_consts(target)
     decls = File.read(target.file).lines.select do |line|
-      line.match?(/\A[a-z_]\w*(?:: [^=\n]+)? = /)
+      line.match?(/\A(?:PUB )?MUTABLE [a-z_]\w*(?:: [^=\n]+)? = /) ||
+        line.match?(/\A[a-z_]\w*(?:: [^=\n]+)? = /)
     end
     return '' if decls.empty?
 
-    "\n# --- module-level constants from #{rel(target.file)} ---\n" + decls.join
+    "\n# --- module scope from #{rel(target.file)} ---\n" + decls.join
   end
 
   def probe_source(target, _group, cache, pkg_name)
@@ -270,7 +282,12 @@ module SelfhostFnProbe
     # A stub keeps its signature, and a parameter's DEFAULT value can call
     # something -- so the call set has to close over the stubs themselves or
     # the probe reports an undefined function the target never mentions.
-    want = target.text.scan(/(?<![\w.])([a-zA-Z_]\w*[?!]?)\(/).flatten.uniq
+    # The module scope is emitted alongside the target, so whatever ITS
+    # initializers call needs a stand-in too -- otherwise carrying a file-level
+    # MUTABLE whose value comes from another unit reports that unit's function
+    # as undefined.
+    scope = module_consts(target)
+    want = (target.text + scope).scan(/(?<![\w.])([a-zA-Z_]\w*[?!]?)\(/).flatten.uniq
     emitted = {}
     until want.empty?
       name = want.shift
@@ -446,6 +463,7 @@ module SelfhostFnProbe
     stage = :clear
     limit = nil
     passing = nil
+    all_files_mode = false
     OptionParser.new do |p|
       # Several files at once: the annotator is three of them, and measuring
       # just those skips a hang in an unrelated file that has killed whole runs.
@@ -461,9 +479,10 @@ module SelfhostFnProbe
       p.on('--limit N', Integer) { |v| limit = v }
       # Stage 2 only makes sense for what already passed stage 1.
       p.on('--passing FILE') { |v| passing = v }
+      p.on('--all-files', 'Probe every translated file, not just the largest package group') { all_files_mode = true }
     end.parse!(argv)
 
-    group = members
+    group = all_files_mode ? all_files : members
     files = only_file ? Array(only_file) : group
     cache = {}
     group.each { |m| cache[File.join(SRC, m)] = dissect(File.join(SRC, m)) }
