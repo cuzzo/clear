@@ -857,15 +857,21 @@ PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionF
       CONTINUE;
   END
   MUTABLE reg: ?SymbolEntryRegInput = COPY sym.reg;
-  IF !(((reg != NIL) AND (reg IS_A Locatable))) THEN
+  IF (reg == NIL) THEN
       CONTINUE;
   END
-  MUTABLE node: ?SymbolEntryRegInput = reg;
-  IF !(((((node != NIL) AND (node IS_A VarDecl)) OR ((node != NIL) AND (node IS_A DestructureTarget))) OR ((IF node? IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :decl) ELSE FALSE END)))) THEN
+  MUTABLE node: SymbolEntryRegInput = COPY reg;
+  MUTABLE rtoc_is_decl: Bool = FALSE;
+  IF (node IS_A VarDecl OR node IS_A DestructureTarget) THEN
+    rtoc_is_decl = TRUE;
+  ELSE_IF node IS_A BindExpr AS bind_expr THEN
+    rtoc_is_decl = (bind_expr.mode == :decl);
+  END
+  IF !(rtoc_is_decl) THEN
       CONTINUE;
   END
   MUTABLE ti = TRY (aST__full_type_mut(castSymbolEntryRegInputToLocatable(node)));
-  IF !((TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new(TypeConstructionInput{ SymbolValue: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: COPY rtoc_key })) })), schema_lookup)) OR (values |> ANY escapeAnalysis__aggregate_contains_heap_owned_value?(_)))) THEN
+  IF !((TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new(TypeConstructionInput{ StringValue: COPY rtoc_key })), schema_lookup)) OR (values |> ANY escapeAnalysis__aggregate_contains_heap_owned_value?(_)))) THEN
       CONTINUE;
   END
   escapeAnalysis__mark_symbol_heap_mut(sym);
@@ -1006,12 +1012,13 @@ PUB FN escapeAnalysis__mark_expr_roots_heap_mut(expr: ?Locatable) RETURNS Void -
   END
   MUTABLE root: ?Identifier = root_branch_value;
   IF root EXISTS AS root_value THEN
-    escapeAnalysis__mark_node_symbol_heap_mut(root_value);
+    escapeAnalysis__mark_node_symbol_heap_mut(Locatable{ Identifier: COPY root_value });
     RETURN;
   END
-  MUTABLE node = unwrapped;
-  IF node IS_A Identifier THEN
-    escapeAnalysis__mark_node_symbol_heap_mut(node);
+  IF castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS AS rtoc_node THEN
+    IF rtoc_node IS_A Identifier THEN
+      escapeAnalysis__mark_node_symbol_heap_mut(rtoc_node);
+    END
   END
 END
 PUB FN escapeAnalysis__mark_expr_identifiers_heap_mut(expr: ?Locatable) RETURNS !Bool ->
@@ -1487,16 +1494,16 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
 PUB FN escapeAnalysis__borrow_return_expr?(expr: ?Locatable) RETURNS !Bool ->
-  MUTABLE call: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
-  IF !((UNWRAP (call) IS_A FuncCall OR UNWRAP (call) IS_A MethodCall)) THEN
+  MUTABLE rtoc_call_loc: ?Locatable = castOptionalDynamicValueToOptionalLocatable(escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr)));
+  IF (rtoc_call_loc == NIL) THEN
     RETURN FALSE;
   END
-  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF (aST__node__matched_signature(UNWRAP (castDynamicValueToLocatable(UNWRAP (call)))) EXISTS) THEN
-    sig_branch_value = functionSignature__unwrap(call.matched_signature);
-  ELSE
-    sig_branch_value = NIL;
+  MUTABLE rtoc_call: Locatable = COPY rtoc_call_loc;
+  MUTABLE call: ?DynamicValue = castLocatableToDynamicValue(rtoc_call);
+  IF !((rtoc_call IS_A FuncCall OR rtoc_call IS_A MethodCall)) THEN
+    RETURN FALSE;
   END
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = locatable__matched_signature(rtoc_call);
   MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
   RETURN (!(!(sig)) AND !(((TRY (functionSignature__return_lifetime(sig))).length() == 0)));
 END
@@ -1566,7 +1573,7 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
   IF summary EXISTS AS summary_value THEN
     MUTABLE summary_value_mutable = COPY summary_value;
     FOR _ IN summary_value_mutable.binding_nodes DO
-    escapeAnalysis__record_binding_fact_mut(_, &symbols, binding_values);
+    escapeAnalysis__record_binding_fact_mut(_, &symbols, &binding_values);
     END
     FOR _ IN summary_value_mutable.assignment_nodes DO
   IF _ IS_A BindExpr AS bind_expr THEN
