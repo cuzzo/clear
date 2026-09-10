@@ -146,7 +146,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       WHILE (index < keys.length()) DO
         MUTABLE key = UNWRAP (keys[index]);
         MUTABLE value = UNWRAP (fields[key]);
-        fields[key] = TRY (stringConcatRewriter__rewrite_required_node_mut(&rtoc_self_view, UNWRAP (value)));
+        fields[key] = TRY (stringConcatRewriter__rewrite_required_node_mut(&rtoc_self_view, value));
         index = (index + 1);
       END
     END

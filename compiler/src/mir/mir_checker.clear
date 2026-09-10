@@ -561,7 +561,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, Name{ StringValue: COPY (UNWRAP (rtoc_each_items_13[rtoc_idx_2]).name OR_ELSE (UNWRAP (fact)).source) }, "ownership-consuming MIR node tries to consume borrowed operand from ${UNWRAP (rtoc_each_items_13[rtoc_idx_2]).source}")));
+          &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, Name{ StringValue: COPY (rtoc_each_items_13[rtoc_idx_2].name OR_ELSE (UNWRAP (fact)).source) }, "ownership-consuming MIR node tries to consume borrowed operand from ${UNWRAP (rtoc_each_items_13[rtoc_idx_2]).source}")));
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
@@ -1644,7 +1644,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             IF (child_alloc_value == owner_alloc) THEN
               RETURN;
             END
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY emittable__name(rtoc_expr_node) }, "owned child is :${child_alloc_value} but aggregate owner is :${UNWRAP (owner_alloc)}; nested ownership placement is implicit/incoherent")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: UNWRAP (COPY emittable__name(rtoc_expr_node)) }, "owned child is :${child_alloc_value} but aggregate owner is :${UNWRAP (owner_alloc)}; nested ownership placement is implicit/incoherent")));
           ELSE
             RETURN;
           END
@@ -2101,7 +2101,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF idx EXISTS AS idx_value THEN
             &available.remove(idx_value);
         ELSE
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_ALLOC_MISMATCH, Name{ StringValue: COPY rtoc_let.name }, "owned-result initializer produces :${expected_alloc} storage but no MIR::AllocMark uses :${UNWRAP (expected_alloc)} (marks: ${((UNWRAP (marks)) |> SELECT ":${_.alloc}").join(", ")})")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :OWNED_RESULT_ALLOC_MISMATCH, Name{ StringValue: COPY rtoc_let.name }, "owned-result initializer produces :${expected_alloc} storage but no MIR::AllocMark uses :${expected_alloc} (marks: ${((UNWRAP (marks)) |> SELECT ":${_.alloc}").join(", ")})")));
         END
       rtoc_idx = rtoc_idx + 1;
     END
@@ -2536,7 +2536,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE rtoc_label = mIRChecker__allocator_metadata_label(rtoc_self_view, rtoc_source);
       FOR rtoc_alloc_key IN (metadata).slots.keys() DO
-        MUTABLE alloc: String@symbol = COPY (UNWRAP (metadata)).slots[rtoc_alloc_key];
+        MUTABLE alloc: String@symbol = COPY (metadata).slots[rtoc_alloc_key];
         MUTABLE alloc_key = symbol(rtoc_alloc_key);
         IF (valid_allocators |> ANY (_ == alloc)) THEN
         CONTINUE;
@@ -2678,13 +2678,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
-          MUTABLE rtoc_bound_2682 = UNWRAP (alloc_metadata);
+          MUTABLE rtoc_bound_2682 = alloc_metadata;
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${emittable__variant_name(UNWRAP (metadata_nodes[rtoc_idx]))} has allocator metadata ${inlineAllocMetadata__inspect(rtoc_bound_2682)} for '${UNWRAP (target)}' but no MIR::AllocMark")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE container_alloc = (UNWRAP ((UNWRAP (allocs[UNWRAP (target)])).first())).alloc;
-      MUTABLE rtoc_bound_2688 = UNWRAP (alloc_metadata);
+      MUTABLE container_alloc = ((UNWRAP (allocs[UNWRAP (target)])).first()).alloc;
+      MUTABLE rtoc_bound_2688 = alloc_metadata;
       IF inlineAllocMetadata__primary(rtoc_bound_2688) THEN
           MUTABLE rtoc_bound_2690 = UNWRAP (alloc_metadata);
           MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(rtoc_bound_2690);
@@ -2692,8 +2692,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${UNWRAP (target)}' is :${container_alloc}")));
           END
       END
-      MUTABLE rtoc_bound_2696 = UNWRAP (alloc_metadata);
-      MUTABLE rtoc_bound_2697 = UNWRAP (alloc_metadata);
+      MUTABLE rtoc_bound_2696 = alloc_metadata;
+      MUTABLE rtoc_bound_2697 = alloc_metadata;
       MUTABLE rtoc_each_items_52 = ([InlineStoredAllocCheck{ label: :key_alloc, alloc: COPY inlineAllocMetadata__key_alloc(rtoc_bound_2696) }, InlineStoredAllocCheck{ label: :val_alloc, alloc: COPY inlineAllocMetadata__value_alloc(rtoc_bound_2697) }]);
       MUTABLE rtoc_idx_2 = 0;
       WHILE rtoc_idx_2 < rtoc_each_items_52.length() DO
@@ -2740,7 +2740,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       FOR rtoc_alloc_key IN (metadata).slots.keys() DO
-        MUTABLE alloc_sym: String@symbol = COPY (UNWRAP (metadata)).slots[rtoc_alloc_key];
+        MUTABLE alloc_sym: String@symbol = COPY (metadata).slots[rtoc_alloc_key];
         MUTABLE alloc_key = symbol(rtoc_alloc_key);
         IF !((alloc_sym == :frame)) THEN
         CONTINUE;
@@ -2888,14 +2888,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY label }, "${node_kind} callable contract has no typed ownership contract")));
       RETURN;
     END
-    IF ((TRY (functionSignature__params(sig))).length() < (UNWRAP (contract)).checked_arg_count) THEN
+    IF ((TRY (functionSignature__params(sig))).length() < (contract).checked_arg_count) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MIR_CALL_NO_CONTRACT, Name{ StringValue: COPY label }, "${node_kind} callable contract covers ${(TRY (functionSignature__params(sig))).length().toString()} params but callsite has ${(UNWRAP (contract)).checked_arg_count.toString()} args")));
     END
-    IF (TRY (mIRChecker__function_signature_takes_ownership?(rtoc_self_view, sig, (UNWRAP (contract)).checked_arg_count)) AND !(ownership.covers_consuming_params)) THEN
+    IF (TRY (mIRChecker__function_signature_takes_ownership?(rtoc_self_view, sig, (contract).checked_arg_count)) AND !(ownership.covers_consuming_params)) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY label }, "${node_kind} target declares TAKES/consuming params but concrete consumed bindings are absent")));
     END
-    TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, ownership, "${node_kind} ownership_contract", transfers, TRY (mIRChecker__function_signature_takes_ownership?(rtoc_self_view, sig, (UNWRAP (contract)).checked_arg_count))));
-    TRY (mIRChecker__check_consumed_allocators_match_sink_mut(&rtoc_self_view, MIRCheckerAllocatorMetadataSource{ CallableContractMultiowned: COPY UNWRAP (contract) }, TRY (ownershipContract__owned_operand_names(ownership)), allocs));
+    TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, ownership, "${node_kind} ownership_contract", transfers, TRY (mIRChecker__function_signature_takes_ownership?(rtoc_self_view, sig, (contract).checked_arg_count))));
+    TRY (mIRChecker__check_consumed_allocators_match_sink_mut(&rtoc_self_view, MIRCheckerAllocatorMetadataSource{ CallableContractMultiowned: COPY contract }, TRY (ownershipContract__owned_operand_names(ownership)), allocs));
     NIL;
 }
 END
@@ -2973,7 +2973,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node) AND !(mIRChecker__ownership_contract_present?(rtoc_self_view, contract))) THEN
           &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, rtoc_node) }, "stdlib_def declares a TAKES/consuming parameter but ownership_contract is absent; MIRChecker cannot prove whether this call consumes an owned binding")));
       END
-      TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, UNWRAP (contract), "ownership_contract", transfers, mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node)));
+      TRY (mIRChecker__verify_ownership_contract_operands_mut(&rtoc_self_view, contract, "ownership_contract", transfers, mIRChecker__stdlib_takes_ownership?(rtoc_self_view, rtoc_node)));
       TRY (mIRChecker__check_consumed_allocators_match_sink_mut(&rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY rtoc_node }, consumes, allocs));
     rtoc_idx = rtoc_idx + 1;
     END
@@ -3651,7 +3651,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (mIRChecker__check_expr_sources_for_unhoisted(&rtoc_self_view, _, "expression", owned_sources.contains?(_)));
       END
     END
-    FOR _ IN TRY (emittable__body_slots(UNWRAP (node))) DO
+    FOR _ IN TRY (emittable__body_slots(node)) DO
     TRY (mIRChecker__check_stmts_for_unhoisted(&rtoc_self_view, _.body));
     END
     NIL;

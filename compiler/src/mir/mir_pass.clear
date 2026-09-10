@@ -354,7 +354,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE struct_lit_mutable = COPY struct_lit;
         FOR MUTABLE rtoc_mutable_block_param_6 IN struct_lit_mutable.fields.values() DO
         IF rtoc_mutable_block_param_6 IS_A Identifier THEN
-          TRY (mIRPass__add_if_consumed(rtoc_self_view, &rtoc_mutable_block_param_6, &names, facts, FALSE));
+          TRY (mIRPass__add_if_consumed(rtoc_self_view, castLocatableToIdentifier(&rtoc_mutable_block_param_6), &names, facts, FALSE));
         ELSE
           TRY (mIRPass__walk_consumed(rtoc_self_view, &rtoc_mutable_block_param_6, &names, facts));
         END
@@ -419,7 +419,7 @@ PRIVATE FN mIRPass__consume_call_args(self: MIRPass, node: Node, MUTABLE names: 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sig_obj: ?FunctionSignature@multiowned = NIL;
-    IF (aST__node__matched_signature(node) EXISTS) THEN
+    IF (aST__node__matched_signature(castNodeToLocatable(node)) EXISTS) THEN
       sig_obj = functionSignature__unwrap(node.matched_signature);
     END
     MUTABLE params: []Any = List[];

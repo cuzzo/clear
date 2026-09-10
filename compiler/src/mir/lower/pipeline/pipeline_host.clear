@@ -1205,7 +1205,7 @@ PRIVATE FN pipelineHost__pipeline_source_shape(MUTABLE self: PipelineHost, sourc
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN PipelineSourceShape{ type: COPY TRY (type__from_node_mut(source_node, "pipeline source shape")), bc_target: pipelineHost__bc_target?(&rtoc_self_view), named_source: source_node IS_A Identifier };
+    RETURN PipelineSourceShape{ type: UNWRAP (COPY TRY (type__from_node_mut(source_node, "pipeline source shape"))), bc_target: pipelineHost__bc_target?(&rtoc_self_view), named_source: source_node IS_A Identifier };
 }
 END
 PRIVATE FN pipelineHost__lower_range_fold_observable(self: PipelineHost, p: PipelineLazyRangePrefix, smooth_node: BinaryOp, label: String, source_node: Locatable, acc_alloc_expr: Emittable, publish_stmts: []Emittable) RETURNS !MIRBlockExpr

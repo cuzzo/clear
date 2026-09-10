@@ -395,7 +395,7 @@ PUB FN ownershipDataflow__state_from_names(state: {String}OwnerEntry) RETURNS !{
   RETURN entries;
 END
 PUB FN ownershipDataflow__place_for_binding_node(name: String, node: Node) RETURNS PlaceId ->
-  MUTABLE sym = aST__node__symbol(node);
+  MUTABLE sym = aST__node__symbol(castNodeToLocatable(node));
   MUTABLE symbol = IF sym IS_A SymbolEntry THEN
     sym
   ELSE
@@ -1160,7 +1160,7 @@ PRIVATE FN ownershipDataflow__update_declared_owner_mut(MUTABLE self: OwnershipD
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE place = ownershipDataflow__place_for_binding_node(name, node);
+    MUTABLE place = ownershipDataflow__place_for_binding_node(name, castLocatableToNode(node));
     MUTABLE entry: ?OwnerEntry = TRY (ownershipDataflow__make_owner_entry(rtoc_self_view, &node));
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
@@ -1269,7 +1269,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((IF n IS_A Identifier AS identifier THEN (identifier.was_moved != NIL) ELSE FALSE END)) THEN
         RETURN;
     END
-    MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(n) AS String), n);
+    MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(n) AS String), castLocatableToNode(n));
     IF !(ownershipDataflow__state_entry(rtoc_self_view, step.state, place)) THEN
         RETURN;
     END
@@ -2211,14 +2211,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           :immutable
         END;
       MUTABLE token = (var_node.token() OR stmt.token);
-      IF borrowState__conflicts_with?(body_state, UNWRAP (source), kind) THEN
+      IF borrowState__conflicts_with?(body_state, source, kind) THEN
           IF (kind == :mutable) THEN
             &rtoc_self_view.errors.append("[ALIAS_VIOLATION] ${rtoc_self_view.fn_name}::${(source OR_ELSE "")} -- mutable borrow (RESTRICT) while already borrowed${borrowChecker__line_info(rtoc_self_view, token)}");
           ELSE_IF borrowState__mutable?(body_state, UNWRAP (source)) THEN
             &rtoc_self_view.errors.append("[ALIAS_VIOLATION] ${rtoc_self_view.fn_name}::${(source OR_ELSE "")} -- immutable borrow while mutably borrowed (RESTRICT)${borrowChecker__line_info(rtoc_self_view, token)}");
           END
       END
-      body_state = borrowState__add(body_state, UNWRAP (source), kind);
+      body_state = borrowState__add(body_state, source, kind);
     rtoc_idx = rtoc_idx + 1;
     END
     TRY (borrowChecker__check_stmts(&rtoc_self_view, stmt.body, body_state));

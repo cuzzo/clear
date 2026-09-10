@@ -75,7 +75,7 @@ PUB FN liveness__analyze(segments: []Segment, ctx: {String@symbol}?TransformValu
         CONTINUE;
       END
   END
-  cross[rtoc_each_2] = CrossSegmentVarFact{ type_info: COPY type_by_name[rtoc_each_2], first_def_seg: def_seg, last_use_seg: UNWRAP (use_seg) };
+  cross[rtoc_each_2] = CrossSegmentVarFact{ type_info: COPY type_by_name[rtoc_each_2], first_def_seg: def_seg, last_use_seg: use_seg };
     END
   RETURN LivenessResult{ cross_segment_vars: cross };
 END
