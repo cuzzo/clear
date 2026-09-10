@@ -75,6 +75,18 @@ module SelfhostFnProbe
           i += 1
         end
         types << lines[start...i].join
+      elsif line =~ /^(?:PUB |PRIVATE )?IMPLEMENTATION /
+        # A struct's METHODs live in an IMPLEMENTATION block, not in the struct
+        # declaration. Leaving it out of the type set made every call on one
+        # report "no inherent METHOD" for a method the source defines.
+        start = i
+        depth = 0
+        loop do
+          depth += lines[i].count('{') - lines[i].count('}')
+          i += 1
+          break if i >= lines.length || depth <= 0
+        end
+        types << lines[start...i].join
       elsif line =~ /^(?:PUB |PRIVATE )?(?:STRUCT|UNION|ENUM) /
         start = i
         if line.rstrip.end_with?('}')
@@ -227,7 +239,12 @@ module SelfhostFnProbe
           # The package has fields typed by EXTERN structs, so it needs the
           # declarations itself. Transpiling only checks names and passes
           # without them; compiling the package's Zig does not.
-          out << (d.start_with?('EXTERN') || d.start_with?('PUB ') ? d : "PUB #{d}")
+          # An IMPLEMENTATION block takes no visibility modifier.
+          out << if d.start_with?('EXTERN') || d.start_with?('PUB ') || d.start_with?('IMPLEMENTATION')
+                   d
+                 else
+                   "PUB #{d}"
+                 end
         end
       end
       # Non-rtoc requires name real external packages (stdlib path, fs, regex).
