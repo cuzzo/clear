@@ -817,7 +817,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         stmt_branch_value = TRY (clearParser__parse_expression(&rtoc_self_view));
       END
       MUTABLE stmt: Locatable = stmt_branch_value?;
-      &branches.append(DoBranch{ body: COPY [stmt], pinned: prefix.pinned, parallel: prefix.parallel, stack_size: COPY prefix.stack_size, can_smash: prefix.can_smash, computed_stack_tier: NIL, capture_analysis: NIL });
+      &branches.append(DoBranch{ body: COPY [stmt], pinned: PinMode{ BoolValue: prefix.pinned }, parallel: prefix.parallel, stack_size: COPY prefix.stack_size, can_smash: prefix.can_smash, computed_stack_tier: NIL, capture_analysis: NIL });
       IF !(castClearParserReturnValueToBool(TRY (clearParser__match_mut(&rtoc_self_view, :CHAR, ",")))) THEN
         BREAK;
       END
@@ -839,7 +839,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE prefix = TRY (clearParser__parse_task_prefix(&rtoc_self_view, clearParser__do_task_sigils(), "BG", "BG", "closest BG body sigil"));
     MUTABLE body = TRY (clearParser__parse_bg_then_body(&rtoc_self_view));
     TRY (clearParser__consume(&rtoc_self_view, :CHAR, "}"));
-    MUTABLE node = BgBlock{ token: COPY bg_token, body: body, deferred_drops: NIL, stack_size: COPY prefix.stack_size, pinned: prefix.pinned, parallel: prefix.parallel, arena_mode: prefix.arena, can_smash: prefix.can_smash, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, computed_stack_tier: NIL, captures_resource: NIL, capture_analysis: NIL, async_result_shape: NIL, declared_async_payload: NIL, spawn_form: NIL, fsm_ineligible_reason: NIL, fsm_suspend_points: NIL, open_brace_token: NIL, prefix_token: NIL, can_smash_token: NIL };
+    MUTABLE node = BgBlock{ token: COPY bg_token, body: body, deferred_drops: NIL, stack_size: COPY prefix.stack_size, pinned: PinMode{ BoolValue: prefix.pinned }, parallel: prefix.parallel, arena_mode: prefix.arena, can_smash: prefix.can_smash, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, computed_stack_tier: NIL, captures_resource: NIL, capture_analysis: NIL, async_result_shape: NIL, declared_async_payload: NIL, spawn_form: NIL, fsm_ineligible_reason: NIL, fsm_suspend_points: NIL, open_brace_token: NIL, prefix_token: NIL, can_smash_token: NIL };
     node.open_brace_token = open_brace;
     node.prefix_token = COPY prefix.stack_size_token;
     node.can_smash_token = COPY prefix.can_smash_token;

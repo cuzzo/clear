@@ -61,7 +61,6 @@ UNION MIRLoweringReturnValue { Cleanup: Cleanup, ErrCleanup: ErrCleanup, InlineB
 UNION MIRLoweringType { StringValue: String, SymbolValue: String@symbol, Type: Type }
 UNION Mir { Emittable: Emittable, ArrayValue: []Emittable }
 UNION MIRLoweringName { StringValue: String, SymbolValue: String@symbol, PlaceId: PlaceId, ASTProgram: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDef: FunctionDef, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecovery: TenseRecovery, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlock: WithBlock, SyncPolicyDecl: SyncPolicyDecl, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, LimitOp: LimitOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, JoinOp: JoinOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKind: TenseOperationKind, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup }
-PUB UNION PinMode { SymbolValue: String@symbol, BoolValue: Bool }
 UNION Pinned { BoolValue: Bool, SymbolValue: String@symbol }
 UNION ReturnTypeNode { Type: Type, SymbolValue: String@symbol, StringValue: String }
 UNION Root { Emittable: Emittable, ArrayValue: []Emittable }
@@ -12866,7 +12865,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE ctx_type = "__DoBranchCtx${mIRLoweringGeneratedId__to_s(id)}_${mIRLoweringGeneratedId__to_s(branch_index)}";
       MUTABLE ctx_var = "__do${id.toString()}_ctx${branch_index.toString()}";
       MUTABLE branch_analysis: ?CaptureAnalysis = COPY branch.capture_analysis;
-      MUTABLE pinned: Bool = COPY branch.pinned;
+      MUTABLE pinned: Bool = pinMode__pinned?(branch.pinned);
       &boundary_facts.append(TRY (mIRLowering__execution_boundary_fact(&rtoc_self_view, :do_branch, mIRLowering__execution_boundary_dispatch(rtoc_self_view, branch.parallel, Pinned{ BoolValue: COPY pinned }), branch_analysis)));
       MUTABLE caps = TRY (fiberCtxBuilder__build(branch_analysis, "ctx", {}, NIL, ((id * 1000) + branch_index), TRY (mIRLowering__fiber_capture_source_overrides(&rtoc_self_view, branch_analysis, {})), mIRLowering__mir_schema_lookup(&rtoc_self_view)));
       MUTABLE capture_fields: []ContextFieldDecl = [mIRLowering__context_field_decl(rtoc_self_view, "alloc", "std.mem.Allocator")];
@@ -13116,7 +13115,7 @@ PRIVATE FN mIRLowering__bg_scheduler_plan(self: MIRLowering, MUTABLE node: BgBlo
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE task_cfg = mIRLowering__task_config_plan(rtoc_self_view, node.stack_size, node.computed_stack_tier);
-    MUTABLE pin_mode: ?PinMode = PinMode{ BoolValue: node.pinned };
+    MUTABLE pin_mode: ?PinMode = COPY node.pinned;
     MUTABLE site_id = (names.id + 1);
     MUTABLE site_line: Int64 = 0;
     IF TRUE THEN
@@ -13129,10 +13128,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE dispatch: PinMode = IF node.parallel THEN
       PinMode{ SymbolValue: :parallel }
     ELSE
-      (IF !(node.pinned) THEN
+      (IF !(pinMode__pinned?(node.pinned)) THEN
       PinMode{ SymbolValue: :local }
     ELSE
-      PinMode{ BoolValue: node.pinned }
+      COPY UNWRAP (node.pinned)
     END)
     END;
     MUTABLE profiled_task_cfg = mIRLowering__profiled_task_config_plan(rtoc_self_view, task_cfg, site_id, COPY dispatch);
@@ -13175,7 +13174,7 @@ PRIVATE FN mIRLowering__bg_alloc_expr(self: MIRLowering, MUTABLE node: BgBlock, 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE receiver = Ident{ name: COPY rt_name, lowered_node_id: NIL, ownership_consumption: NIL };
-    IF ((node.pinned == TRUE) OR (node.pinned == :local)) THEN
+    IF ((node.pinned == PinMode{ BoolValue: TRUE }) OR (node.pinned == PinMode{ SymbolValue: :local })) THEN
       MUTABLE sched = MIRMethodCall{ receiver: Emittable{ Ident: COPY receiver }, method: "getSched", args: ( { MUTABLE rtoc_empty_list_507: []Any = List[]; rtoc_empty_list_507 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
       RETURN Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ MIRMethodCall: COPY sched }, field: "allocator", lowered_node_id: NIL, ownership_consumption: NIL } };
     END

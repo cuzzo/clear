@@ -3781,7 +3781,7 @@ PUB STRUCT BgBlock {
   body: []Locatable,
   deferred_drops: ?[]DeferredDrop,
   stack_size: ?String@symbol,
-  pinned: Bool,
+  pinned: ?PinMode,
   parallel: Bool,
   arena_mode: Bool,
   can_smash: Bool,
@@ -7345,9 +7345,20 @@ PUB STRUCT UnionMethodRequirement {
   has_default_body: Bool,
   visibility: String@symbol
 }
+# A BG/DO pin is tri-state in Ruby: absent, plain TRUE, or a scheduler
+# affinity (:local / :shared). The union keeps all three.
+PUB UNION PinMode { SymbolValue: String@symbol, BoolValue: Bool }
+PUB FN pinMode__pinned?(value: ?PinMode) RETURNS Bool ->
+  PARTIAL MATCH value START
+    PinMode.BoolValue AS rtoc_pin_bool -> RETURN rtoc_pin_bool;,
+    PinMode.SymbolValue AS rtoc_pin_sym -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
 PUB STRUCT DoBranch {
   body: []Locatable,
-  pinned: Bool,
+  pinned: ?PinMode,
   parallel: Bool,
   stack_size: ?String@symbol,
   can_smash: Bool,

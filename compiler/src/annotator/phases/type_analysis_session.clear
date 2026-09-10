@@ -17509,14 +17509,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ DoBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :DO_CAPTURES_WITH_SCOPED }));
     END
     MUTABLE analysis_branch_value: ?CaptureAnalysis = NIL;
-      IF (((!(rtoc_mutable_block_param_419.pinned) AND !(rtoc_mutable_block_param_419.parallel)) AND analysis_result.has_shared)) THEN
-        analysis_branch_value = analysis_result;
+      IF (((!(pinMode__pinned?(rtoc_mutable_block_param_419.pinned)) AND !(rtoc_mutable_block_param_419.parallel)) AND analysis_result.has_shared)) THEN
+        analysis_branch_value = COPY analysis_result;
       ELSE
         analysis_branch_value = NIL;
       END
     MUTABLE analysis: ?CaptureAnalysis = analysis_branch_value;
-    IF ((analysis != NIL) AND !(rtoc_mutable_block_param_419.pinned)) THEN
-        rtoc_mutable_block_param_419.pinned = TRUE;
+    IF ((analysis != NIL) AND !(pinMode__pinned?(rtoc_mutable_block_param_419.pinned))) THEN
+        rtoc_mutable_block_param_419.pinned = PinMode{ BoolValue: TRUE };
         typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ DoBlock: COPY node }, "DO branch auto-pinned \u{2014} captures shared/locked resource. Use @parallel to distribute.");
     END
     END
@@ -17651,8 +17651,8 @@ PRIVATE FN typeAnalysisSession__visit_BgBlock(MUTABLE self: TypeAnalysisSession,
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("YIELD")));
-    MUTABLE prev_bg_pinned = typeAnalysisSession__phase_traversal_state(&rtoc_self_view).current_bg_pinned;
-    rtoc_self_view.traversal_state.current_bg_pinned = !(!(node.pinned));
+    MUTABLE prev_bg_pinned: Bool = COPY typeAnalysisSession__phase_traversal_state(&rtoc_self_view).current_bg_pinned;
+    rtoc_self_view.traversal_state.current_bg_pinned = pinMode__pinned?(node.pinned);
     DEFER rtoc_self_view.traversal_state.current_bg_pinned = prev_bg_pinned;
     MUTABLE last_type: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
@@ -17679,9 +17679,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE payload_type = TRY (typeAnalysisSession__owned_async_payload_type(&rtoc_self_view, last_type));
     node.async_result_shape = TRY (asyncResultShape__promise(CAST(payload_type AS Type)));
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${type__to_s(payload_type)}") }))));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BgBlock: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${type__to_s(payload_type)}") }))));
     IF node.arena_mode THEN
-      node.pinned = TRUE;
+      node.pinned = PinMode{ BoolValue: TRUE };
       IF node.parallel THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BgBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :BG_ARENA_AND_PARALLEL }));
       END
@@ -17699,24 +17699,24 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BgBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :BG_CAPTURES_WITH_SCOPED }));
     END
     MUTABLE analysis_branch_value: ?CaptureAnalysis = NIL;
-    IF (((!(node.pinned) AND !(node.parallel)) AND analysis_result.has_shared)) THEN
-      analysis_branch_value = analysis_result;
+    IF (((!(pinMode__pinned?(node.pinned)) AND !(node.parallel)) AND analysis_result.has_shared)) THEN
+      analysis_branch_value = COPY analysis_result;
     ELSE
       analysis_branch_value = NIL;
     END
     MUTABLE analysis: ?CaptureAnalysis = analysis_branch_value;
-    IF ((prev_bg_pinned AND !(node.pinned)) AND analysis_result.has_outer_ref) THEN
+    IF ((prev_bg_pinned AND !(pinMode__pinned?(node.pinned))) AND analysis_result.has_outer_ref) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BgBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :BG_PINNED_CAPTURE_MISMATCH }));
     END
-    IF ((analysis != NIL) AND !(node.pinned)) THEN
+    IF ((analysis != NIL) AND !(pinMode__pinned?(node.pinned))) THEN
       IF analysis.has_local THEN
-        node.pinned = :local;
+        node.pinned = PinMode{ SymbolValue: :local };
         typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ BgBlock: COPY node }, "BG block auto-pinned \u{2014} captures @local resource (same-scheduler affinity).");
       ELSE_IF analysis.has_affine_locked THEN
-        node.pinned = :shared;
+        node.pinned = PinMode{ SymbolValue: :shared };
         typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ BgBlock: COPY node }, "BG block auto-pinned \u{2014} captures @locked resource (round-robin scheduler affinity).");
       ELSE
-        node.pinned = :local;
+        node.pinned = PinMode{ SymbolValue: :local };
         IF analysis.has_sharded THEN
           typeAnalysisSession__note_mut(&rtoc_self_view, Locatable{ BgBlock: COPY node }, "BG block auto-pinned \u{2014} captures @sharded map (scheduler affinity for shard locality).");
         ELSE
