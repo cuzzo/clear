@@ -116,18 +116,18 @@ PUB FN escapeAnalysis__apply_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?
   MUTABLE result = TRY (escapeAnalysis__apply_with_facts_mut(fn_nodes, schema_lookup));
   RETURN CAST(Tuple{result.heap_fns, result.bg_heap} AS Tuple<[Set]String, [Set]String>);
 END
-PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, body_summaries: {String}FunctionBodySummary, hoist_bindings: ?{String}[]VarDecl = NIL) RETURNS !EscapeAnalysisResult ->
+PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, body_summaries: {String}FunctionBodySummary = {}, hoist_bindings: ?{String}[]VarDecl = NIL) RETURNS !EscapeAnalysisResult ->
   MUTABLE bg_heap: [Set]String = Set[];
   MUTABLE placements = EscapePlacementFacts{ placements: List[] };
   MUTABLE facts_by_name: {String}FunctionFacts = {};
   FOR rtoc_key IN fn_nodes.keys() DO
   MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
   IF fn_value.body THEN
-    facts_by_name[rtoc_key] = TRY (escapeAnalysis__function_facts(fn_value, body_summaries[rtoc_key], ((IF hoist_bindings != NIL THEN
-      hoist_bindings[rtoc_key]
-    ELSE
-      NIL
-    END))));
+    MUTABLE rtoc_hoisted: []VarDecl = [];
+    IF hoist_bindings EXISTS AS rtoc_hoist_map THEN
+      rtoc_hoisted = COPY (rtoc_hoist_map[rtoc_key] OR_ELSE List[]);
+    END
+    facts_by_name[rtoc_key] = TRY (escapeAnalysis__function_facts(fn_value, body_summaries[rtoc_key], rtoc_hoisted));
   END
   END
   FOR _ IN facts_by_name.values() DO
@@ -153,7 +153,7 @@ PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schem
     rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :loop_receiver_backing_storage, %() USE(body) -> {
-    TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(((body |> SELECT castLocatableToNode(_)) |> SELECT castLocatableToNode(_))));
+    TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut((body |> SELECT castLocatableToNode(_))));
     rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :assignment_ownership, %() USE(facts_by_name, fn_nodes, schema_lookup, _) -> {
