@@ -12656,7 +12656,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.mutates_receiver = TRY (functionSignature__mutates_receiver?(method_def_value_mutable));
       node.can_fail = (IF node.can_fail != NIL THEN node.can_fail ELSE functionSignature__can_fail(method_def_value_mutable) END);
       IF (functionSignature__recoverable_result?(method_def_value_mutable) AND TRUE) THEN
-        node.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ StaticCall: COPY node })) })))));
+        node__set_error_union_type_mut(&node, TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ StaticCall: COPY node })) }))))));
       END
       node.error_kind = TRY (functionSignature__intrinsic_error_kind(method_def_value_mutable));
       node.error_type = TRY (functionSignature__intrinsic_error_type(method_def_value_mutable));
@@ -12706,7 +12706,7 @@ PRIVATE FN typeAnalysisSession__visit_IntrinsicFunc(MUTABLE self: TypeAnalysisSe
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE matched_def = COPY matched_def_input;
+    MUTABLE matched_def: ?FunctionSignature = COPY matched_def_input;
     MUTABLE definitions: []FunctionSignature@multiowned = TRY (intrinsicRegistry__overloads(:std_lib, UNWRAP (aST__node_name(UNWRAP (castNodeToLocatable(node))))));
     matched_def = (matched_def OR_ELSE TRY (typeAnalysisSession__find_matching_intrinsic(&rtoc_self_view, definitions, args)));
     IF matched_def EXISTS AS matched_def_value THEN
@@ -12723,17 +12723,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, castNodeToLocatable__type_analysis_session(node), { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_303 = (TRY (functionSignature__return_def(matched_def_value_mutable)));
       TRY (functionReturn__resolve(rtoc_local_receiver_303, NIL, args)) }));
-      node__set_zig_pattern_mut(&node, TRY (functionSignature__intrinsic_pattern(matched_def_value_mutable)));
+      node__set_zig_pattern_mut(&node, castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__type_analysis_session(TRY (functionSignature__intrinsic_pattern(matched_def_value_mutable))));
       node__set_matched_stdlib_def_mut(&node, COPY matched_def_value_mutable);
-      IF (aST__node__matched_signature(Node{ MethodCall: COPY UNWRAP (castNodeToMethodCall(node))}) EXISTS) THEN
-        node.matched_signature = COPY matched_def_value_mutable;
-      END
+      node__set_matched_signature_mut(&node, COPY matched_def_value_mutable);
       MUTABLE matched_allocates = TRY (functionSignature__emits_allocating?(matched_def_value_mutable));
       node__set_stdlib_allocates_mut(&node, matched_allocates);
       node__set_mutates_receiver_mut(&node, TRY (functionSignature__mutates_receiver?(matched_def_value_mutable)));
-      node.can_fail = ((aST__node__can_fail(UNWRAP (castNodeToLocatable(node))) OR functionSignature__can_fail(matched_def_value_mutable)) OR matched_allocates);
+      node__set_can_fail_mut(&node, (((aST__node__can_fail(UNWRAP (castNodeToLocatable(node))) OR_ELSE FALSE) OR (functionSignature__can_fail(matched_def_value_mutable) OR_ELSE FALSE)) OR matched_allocates));
       IF (functionSignature__recoverable_result?(matched_def_value_mutable) AND (aST__node_error_union_type(UNWRAP (castNodeToLocatable(node))) EXISTS)) THEN
-        node.error_union_type = TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (castNodeToLocatable(node)))) })))));
+        node__set_error_union_type_mut(&node, TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(UNWRAP (castNodeToLocatable(node)))) }))))));
       END
       IF TRY (functionSignature__intrinsic_error_kind(matched_def_value_mutable)) THEN
         node__set_error_kind_mut(&node, TRY (functionSignature__intrinsic_error_kind(matched_def_value_mutable)));
@@ -12741,7 +12739,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF TRY (functionSignature__intrinsic_error_type(matched_def_value_mutable)) THEN
         node__set_error_type_mut(&node, TRY (functionSignature__intrinsic_error_type(matched_def_value_mutable)));
       END
-      IF ((matched_allocates OR functionSignature__can_fail(matched_def_value_mutable)) OR functionSignature__needs_rt(matched_def_value_mutable)) THEN
+      IF ((matched_allocates OR (functionSignature__can_fail(matched_def_value_mutable) OR_ELSE FALSE)) OR (functionSignature__needs_rt(matched_def_value_mutable) OR_ELSE FALSE)) THEN
         IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
                 MUTABLE rtoc_mutable_receiver_304 = UNWRAP (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
                 functionContext__record_alloc_use_mut(&rtoc_mutable_receiver_304);
@@ -12751,7 +12749,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("SUSPENDS")));
       END
       IF TRY (functionSignature__mutates_receiver?(matched_def_value_mutable)) THEN
-      IF node IS_A MethodCall AS method_call THEN
+      IF node IS_A MethodCall AS MUTABLE method_call THEN
         typeAnalysisSession__mark_chain_needs_mut_ref_mut(&rtoc_self_view, method_call.object);
         MUTABLE root: ?String = typeAnalysisSession__chain_root_name(&rtoc_self_view, &method_call.object);
         IF root EXISTS AS root_value THEN
@@ -12762,9 +12760,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__narrow_collection_type_mut(&rtoc_self_view, matched_def_value_mutable, args));
       RETURN NIL;
     ELSE
-      MUTABLE sigs = ( { MUTABLE rtoc_map_results = CAST([] AS []String); definitions |> EACH { &rtoc_map_results.append(COPY TRY (functionSignature__intrinsic_args_label(_))); }; rtoc_map_results } ).join(" or ");
-      MUTABLE arg_types = (args |> SELECT _.resolved_type).join(", ");
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_NO_OVERLOAD }, arg_types, CAST({:name: aST__node_name(UNWRAP (castNodeToLocatable(node))), :candidates: sigs} AS {String@symbol}Any)));
+      MUTABLE rtoc_fn_name: String = "unknown";
+      IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) EXISTS AS rtoc_fn_ctx THEN
+        rtoc_fn_name = COPY rtoc_fn_ctx.name;
+      END
+      MUTABLE rtoc_sig_labels: []String = [];
+      MUTABLE rtoc_sig_idx = 0;
+      WHILE rtoc_sig_idx < definitions.length() DO
+        MUTABLE rtoc_defn: FunctionSignature = COPY UNWRAP (definitions[rtoc_sig_idx]);
+        &rtoc_sig_labels.append(COPY TRY (functionSignature__intrinsic_args_label(rtoc_defn)));
+        rtoc_sig_idx = rtoc_sig_idx + 1;
+      END
+      MUTABLE sigs = rtoc_sig_labels.join(" or ");
+      MUTABLE arg_types = (args |> SELECT COPY (locatable__resolved_type(_) OR_ELSE symbol(""))).join(", ");
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_NO_OVERLOAD }, [], CAST({:name: aST__node_name(UNWRAP (castNodeToLocatable(node))), :args: arg_types, :candidates: sigs, :fn: rtoc_fn_name} AS {String@symbol}Any)));
       RETURN NIL;
     END
 }
@@ -22583,6 +22592,14 @@ FN castSchemasUnionSchemaVariantValueToTypeTypeInput__type_analysis_session(valu
     DEFAULT -> panic("Invalid cast to TypeTypeInput");
   END
   panic("Invalid cast to TypeTypeInput");
+END
+FN castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__type_analysis_session(value: ?FunctionSignatureReturnValue) RETURNS ?String@symbol ->
+  IF value != NIL THEN
+    IF value IS_A String@symbol AS cast_payload THEN
+      RETURN cast_payload;
+    END
+  END
+  RETURN NIL;
 END
 FN castTypeToOptionalTypeTypeInput__type_analysis_session(value: Type) RETURNS ?TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };

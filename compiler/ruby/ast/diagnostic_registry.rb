@@ -3211,7 +3211,7 @@ module DiagnosticRegistry
     },
     FN_PARAM_NO_CAPABILITY: {
       severity: :error, category: :type,
-      template: "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').",
+      template: "Capability annotations are not allowed on function parameters: parameter '%{name}' is declared '%{type}'. Use the plain type (e.g., 'Node' not 'Node @multiowned').",
       summary:  "FN-type parameter syntax disallows capability sigils.",
       cause: "CLEAR functions take *types*, not capabilities. Capabilities are properties of bindings (the caller's local), unwrapped at the call site via WITH. Allowing `@multiowned` etc. on a parameter would conflate the type with the caller's wrapping — and would force every call site to wrap the value, even when the caller has a plain T.",
       fix_hint: "Drop the sigil from the parameter type (e.g. `c: Counter` not `c: Counter @multiowned`). The caller wraps as needed (`WITH c { fn(c); }` for a multiowned binding). To require a sync family on the param, use `REQUIRES c: LOCKED` (or ATOMIC, VERSIONED) — that's the supported way to constrain capabilities.",

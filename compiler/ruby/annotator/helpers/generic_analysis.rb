@@ -164,7 +164,14 @@ module GenericAnalysis
     has_ownership_cap = %i[multiowned split].include?(type_obj.ownership)
     primitive_atomic_param = type_obj.atomic? && type_obj.primitive?
     has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol c size].include?(type_obj.sync)
-    error!(facts.node, :FN_PARAM_NO_CAPABILITY) if has_ownership_cap || has_sync_cap
+    return unless has_ownership_cap || has_sync_cap
+
+    # The node this fires on is a type annotation, which often carries no
+    # token -- so without the name and the spelled type the reader is left
+    # searching a whole function for the parameter that tripped it.
+    name = facts.node.respond_to?(:name) ? T.unsafe(facts.node).name.to_s : "?"
+    cap = has_ownership_cap ? type_obj.ownership : type_obj.sync
+    error!(facts.node, :FN_PARAM_NO_CAPABILITY, name: name, type: "#{type_obj.resolved}@#{cap}")
   end
 
   sig { params(facts: TypeAnnotationFacts).void }
