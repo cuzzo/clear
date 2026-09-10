@@ -653,12 +653,12 @@ PUB FN escapeAnalysis__param_accepts_caller_sync?(fn_node: FunctionDef, param: P
 END
 PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, bg_heap: [Set]String, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   MUTABLE context = EscapeContext{ fn: facts.fn, facts: COPY facts, fn_nodes: COPY fn_nodes, facts_by_name: COPY facts_by_name, bg_heap: COPY bg_heap, schema_lookup: schema_lookup };
-  FOR _ IN facts.escape_nodes DO
-  FOR _ IN escapeAnalysis__escape_sinks() DO
-  IF escapeSink__matches?(_, _) THEN
-    TRY (escapeAnalysis__apply_escape_sink_mut(_, _, &context));
-  END
-  END
+  FOR rtoc_escape_node IN facts.escape_nodes DO
+    FOR rtoc_sink IN escapeAnalysis__escape_sinks() DO
+      IF escapeSink__matches?(rtoc_sink, rtoc_escape_node) THEN
+        TRY (escapeAnalysis__apply_escape_sink_mut(rtoc_sink, rtoc_escape_node, &context));
+      END
+    END
   END
 END
 PUB FN escapeAnalysis__apply_escape_sink_mut(sink: EscapeSink, node: Locatable, MUTABLE context: EscapeContext) RETURNS !Void ->
@@ -751,16 +751,19 @@ PUB FN escapeAnalysis__propagate_value_block_placements_mut(facts: FunctionFacts
 END
 PUB FN escapeAnalysis__mark_value_position_heap_mut(expr: ?Locatable) RETURNS Void ->
   MUTABLE node: ?DynamicValue = castOptionalLocatableToOptionalDynamicValue(COPY expr);
-  WHILE node DO
-    IF node? IS_A Locatable AS locatable THEN
-      MUTABLE locatable = escapeAnalysis__unwrap_value(locatable);
+  WHILE node != NIL DO
+    node = escapeAnalysis__unwrap_value(node);
+    MUTABLE rtoc_loc: ?Locatable = castOptionalDynamicValueToOptionalLocatable(node);
+    IF (rtoc_loc == NIL) THEN
+      RETURN;
     END
-    IF (node IS_A Cast) THEN
-      node = node.value();
-    ELSE_IF (node IS_A BlockExpr) THEN
-      node = node.result;
-    ELSE_IF node IS_A Identifier AS identifier THEN
-      escapeAnalysis__mark_node_symbol_heap_mut(identifier);
+    MUTABLE rtoc_current: Locatable = COPY rtoc_loc;
+    IF rtoc_current IS_A Cast AS rtoc_cast THEN
+      node = castOptionalLocatableToOptionalDynamicValue(rtoc_cast.value);
+    ELSE_IF rtoc_current IS_A BlockExpr AS rtoc_block THEN
+      node = castOptionalLocatableToOptionalDynamicValue(rtoc_block.result);
+    ELSE_IF rtoc_current IS_A Identifier THEN
+      escapeAnalysis__mark_node_symbol_heap_mut(rtoc_current);
       RETURN;
     ELSE
       RETURN;
