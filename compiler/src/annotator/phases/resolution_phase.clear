@@ -1977,27 +1977,25 @@ PRIVATE FN resolutionSession__register_extern_struct_declaration(MUTABLE self: R
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE schema =   IF ((node.close_method != NIL) AND (node.from_module != NIL)) THEN
-      {
-    MUTABLE rtoc_value_block_marker = 0;
+    MUTABLE schema: ?SchemaValue = NIL;
+    IF ((node.close_method != NIL) AND (node.from_module != NIL)) THEN
       MUTABLE close_plan = resourceClosePlan__c_function(UNWRAP (node.close_method));
       IF (node.extern_source?.abi == :c) THEN
-      close_plan = resourceClosePlan__c_function(UNWRAP (node.close_method));
+        close_plan = resourceClosePlan__c_function(UNWRAP (node.close_method));
+      ELSE
+        close_plan = resourceClosePlan__method(UNWRAP (node.close_method));
+      END
+      schema = SchemaValue{ ResourceSchemaMultiowned: COPY TRY (resourceSchema__new(close_plan, {}, castStructFieldMapToSchemasResourceSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.from_module, node.as_type, :package, {})) };
     ELSE
-      close_plan = resourceClosePlan__method(UNWRAP (node.close_method));
+      schema = SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(castStructFieldMapToSchemasStructSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), ( { MUTABLE rtoc_empty_list_55: []GenericParamDecl = List[]; rtoc_empty_list_55 } ), {}, {}, :package, node.from_module, node.as_type)) };
     END
-    TRY (resourceSchema__new(close_plan, {}, castStructFieldMapToSchemasResourceSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.from_module, node.as_type, :package, {}))
-    }
-    ELSE
-      TRY (structSchema__new(castStructFieldMapToSchemasStructSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), ( { MUTABLE rtoc_empty_list_55: []GenericParamDecl = List[]; rtoc_empty_list_55 } ), {}, {}, :package, node.from_module, node.as_type))
-    END;
     MUTABLE existing: ?ScopeTypeEntry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_56 = TRY (resolutionSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type_entry(rtoc_local_receiver_56, symbol(node.name))) };
-    IF ((existing != NIL) AND resolutionSession__equivalent_extern_type_schema?(&rtoc_self_view, existing.schema, schema)) THEN
+    IF ((existing != NIL) AND resolutionSession__equivalent_extern_type_schema?(&rtoc_self_view, existing.schema, UNWRAP (schema))) THEN
       TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ExternStructDecl: COPY node }, :Void));
       RETURN;
     END
-    TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ ExternStructDecl: COPY node }, symbol(node.name), schema));
+    TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ ExternStructDecl: COPY node }, symbol(node.name), UNWRAP (schema)));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ExternStructDecl: COPY node }, :Void));
 }
 END
