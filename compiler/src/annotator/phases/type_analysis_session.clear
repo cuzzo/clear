@@ -20463,7 +20463,7 @@ PRIVATE FN typeAnalysisSession__stamp_bg_handle_lifetime_mut(MUTABLE self: TypeA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE sources = CAST(((TRY (typeAnalysisSession__collect_bg_sources_in_expr(&rtoc_self_view, UNWRAP (declNode__value(decl_node))))) |> DISTINCT _) AS []SymbolEntry@multiowned);
+    MUTABLE sources: []SymbolEntry@multiowned = (TRY (typeAnalysisSession__collect_bg_sources_in_expr(&rtoc_self_view, castLocatableToBgSourceWalkValue(UNWRAP (declNode__value(decl_node)))))) |> DISTINCT _ |> SELECT KEEP _;
     IF sources.empty?() THEN
       RETURN;
     END

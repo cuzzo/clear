@@ -90,7 +90,7 @@ PUB STRUCT EscapeContext {
 }
 PUB STRUCT EscapeSink {
   name: String@symbol,
-  node_classes: []Any@multiowned,
+  node_classes: []String@symbol,
   handler: String@symbol
 }
 
@@ -110,7 +110,7 @@ PUB FN escapeSink__matches?(self: EscapeSink, node: Any) RETURNS Bool ->
   END;
 END
 PUB FN escapeAnalysis__escape_sinks() RETURNS [8]EscapeSink EFFECTS REENTRANT ->
-  RETURN [EscapeSink{ name: :owning_return, node_classes: [BgSourceWalkValue.ReturnNode], handler: symbol("apply_return_escape_sink!") }, EscapeSink{ name: :enclosing_scope_store, node_classes: [BgSourceWalkValue.Assignment], handler: symbol("apply_assignment_escape_sink!") }, EscapeSink{ name: :binding_result, node_classes: [BgSourceWalkValue.VarDecl, BgSourceWalkValue.BindExpr], handler: symbol("apply_binding_escape_sink!") }, EscapeSink{ name: :destructured_binding, node_classes: [BgSourceWalkValue.DestructuringAssignment], handler: symbol("apply_destructuring_escape_sink!") }, EscapeSink{ name: :execution_boundary_capture, node_classes: [AsyncSpawnNode.BgBlock, BgSourceWalkValue.BgStreamBlock], handler: symbol("apply_execution_boundary_escape_sink!") }, EscapeSink{ name: :lambda_capture, node_classes: [BgSourceWalkValue.LambdaLit], handler: symbol("apply_lambda_escape_sink!") }, EscapeSink{ name: :takes_or_mutable_arg, node_classes: [BgSourceWalkValue.FuncCall], handler: symbol("apply_func_call_escape_sink!") }, EscapeSink{ name: :takes_or_mutable_arg, node_classes: [AutoInferenceWalkNode.MethodCall], handler: symbol("apply_method_call_escape_sink!") }];
+  RETURN [EscapeSink{ name: :owning_return, node_classes: [:ReturnNode], handler: symbol("apply_return_escape_sink!") }, EscapeSink{ name: :enclosing_scope_store, node_classes: [:Assignment], handler: symbol("apply_assignment_escape_sink!") }, EscapeSink{ name: :binding_result, node_classes: [:VarDecl, :BindExpr], handler: symbol("apply_binding_escape_sink!") }, EscapeSink{ name: :destructured_binding, node_classes: [:DestructuringAssignment], handler: symbol("apply_destructuring_escape_sink!") }, EscapeSink{ name: :execution_boundary_capture, node_classes: [:BgBlock, :BgStreamBlock], handler: symbol("apply_execution_boundary_escape_sink!") }, EscapeSink{ name: :lambda_capture, node_classes: [:LambdaLit], handler: symbol("apply_lambda_escape_sink!") }, EscapeSink{ name: :takes_or_mutable_arg, node_classes: [:FuncCall], handler: symbol("apply_func_call_escape_sink!") }, EscapeSink{ name: :takes_or_mutable_arg, node_classes: [:MethodCall], handler: symbol("apply_method_call_escape_sink!") }];
 END
 PUB FN escapeAnalysis__apply_mut(fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Tuple<[Set]String, [Set]String> ->
   MUTABLE result = TRY (escapeAnalysis__apply_with_facts_mut(fn_nodes, schema_lookup));
@@ -791,7 +791,8 @@ END
 PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatable) RETURNS !Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < nodes.length() DO
-    IF (nodes[rtoc_idx]? IS_A MethodCall) THEN
+    MUTABLE root: ?Identifier = NIL;
+    IF nodes[rtoc_idx]? IS_A MethodCall AS rtoc_method_call THEN
         MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
         IF (locatable__matched_signature(nodes[rtoc_idx]?) != NIL) THEN
           sig_branch_value = functionSignature__unwrap(X{ FunctionSignature: COPY UNWRAP (locatable__matched_signature(nodes[rtoc_idx]?)) });
@@ -805,7 +806,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
             rtoc_idx = rtoc_idx + 1;
   CONTINUE;
           END
-          MUTABLE root: ?Identifier = aST__root_identifier(nodes[rtoc_idx]?.object);
+          root = aST__root_identifier(rtoc_method_call.object);
         ELSE
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -815,13 +816,16 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
         END
-        MUTABLE root: ?Identifier = aST__root_identifier(castAssignmentNameToLocatable__escape_analysis(assignment.name));
+        root = aST__root_identifier(castAssignmentNameToLocatable__escape_analysis(assignment.name));
         MUTABLE ti: ?Type@multiowned = NIL;
-        IF root?.symbol != NIL THEN
-          MUTABLE rtoc_root_symbol = UNWRAP (root).symbol;
+        IF root?.symbol EXISTS AS rtoc_root_symbol THEN
           ti = COPY symbolEntry__type(rtoc_root_symbol);
         END
-        IF !(((ti != NIL) AND type__collection?(ti))) THEN
+        MUTABLE rtoc_ti_collection: Bool = FALSE;
+        IF ti EXISTS AS rtoc_ti THEN
+          rtoc_ti_collection = type__collection?(rtoc_ti);
+        END
+        IF !(rtoc_ti_collection) THEN
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
         END
@@ -829,12 +833,12 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE sym = COPY root?.symbol;
-    IF !((IF sym != NIL THEN
-        symbolEntry__is_param(sym)
-      ELSE
-        NIL
-      END)) THEN
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY root?.symbol;
+    MUTABLE rtoc_sym_is_param: Bool = FALSE;
+    IF sym EXISTS AS rtoc_sym THEN
+      rtoc_sym_is_param = symbolEntry__is_param(rtoc_sym);
+    END
+    IF !(rtoc_sym_is_param) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -2071,23 +2075,15 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
   rtoc_idx = rtoc_idx + 1;
       END
       IF has_param_return THEN
-        MUTABLE ret: ?Type = TRY (type__from_node(UNWRAP (castTypeTypeInputToType(UNWRAP (return_type)))));
-        IF ret EXISTS AS ret_value THEN
-          MUTABLE ret_value = TRY (type__success_type(ret_value));
+        MUTABLE ret: ?Type = NIL;
+        IF castTypeTypeInputToType(UNWRAP (return_type)) EXISTS AS rtoc_return_type THEN
+          ret = TRY (type__success_type(rtoc_return_type));
         END
-        IF (IF (IF ret != NIL THEN
-          TRY (type__string?(ret))
-        ELSE
-          NIL
-        END) != NIL THEN (IF ret != NIL THEN
-          TRY (type__string?(ret))
-        ELSE
-          NIL
-        END) ELSE (IF ret != NIL THEN
-          TRY (type__recursive_cleanup_shape?(ret, schema_lookup))
-        ELSE
-          NIL
-        END) END) THEN
+        MUTABLE rtoc_ret_heapish: Bool = FALSE;
+        IF ret EXISTS AS rtoc_ret THEN
+          rtoc_ret_heapish = (TRY (type__string?(rtoc_ret)) OR TRY (type__recursive_cleanup_shape?(rtoc_ret, schema_lookup)));
+        END
+        IF rtoc_ret_heapish THEN
           RETURN TRUE;
         END
         RETURN FALSE;
