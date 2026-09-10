@@ -17405,19 +17405,19 @@ PRIVATE FN typeAnalysisSession__resolve_error_selectors_mut(MUTABLE self: TypeAn
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE possible = Set[];
+    MUTABLE rtoc_possible_set: [Set]String@symbol = Set[];
     IF is_snapshot_txn THEN
-      &possible.merge(executionBoundaries__snapshot_possible_types());
+      &rtoc_possible_set.merge(executionBoundaries__snapshot_possible_types());
     END
     MUTABLE capability_plan = TRY (capabilityPlan__require_for(node));
     IF ((TRY (withCapabilityPlan__locks(capability_plan))).length() > 0) THEN
-      &possible.merge(executionBoundaries__lock_possible_types());
+      &rtoc_possible_set.merge(executionBoundaries__lock_possible_types());
     END
     IF !(((TRY (withCapabilityPlan__guarded(capability_plan))).length() == 0)) THEN
-      &possible.insert(:GuardFail);
+      &rtoc_possible_set.insert(:GuardFail);
     END
-    possible = possible |> SELECT COPY _;
-    MUTABLE matched = List[];
+    MUTABLE possible: []String@symbol = rtoc_possible_set |> SELECT COPY _;
+    MUTABLE matched: []String@symbol = List[];
     FOR _ IN clause.selectors DO
     MUTABLE form = COPY _.form;
     MUTABLE name = COPY _.name;
@@ -17425,33 +17425,60 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE diagnostic_token = (token OR_ELSE node.token);
     IF (form == :kind) THEN
         IF !(aST__error_kind?(name)) THEN
-          TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, diagnostic_token, NameCandidate{ SymbolValue: COPY name }, (((ruby_constant_error_kinds() |> SELECT _.toString() |> SELECT NameCandidate{ StringValue: COPY UNWRAP (castNameCandidateToString(NameCandidate{ StringValue: COPY _ }))}) |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }), "Unknown error kind '${name}'. Expected one of: ${(ruby_constant_error_kinds() |> SELECT _.toString()).join(", ")}", "closest known kind"));
+          TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, diagnostic_token, NameCandidate{ SymbolValue: COPY name }, (ruby_constant_error_kinds() |> SELECT NameCandidate{ SymbolValue: COPY _ }), "Unknown error kind '${name}'. Expected one of: ${(ruby_constant_error_kinds() |> SELECT _.toString()).join(", ")}", "closest known kind"));
         END
         IF aST__error_kind?(name) THEN
-          matched = ruby_array_concat_Any__type_analysis_session(matched, CAST(TRY (aST__types_for_kind(name)) AS []Any));
+          MUTABLE rtoc_kind_types: []String@symbol = TRY (aST__types_for_kind(name));
+          MUTABLE rtoc_kind_i = 0;
+          WHILE rtoc_kind_i < rtoc_kind_types.length() DO
+            &matched.append(COPY UNWRAP (rtoc_kind_types[rtoc_kind_i]));
+            rtoc_kind_i = rtoc_kind_i + 1;
+          END
         END
     ELSE_IF (form == :type) THEN
         IF !(TRY (aST__error_type?(name))) THEN
-          TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, diagnostic_token, NameCandidate{ SymbolValue: COPY name }, TRY (aST__error_type_names()), "Unknown error type '${name}'. Register it in src/ast/error_registry.rb.", "closest registered type"));
+          TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, diagnostic_token, NameCandidate{ SymbolValue: COPY name }, (TRY (aST__error_type_names()) |> SELECT NameCandidate{ StringValue: COPY _ }), "Unknown error type '${name}'. Register it in src/ast/error_registry.rb.", "closest registered type"));
         END
         IF TRY (aST__error_type?(name)) THEN
           &matched.append(name);
         END
     END
     END
-    &matched.uniq_mut();
+    matched = matched |> DISTINCT _ |> SELECT COPY _;
     IF clause.retries EXISTS AS retries_value THEN
-      MUTABLE non_transient = matched |> WHERE !((TRY (aST__kind_of_type(_)) == :Transient));
+      MUTABLE non_transient: []String@symbol = List[];
+      MUTABLE rtoc_matched_i = 0;
+      WHILE rtoc_matched_i < matched.length() DO
+        IF !((TRY (aST__kind_of_type(UNWRAP (matched[rtoc_matched_i]))) == :Transient)) THEN
+          &non_transient.append(COPY UNWRAP (matched[rtoc_matched_i]));
+        END
+        rtoc_matched_i = rtoc_matched_i + 1;
+      END
       IF !((non_transient.length() == 0)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, (IF clause.token EXISTS AS rtoc_anchor_tok_17255 THEN DiagnosticAnchor{ TokenValue: COPY rtoc_anchor_tok_17255 } ELSE DiagnosticAnchor{ Locatable: COPY Locatable{ WithBlock: COPY node } } END), TypeAnalysisCodeOrMessage{ SymbolValue: :RETRY_ONLY_TRANSIENT }, [], CAST({:types: non_transient.join(", ")} AS {String@symbol}Any)));
       END
     END
-    MUTABLE overlap = ruby_set_intersection_Any_set(matched, possible);
+    MUTABLE overlap: []String@symbol = List[];
+    MUTABLE rtoc_overlap_i = 0;
+    WHILE rtoc_overlap_i < matched.length() DO
+      IF possible.contains?(UNWRAP (matched[rtoc_overlap_i])) THEN
+        &overlap.append(COPY UNWRAP (matched[rtoc_overlap_i]));
+      END
+      rtoc_overlap_i = rtoc_overlap_i + 1;
+    END
     IF overlap.empty?() THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :SELECTORS_NO_MATCH }, [], CAST({:matched: matched.join(", "), :possible: "any error the WITH acquire can produce (${possible.join(", ")})."} AS {String@symbol}Any)));
     END
-    clause.matched_types = overlap;
-    clause.bubble_types = (possible - overlap);
+    clause.matched_types = COPY overlap;
+    MUTABLE rtoc_bubble: []String@symbol = List[];
+    MUTABLE rtoc_bubble_i = 0;
+    WHILE rtoc_bubble_i < possible.length() DO
+      IF !(overlap.contains?(UNWRAP (possible[rtoc_bubble_i]))) THEN
+        &rtoc_bubble.append(COPY UNWRAP (possible[rtoc_bubble_i]));
+      END
+      rtoc_bubble_i = rtoc_bubble_i + 1;
+    END
+    clause.bubble_types = rtoc_bubble;
 }
 END
 PRIVATE FN typeAnalysisSession__visit_DoBlock(MUTABLE self: TypeAnalysisSession, MUTABLE node: DoBlock) RETURNS !?String@symbol
@@ -17999,13 +18026,13 @@ PRIVATE FN typeAnalysisSession__resolve_catch_clause_mut(MUTABLE self: TypeAnaly
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE kinds = List[];
-    MUTABLE types = List[];
+    MUTABLE kinds: []String@symbol = List[];
+    MUTABLE types: []String = List[];
     FOR _ IN clause.items DO
     IF (_.form == :kind) THEN
       MUTABLE kind_sym = symbol(_.name);
       IF !(aST__error_kind?(kind_sym)) THEN
-        TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, CAST(COPY _.token AS Token), NameCandidate{ StringValue: COPY UNWRAP (castNameCandidateToString(NameCandidate{ StringValue: COPY _.name }))}, (((ruby_constant_error_kinds() |> SELECT _.toString() |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }) |> SELECT NameCandidate{ StringValue: COPY _ }), "Unknown error kind '${_.name}'. Expected one of: ${(ruby_constant_error_kinds() |> SELECT _.toString()).join(", ")}", "closest known kind"));
+        TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, CAST(COPY _.token AS Token), NameCandidate{ StringValue: COPY _.name }, (ruby_constant_error_kinds() |> SELECT NameCandidate{ SymbolValue: COPY _ }), "Unknown error kind '${_.name}'. Expected one of: ${(ruby_constant_error_kinds() |> SELECT _.toString()).join(", ")}", "closest known kind"));
       END
       IF aST__error_kind?(kind_sym) THEN
         &kinds.append(kind_sym);
@@ -18013,17 +18040,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       MUTABLE type_sym = symbol(_.name);
       IF !(TRY (aST__error_type?(type_sym))) THEN
-        TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, CAST(COPY _.token AS Token), NameCandidate{ StringValue: COPY _.name }, TRY (aST__error_type_names()), "CATCH ${_.name}: error type '${_.name}' is not registered. A type must be registered via RAISE/OR_ELSE EXIT before it can be CATCHed.", "closest registered type"));
+        TRY (typeAnalysisSession__emit_registry_mismatch_mut(&rtoc_self_view, CAST(COPY _.token AS Token), NameCandidate{ StringValue: COPY _.name }, (TRY (aST__error_type_names()) |> SELECT NameCandidate{ StringValue: COPY _ }), "CATCH ${_.name}: error type '${_.name}' is not registered. A type must be registered via RAISE/OR_ELSE EXIT before it can be CATCHed.", "closest registered type"));
       END
       IF TRY (aST__error_type?(type_sym)) THEN
         &types.append(COPY _.name);
       END
     END
     END
-    clause.kinds = CAST((kinds |> DISTINCT _) AS []Any);
-    clause.types = CAST((types |> DISTINCT _) AS []Any);
-    MUTABLE filter_types = List[];
-    MUTABLE filter_messages = List[];
+    clause.kinds = kinds |> DISTINCT _ |> SELECT COPY _;
+    clause.types = types |> DISTINCT _ |> SELECT COPY _;
+    MUTABLE filter_types: []String = List[];
+    MUTABLE filter_messages: []Locatable = List[];
     FOR _ IN clause.filters DO
     IF (_.form == :type) THEN
       MUTABLE type_sym = symbol((CAST(_.value AS String)));
@@ -18037,7 +18064,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &filter_messages.append(message_expr);
     END
     END
-    clause.filter_types = CAST((filter_types |> DISTINCT _) AS []Any);
+    clause.filter_types = filter_types |> DISTINCT _ |> SELECT COPY _;
     clause.filter_messages = filter_messages;
 }
 END
