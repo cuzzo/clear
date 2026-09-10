@@ -1,0 +1,20 @@
+# insertAt(index, value) shifts the tail right; list `insert` still appends.
+FN main() RETURNS Void ->
+  MUTABLE xs: []Int64 = [1_i64, 2_i64, 4_i64];
+  &xs.insertAt(2, 3_i64);
+  &xs.insertAt(0, 0_i64);
+  MUTABLE out = "";
+  FOR x IN xs DO
+    out = "${out}${x.toString()},";
+  END
+  print(out);
+
+  MUTABLE names: []String = ["b"];
+  &names.insertAt(0, "a");
+  &names.insert("c");
+  MUTABLE joined = "";
+  FOR n IN names DO
+    joined = "${joined}${n}";
+  END
+  print(joined);
+END

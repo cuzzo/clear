@@ -61,6 +61,20 @@ STD_LIB = T.let({
     is_method: true,
   },
 
+  # insertAt(index, value) -- Ruby's Array#insert. List "insert" already means
+  # append (it mirrors Set#insert), so the positional form needs its own name.
+  "insertAt" => {
+    args: [:"Any[]", :Int64, { type: :Any, takes: true }],
+    return: :Void,
+    zig: "try {0}.insert({alloc}, @intCast({1}), {2})",
+    bc: true,
+    narrows_collection: true,
+    allocates: true,
+    alloc: :receiver_storage,
+    mutates_receiver: true,
+    is_method: true,
+  },
+
   "insert" => {
     args: [:"Any[]", { type: :Any, takes: true }],
     return: :Void,

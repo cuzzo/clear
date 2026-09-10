@@ -1497,7 +1497,7 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
         ast_arg: ast_arg,
         takes: ownership.takes?(index),
         coerce_type: stdlib_coerce_type(param.type),
-        sink_type: stdlib_sink_type_for_arg(receiver_type, index, ownership.takes?(index)),
+        sink_type: stdlib_sink_type_for_arg(receiver_type, ownership.takes?(index)),
         # The registry declares plain byte strings as :String; the interned
         # handle is only ever a RETURN sync (`symbol()`), never a param spelling.
         declared_byte_string: stdlib_coerce_type(param.type) == :String,
@@ -1517,11 +1517,14 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     FunctionSignature.unwrap(fallback)
   end
 
-  sig { params(receiver_type: T.nilable(Type), index: Integer, takes: T::Boolean).returns(T.nilable(Type)) }
-  def stdlib_sink_type_for_arg(receiver_type, index, takes)
+  sig { params(receiver_type: T.nilable(Type), takes: T::Boolean).returns(T.nilable(Type)) }
+  def stdlib_sink_type_for_arg(receiver_type, takes)
     return nil unless takes && receiver_type
-    return receiver_type.value_type if receiver_type.map? && index == 2
-    return receiver_type.element_type if receiver_type.linear_collection? && index == 1
+    # Every registry arg marked `takes` is the value that lands in a container
+    # slot, so the sink is the receiver's slot type -- not a fixed position.
+    # (`insertAt(index, value)` puts it third; `put(key, value)` second.)
+    return receiver_type.value_type if receiver_type.map?
+    return receiver_type.element_type if receiver_type.linear_collection?
 
     nil
   end
