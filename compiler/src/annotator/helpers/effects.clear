@@ -258,6 +258,10 @@ END
 # cross-file constant is a PUB FN accessor.
 # Ruby: EffectAudit::RECURSION_YIELD_BUDGET. Bounded recursion deeper than this
 # would stall the scheduler, so the compiler injects the yield instead.
+# Ruby: EffectAudit::STACK_TIER_BUDGET.
+PUB FN stackTierBudget() RETURNS {String@symbol}Int64 ->
+  RETURN CAST({:micro: 4096, :standard: 16384, :large: 65536, :xl: 262144, :service: 4194304} AS {String@symbol}Int64);
+END
 PUB FN recursionYieldBudget() RETURNS Int64 EFFECTS REENTRANT ->
   RETURN 4096;
 END

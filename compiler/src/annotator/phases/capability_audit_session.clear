@@ -3061,7 +3061,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         :micro
       END;
-    MUTABLE budget = UNWRAP ((CAST({:micro: 4096, :standard: 16384, :large: 65536, :xl: 262144, :service: 4194304} AS {String@symbol}Int64))[tier]);
+    MUTABLE rtoc_tier_budget = stackTierBudget();
+    MUTABLE budget: Int64 = UNWRAP (rtoc_tier_budget[tier]);
     WHILE ((stack_bytes > (budget / 2)) AND (tier != :xl)) DO
         tier =     IF (tier == :micro) THEN
           :standard

@@ -811,8 +811,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL
     END) |> WHERE _ != NIL) |> DISTINCT _;
     MUTABLE seen: [Set]String = Set[];
-    RETURN declarations.conformance_declarations |> SELECT { MUTABLE rtoc_mutable_block_param_14 = COPY _;
-    {
+    MUTABLE rtoc_resolutions: []ConformanceResolution = [];
+    FOR MUTABLE rtoc_mutable_block_param_14 IN declarations.conformance_declarations DO
     MUTABLE protocol_name = resolutionSession__conformance_base_name(rtoc_self_view, rtoc_mutable_block_param_14.protocol_type);
     MUTABLE owner_name = resolutionSession__conformance_base_name(rtoc_self_view, rtoc_mutable_block_param_14.owner_type);
     MUTABLE protocol: ?ProtocolDef = COPY rtoc_self_view.protocols[protocol_name];
@@ -837,8 +837,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE associated = TRY (resolutionSession__conformance_associated_types(rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol)));
     MUTABLE members = TRY (resolutionSession__collect_conformance_members_mut(&rtoc_self_view, rtoc_mutable_block_param_14, UNWRAP (protocol), owner_name));
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ ConformanceDef: COPY rtoc_mutable_block_param_14 }, :Void));
-    ConformanceResolution{ declaration: COPY rtoc_mutable_block_param_14, protocol: UNWRAP (COPY protocol), owner_name: COPY owner_name, owner_generic_params: COPY UNWRAP (owner_params), associated_types: CAST(COPY associated AS {String@symbol}Type), members: members }
-    } };
+    &rtoc_resolutions.append(ConformanceResolution{ declaration: COPY rtoc_mutable_block_param_14, protocol: UNWRAP (COPY protocol), owner_name: COPY owner_name, owner_generic_params: COPY UNWRAP (owner_params), associated_types: CAST(COPY associated AS {String@symbol}Type), members: members });
+    END
+    RETURN rtoc_resolutions;
 }
 END
 PRIVATE FN resolutionSession__prepare_conformance_members_mut(MUTABLE self: ResolutionSession, MUTABLE declarations: DeclarationIndex, resolutions: []ConformanceResolution, MUTABLE program: Program) RETURNS !Void
