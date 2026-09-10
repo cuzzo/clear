@@ -13773,14 +13773,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF UNWRAP (type_params).empty?() THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_NOT_GENERIC }, [], CAST({:type: node.name} AS {String@symbol}Any)));
       END
-      IF ((node.type_args OR_ELSE List[]).length() != type_params.length()) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], CAST({:type: node.name, :expected: (type_params).length(), :got: node.type_args.length()} AS {String@symbol}Any)));
+      IF ((node.type_args OR_ELSE List[]).length() != (type_params OR_ELSE List[]).length()) THEN
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], CAST({:type: node.name, :expected: (type_params OR_ELSE List[]).length(), :got: (node.type_args OR_ELSE List[]).length()} AS {String@symbol}Any)));
       END
-      type_params.zip(node.type_args).keys() |> EACH {
-    MUTABLE arg = (type_params.zip(node.type_args)[_] OR_ELSE panic("missing hash key"));
-      subst[_] = castTypeToGenericBinding(TRY (type__new(arg)));
-      };
-    ELSE_IF (type_params).any?() THEN
+      MUTABLE rtoc_tp = (type_params OR_ELSE List[]);
+      MUTABLE rtoc_ta = (node.type_args OR_ELSE List[]);
+      MUTABLE rtoc_tp_i = 0;
+      WHILE rtoc_tp_i < rtoc_tp.length() DO
+        IF rtoc_ta[rtoc_tp_i] EXISTS AS rtoc_ta_v THEN
+          subst[UNWRAP (rtoc_tp[rtoc_tp_i])] = castTypeToGenericBinding(TRY (type__new(TypeConstructionInput{ Type: COPY rtoc_ta_v })));
+        END
+        rtoc_tp_i = rtoc_tp_i + 1;
+      END
+    ELSE_IF (type_params OR_ELSE List[]).any?() THEN
       MUTABLE params_hint = ((type_params OR_ELSE List[]) |> SELECT _.toString()).join(", ");
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_MISSING_TYPE_ARGS }, [], CAST({:type: node.name, :type2: node.name, :hint: params_hint} AS {String@symbol}Any)));
     END
@@ -15575,24 +15580,33 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(schemas__union?(schema)) THEN
       RETURN;
     END
-    MUTABLE has_heap = (((schemaValue__variants(UNWRAP (schema)) OR_ELSE {}))) |> ANY TRY (type__variant_has_heap?(_._1));
+    MUTABLE has_heap: Bool = FALSE;
+    IF schemaValue__union_variants(UNWRAP (schema)) EXISTS AS rtoc_uv_map THEN
+      FOR rtoc_uv_key IN rtoc_uv_map.keys() DO
+        IF rtoc_uv_map[rtoc_uv_key] EXISTS AS rtoc_uv_val THEN
+          IF TRY (type__variant_has_heap?(rtoc_uv_val)) THEN
+            has_heap = TRUE;
+          END
+        END
+      END
+    END
     IF !(has_heap) THEN
       RETURN;
     END
-    MUTABLE first_arg =   IF value_node IS_A MethodCall THEN
+    MUTABLE first_arg: ?Locatable =   IF value_node IS_A MethodCall THEN
       locatable__object(value_node)
-    ELSE_IF type__any?(locatable__args(value_node)) THEN
-      locatable__args(value_node).first()
+    ELSE_IF (locatable__args(value_node) OR_ELSE List[]).any?() THEN
+      (locatable__args(value_node) OR_ELSE List[]).first()
     ELSE
       NIL
     END;
-    IF !(first_arg IS_A Identifier) THEN
+    IF !((first_arg != NIL) AND (first_arg IS_A Identifier)) THEN
       RETURN;
     END
-    MUTABLE arg_type = first_arg.resolved_type;
+    MUTABLE arg_type: ?String@symbol = locatable__resolved_type(first_arg);
     IF ((arg_type == type__resolved(ret_type_obj)) OR type__map?((TRY (aST__full_type_mut(first_arg))))) THEN
       MUTABLE rtoc_mutable_receiver_383 = typeAnalysisSession__ownership_graph(&rtoc_self_view);
-      TRY (ownershipGraph__add_edge(&rtoc_mutable_receiver_383, Edge{ from: COPY var_name, to: COPY first_arg.name(), kind: :aliases }));
+      TRY (ownershipGraph__add_edge(&rtoc_mutable_receiver_383, Edge{ from: COPY var_name, to: COPY UNWRAP (locatable__name(first_arg)), kind: :aliases }));
     END
 }
 END
