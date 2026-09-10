@@ -3421,8 +3421,8 @@ PRIVATE FN typeAnalysisSession__resolve_call(MUTABLE self: TypeAnalysisSession, 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE comptime_type_args: []Any = List[];
-    MUTABLE subst = NIL;
+    MUTABLE comptime_type_args: []String@symbol = List[];
+    MUTABLE subst: {String@symbol}GenericBinding = {};
     MUTABLE func_name: ?String = aST__node_name(UNWRAP (castFunctionCallNodeToLocatable(node)));
     MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, UNWRAP (func_name)));
     IF scope EXISTS AS scope_value THEN
@@ -3440,11 +3440,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ((type__resolved(func_type) == :Intrinsic)) THEN
         TRY (typeAnalysisSession__visit_IntrinsicFunc(&rtoc_self_view, castFunctionCallNodeToNode(node), args));
       ELSE_IF ((fsig != NIL) AND ((entry != NIL) AND (symbolEntry__storage(entry) == :static))) THEN
-        MUTABLE signature: ?FunctionSignature@multiowned = KEEP fsig;
-        IF (IF node IS_A FuncCall AS func_call THEN (functionSignature__module_alias(UNWRAP (signature)) != NIL) ELSE FALSE END) THEN
-          functionCallNode__set_module_alias_mut(&node, functionSignature__module_alias(UNWRAP (signature)));
+        MUTABLE signature: FunctionSignature@multiowned = KEEP fsig;
+        IF (IF node IS_A FuncCall AS func_call THEN (functionSignature__module_alias(signature) != NIL) ELSE FALSE END) THEN
+          functionCallNode__set_module_alias_mut(&node, functionSignature__module_alias(signature));
         END
-        IF (TRUE AND functionSignature__extern(UNWRAP (signature))) THEN
+        IF (TRUE AND functionSignature__extern(signature)) THEN
           MATCH node START
             FunctionCallNode.FuncCall AS item ->
               MUTABLE item_mutable = COPY item;
@@ -3458,46 +3458,46 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MATCH node START
             FunctionCallNode.FuncCall AS item ->
               MUTABLE item_mutable = COPY item;
-              item_mutable.extern_effects = TRY (functionSignature__extern_effects(UNWRAP (signature)));
+              item_mutable.extern_effects = TRY (functionSignature__extern_effects(signature));
               node = FunctionCallNode{ FuncCall: item_mutable };,
             FunctionCallNode.MethodCall AS item ->
               MUTABLE item_mutable = COPY item;
-              item_mutable.extern_effects = TRY (functionSignature__extern_effects(UNWRAP (signature)));
+              item_mutable.extern_effects = TRY (functionSignature__extern_effects(signature));
               node = FunctionCallNode{ MethodCall: item_mutable };,
           END
           MATCH node START
             FunctionCallNode.FuncCall AS item ->
               MUTABLE item_mutable = COPY item;
-              item_mutable.extern_source = functionSignature__extern_source(UNWRAP (signature));
+              item_mutable.extern_source = functionSignature__extern_source(signature);
               node = FunctionCallNode{ FuncCall: item_mutable };,
             FunctionCallNode.MethodCall AS item ->
               MUTABLE item_mutable = COPY item;
-              item_mutable.extern_source = functionSignature__extern_source(UNWRAP (signature));
+              item_mutable.extern_source = functionSignature__extern_source(signature);
               node = FunctionCallNode{ MethodCall: item_mutable };,
           END
           TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("EXTERN")));
-          MUTABLE alloc_kind = (TRY (functionSignature__extern_effects(UNWRAP (signature))))[:alloc];
+          MUTABLE alloc_kind: ?ExternEffectValue = COPY (TRY (functionSignature__extern_effects(signature)))[:alloc];
           MUTABLE fn_ctx: ?FunctionContext@multiowned = typeAnalysisSession__current_fn_ctx(&rtoc_self_view);
-          IF (alloc_kind AND (fn_ctx != NIL)) THEN
-            IF (alloc_kind == :heap) THEN
+          IF ((alloc_kind != NIL) AND (fn_ctx != NIL)) THEN
+            IF (IF alloc_kind IS_A SymbolValue AS rtoc_aks THEN (rtoc_aks == :heap) ELSE FALSE END) THEN
               functionContext__record_heap_use_mut(&fn_ctx);
             ELSE
               functionContext__record_frame_use_mut(&fn_ctx);
             END
           END
         END
-        IF functionSignature__extern(UNWRAP (signature)) THEN
+        IF functionSignature__extern(signature) THEN
           FOR _ IN args DO
     MUTABLE rtoc_mutable_block_param_66 = COPY _;
           IF type__soa?((TRY (aST__full_type_mut(rtoc_mutable_block_param_66)))) THEN
             TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY rtoc_mutable_block_param_66 }, TypeAnalysisCodeOrMessage{ SymbolValue: :SOA_TO_EXTERN_FN }));
           END
           END
-          TRY (typeAnalysisSession__mark_owned_c_out_parameters_mut(&rtoc_self_view, UNWRAP (signature), args));
-          comptime_type_args = ( { MUTABLE rtoc_empty_list_67: []Any = List[]; rtoc_empty_list_67 } );
-          MUTABLE params = TRY (functionSignature__params(UNWRAP (signature)));
+          TRY (typeAnalysisSession__mark_owned_c_out_parameters_mut(&rtoc_self_view, signature, args));
+          comptime_type_args = ( { MUTABLE rtoc_empty_list_67: []String@symbol = List[]; rtoc_empty_list_67 } );
+          MUTABLE params = TRY (functionSignature__params(signature));
           MUTABLE rtoc_idx = 0;
-          WHILE rtoc_idx < _.length() DO
+          WHILE rtoc_idx < params.length() DO
       MUTABLE arg: ?Locatable = COPY args[rtoc_idx];
       IF params[rtoc_idx]?.comptime EXISTS AS comptime_value THEN
       IF arg? IS_A Identifier AS identifier THEN
@@ -3521,31 +3521,47 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             END
           END
         END
-        MUTABLE type_params = TRY (functionSignature__type_params(UNWRAP (signature)));
-        IF (_.length() > 0) THEN
+        MUTABLE type_params = TRY (functionSignature__type_params(signature));
+        IF (type_params.length() > 0) THEN
           IF (functionSignature__extern(signature) AND ((comptime_type_args.length() > 0))) THEN
             subst = {};
             MUTABLE rtoc_idx = 0;
             WHILE rtoc_idx < type_params.length() DO
-    IF comptime_type_args[rtoc_idx] THEN
-                subst[type_params[rtoc_idx]?] = UNWRAP (COPY comptime_type_args[rtoc_idx]);
+    IF comptime_type_args[rtoc_idx] EXISTS AS rtoc_cta THEN
+                subst[UNWRAP (type_params[rtoc_idx])] = GenericBinding{ SymbolValue: COPY rtoc_cta };
     END
     rtoc_idx = rtoc_idx + 1;
             END
           ELSE
-            subst = TRY (typeAnalysisSession__infer_generic_type_args_mut(&rtoc_self_view, castFunctionCallNodeToGenericCallNode(node), UNWRAP (signature), args, type_params));
+            subst = TRY (typeAnalysisSession__infer_generic_type_args_mut(&rtoc_self_view, castFunctionCallNodeToGenericCallNode(node), signature, args, type_params));
           END
           MATCH node START
             FunctionCallNode.FuncCall AS item ->
               MUTABLE item_mutable = COPY item;
-              item_mutable.generic_type_args = type_params |> SELECT subst[_];
+              MUTABLE rtoc_gargs: []String@symbol = List[];
+              FOR rtoc_tp IN type_params DO
+                IF UNWRAP (subst[rtoc_tp]) IS_A String@symbol AS rtoc_gb_sym THEN
+                  &rtoc_gargs.append(COPY rtoc_gb_sym);
+                ELSE
+                  &rtoc_gargs.append(:Any);
+                END
+              END
+              item_mutable.generic_type_args = rtoc_gargs;
               node = FunctionCallNode{ FuncCall: item_mutable };,
             FunctionCallNode.MethodCall AS item ->
               MUTABLE item_mutable = COPY item;
-              item_mutable.generic_type_args = type_params |> SELECT subst[_];
+              MUTABLE rtoc_gargs: []String@symbol = List[];
+              FOR rtoc_tp IN type_params DO
+                IF UNWRAP (subst[rtoc_tp]) IS_A String@symbol AS rtoc_gb_sym THEN
+                  &rtoc_gargs.append(COPY rtoc_gb_sym);
+                ELSE
+                  &rtoc_gargs.append(:Any);
+                END
+              END
+              item_mutable.generic_type_args = rtoc_gargs;
               node = FunctionCallNode{ MethodCall: item_mutable };,
           END
-          MUTABLE substituted = TRY (typeAnalysisSession__substitute_type_params(&rtoc_self_view, UNWRAP (signature), subst));
+          MUTABLE substituted = TRY (typeAnalysisSession__substitute_type_params(&rtoc_self_view, signature, subst));
           TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, node, substituted, args));
           MATCH node START
             FunctionCallNode.FuncCall AS item ->
@@ -3559,7 +3575,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
           TRY (typeAnalysisSession__stamp_resolved_call_result_mut(&rtoc_self_view, &node, CAST(functionSignature__return_type(substituted) AS Type), functionSignature__recoverable_result?(substituted)));
         ELSE
-          TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, node, UNWRAP (signature), args));
+          TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, node, signature, args));
           MATCH node START
             FunctionCallNode.FuncCall AS item ->
               MUTABLE item_mutable = COPY item;
@@ -3573,12 +3589,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           TRY (typeAnalysisSession__stamp_resolved_call_result_mut(&rtoc_self_view, &node, CAST(functionSignature__return_type(signature) AS Type), functionSignature__recoverable_result?(signature)));
         END
       ELSE_IF (IF fsig != NIL THEN fsig ELSE fn_type END) THEN
-        IF node IS_A FuncCall AS func_call THEN
+        IF node IS_A FuncCall AS MUTABLE func_call THEN
           func_call.fn_var_call = TRUE;
         END
         IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, UNWRAP (func_name))) != NIL THEN
-                MUTABLE rtoc_mutable_receiver_69: ?Scope@multiowned = (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, UNWRAP (func_name))));
-                scope__mark_read(&_, func_name);
+                MUTABLE rtoc_mutable_receiver_69: Scope@multiowned = UNWRAP (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, UNWRAP (func_name))));
+                scope__mark_read(&rtoc_mutable_receiver_69, UNWRAP (func_name));
         END
         MUTABLE sig = (fsig OR_ELSE TRY (typeAnalysisSession__signature_from_function_type(&rtoc_self_view, fn_type?)));
         MUTABLE synthetic_sig = TRY (functionSignature__new(TRY (functionSignature__params(sig)), TypeTypeInput{ Type: COPY functionSignature__return_type(sig) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_70: []String@symbol = List[]; rtoc_empty_list_70 } ), {}, functionSignature__reentrant(sig), FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_71: []String@symbol = List[]; rtoc_empty_list_71 } ), NIL, ( { MUTABLE rtoc_empty_list_72: []String@symbol = List[]; rtoc_empty_list_72 } )));
@@ -3602,7 +3618,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     ELSE
       MUTABLE fn_nodes = TRY (typeAnalysisSession__function_node_map(&rtoc_self_view));
-      TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ TokenMultiowned: COPY UNWRAP (functionCallNode__token(node)) }, func_name, fn_nodes.keys(), "Undefined function '${(func_name OR_ELSE "")}'", "closest declared function"));
+      TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ TokenMultiowned: COPY UNWRAP (functionCallNode__token(node)) }, UNWRAP (func_name), fn_nodes.keys(), "Undefined function '${(func_name OR_ELSE "")}'", "closest declared function"));
       RETURN NIL;
     END
 }
