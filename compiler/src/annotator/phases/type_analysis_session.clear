@@ -15244,16 +15244,17 @@ PRIVATE FN typeAnalysisSession__establish_inferred_alias_mut(MUTABLE self: TypeA
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE plan: Any = NIL;
+    MUTABLE plan_slot: ?OwnershipTransportPlan = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
-        plan = COPY item.ownership_transport_plan;,
+        plan_slot = COPY item.ownership_transport_plan;,
       DeclarationNode.BindExpr AS item ->
-        plan = COPY item.ownership_transport_plan;,
+        plan_slot = COPY item.ownership_transport_plan;,
     END
-    IF !(FALSE) THEN
+    IF (plan_slot == NIL) THEN
       RETURN;
     END
+    MUTABLE plan: OwnershipTransportPlan = COPY plan_slot;
     IF (typeAnalysisSession__language_mode(&rtoc_self_view) == :strict) THEN
       RETURN;
     END

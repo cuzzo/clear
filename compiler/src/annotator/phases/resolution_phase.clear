@@ -1835,8 +1835,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      FOR _ IN choices DO
-      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: DiagnosticKwValue{ StringValue: COPY _[1] }, :edge: DiagnosticKwValue{ StringValue: COPY "${(edges[rtoc_idx]?.owner OR_ELSE :unknown).toString()}.${(edges[rtoc_idx]?.field_name OR_ELSE "")}" }, :capability: DiagnosticKwValue{ StringValue: COPY _[0] }} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), _._0)], :interactive)));
+      MUTABLE rtoc_edge = COPY edges[rtoc_idx]?;
+      FOR rtoc_choice IN choices DO
+      MUTABLE rtoc_capability: String = COPY rtoc_choice[0];
+      MUTABLE rtoc_description: String = COPY rtoc_choice[1];
+      &fixes.append(TRY (fix__new(TRY (resolutionSession__fix_description(rtoc_self_view, :CHOOSE_RECURSIVE_LAYOUT, CAST({:description: DiagnosticKwValue{ StringValue: COPY rtoc_description }, :edge: DiagnosticKwValue{ StringValue: COPY "${(rtoc_edge.owner).toString()}.${(rtoc_edge.field_name)}" }, :capability: DiagnosticKwValue{ StringValue: COPY rtoc_capability }} AS {String@symbol}DiagnosticKwValue))), [edit__new(CAST(span AS Span), rtoc_capability)], :interactive)));
       END
     rtoc_idx = rtoc_idx + 1;
       END
