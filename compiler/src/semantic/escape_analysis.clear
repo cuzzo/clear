@@ -1787,19 +1787,41 @@ PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, expr: Locatabl
   END
   escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts, names);
 END
-PUB FN escapeAnalysis__materializing_pipeline_expr?(expr: Locatable) RETURNS Bool ->
+# Ruby chains `node.is_a?(AST::BinaryOp)` straight off the unwrapped value; a
+# DynamicValue has to become a Locatable before IS_A can ask about a variant.
+PRIVATE FN escapeAnalysis__unwrap_orelse_left(expr: Locatable) RETURNS ?Locatable ->
   MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(expr)));
-  IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
-    node = escapeAnalysis__unwrap_value(node.left());
+  MUTABLE loc: ?Locatable = castOptionalDynamicValueToOptionalLocatable(node);
+  IF loc EXISTS AS rtoc_loc THEN
+    IF rtoc_loc IS_A BinaryOp AS rtoc_bin THEN
+      IF (rtoc_bin.op == symbol("OR_ELSE")) THEN
+        MUTABLE inner: ?DynamicValue = escapeAnalysis__unwrap_value(castOptionalLocatableToOptionalDynamicValue(locatable__left(rtoc_loc)));
+        RETURN castOptionalDynamicValueToOptionalLocatable(inner);
+      END
+    END
   END
-  RETURN ((IF node IS_A BinaryOp AS rtoc_smooth_n THEN binaryOp__smooth?(rtoc_smooth_n) ELSE FALSE END) AND !(node.right() IS_A SkipOp));
+  RETURN COPY loc;
+END
+PUB FN escapeAnalysis__materializing_pipeline_expr?(expr: Locatable) RETURNS Bool ->
+  MUTABLE node: ?Locatable = escapeAnalysis__unwrap_orelse_left(expr);
+  IF node EXISTS AS rtoc_node THEN
+    IF rtoc_node IS_A BinaryOp AS rtoc_smooth_n THEN
+      IF binaryOp__smooth?(rtoc_smooth_n) THEN
+        IF locatable__right(rtoc_node) EXISTS AS rtoc_right THEN
+          RETURN !(rtoc_right IS_A SkipOp);
+        END
+        RETURN TRUE;
+      END
+    END
+  END
+  RETURN FALSE;
 END
 PUB FN escapeAnalysis__returned_call_result?(expr: Locatable) RETURNS Bool ->
-  MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(expr)));
-  IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
-    node = escapeAnalysis__unwrap_value(node.left());
+  MUTABLE node: ?Locatable = escapeAnalysis__unwrap_orelse_left(expr);
+  IF node EXISTS AS rtoc_node THEN
+    RETURN aST__call?(rtoc_node);
   END
-  RETURN !(!(((node IS_A Locatable AND aST__call?(node)))));
+  RETURN FALSE;
 END
 PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, names: [Set]String) RETURNS Void ->
   MUTABLE rtoc_idx = 0;
