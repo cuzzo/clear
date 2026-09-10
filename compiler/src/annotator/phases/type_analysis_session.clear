@@ -14314,35 +14314,36 @@ PRIVATE FN typeAnalysisSession__visit_ForEach(MUTABLE self: TypeAnalysisSession,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.collection));
     MUTABLE coll_type = TRY (aST__full_type_mut(node.collection));
-    MUTABLE ct_branch_value: ?Type = NIL;
-    IF TRUE THEN
-      ct_branch_value = COPY coll_type;
-    ELSE
-      ct_branch_value = TRY (type__new( TypeConstructionInput{ Type: COPY coll_type }));
-    END
-    MUTABLE ct: Type = ct_branch_value?;
-    MUTABLE elem_type =   IF (TRY (type__dynamic_stream?(ct)) OR ((TRY (type__bounded_stream?(ct)) AND type__canonical_stream?(ct)))) THEN
-      (IF TRY (type__stream_element_type(ct)) != NIL THEN TRY (type__stream_element_type(ct)) ELSE UNWRAP (TRY (type__element_type((TRY (type__tense_type(ct)))))) END)
+    MUTABLE ct: Type = COPY coll_type;
+    MUTABLE elem_ti_opt: ?Type = NIL;
+    IF (TRY (type__dynamic_stream?(ct)) OR ((TRY (type__bounded_stream?(ct)) AND type__canonical_stream?(ct)))) THEN
+      MUTABLE rtoc_sel_opt: ?Type = TRY (type__stream_element_type(ct));
+      IF rtoc_sel_opt EXISTS AS rtoc_sel THEN
+        elem_ti_opt = COPY rtoc_sel;
+      ELSE
+        MUTABLE rtoc_tense_ct = TRY (type__tense_type(ct));
+        elem_ti_opt = TRY (type__element_type(rtoc_tense_ct));
+      END
     ELSE_IF (type__array?(ct) OR type__list_collection?(ct)) THEN
-      (TRY (type__element_type(ct)) OR_ELSE TRY (type__value_type(ct)))
+      MUTABLE rtoc_el_opt: ?Type = TRY (type__element_type(ct));
+      IF rtoc_el_opt EXISTS AS rtoc_el THEN
+        elem_ti_opt = COPY rtoc_el;
+      ELSE
+        elem_ti_opt = TRY (type__value_type(ct));
+      END
     ELSE_IF type__map?(ct) THEN
-      :String
+      elem_ti_opt = TRY (type__new(TypeConstructionInput{ SymbolValue: :String }));
     ELSE
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ForEach: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :FOR_IN_NEEDS_COLLECTION }, [], CAST({:got: coll_type} AS {String@symbol}Any)))
-    END;
-    MUTABLE elem_ti_branch_value: ?Type = NIL;
-    IF elem_type IS_A Type THEN
-      elem_ti_branch_value = elem_type;
-    ELSE
-      elem_ti_branch_value = TRY (type__new(elem_type));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ForEach: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :FOR_IN_NEEDS_COLLECTION }, [], CAST({:got: type__resolved(ct)} AS {String@symbol}Any)));
+      elem_ti_opt = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
     END
-    MUTABLE elem_ti: Type = elem_ti_branch_value?;
+    MUTABLE elem_ti: Type = UNWRAP (elem_ti_opt);
     TRY (typeAnalysisSession__analyze_loop_control_flow_branches(&rtoc_self_view, [(%() USE(elem_ti, MUTABLE node, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_351 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_351, node.var_name, NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(elem_ti), ScopeMutabilityInput{ BoolValue: COPY (node.is_mutable == TRUE) }, FALSE, NIL, :borrow));
     typeAnalysisSession__record_capture_local_mut(&rtoc_self_view, CAST(node.var_name AS String));
-    node.symbol = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_352 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    scope__local_entry_mut(&rtoc_local_receiver_352, node.var_name) };
+    MUTABLE rtoc_local_receiver_352 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
+    node.symbol = scope__local_entry_mut(&rtoc_local_receiver_352, node.var_name);
     MUTABLE rtoc_mutable_receiver_353 = UNWRAP (node.symbol);
     symbolEntry__mark_borrowed_alias_mut(&rtoc_mutable_receiver_353);
     TRY (typeAnalysisSession__classify_ownership_mut(&rtoc_self_view, UNWRAP (node.symbol)));
