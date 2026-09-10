@@ -267,7 +267,12 @@ module SelfhostFnProbe
   # file-level mutable (`enabled`, a registry cache) report an undefined
   # variable the source does not have -- a probe artifact counted as a blocker.
   def module_consts(target)
-    decls = File.read(target.file).lines.select do |line|
+    # dissect already separated what sits OUTSIDE a function; a regex over raw
+    # lines cannot, and swept up the body of every function the corpus does not
+    # indent -- carrying its locals in as module declarations.
+    @module_scope ||= {}
+    loose = (@module_scope[target.file] ||= dissect(target.file)[3])
+    decls = loose.select do |line|
       line.match?(/\A(?:PUB )?MUTABLE [a-z_]\w*(?:: [^=\n]+)? = /) ||
         line.match?(/\A[a-z_]\w*(?:: [^=\n]+)? = /)
     end
