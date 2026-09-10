@@ -437,7 +437,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE param: ?Any = COPY params[(rtoc_idx + param_offset)];
       MUTABLE consumes = ((param != NIL) AND (param.takes() == TRUE));
       IF (UNWRAP (rtoc_each_items_7[rtoc_idx]) IS_A Identifier AND ((UNWRAP (rtoc_each_items_7[rtoc_idx]).was_moved OR consumes))) THEN
-          TRY (mIRPass__add_if_consumed(rtoc_self_view, &UNWRAP (rtoc_each_items_7[rtoc_idx]), &names, facts, (aST__moved?(UNWRAP (rtoc_each_items_7[rtoc_idx])) OR consumes)));
+          TRY (mIRPass__add_if_consumed(rtoc_self_view, &rtoc_each_items_7[rtoc_idx], &names, facts, (aST__moved?(UNWRAP (rtoc_each_items_7[rtoc_idx])) OR consumes)));
       ELSE
           TRY (mIRPass__walk_consumed(rtoc_self_view, UNWRAP (rtoc_each_items_7[rtoc_idx]), &names, facts));
       END

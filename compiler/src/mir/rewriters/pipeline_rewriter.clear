@@ -233,7 +233,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         pipelineRewriter__patch_chain_source_mut(&rtoc_self_view, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
-    MUTABLE is_range_fold_terminal = (((terminal != NIL) AND (terminal IS_A EachOp)) OR aST__pipeline_terminal_fold?(terminal));
+    MUTABLE is_range_fold_terminal = (((terminal != NIL) AND (terminal IS_A EachOp)) OR aST__pipeline_terminal_fold?(UNWRAP (terminal)));
     MUTABLE source_type = &real_source.full_type_mut();
     MUTABLE has_limit = stages |> ANY _ IS_A LimitOp;
     IF (TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY &node.full_type_mut() }))))) AND (stages |> ANY _ IS_A SelectOp)) THEN

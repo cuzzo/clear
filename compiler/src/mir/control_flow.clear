@@ -891,7 +891,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE name = COPY (rtoc_self_view.fn_node.params[rtoc_idx]?.name);
       MUTABLE ti = COPY rtoc_self_view.fn_node.params[rtoc_idx]?.type;
-      IF !(TRY (ownershipDataflow__ownership_tracked_type?(rtoc_self_view, ti, TRUE))) THEN
+      IF !(TRY (ownershipDataflow__ownership_tracked_type?(rtoc_self_view, UNWRAP (ti), TRUE))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -2196,7 +2196,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_31.length() DO
       MUTABLE var_node = COPY rtoc_each_items_31[rtoc_idx]?.var_node;
-      MUTABLE source: ?String = borrowChecker__cap_source_name(rtoc_self_view, var_node);
+      MUTABLE source: ?String = borrowChecker__cap_source_name(rtoc_self_view, UNWRAP (var_node));
       IF !(source) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;

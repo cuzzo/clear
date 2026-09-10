@@ -3528,7 +3528,7 @@ FN mIRLowering__ownership_root_name(MUTABLE self: MIRLowering, MUTABLE node: ?Lo
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE current: ?Locatable = COPY node;
     IF ((((current != NIL) AND (current IS_A MoveNode)) OR ((current != NIL) AND (current IS_A CopyNode))) OR ((current != NIL) AND (current IS_A KeepNode))) THEN
-      current = aST__node_value( current);
+      current = aST__node_value( UNWRAP (current));
     END
     WHILE (((current != NIL) AND (current IS_A GetField)) OR ((current != NIL) AND (current IS_A GetIndex))) DO
       current = aST__node_target(UNWRAP (current));
@@ -8250,7 +8250,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF type__collection?(UNWRAP (ti)) THEN
         RETURN mIRLowering__uniform_cleanup_entry(rtoc_self_view, TRY (type__zig_type(UNWRAP (ti))), alloc);
       END
-      IF !(((((TRY (type__needs_explicit_cleanup?(ti, alloc, mIRLowering__mir_schema_lookup(&rtoc_self_view))) OR TRY (type__recursive_cleanup_shape?(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view)))) OR TRY (type__needs_cleanup?(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view)))) OR TRY (type__heap_ptr?(ti))) OR TRY (type__collection_value?(ti)))) THEN
+      IF !(((((TRY (type__needs_explicit_cleanup?(UNWRAP (ti), alloc, mIRLowering__mir_schema_lookup(&rtoc_self_view))) OR TRY (type__recursive_cleanup_shape?(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view)))) OR TRY (type__needs_cleanup?(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view)))) OR TRY (type__heap_ptr?(ti))) OR TRY (type__collection_value?(ti)))) THEN
         RETURN NIL;
       END
       MUTABLE zig_t = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ StringValue: CAST(type__resolved(ti) AS String) })))))));
@@ -17420,7 +17420,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE expected_ti: ?Type = TRY (type__from_node(mIRLowering__function_state(&rtoc_self_view).current_expected_type));
     IF expected_ti EXISTS AS expected_ti_value THEN
       IF type__optional?(expected_ti_value) THEN
-      expected_ti = TRY (type__non_optional_type( expected_ti));
+      expected_ti = TRY (type__non_optional_type( UNWRAP (expected_ti)));
     END
     END
     MUTABLE ti =   IF (IF expected_ti != NIL THEN
@@ -18404,7 +18404,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END)) THEN
       RETURN FALSE;
     END
-    IF TRY (functionSignature__heap_return_alloc?(sig)) THEN
+    IF TRY (functionSignature__heap_return_alloc?(UNWRAP (sig))) THEN
       RETURN TRUE;
     END
     MUTABLE metadata = emittable__allocs(init);
