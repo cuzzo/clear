@@ -927,8 +927,15 @@ module PipeAnalysis
     end
 
     # Result type is the element type of the nested array
-    nested_element_type = T.must(expr_type.element_type).resolved
-    stamp_type!(node, Type.new(:"#{nested_element_type}[]"))
+    nested_element = T.must(expr_type.element_type)
+    nested_element_type = nested_element.resolved
+    result_type = Type.new(:"#{nested_element_type}[]")
+    # `resolved` names the element without its capabilities, so flat-mapping
+    # lists of @multiowned items produced a list of plain ones -- a type that
+    # prints identically to the declared return and does not satisfy it.
+    result_type.elem_ownership = nested_element.ownership if nested_element.ownership
+    result_type.elem_sync = nested_element.sync if nested_element.sync
+    stamp_type!(node, result_type)
     stamp_type!(node.right, node.right.expression.full_type!(context: "pipeline op expression"))
     node.storage = :frame
 

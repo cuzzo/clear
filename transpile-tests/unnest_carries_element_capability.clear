@@ -1,0 +1,22 @@
+# Test: UNNEST names its result element with `resolved`, which drops the
+# element's capabilities. Flat-mapping lists of @multiowned items produced a
+# list of PLAIN items -- a type that prints identically to the declared
+# `[]Item@multiowned` return and does not satisfy it.
+
+STRUCT Item { name: String }
+
+FN kids(n: Int64) RETURNS []Item@multiowned ->
+  MUTABLE out: []Item@multiowned = List[];
+  MUTABLE one: Item@multiowned = Item{ name: "x" };
+  &out.append(one);
+  RETURN out;
+END
+
+FN all_kids(xs: []Int64) RETURNS []Item@multiowned ->
+  RETURN xs |> UNNEST kids(_);
+END
+
+FN main() RETURNS Void ->
+  MUTABLE r = all_kids([1, 2]);
+  ASSERT r.length() == 2;
+END
