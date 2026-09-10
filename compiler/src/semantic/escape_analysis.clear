@@ -711,20 +711,17 @@ PUB FN escapeAnalysis__apply_destructuring_escape_sink_mut(node: DestructuringAs
   END
 END
 PUB FN escapeAnalysis__propagate_value_block_placements_mut(facts: FunctionFacts) RETURNS Void ->
-  MUTABLE body = COPY facts.fn.body;
-  escapeAnalysis__walk_body(body, %(node)  -> {
+  MUTABLE body: []Node = facts.fn.body |> SELECT castLocatableToNode(_);
+  escapeAnalysis__walk_body(body, %(node: Locatable) -> {
   IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
       RETURN;
   END
-  IF !((IF node.symbol != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (node.symbol);
-  symbolEntry__heap_storage?(rtoc_local_receiver_8) }
-    ELSE
-      NIL
-    END)) THEN
-      RETURN;
+  IF aST__node__symbol(node) EXISTS AS rtoc_decl_symbol THEN
+    IF symbolEntry__heap_storage?(rtoc_decl_symbol) THEN
+      escapeAnalysis__mark_value_position_heap_mut(aST__node_value(node));
+    END
   END
-  escapeAnalysis__mark_value_position_heap_mut(node.value())
+  rubyToClearVoid__escape_analysis()
   });
 END
 PUB FN escapeAnalysis__mark_value_position_heap_mut(expr: ?Locatable) RETURNS Void ->
@@ -906,47 +903,49 @@ PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETUR
     RETURN;
   END
   MUTABLE declared_names = TRY (escapeAnalysis__loop_body_declared_names(body));
-  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(declared_names) -> {
-  IF (node IS_A MethodCall) THEN
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature);
-      IF sig EXISTS AS sig_value THEN
+  TRY (escapeAnalysis__each_loop_body_node(body, %(node: Locatable) USE(declared_names) -> {
+  MUTABLE root: ?Identifier = NIL;
+  MUTABLE value_params: []Param = [];
+  MUTABLE eligible: Bool = FALSE;
+  IF node IS_A MethodCall AS rtoc_method THEN
+      IF rtoc_method.matched_signature EXISTS AS sig_value THEN
         MUTABLE sig_value_mutable = COPY sig_value;
-        IF !((TRY (functionSignature__emits_allocating?(sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(sig_value_mutable)))) THEN
-          RETURN;
+        IF (TRY (functionSignature__emits_allocating?(sig_value_mutable)) AND TRY (functionSignature__mutates_receiver?(sig_value_mutable))) THEN
+          root = aST__root_identifier(rtoc_method.object);
+          value_params = (TRY (functionSignature__params(sig_value_mutable))) |> SKIP 1;
+          eligible = TRUE;
         END
-        MUTABLE root: ?Identifier = aST__root_identifier(node.object);
-        MUTABLE value_params = (TRY (functionSignature__params(sig_value_mutable))) |> SKIP 1;
-      ELSE
-        RETURN;
       END
-  ELSE_IF (node IS_A Assignment) THEN
-      IF !(node.name() IS_A GetIndex) THEN
-        RETURN;
+  ELSE_IF node IS_A Assignment AS rtoc_assignment THEN
+      MUTABLE rtoc_target: ?Locatable = castAssignmentNameToLocatable__escape_analysis(rtoc_assignment.name);
+      IF rtoc_target EXISTS AS rtoc_target_value THEN
+        IF rtoc_target_value IS_A GetIndex THEN
+          root = aST__root_identifier(rtoc_target_value);
+          IF root EXISTS AS rtoc_root_a THEN
+            IF aST__node__symbol(Locatable{ Identifier: COPY rtoc_root_a }) EXISTS AS rtoc_root_sym THEN
+              MUTABLE ti: ?Type@multiowned = COPY symbolEntry__type(rtoc_root_sym);
+              IF ti EXISTS AS rtoc_ti THEN
+                eligible = type__collection?(rtoc_ti);
+              END
+            END
+          END
+        END
       END
-      MUTABLE root: ?Identifier = aST__root_identifier(node.name());
-      MUTABLE ti: ?Type@multiowned = NIL;
-      IF root?.symbol != NIL THEN
-        MUTABLE rtoc_root_symbol = UNWRAP (root).symbol;
-        ti = COPY symbolEntry__type(rtoc_root_symbol);
-      END
-      IF !(((ti != NIL) AND type__collection?(ti))) THEN
-        RETURN;
-      END
-      MUTABLE value_params = List[];
-  ELSE
+  END
+  IF !(eligible) THEN
       RETURN;
   END
-  IF !(root?.symbol) THEN
-      RETURN;
+  IF root EXISTS AS rtoc_root THEN
+    IF aST__node__symbol(Locatable{ Identifier: COPY rtoc_root }) EXISTS AS rtoc_root_symbol THEN
+      IF !(declared_names.contains?(CAST(rtoc_root.name AS String))) THEN
+        escapeAnalysis__mark_symbol_heap_mut(rtoc_root_symbol);
+        IF node IS_A MethodCall AS node_narrowed THEN
+          TRY (escapeAnalysis__mark_loop_method_value_params_heap_mut(node_narrowed, value_params));
+        END
+      END
+    END
   END
-  IF declared_names.contains?(CAST(root.name AS String)) THEN
-      RETURN;
-  END
-  escapeAnalysis__mark_symbol_heap_mut(root.symbol);
-  IF node IS_A MethodCall AS node_narrowed THEN
-    RETURN TRY (escapeAnalysis__mark_loop_method_value_params_heap_mut(node_narrowed, value_params));
-  END
-  NIL
+  rubyToClearVoid__escape_analysis()
   }));
 END
 PUB FN escapeAnalysis__mark_loop_method_value_params_heap_mut(node: MethodCall, value_params: []Param) RETURNS !Void ->
@@ -1072,23 +1071,23 @@ PUB FN escapeAnalysis__mark_fsm_ctx_locals_heap_mut(node: BgBlock, schema_lookup
   IF !((node.spawn_form == :fsm)) THEN
     RETURN;
   END
-  escapeAnalysis__walk_body(node.body, %(child) USE(schema_lookup) -> {
-  IF !((child IS_A VarDecl OR ((child IS_A BindExpr AND (child.mode == :decl))))) THEN
+  escapeAnalysis__walk_body(node.body |> SELECT castLocatableToNode(_), %(child: Locatable) USE(schema_lookup) -> {
+  MUTABLE rtoc_is_decl: Bool = FALSE;
+  IF child IS_A VarDecl THEN
+    rtoc_is_decl = TRUE;
+  ELSE_IF child IS_A BindExpr AS rtoc_bind THEN
+    rtoc_is_decl = (rtoc_bind.mode == :decl);
+  END
+  IF !(rtoc_is_decl) THEN
       RETURN;
   END
-  MUTABLE ti = TRY (type__success_type((TRY (aST__full_type_mut(child)))));
-  IF !(((IF ti != NIL THEN
-      TRY (type__heap_ptr?(ti))
-    ELSE
-      NIL
-    END) OR_ELSE (IF ti != NIL THEN
-      TRY (type__recursive_cleanup_shape?(ti, schema_lookup))
-    ELSE
-      NIL
-    END))) THEN
-      RETURN;
+  MUTABLE ti: ?Type = TRY (type__success_type((TRY (aST__full_type_mut(child)))));
+  IF ti EXISTS AS rtoc_ti THEN
+    IF (TRY (type__heap_ptr?(rtoc_ti)) OR TRY (type__recursive_cleanup_shape?(rtoc_ti, schema_lookup))) THEN
+      escapeAnalysis__mark_symbol_heap_mut(aST__node__symbol(child));
+    END
   END
-  escapeAnalysis__mark_symbol_heap_mut(child.symbol)
+  rubyToClearVoid__escape_analysis()
   });
 END
 PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Param, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
