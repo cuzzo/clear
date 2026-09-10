@@ -19867,28 +19867,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE type_obj = rhs_type;
     MUTABLE is_copy = (TRY (type__implicitly_copyable?(type_obj, %(t: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, t)))) AND ((!(TRY (type__string?(type_obj))) OR type__symbol?(type_obj))));
-    IF (!(is_copy) AND ((TRY (type__requires_move?(type_obj)) OR (IF rhs_info != NIL THEN
-      symbolEntry__resource(rhs_info)
-    ELSE
-      NIL
-    END)))) THEN
+    MUTABLE rtoc_rhs_resource: Bool = FALSE;
+    IF rhs_info EXISTS AS rtoc_rhs_info THEN
+      rtoc_rhs_resource = (symbolEntry__resource(rtoc_rhs_info) OR_ELSE FALSE);
+    END
+    IF (!(is_copy) AND (TRY (type__requires_move?(type_obj)) OR rtoc_rhs_resource)) THEN
       MUTABLE rtoc_graph_19563 = typeAnalysisSession__ownership_graph(&rtoc_self_view);
-      IF ((ownershipGraph__get_index(rtoc_graph_19563, rhs_name) != NIL) AND (((ownershipGraph__get_index(rtoc_graph_19563, rhs_name))?).kind == :borrowed)) THEN
+      IF ((ownershipGraph__get_index(rtoc_graph_19563, UNWRAP (rhs_name)) != NIL) AND (((ownershipGraph__get_index(rtoc_graph_19563, UNWRAP (rhs_name)))?).kind == :borrowed)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :MOVE_BORROWED_PARAM }, [], CAST({:name: rhs_name} AS {String@symbol}Any)));
       END
-      MUTABLE lhs_name: String = "";
-      IF aST__node_name(UNWRAP (castNodeToLocatable(node))) IS_A Identifier THEN
-        lhs_name = aST__node_name(UNWRAP (castNodeToLocatable(node))).name();
-      ELSE
-        lhs_name = COPY CAST(aST__node_name(UNWRAP (castNodeToLocatable(node))) AS String);
-      END
-      MUTABLE move_tok = IF TRUE THEN
-        aST__node_value(UNWRAP (castNodeToLocatable(node))).token()
-      ELSE
-        aST__node__token(node)
-      END;
-      TRY (typeAnalysisSession__og_move(&rtoc_self_view, rhs_name, UNWRAP (lhs_name), move_tok));
-      aST__node_value(UNWRAP (castNodeToLocatable(node))).was_moved = TRUE;
+      MUTABLE lhs_name: String = COPY (aST__node_name(UNWRAP (castNodeToLocatable(node))) OR_ELSE "");
+      MUTABLE rtoc_moved_value: Locatable = COPY UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))));
+      MUTABLE move_tok: Token = COPY aST__node__token(rtoc_moved_value);
+      TRY (typeAnalysisSession__og_move(&rtoc_self_view, UNWRAP (rhs_name), lhs_name, move_tok));
+      locatable__set_was_moved_mut(&rtoc_moved_value, TRUE);
     END
 }
 END
@@ -20726,43 +20718,35 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE val: ?Locatable = typeAnalysisSession__cleanup_source_value(&rtoc_self_view, aST__node_value(UNWRAP (castNodeToLocatable(node))));
     IF ((val != NIL) AND ((val IS_A FuncCall OR val IS_A MethodCall))) THEN
       MUTABLE matched_def: ?FunctionSignature@multiowned = locatable__matched_stdlib_def(val);
-      IF matched_def THEN
-        IF !((TRY (functionSignature__intrinsic_lifetime(UNWRAP (matched_def)))).empty?()) THEN
-          IF TRUE THEN
-            val.storage = :borrow;
-          END
-          IF TRUE THEN
-            node.storage = :borrow;
-          END
+      IF matched_def EXISTS AS rtoc_matched_def THEN
+        IF !((TRY (functionSignature__intrinsic_lifetime(rtoc_matched_def))).empty?()) THEN
+          MUTABLE rtoc_borrow_val: Locatable = COPY val;
+          locatable__set_storage_override_mut(&rtoc_borrow_val, :borrow);
+          MUTABLE rtoc_borrow_node: Locatable = COPY UNWRAP (castNodeToLocatable(node));
+          locatable__set_storage_override_mut(&rtoc_borrow_node, :borrow);
           RETURN NIL;
         END
-        MUTABLE ret_alloc: ?String@symbol = TRY (functionSignature__return_alloc(matched_def));
-        IF TRY (functionSignature__emits_allocating?(matched_def)) THEN
+        MUTABLE ret_alloc: ?String@symbol = TRY (functionSignature__return_alloc(rtoc_matched_def));
+        IF TRY (functionSignature__emits_allocating?(rtoc_matched_def)) THEN
           IF (ret_alloc == NIL) THEN
-            ret_alloc = TRY (functionSignature__intrinsic_alloc(&matched_def, IntrinsicAllocationKind.Alloc));
+            MUTABLE rtoc_alloc_sig: FunctionSignature@multiowned = KEEP rtoc_matched_def;
+            ret_alloc = TRY (functionSignature__intrinsic_alloc(&rtoc_alloc_sig, IntrinsicAllocationKind.Alloc));
           END
         END
-        IF ret_alloc THEN
-          IF ([:heap, :frame]).contains?(ret_alloc) THEN
-            IF TRUE THEN
-              val.storage = ret_alloc;
-            END
+        IF ret_alloc EXISTS AS rtoc_ret_alloc THEN
+          IF ([:heap, :frame]).contains?(rtoc_ret_alloc) THEN
+            MUTABLE rtoc_alloc_val: Locatable = COPY val;
+            locatable__set_storage_override_mut(&rtoc_alloc_val, COPY rtoc_ret_alloc);
           END
           RETURN NIL;
         END
       END
     END
     MUTABLE alloc = TRY (type__cleanup_allocator(ti, %(name: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, name))));
-    MUTABLE val_ti = IF (val != NIL) THEN
-      TRY (aST__full_type_mut(val))
-    ELSE
-      NIL
-    END;
-    val_ti = IF val_ti IS_A Type THEN
-      val_ti
-    ELSE
-      NIL
-    END;
+    MUTABLE val_ti: ?Type = NIL;
+    IF val EXISTS AS rtoc_cleanup_val THEN
+      val_ti = TRY (aST__full_type_mut(rtoc_cleanup_val));
+    END
     type__apply_cleanup_placement_mut(&ti, val_ti, alloc);
     RETURN alloc;
 }
