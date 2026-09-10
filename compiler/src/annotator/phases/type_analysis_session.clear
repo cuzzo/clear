@@ -11189,13 +11189,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     });
     END
     IF typeAnalysisSession__strict_test?(&rtoc_self_view) THEN
-      MUTABLE stubbed_fns: [Set]String = ((node.setup OR_ELSE List[]) |> SELECT:? (    IF _ IS_A StubDecl THEN
-        locatable__function_name(_)
-      ELSE
-        NIL
-      END) |> WHERE _ != NIL) |> DISTINCT _;
-      FOR _ IN node.tests DO
-      TRY (typeAnalysisSession__validate_strict_io_mut(&rtoc_self_view, _, _, UNWRAP (test_body_summaries[aST__node_identity(Locatable{ TestThat: COPY _ })])));
+      MUTABLE stubbed_fns: [Set]String = Set[];
+      FOR rtoc_setup IN (node.setup OR_ELSE List[]) DO
+        IF rtoc_setup IS_A StubDecl THEN
+          IF locatable__function_name(rtoc_setup) EXISTS AS rtoc_stub_name THEN
+            &stubbed_fns.insert(COPY rtoc_stub_name);
+          END
+        END
+      END
+      FOR rtoc_test IN node.tests DO
+        TRY (typeAnalysisSession__validate_strict_io_mut(&rtoc_self_view, rtoc_test, stubbed_fns, UNWRAP (test_body_summaries[aST__node_identity(Locatable{ TestThat: COPY rtoc_test })])));
       END
     END
     FOR _ IN node.benchmarks DO
@@ -12135,7 +12138,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((type__semantic_type_key(expected_return) == type__semantic_type_key(actual_return))) THEN
       RETURN "${requirement.name}: expected RETURNS ${TRY (type__surface_name(TypeTypeInput{ Type: COPY expected_return }))}, found ${TRY (type__surface_name(castTypeToTypeTypeInput__type_analysis_session(actual_return)))}";
     END
-    MUTABLE actual_effect = (member.reentrance_kind OR member.effects_decl);
+    MUTABLE actual_effect: ?String@symbol = (member.reentrance_kind OR_ELSE member.effects_decl);
     IF typeAnalysisSession__protocol_effect_accepts?(&rtoc_self_view, requirement.effects_decl, actual_effect) THEN
       RETURN NIL;
     END
