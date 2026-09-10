@@ -153,7 +153,7 @@ PUB FN escapeAnalysis__apply_with_facts_mut(fn_nodes: {String}FunctionDef, schem
     rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :loop_receiver_backing_storage, %() USE(body) -> {
-    TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(((body |> SELECT UNWRAP (castLocatableToNode(_))) |> SELECT UNWRAP (castLocatableToNode(_)))));
+    TRY (escapeAnalysis__mark_loop_receiver_allocations_heap_mut(((body |> SELECT castLocatableToNode(_)) |> SELECT castLocatableToNode(_))));
     rubyToClearVoid__escape_analysis()
   }));
   TRY (escapeAnalysis__record_placement_phase_mut(&placements, _, :assignment_ownership, %() USE(facts_by_name, fn_nodes, schema_lookup, _) -> {
@@ -248,7 +248,7 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
           MUTABLE t = s.type();
           t.sync()
             });
-            IF ((rtoc_key AND (symbolEntry__sync( UNWRAP (entry)) != rtoc_key)) AND escapeAnalysis__param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, UNWRAP (rtoc_key))) THEN
+            IF ((rtoc_key AND (symbolEntry__sync( entry) != rtoc_key)) AND escapeAnalysis__param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, rtoc_key)) THEN
               symbolEntry__set_sync(&entry, unified);
               changed = TRUE;
             END
@@ -312,7 +312,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
   MUTABLE owner_fn: ?FunctionDef = COPY fn_nodes[_.name];
   MUTABLE liveness: ?KeptEdgeLiveness@multiowned = NIL;
   MUTABLE local_entries = _.binding_nodes.each_with_object({}, %(node: BindingNode, map: {String}SymbolEntry@multiowned) -> {
-    MUTABLE sym = aST__node__symbol(UNWRAP (castBindingNodeToLocatable(node)));
+    MUTABLE sym = aST__node__symbol(castBindingNodeToLocatable(node));
     IF sym IS_A SymbolEntry THEN
       map[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
       RETURN;
@@ -493,7 +493,7 @@ PUB FN escapeAnalysis__promote_kept_binding_mut(summary: FunctionBodySummary, fn
   MUTABLE rtoc_mutable_receiver_7 = symbolEntry__type(entry);
   TRY (type__set_ownership(&rtoc_mutable_receiver_7, :multiowned));
   symbolEntry__set_storage(&entry, :multiowned);
-  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(UNWRAP (castBindingNodeToLocatable(_))) EXISTS) AND ((UNWRAP (aST__node__symbol( UNWRAP (castBindingNodeToLocatable(_))))).binding_id == entry.binding_id));
+  MUTABLE decl: ?BindingNode = summary.binding_nodes |> FIND ((aST__node__symbol(castBindingNodeToLocatable(_)) EXISTS) AND ((aST__node__symbol( UNWRAP (castBindingNodeToLocatable(_)))).binding_id == entry.binding_id));
   IF decl EXISTS AS decl_value THEN
     MUTABLE decl_value_mutable = COPY decl_value;
     MUTABLE stamped = (decl_value_mutable.full_type());
@@ -712,7 +712,7 @@ PUB FN escapeAnalysis__apply_destructuring_escape_sink_mut(node: DestructuringAs
 END
 PUB FN escapeAnalysis__propagate_value_block_placements_mut(facts: FunctionFacts) RETURNS Void ->
   MUTABLE body = COPY facts.fn.body;
-  escapeAnalysis__walk_body(body, %(node) USE(MUTABLE ti) -> {
+  escapeAnalysis__walk_body(body, %(node)  -> {
   IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
       RETURN;
   END
@@ -766,7 +766,7 @@ PUB FN escapeAnalysis__mark_param_receiver_allocations_heap_mut(nodes: []Locatab
     IF (nodes[rtoc_idx]? IS_A MethodCall) THEN
         MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
         IF (locatable__matched_signature(nodes[rtoc_idx]?) != NIL) THEN
-          sig_branch_value = functionSignature__unwrap(locatable__matched_signature(nodes[rtoc_idx]?));
+          sig_branch_value = functionSignature__unwrap(X{ FunctionSignature: COPY UNWRAP (locatable__matched_signature(nodes[rtoc_idx]?)) });
         ELSE
           sig_branch_value = NIL;
         END
@@ -839,8 +839,8 @@ PUB FN escapeAnalysis__mark_recursive_aggregate_owners_heap_mut(facts: FunctionF
   IF !(((((node != NIL) AND (node IS_A VarDecl)) OR ((node != NIL) AND (node IS_A DestructureTarget))) OR ((IF node? IS_A BindExpr AS bind_expr THEN (bind_expr.mode == :decl) ELSE FALSE END)))) THEN
       CONTINUE;
   END
-  MUTABLE ti = TRY (aST__full_type_mut(UNWRAP (castSymbolEntryRegInputToLocatable(UNWRAP (node)))));
-  IF !((TRY (escapeAnalysis__aggregate_owner_requires_heap?(rtoc_key, schema_lookup)) OR (values |> ANY escapeAnalysis__aggregate_contains_heap_owned_value?(_)))) THEN
+  MUTABLE ti = TRY (aST__full_type_mut(castSymbolEntryRegInputToLocatable(node)));
+  IF !((TRY (escapeAnalysis__aggregate_owner_requires_heap?(TRY (type__new(TypeConstructionInput{ SymbolValue: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: COPY rtoc_key })) })), schema_lookup)) OR (values |> ANY escapeAnalysis__aggregate_contains_heap_owned_value?(_)))) THEN
       CONTINUE;
   END
   escapeAnalysis__mark_symbol_heap_mut(sym);
@@ -906,7 +906,7 @@ PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETUR
     RETURN;
   END
   MUTABLE declared_names = TRY (escapeAnalysis__loop_body_declared_names(body));
-  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(declared_names) -> {
+  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(declared_names, MUTABLE node) -> {
   IF (node IS_A MethodCall) THEN
       MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature);
       IF sig EXISTS AS sig_value THEN
@@ -1191,7 +1191,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
 END
 PUB FN escapeAnalysis__loop_body_declared_names(body: []Node) RETURNS ![Set]String ->
   MUTABLE names: [Set]String = Set[];
-  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(MUTABLE names, MUTABLE ti, MUTABLE stack) -> {
+  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(MUTABLE names, MUTABLE ti, MUTABLE stack, MUTABLE value) -> {
   MUTABLE name: ?String = localBindingAnalysis__binding_decl_name(node);
   IF name EXISTS AS name_value THEN
     RETURN &names.insert(name_value);
@@ -1315,7 +1315,7 @@ PUB FN escapeAnalysis__heap_binding_carries_sources?(value: Locatable) RETURNS B
   IF (node IS_A CopyNode OR node IS_A KeepNode) THEN
     RETURN FALSE;
   END
-  node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(node)));
+  node = UNWRAP (castDynamicValueToLocatable(UNWRAP (escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(node))))));
   IF node IS_A Identifier AS identifier THEN
     RETURN TRUE;
   END
@@ -1359,7 +1359,7 @@ PUB FN escapeAnalysis__assigned_binding_name(node: AssignmentNode) RETURNS ?Stri
     RETURN NIL;
   END
   IF node IS_A Assignment AS assignment THEN
-    MUTABLE target = escapeAnalysis__unwrap_value(UNWRAP (castAssignmentNameToDynamicValue(assignment.name)));
+    MUTABLE target: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castAssignmentNameToDynamicValue(assignment.name)));
     IF (target IS_A String OR target IS_A String@symbol) THEN
       RETURN COPY CAST(target AS String);
     END
@@ -1389,7 +1389,7 @@ PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes
   RETURN TRY (escapeAnalysis__call_result_is_heap?(UNWRAP (value), fn_nodes, schema_lookup, facts_by_name));
 END
 PUB FN escapeAnalysis__ownership_transferring_expr?(expr: ?Locatable, include_allocating_expr: Bool) RETURNS !Bool ->
-  MUTABLE value: SymbolEntry = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
+  MUTABLE value: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
   IF (UNWRAP (value) IS_A BinaryOp AND (UNWRAP (value).op == symbol("OR_ELSE"))) THEN
     value = escapeAnalysis__unwrap_value(value.left());
   END
@@ -1450,7 +1450,7 @@ END
 PUB FN escapeAnalysis__expr_has_heap_identifier?(expr: ?Locatable) RETURNS Bool ->
   MUTABLE found: Bool = FALSE;
   aST__each_locatable_list(expr, FALSE, %(raw: Locatable) -> {
-  MUTABLE node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(raw)));
+  MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(raw)));
   IF node IS_A Identifier THEN
       IF escapeAnalysis__symbol_heap?(node.symbol) THEN
         found = TRUE;
@@ -1463,7 +1463,7 @@ END
 PUB FN escapeAnalysis__expr_has_owned_inline_value?(expr: ?Locatable) RETURNS !Bool ->
   MUTABLE root: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
   aST__each_locatable_list(expr, FALSE, %(raw: Locatable) USE(root) -> {
-  MUTABLE node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(raw)));
+  MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(raw)));
   IF !(node IS_A Locatable) THEN
       RETURN;
   END
@@ -1617,7 +1617,7 @@ PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg
 END
 PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{Int64}[]Identifier ->
   MUTABLE refs: {Int64}[]Identifier = {};
-  aST__each_locatable(body, FALSE, %(node: Locatable) USE(MUTABLE refs, MUTABLE ti, MUTABLE call, MUTABLE node) -> {
+  aST__each_locatable(body, FALSE, %(node: Locatable) USE(MUTABLE refs, MUTABLE call, MUTABLE node, MUTABLE ti) -> {
   IF !(node IS_A LambdaLit) THEN
       RETURN;
   END
@@ -1699,7 +1699,7 @@ PUB FN escapeAnalysis__borrowed_return?(fn_value: FunctionDef, expr: Locatable) 
   END
   MUTABLE returned: [Set]String = Set[];
   TRY (escapeAnalysis__collect_identifier_names_mut(expr, &returned));
-  IF ((IF fn_value.return_lifetime IS_A String@symbol AS fn_valuereturn_lifetime_payload THEN (fn_valuereturn_lifetime_payload == :wildcard) ELSE FALSE END)) THEN
+  IF ((IF fn_value.return_lifetime IS_A String@symbol AS fn_valuereturn_lifetime_payload THEN ((type__resolved(fn_valuereturn_lifetime_payload) == :wildcard)) ELSE FALSE END)) THEN
     MUTABLE param_names: [Set]String = Set[];
     FOR _ IN fn_value.params DO
     &param_names.insert(COPY _.name);
@@ -1736,7 +1736,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
     END
   END
   MUTABLE expr_t = TRY (aST__full_type_mut(expr));
-  IF (!(expr IS_A Identifier) AND ((TRUE) AND UNWRAP (expr_t).rodata?())) THEN
+  IF (!(expr IS_A Identifier) AND ((TRUE) AND expr_t.rodata())) THEN
     RETURN FALSE;
   END
   IF (type__rodata?(ti) OR type__borrowed_reference?(ti)) THEN
@@ -1776,14 +1776,14 @@ PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, expr: Locatabl
   escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts, names);
 END
 PUB FN escapeAnalysis__materializing_pipeline_expr?(expr: Locatable) RETURNS Bool ->
-  MUTABLE node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(expr)));
+  MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(expr)));
   IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
     node = escapeAnalysis__unwrap_value(node.left());
   END
   RETURN ((IF node IS_A BinaryOp AS rtoc_smooth_n THEN binaryOp__smooth?(rtoc_smooth_n) ELSE FALSE END) AND !(node.right() IS_A SkipOp));
 END
 PUB FN escapeAnalysis__returned_call_result?(expr: Locatable) RETURNS Bool ->
-  MUTABLE node = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(expr)));
+  MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(expr)));
   IF (node IS_A BinaryOp AND (node.op() == symbol("OR_ELSE"))) THEN
     node = escapeAnalysis__unwrap_value(node.left());
   END
@@ -1799,7 +1799,7 @@ PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, 
     END
     MUTABLE changed = escapeAnalysis__mark_symbol_heap_mut(sym);
     MUTABLE decl: ?SymbolEntryRegInput = COPY sym.reg;
-    IF (changed AND (aST__node__container_borrow(UNWRAP (castSymbolEntryRegInputToLocatable(UNWRAP (decl)))) EXISTS)) THEN
+    IF (changed AND (aST__node__container_borrow(castSymbolEntryRegInputToLocatable(decl)) EXISTS)) THEN
         decl.container_borrow = FALSE;
     END
   rtoc_idx = rtoc_idx + 1;
@@ -1862,7 +1862,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
 PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, facts_by_name: {String}FunctionFacts) RETURNS !Bool ->
-  MUTABLE call = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(value)));
+  MUTABLE call: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(value)));
   IF (call IS_A BinaryOp AND (call.op() == symbol("OR_ELSE"))) THEN
     call = escapeAnalysis__unwrap_value(call.left());
   END
@@ -1939,7 +1939,7 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
   rtoc_idx = rtoc_idx + 1;
       END
       IF has_param_return THEN
-        MUTABLE ret: ?Type = TRY (type__from_node(UNWRAP (castTypeTypeInputToType(return_type))));
+        MUTABLE ret: ?Type = TRY (type__from_node(UNWRAP (castTypeTypeInputToType(UNWRAP (return_type)))));
         IF ret EXISTS AS ret_value THEN
           MUTABLE ret_value = TRY (type__success_type(ret_value));
         END
@@ -1969,7 +1969,7 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
   END
 END
 PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
-  MUTABLE node: SymbolEntry = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
+  MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
   IF (UNWRAP (node) IS_A BinaryOp AND (UNWRAP (node).op == symbol("OR_ELSE"))) THEN
     node = escapeAnalysis__unwrap_value(node.left());
   END

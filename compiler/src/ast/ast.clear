@@ -20118,3 +20118,12 @@ PUB FN castLocatableToUnaryOp(value: Locatable) RETURNS ?UnaryOp EFFECTS REENTRA
   END
   RETURN NIL;
 END
+
+# Ruby hands the node straight to a callee that wants one specific shape.
+# The union either holds that variant or it does not.
+PUB FN castNodeToStaticCall(value: Node) RETURNS ?StaticCall EFFECTS REENTRANT ->
+  IF value IS_A StaticCall AS item THEN
+    RETURN item;
+  END
+  RETURN NIL;
+END
