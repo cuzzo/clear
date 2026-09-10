@@ -1492,6 +1492,12 @@ module MIR
     include Stmt
     sig { returns(T::Array[Emittable]) }
     def child_exprs = compact_child_exprs([value])
+    # The value a break carries IS the block's result, which whatever consumes
+    # the block binds -- the same ownership-binding position BreakExpr's value
+    # sits in. Without that, a retain reaching a block result read as an
+    # allocation nobody had hoisted.
+    sig { returns(T::Array[Emittable]) }
+    def owned_position_source_exprs = compact_child_exprs([value])
   end
 
   # Break expression.

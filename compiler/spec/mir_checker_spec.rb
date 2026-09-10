@@ -1198,6 +1198,19 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("DupeSlice") }).to be true
     end
 
+    it "passes: a block's break carries an allocating result out" do
+      # The value a break carries IS the block's result, which whatever binds
+      # the block owns -- the same position a break EXPRESSION's value sits in.
+      block = MIR::BlockExpr.new("blk", [
+        MIR::BreakStmt.new("blk", MIR::DupeSlice.new(MIR::Ident.new("src"), :heap)),
+      ])
+      body = [
+        MIR::Let.new("s", block, false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("break_result", body), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
     it "flags: DupeSlice as Call argument" do
       inner = MIR::DupeSlice.new(MIR::Ident.new("s"), :heap)
       body = [

@@ -413,6 +413,7 @@ class MIRChecker
     nodes = T.let(MIR.nodes(fn_def.body), T::Array[MIR::Node])
     @line_by_name = T.let(source_lines_by_binding(nodes), T.nilable(T::Hash[String, Integer]))
     @current_clr_line = T.let(nil, T.nilable(Integer))
+    @current_stmt_kind = T.let(nil, T.nilable(String))
 
     allocs = T.let({}, AllocMarksByName)
     cleanups = T.let({}, CleanupMarksByName)
@@ -3098,6 +3099,10 @@ class MIRChecker
   def check_stmt_for_unhoisted(node)
     return unless node.is_a?(MIR::Emittable)
 
+    # The statement is the position the expression sits in, and naming it is
+    # what tells the reader whether the fix is a hoist or an owning sink.
+    @current_stmt_kind = node.class.name.to_s.split("::").last
+
     case node
     when MIR::Let
       check_owned_expr_position_for_unhoisted(node.init, "Let initializer")
@@ -3187,7 +3192,8 @@ class MIRChecker
       unless owned_position
         kind = expr.class.name.split("::").last
         @errors << error(:UNHOISTED_ALLOC, @fn_name,
-          "#{kind} in non-Let-init position (must be hoisted to a named variable)")
+          "#{kind} in non-Let-init position inside #{@current_stmt_kind || 'a statement'} " \
+          "(must be hoisted to a named variable)")
         return  # one error per site -- don't recurse into nested allocs
       end
     end
