@@ -14741,7 +14741,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END) THEN
         payload_branch_value = TRY (type__success_type(UNWRAP (error_type)));
       ELSE
-        payload_branch_value = value_type;
+        payload_branch_value = COPY value_type;
       END
       MUTABLE payload: Type = payload_branch_value?;
       MUTABLE selected_type = COPY declared_value;
@@ -14785,15 +14785,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           MUTABLE node = DeclarationNode{ BindExpr: item_mutable };,
       END
       IF (wants_error OR wants_error_optional) THEN
-        MUTABLE value_node: Locatable = NIL;
         MATCH node START
-          DeclarationNode.VarDecl AS item ->
-            value_node = COPY item.value;,
-          DeclarationNode.BindExpr AS item ->
-            value_node = COPY item.value;,
-        END
-        IF (aST__node_retain_error_channel(value_node) EXISTS) THEN
-          value_node.retain_error_channel = TRUE;
+          DeclarationNode.VarDecl AS MUTABLE item ->
+            locatable__set_retain_error_channel_mut(&item.value, TRUE);,
+          DeclarationNode.BindExpr AS MUTABLE item ->
+            locatable__set_retain_error_channel_mut(&item.value, TRUE);,
         END
       END
     ELSE
