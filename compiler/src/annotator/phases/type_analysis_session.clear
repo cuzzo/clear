@@ -2308,7 +2308,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
       IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
-        length = COPY CAST(((tokenValue__to_f(UNWRAP (castLocatableToLiteral(index))) + 1.0)) AS String);
+        length = COPY CAST(((tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(index)).value)) + 1.0)) AS String);
       ELSE
         length = "0";
       END
@@ -2316,7 +2316,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE alias_name = "${name}_view";
         MUTABLE rewritten = compilerRegexReplaceAll(inner, compilerRegexCompile("\\b${compilerRegexEscape(name)}\\s*(?=\\[)"), alias_name);
         MUTABLE replacement = "${indent}WITH UNSAFE VIEW ${name} LENGTH ${length} AS ${alias_name} { ${rewritten} }";
-        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, line_num, 1, (body).length()), replacement)], :interactive)));
+        &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :WRAP_FOREIGN_INDEX_UNSAFE_VIEW, CAST({:name: DiagnosticKwValue{ StringValue: COPY name }, :length: DiagnosticKwValue{ StringValue: COPY length }, :alias_name: DiagnosticKwValue{ StringValue: COPY alias_name }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (line_num), 1, (body).length()), replacement)], :interactive)));
       END
     END
     IF (fixes.length() == 0) THEN
@@ -5666,7 +5666,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
       END
       IF UNWRAP (opts["size"]) IS_A Literal THEN
-        MUTABLE v = tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))));
+        MUTABLE v = tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))).value));
         IF (_ <= 0) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_POSITIVE }));
         END
@@ -10478,14 +10478,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN typeAnalysisSession__expression_allocates?(&rtoc_self_view, UNWRAP (allocDeclarationNode__value(node)));
 }
 END
-PRIVATE FN typeAnalysisSession__expression_allocates?(MUTABLE self: TypeAnalysisSession, MUTABLE node: ?Locatable) RETURNS Bool
+PRIVATE FN typeAnalysisSession__expression_allocates?(MUTABLE self: TypeAnalysisSession, node: ?Locatable) RETURNS Bool
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN PARTIAL MATCH UNWRAP (node) START
       Locatable.FuncCall AS func_call -> FALSE,
-      AutoInferenceWalkNode.MethodCall -> FALSE,
+      Locatable.MethodCall -> FALSE,
       Locatable.Identifier AS identifier -> FALSE,
       Locatable.GetField AS get_field -> FALSE,
       Locatable.GetIndex AS get_index -> FALSE,
