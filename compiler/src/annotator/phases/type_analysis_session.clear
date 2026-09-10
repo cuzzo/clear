@@ -13252,8 +13252,9 @@ PRIVATE FN typeAnalysisSession__resolve_runtime_is_a_variant_mut(MUTABLE self: T
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE target_names = TRY (typeAnalysisSession__runtime_is_a_target_names(rtoc_self_view, &node.castIsARightToNode(right)));
-    MUTABLE variant_key = (target_names |> SELECT:? typeAnalysisSession__runtime_union_variant_key(&rtoc_self_view, schema, _) |> WHERE _ != NIL).first();
+    MUTABLE rtoc_isa_right_node: Node = UNWRAP (castIsARightToNode(node.right));
+    MUTABLE target_names = TRY (typeAnalysisSession__runtime_is_a_target_names(rtoc_self_view, &rtoc_isa_right_node));
+    MUTABLE variant_key: ?TypeAnalysisSessionReturnValue = (target_names |> SELECT:? typeAnalysisSession__runtime_union_variant_key(&rtoc_self_view, schema, _) |> WHERE _ != NIL).first();
     IF variant_key THEN
       RETURN COPY CAST(variant_key AS String);
     END
@@ -13266,7 +13267,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (payload_matches.length() > 1) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IsA: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_AMBIGUOUS_PAYLOAD }, [], CAST({:target: TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, UNWRAP (castIsARightToNode(node.right)))), :union: union_type, :variants: ((payload_matches |> SELECT _.toString()) |> ORDER_BY _).join(", ")} AS {String@symbol}Any)));
     END
-    RETURN TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IsA: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_UNKNOWN_VARIANT }, [], CAST({:target: TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, &node.castIsARightToNode(right))), :union: union_type} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IsA: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_UNKNOWN_VARIANT }, [], CAST({:target: TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, &rtoc_isa_right_node)), :union: union_type} AS {String@symbol}Any)));
+    RETURN COPY "";
 }
 END
 PRIVATE FN typeAnalysisSession__runtime_is_a_target_names(self: TypeAnalysisSession, MUTABLE node: Node) RETURNS ![]String
@@ -13334,10 +13336,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN !(((payload_names |> WHERE target_names.contains?(_)).length() == 0));
     ELSE_IF UNWRAP (payload) IS_A InlineStructVariant@multiowned AS inline_struct_variant_multiowned THEN
       MUTABLE synthetic_name = "${union_type}_${variant_name}";
-      RETURN type__any?((ruby_set_intersection_String([synthetic_name, variant_name], target_names)));
+      RETURN (ruby_set_intersection_String([synthetic_name, variant_name], target_names)).any?();
     ELSE_IF payload IS_A String@symbol AS string_symbol THEN
       MUTABLE payload_name = COPY CAST(string_symbol AS String);
-      RETURN type__any?((ruby_set_intersection_String(CAST(Tuple{payload_name, payload_name.split(".").last()} AS Tuple<String, ?String>), target_names)));
+      RETURN (ruby_set_intersection_String([payload_name, UNWRAP (payload_name.split(".").last())], target_names)).any?();
     ELSE
       RETURN FALSE;
     END
@@ -13415,7 +13417,7 @@ PRIVATE FN typeAnalysisSession__with_comptime_is_a_then_refinement<RESULT>(MUTAB
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE refinement: ?[]Any@multiowned = TRY (typeAnalysisSession__comptime_is_a_type_param_refinement(&rtoc_self_view, condition));
+    MUTABLE refinement: ?Tuple<String@symbol, Type@multiowned> = TRY (typeAnalysisSession__comptime_is_a_type_param_refinement(&rtoc_self_view, condition));
     IF refinement EXISTS AS refinement_value THEN
       MUTABLE refinement_value_mutable = COPY refinement_value;
       MUTABLE type_param: String@symbol = CAST(refinement_value_mutable[0] AS String@symbol);
@@ -13426,7 +13428,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__comptime_is_a_type_param_refinement(MUTABLE self: TypeAnalysisSession, condition: Locatable) RETURNS !?[]Any@multiowned
+PRIVATE FN typeAnalysisSession__comptime_is_a_type_param_refinement(MUTABLE self: TypeAnalysisSession, condition: Locatable) RETURNS !?Tuple<String@symbol, Type@multiowned>
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -13440,7 +13442,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(TRY (typeAnalysisSession__current_function_type_param?(&rtoc_self_view, type_param))) THEN
         RETURN NIL;
       END
-      MUTABLE narrowed_type: ?Type@multiowned = TRY (typeAnalysisSession__static_is_a_target_type(&rtoc_self_view, &is_a.castIsARightToNodeOrType(right)));
+      MUTABLE rtoc_isa_right_is_a: NodeOrType = castIsARightToNodeOrType(is_a.right);
+      MUTABLE narrowed_type: ?Type@multiowned = TRY (typeAnalysisSession__static_is_a_target_type(&rtoc_self_view, &rtoc_isa_right_is_a));
       IF narrowed_type EXISTS AS narrowed_type_value THEN
         RETURN CAST(Tuple{type_param, COPY narrowed_type_value} AS Tuple<String@symbol, Type@multiowned>);
       ELSE
@@ -13754,7 +13757,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF UNWRAP (type_params).empty?() THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_NOT_GENERIC }, [], CAST({:type: node.name} AS {String@symbol}Any)));
       END
-      IF ((node.type_args OR_ELSE List[]).length() != (type_params).length()) THEN
+      IF ((node.type_args OR_ELSE List[]).length() != type_params.length()) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StructLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GENERIC_WRONG_ARG_COUNT }, [], CAST({:type: node.name, :expected: (type_params).length(), :got: node.type_args.length()} AS {String@symbol}Any)));
       END
       type_params.zip(node.type_args).keys() |> EACH {
