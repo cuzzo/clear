@@ -11811,11 +11811,11 @@ PRIVATE FN typeAnalysisSession__with_async_body_fact_frame(MUTABLE self: TypeAna
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE summary: !BodyScanSummary = typeAnalysisSession__with_body_fact_frame(&rtoc_self_view, bodyIdentity__unassigned(), %() USE(MUTABLE rtoc_self_view) -> {
+    MUTABLE summary: BodyScanSummary = TRY (typeAnalysisSession__with_body_fact_frame(&rtoc_self_view, bodyIdentity__unassigned(), %() USE(MUTABLE rtoc_self_view) -> {
     TRY (typeAnalysisSession__with_body_fact_scopes_cleared(&rtoc_self_view, %() -> block()));
     rubyToClearVoid__type_analysis_session()
-    });
-    TRY (typeAnalysisSession__record_async_body_fact_mut(&rtoc_self_view, &node, TRY (summary), validation_node));
+    }));
+    TRY (typeAnalysisSession__record_async_body_fact_mut(&rtoc_self_view, &node, COPY summary, validation_node));
     RETURN summary;
 }
 END
@@ -16011,9 +16011,12 @@ PRIVATE FN typeAnalysisSession__destructure_value_type_at(self: TypeAnalysisSess
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE value = node.value;
-    IF (IF value IS_A ListLit THEN ((locatable__items(value) OR_ELSE List[])[index_value] != NIL) ELSE FALSE END) THEN
-      RETURN TRY (aST__full_type_mut(UNWRAP ((locatable__items(value) OR_ELSE List[])[index_value])));
+    MUTABLE value: Locatable = COPY node.value;
+    IF value IS_A ListLit THEN
+      MUTABLE rtoc_items: []Locatable = COPY (locatable__items(value) OR_ELSE List[]);
+      IF rtoc_items[index_value] EXISTS AS rtoc_item THEN
+        RETURN TRY (aST__full_type_mut(rtoc_item));
+      END
     END
     IF type__tuple?((TRY (aST__full_type_mut(node.value)))) THEN
       RETURN COPY UNWRAP ((TRY (type__generic_args((TRY (aST__full_type_mut(node.value))))))[index_value]);
