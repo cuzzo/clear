@@ -16376,23 +16376,32 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE sym: ?SymbolEntry@multiowned = locatable__symbol(node.target);
-    MUTABLE in_auto_lock = (typeAnalysisSession__phase_traversal_state(&rtoc_self_view).auto_locked_assign_name == aST__node_name(node.target));
+    MUTABLE rtoc_auto_name: ?String = typeAnalysisSession__phase_traversal_state(&rtoc_self_view).auto_locked_assign_name;
+    rtoc_target_name: ?String = aST__node_name(node.target);
+    MUTABLE in_auto_lock = (rtoc_auto_name == rtoc_target_name);
     MUTABLE in_with_block = typeAnalysisSession__inside_with_block?(&rtoc_self_view);
-    MUTABLE cap_error = ([[(IF sym != NIL THEN
-      symbolEntry__locked?(sym)
-    ELSE
-      NIL
-    END), :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@locked"], [(IF sym != NIL THEN
-      symbolEntry__write_locked?(UNWRAP (sym))
-    ELSE
-      NIL
-    END), :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, "EXCLUSIVE", "@writeLocked"], [(IF sym != NIL THEN
-      symbolEntry__atomic_ptr?(UNWRAP (sym))
-    ELSE
-      NIL
-    END), :CAP_FIELD_NEEDS_WITH_SNAPSHOT, "SNAPSHOT", "@boxed:atomic"]]) |> FIND _[0];
-    IF ((cap_error AND !(in_auto_lock)) AND !(in_with_block)) THEN
-      TRY (typeAnalysisSession__emit_cap_field_needs_with_mut(&rtoc_self_view, &node, cap_error[1], node.target.name(), node.field, cap_error[3], cap_error[2]));
+    MUTABLE cap_code: ?String@symbol = NIL;
+    MUTABLE cap_perm: String = "";
+    MUTABLE cap_name: String = "";
+    IF sym EXISTS AS rtoc_sym THEN
+      IF symbolEntry__locked?(rtoc_sym) THEN
+        cap_code = :CAP_FIELD_NEEDS_WITH_EXCLUSIVE;
+        cap_perm = COPY "EXCLUSIVE";
+        cap_name = COPY "@locked";
+      ELSE_IF symbolEntry__write_locked?(rtoc_sym) THEN
+        cap_code = :CAP_FIELD_NEEDS_WITH_EXCLUSIVE;
+        cap_perm = COPY "EXCLUSIVE";
+        cap_name = COPY "@writeLocked";
+      ELSE_IF symbolEntry__atomic_ptr?(rtoc_sym) THEN
+        cap_code = :CAP_FIELD_NEEDS_WITH_SNAPSHOT;
+        cap_perm = COPY "SNAPSHOT";
+        cap_name = COPY "@boxed:atomic";
+      END
+    END
+    IF (((cap_code != NIL) AND !(in_auto_lock)) AND !(in_with_block)) THEN
+      MUTABLE rtoc_cap_field: String = COPY node.field;
+      MUTABLE rtoc_cap_owner: String = COPY (locatable__name(node.target) OR_ELSE "");
+      TRY (typeAnalysisSession__emit_cap_field_needs_with_mut(&rtoc_self_view, &node, COPY cap_code, NameCandidate{ StringValue: COPY rtoc_cap_owner }, rtoc_cap_field, cap_name, cap_perm));
     END
 }
 END
