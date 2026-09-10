@@ -20394,3 +20394,174 @@ PUB FN castNodeToStaticCall(value: Node) RETURNS ?StaticCall EFFECTS REENTRANT -
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:capture_analysis)` and then reads it. A union variant either
+# carries the field or it does not, so the question is answered here.
+PUB FN locatable__capture_analysis(value: Locatable) RETURNS ?CaptureAnalysis ->
+  PARTIAL MATCH value START
+    Locatable.SelectOp AS item -> RETURN COPY item.capture_analysis;,
+    Locatable.ConcurrentOp AS item -> RETURN COPY item.capture_analysis;,
+    Locatable.BgBlock AS item -> RETURN COPY item.capture_analysis;,
+    Locatable.BgStreamBlock AS item -> RETURN COPY item.capture_analysis;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:capture_analysis)` and then reads it. A union variant either
+# carries the field or it does not, so the question is answered here.
+PUB FN bgNode__capture_analysis(value: BgNode) RETURNS ?CaptureAnalysis ->
+  PARTIAL MATCH value START
+    BgNode.BgBlock AS item -> RETURN COPY item.capture_analysis;,
+    BgNode.BgStreamBlock AS item -> RETURN COPY item.capture_analysis;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:can_fail)` and then reads it. A union variant either
+# carries the field or it does not, so the question is answered here.
+PUB FN locatable__can_fail(value: Locatable) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    Locatable.Program AS item -> RETURN COPY item.can_fail;,
+    Locatable.RequireNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.ProtocolRequirement AS item -> RETURN COPY item.can_fail;,
+    Locatable.ProtocolDef AS item -> RETURN COPY item.can_fail;,
+    Locatable.FunctionDef AS item -> RETURN COPY item.can_fail;,
+    Locatable.ImplementationDef AS item -> RETURN COPY item.can_fail;,
+    Locatable.ConformanceDef AS item -> RETURN COPY item.can_fail;,
+    Locatable.StructDef AS item -> RETURN COPY item.can_fail;,
+    Locatable.VarDecl AS item -> RETURN COPY item.can_fail;,
+    Locatable.Assignment AS item -> RETURN COPY item.can_fail;,
+    Locatable.DestructureTarget AS item -> RETURN COPY item.can_fail;,
+    Locatable.DestructuringAssignment AS item -> RETURN COPY item.can_fail;,
+    Locatable.BindExpr AS item -> RETURN COPY item.can_fail;,
+    Locatable.BinaryOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.IsA AS item -> RETURN COPY item.can_fail;,
+    Locatable.UnaryOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.CallSiteOverride AS item -> RETURN COPY item.can_fail;,
+    Locatable.Identifier AS item -> RETURN COPY item.can_fail;,
+    Locatable.Literal AS item -> RETURN COPY item.can_fail;,
+    Locatable.ListLit AS item -> RETURN COPY item.can_fail;,
+    Locatable.TupleLit AS item -> RETURN COPY item.can_fail;,
+    Locatable.DefaultArrayLit AS item -> RETURN COPY item.can_fail;,
+    Locatable.HashLit AS item -> RETURN COPY item.can_fail;,
+    Locatable.DefaultLit AS item -> RETURN COPY item.can_fail;,
+    Locatable.StructLit AS item -> RETURN COPY item.can_fail;,
+    Locatable.LambdaLit AS item -> RETURN COPY item.can_fail;,
+    Locatable.IfStatement AS item -> RETURN COPY item.can_fail;,
+    Locatable.IfBind AS item -> RETURN COPY item.can_fail;,
+    Locatable.WhileLoop AS item -> RETURN COPY item.can_fail;,
+    Locatable.WhileBindLoop AS item -> RETURN COPY item.can_fail;,
+    Locatable.BreakNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.ContinueNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.FuncCall AS item -> RETURN COPY item.can_fail;,
+    Locatable.MethodCall AS item -> RETURN COPY item.can_fail;,
+    Locatable.GetField AS item -> RETURN COPY item.can_fail;,
+    Locatable.GetIndex AS item -> RETURN COPY item.can_fail;,
+    Locatable.Cast AS item -> RETURN COPY item.can_fail;,
+    Locatable.ReturnNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.Assert AS item -> RETURN COPY item.can_fail;,
+    Locatable.Raise AS item -> RETURN COPY item.can_fail;,
+    Locatable.ThrowNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.DieNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.Slice AS item -> RETURN COPY item.can_fail;,
+    Locatable.Require AS item -> RETURN COPY item.can_fail;,
+    Locatable.DeferStmt AS item -> RETURN COPY item.can_fail;,
+    Locatable.WithBlock AS item -> RETURN COPY item.can_fail;,
+    Locatable.SyncPolicyDecl AS item -> RETURN COPY item.can_fail;,
+    Locatable.SelectOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.WhereOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.IndexOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.ReduceOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.OrderByOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.LimitOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.UnnestOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.DistinctOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.EachOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.TapOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.SkipOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.CollectOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.TakeWhileOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.WindowOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.BatchWindowOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.JoinOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.FindOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.AnyOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.AllOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.CountOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.SumOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.AverageOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.MinOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.MaxOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.ShardOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.ConcurrentOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.Placeholder AS item -> RETURN COPY item.can_fail;,
+    Locatable.Copy AS item -> RETURN COPY item.can_fail;,
+    Locatable.OptionalUnwrap AS item -> RETURN COPY item.can_fail;,
+    Locatable.TenseNavigation AS item -> RETURN COPY item.can_fail;,
+    Locatable.MutableBorrow AS item -> RETURN COPY item.can_fail;,
+    Locatable.OrElseRaise AS item -> RETURN COPY item.can_fail;,
+    Locatable.OrElseExit AS item -> RETURN COPY item.can_fail;,
+    Locatable.OrElsePass AS item -> RETURN COPY item.can_fail;,
+    Locatable.OrElsePrune AS item -> RETURN COPY item.can_fail;,
+    Locatable.OrElseBreak AS item -> RETURN COPY item.can_fail;,
+    Locatable.CatchBlock AS item -> RETURN COPY item.can_fail;,
+    Locatable.RecoverOp AS item -> RETURN COPY item.can_fail;,
+    Locatable.BlockExpr AS item -> RETURN COPY item.can_fail;,
+    Locatable.StringConcat AS item -> RETURN COPY item.can_fail;,
+    Locatable.CapabilityWrap AS item -> RETURN COPY item.can_fail;,
+    Locatable.MoveNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.CopyNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.KeepNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.ShareNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.LinkNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.ResolveNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.FreezeNode AS item -> RETURN COPY item.can_fail;,
+    Locatable.PassStmt AS item -> RETURN COPY item.can_fail;,
+    Locatable.StructPattern AS item -> RETURN COPY item.can_fail;,
+    Locatable.RangeLit AS item -> RETURN COPY item.can_fail;,
+    Locatable.ExternFnDecl AS item -> RETURN COPY item.can_fail;,
+    Locatable.ExternStructDecl AS item -> RETURN COPY item.can_fail;,
+    Locatable.EnumDef AS item -> RETURN COPY item.can_fail;,
+    Locatable.UnionDef AS item -> RETURN COPY item.can_fail;,
+    Locatable.UnionVariantLit AS item -> RETURN COPY item.can_fail;,
+    Locatable.StaticCall AS item -> RETURN COPY item.can_fail;,
+    Locatable.DoBlock AS item -> RETURN COPY item.can_fail;,
+    Locatable.BgBlock AS item -> RETURN COPY item.can_fail;,
+    Locatable.ThenChain AS item -> RETURN COPY item.can_fail;,
+    Locatable.BgStreamBlock AS item -> RETURN COPY item.can_fail;,
+    Locatable.YieldExpr AS item -> RETURN COPY item.can_fail;,
+    Locatable.CloseStream AS item -> RETURN COPY item.can_fail;,
+    Locatable.NextExpr AS item -> RETURN COPY item.can_fail;,
+    Locatable.MatchStatement AS item -> RETURN COPY item.can_fail;,
+    Locatable.ForRange AS item -> RETURN COPY item.can_fail;,
+    Locatable.ForEach AS item -> RETURN COPY item.can_fail;,
+    Locatable.TestBlock AS item -> RETURN COPY item.can_fail;,
+    Locatable.WhenBlock AS item -> RETURN COPY item.can_fail;,
+    Locatable.LetBinding AS item -> RETURN COPY item.can_fail;,
+    Locatable.TestThat AS item -> RETURN COPY item.can_fail;,
+    Locatable.AssertRaises AS item -> RETURN COPY item.can_fail;,
+    Locatable.BenchmarkStmt AS item -> RETURN COPY item.can_fail;,
+    Locatable.SmashStmt AS item -> RETURN COPY item.can_fail;,
+    Locatable.ProfileStmt AS item -> RETURN COPY item.can_fail;,
+    Locatable.StubDecl AS item -> RETURN COPY item.can_fail;,
+    Locatable.Drop AS item -> RETURN COPY item.can_fail;,
+    Locatable.SuppressCleanup AS item -> RETURN COPY item.can_fail;,
+    Locatable.Return AS item -> RETURN COPY item.can_fail;,
+    Locatable.ReassignCleanup AS item -> RETURN COPY item.can_fail;,
+    Locatable.FieldCleanup AS item -> RETURN COPY item.can_fail;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:statements)` and then reads it. A union variant either
+# carries the field or it does not, so the question is answered here.
+PUB FN locatable__statements(value: Locatable) RETURNS ?[]Locatable ->
+  PARTIAL MATCH value START
+    Locatable.Program AS item -> RETURN COPY item.statements;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

@@ -55,7 +55,7 @@ PRIVATE FN pipelineRewriter__rewrite_children_mut(MUTABLE self: PipelineRewriter
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node IS_A Program) THEN
-      node.statements = node.statements() |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
+      node.statements = locatable__statements(node) |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
     ELSE_IF node IS_A FunctionDef AS function_def THEN
       MUTABLE function_def_mutable = COPY function_def;
       function_def_mutable.body = function_def_mutable.body |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
@@ -162,8 +162,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE list_lit_mutable = COPY list_lit;
       list_lit_mutable.items = list_lit_mutable.items |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
     ELSE_IF (node IS_A BlockExpr) THEN
-      node.body = node.body() |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
-      node.result = TRY (pipelineRewriter__rewrite_optional_node(&rtoc_self_view, node.result()));
+      node.body = locatable__body(node) |> SELECT TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &_));
+      node.result = TRY (pipelineRewriter__rewrite_optional_node(&rtoc_self_view, locatable__result(node)));
     END
     RETURN COPY node;
 }
@@ -1311,7 +1311,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF (IF node IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) THEN
       MUTABLE new_node = COPY node;
-      new_node.left = pipelineRewriter__replace_placeholder(rtoc_self_view, node.left(), replacement);
+      new_node.left = pipelineRewriter__replace_placeholder(rtoc_self_view, locatable__left(node), replacement);
       new_node.right = pipelineRewriter__clone_ast_node(rtoc_self_view, aST__node_right(node));
       RETURN new_node;
     END

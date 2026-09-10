@@ -261,10 +261,10 @@ PRIVATE FN mIRPass__recurse_expr_body_mut(MUTABLE self: MIRPass, MUTABLE val: ?L
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF (((val != NIL) AND (val IS_A BgBlock)) AND val.body()) THEN
-      val.body = TRY (mIRPass__transform_body(&rtoc_self_view, val.body(), walkCtx__with(ctx, {:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castOptionalLocatableToBgNode(val), ctx.cleanup_facts)})));
+    IF (((val != NIL) AND (val IS_A BgBlock)) AND locatable__body(val)) THEN
+      val.body = TRY (mIRPass__transform_body(&rtoc_self_view, locatable__body(val), walkCtx__with(ctx, {:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castOptionalLocatableToBgNode(val), ctx.cleanup_facts)})));
     ELSE_IF ((val != NIL) AND (val IS_A BlockExpr)) THEN
-      val.body = TRY (mIRPass__transform_body(&rtoc_self_view, val.body(), ctx));
+      val.body = TRY (mIRPass__transform_body(&rtoc_self_view, locatable__body(val), ctx));
     END
 }
 END
@@ -272,8 +272,8 @@ PRIVATE FN mIRPass__bg_inner_facts(self: MIRPass, bg_node: BgNode, facts: Frozen
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE captures = (IF bg_node.capture_analysis() != NIL THEN
-      (bg_node.capture_analysis()).captures()
+    MUTABLE captures = (IF bgNode__capture_analysis(bg_node) != NIL THEN
+      (bgNode__capture_analysis(bg_node)).captures()
     ELSE
       NIL
     END);

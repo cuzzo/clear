@@ -91,5 +91,5 @@ end
 
 puts "#{rewrites} method calls on a union rewritten to its accessor"
 puts "unresolved: #{unresolved.values.sum} (no such accessor)"
-unresolved.sort_by { |_, v| -v }.first(10).each { |k, v| puts format('  %-44s %d', k, v) }
+unresolved.sort_by { |_, v| -v }.first(ENV.fetch("UNRESOLVED_LIMIT", "10").to_i).each { |k, v| puts format('  %-44s %d', k, v) }
 puts '(dry run -- pass --apply to write)' unless apply

@@ -192,7 +192,7 @@ PRIVATE FN liveness__stmt_decl_type(MUTABLE stmt: BindingStmt) RETURNS !?Type ->
   END
   MUTABLE value: ?Locatable = NIL;
   IF (stmt IS_A VarDecl OR stmt IS_A BindExpr) THEN
-    value = stmt.value();
+    value = bindingStmt__value(stmt);
   END
   IF value EXISTS AS value_value THEN
     MUTABLE value_value_mutable = COPY value_value;
@@ -1076,4 +1076,15 @@ FN castBindingStmtToLocatable(value: BindingStmt) RETURNS Locatable ->
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
+END
+
+# Ruby asks `respond_to?(:value)` and then reads it. A union variant either
+# carries the field or it does not, so the question is answered here.
+PUB FN bindingStmt__value(value: BindingStmt) RETURNS ?Locatable@boxed ->
+  PARTIAL MATCH value START
+    BindingStmt.VarDecl AS item -> RETURN COPY item.value;,
+    BindingStmt.BindExpr AS item -> RETURN COPY item.value;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
 END

@@ -19829,3 +19829,107 @@ FN castLocatableToEmittable(value: Locatable) RETURNS ?Emittable ->
   END
   RETURN NIL;
 END
+
+# Ruby asks `respond_to?(:source_column)` and then reads it. A union variant either
+# carries the field or it does not, so the question is answered here.
+PUB FN emittable__source_column(value: Emittable) RETURNS ?Int64 ->
+  PARTIAL MATCH value START
+    Emittable.FnDef AS item -> RETURN COPY item.source_column;,
+    Emittable.MIRStructDef AS item -> RETURN COPY item.source_column;,
+    Emittable.ProtocolAdapterDef AS item -> RETURN COPY item.source_column;,
+    Emittable.MIREnumDef AS item -> RETURN COPY item.source_column;,
+    Emittable.UnionTypeDef AS item -> RETURN COPY item.source_column;,
+    Emittable.Import AS item -> RETURN COPY item.source_column;,
+    Emittable.TypeAlias AS item -> RETURN COPY item.source_column;,
+    Emittable.CExternFnDecl AS item -> RETURN COPY item.source_column;,
+    Emittable.CExternStructDef AS item -> RETURN COPY item.source_column;,
+    Emittable.ModuleNamespace AS item -> RETURN COPY item.source_column;,
+    Emittable.TestDef AS item -> RETURN COPY item.source_column;,
+    Emittable.Let AS item -> RETURN COPY item.source_column;,
+    Emittable.Set AS item -> RETURN COPY item.source_column;,
+    Emittable.DestructureSet AS item -> RETURN COPY item.source_column;,
+    Emittable.ReassignWithCleanup AS item -> RETURN COPY item.source_column;,
+    Emittable.ResourceClose AS item -> RETURN COPY item.source_column;,
+    Emittable.IfStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.IfBindStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.WhileStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.ForStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.ScopeBlock AS item -> RETURN COPY item.source_column;,
+    Emittable.SwitchStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.UnionMatchStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.IfChain AS item -> RETURN COPY item.source_column;,
+    Emittable.ReturnStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.BreakStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.ContinueStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.Panic AS item -> RETURN COPY item.source_column;,
+    Emittable.AssertStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.AssertRaisesCheck AS item -> RETURN COPY item.source_column;,
+    Emittable.TestPreamble AS item -> RETURN COPY item.source_column;,
+    Emittable.DebugOnly AS item -> RETURN COPY item.source_column;,
+    Emittable.Sort AS item -> RETURN COPY item.source_column;,
+    Emittable.IndexInsert AS item -> RETURN COPY item.source_column;,
+    Emittable.BatchWindowPush AS item -> RETURN COPY item.source_column;,
+    Emittable.BatchWindowFlush AS item -> RETURN COPY item.source_column;,
+    Emittable.MIRDeferStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.ErrDeferStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.ExprStmt AS item -> RETURN COPY item.source_column;,
+    Emittable.DiscardOwned AS item -> RETURN COPY item.source_column;,
+    Emittable.ThunkTrampoline AS item -> RETURN COPY item.source_column;,
+    Emittable.MutualThunkTrampoline AS item -> RETURN COPY item.source_column;,
+    Emittable.MIRBgBlock AS item -> RETURN COPY item.source_column;,
+    Emittable.StreamSpawn AS item -> RETURN COPY item.source_column;,
+    Emittable.FsmIoBody AS item -> RETURN COPY item.source_column;,
+    Emittable.StreamYield AS item -> RETURN COPY item.source_column;,
+    Emittable.FsmB1Body AS item -> RETURN COPY item.source_column;,
+    Emittable.FsmGenericBody AS item -> RETURN COPY item.source_column;,
+    Emittable.SortedLockAcquire AS item -> RETURN COPY item.source_column;,
+    Emittable.FallibleLockBinding AS item -> RETURN COPY item.source_column;,
+    Emittable.CatchWrapper AS item -> RETURN COPY item.source_column;,
+    Emittable.MIRDoBlock AS item -> RETURN COPY item.source_column;,
+    Emittable.Noop AS item -> RETURN COPY item.source_column;,
+    Emittable.Comment AS item -> RETURN COPY item.source_column;,
+    Emittable.Suppress AS item -> RETURN COPY item.source_column;,
+    Emittable.PubConst AS item -> RETURN COPY item.source_column;,
+    Emittable.ModuleVar AS item -> RETURN COPY item.source_column;,
+    Emittable.ModuleConstFree AS item -> RETURN COPY item.source_column;,
+    Emittable.Cleanup AS item -> RETURN COPY item.source_column;,
+    Emittable.ErrCleanup AS item -> RETURN COPY item.source_column;,
+    Emittable.MoveMark AS item -> RETURN COPY item.source_column;,
+    Emittable.FrameSave AS item -> RETURN COPY item.source_column;,
+    Emittable.FrameRestore AS item -> RETURN COPY item.source_column;,
+    Emittable.SnapshotRead AS item -> RETURN COPY item.source_column;,
+    Emittable.SnapshotTransaction AS item -> RETURN COPY item.source_column;,
+    Emittable.SnapshotMultiTxn AS item -> RETURN COPY item.source_column;,
+    Emittable.PolymorphicMutate AS item -> RETURN COPY item.source_column;,
+    Emittable.PolymorphicMutateFlow AS item -> RETURN COPY item.source_column;,
+    Emittable.PolymorphicFlowSignal AS item -> RETURN COPY item.source_column;,
+    Emittable.WithMatchDispatch AS item -> RETURN COPY item.source_column;,
+    Emittable.AllocMark AS item -> RETURN COPY item.source_column;,
+    Emittable.OwnedCreate AS item -> RETURN COPY item.source_column;,
+    Emittable.OwnedDestroy AS item -> RETURN COPY item.source_column;,
+    Emittable.OwnedTransfer AS item -> RETURN COPY item.source_column;,
+    Emittable.OwnedBorrow AS item -> RETURN COPY item.source_column;,
+    Emittable.OwnedStore AS item -> RETURN COPY item.source_column;,
+    Emittable.OwnedReturn AS item -> RETURN COPY item.source_column;,
+    Emittable.ReturnMark AS item -> RETURN COPY item.source_column;,
+    Emittable.TransferMark AS item -> RETURN COPY item.source_column;,
+    Emittable.ReassignMark AS item -> RETURN COPY item.source_column;,
+    Emittable.FieldCleanupMark AS item -> RETURN COPY item.source_column;,
+    Emittable.Pipeline AS item -> RETURN COPY item.source_column;,
+    Emittable.ShardConcurrentEach AS item -> RETURN COPY item.source_column;,
+    Emittable.ShardedMapPut AS item -> RETURN COPY item.source_column;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
+# Ruby asks `respond_to?(:try_wrap)` and then reads it. A union variant either
+# carries the field or it does not, so the question is answered here.
+PUB FN emittable__try_wrap(value: Emittable) RETURNS ?Bool ->
+  PARTIAL MATCH value START
+    Emittable.Call AS item -> RETURN COPY item.try_wrap;,
+    Emittable.MIRMethodCall AS item -> RETURN COPY item.try_wrap;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

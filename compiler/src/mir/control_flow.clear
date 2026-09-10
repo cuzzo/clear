@@ -256,7 +256,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
 END
 PRIVATE FN functionCFG__stmt_can_fail?(node: Locatable, can_fail_fns: [Set]String) RETURNS !Bool EFFECTS REENTRANT ->
   IF (node IS_A FuncCall OR node IS_A MethodCall) THEN
-    IF node.can_fail() THEN
+    IF locatable__can_fail(node) THEN
       RETURN TRUE;
     END
     IF can_fail_fns.contains?(locatable__name(node)) THEN
@@ -1385,8 +1385,8 @@ PRIVATE FN ownershipDataflow__collect_bg_body_gives(self: OwnershipDataflow, bg_
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((IF bg_node.capture_analysis() != NIL THEN
-      (bg_node.capture_analysis()).move_mark_names
+    RETURN (((IF bgNode__capture_analysis(bg_node) != NIL THEN
+      (bgNode__capture_analysis(bg_node)).move_mark_names
     ELSE
       NIL
     END) |> SELECT COPY _) OR_ELSE List[]);
@@ -1534,13 +1534,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE for_each_mutable = COPY for_each;
       TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, for_each_mutable.collection, state));
     ELSE_IF (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
-      MUTABLE captures = (IF stmt.capture_analysis() != NIL THEN
-        (stmt.capture_analysis()).captures()
+      MUTABLE captures = (IF locatable__capture_analysis(stmt) != NIL THEN
+        (locatable__capture_analysis(stmt)).captures()
       ELSE
         NIL
       END);
-      MUTABLE resource_captures = ( { MUTABLE rtoc_pipe_src = ((IF stmt.capture_analysis() != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_20 = (stmt.capture_analysis());
+      MUTABLE resource_captures = ( { MUTABLE rtoc_pipe_src = ((IF locatable__capture_analysis(stmt) != NIL THEN
+        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_20 = (locatable__capture_analysis(stmt));
       COPY rtoc_local_receiver_20.resource_captures }
       ELSE
         NIL
@@ -2167,8 +2167,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (borrowChecker__check_explicit_moves(&rtoc_self_view, stmt, locatable__token(stmt), state));
     ELSE_IF (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
       IF !(borrowState__empty?(state)) THEN
-        FOR _ IN (IF stmt.capture_analysis() != NIL THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_30 = (stmt.capture_analysis());
+        FOR _ IN (IF locatable__capture_analysis(stmt) != NIL THEN
+          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_30 = (locatable__capture_analysis(stmt));
         COPY rtoc_local_receiver_30.resource_captures }
         ELSE
           NIL

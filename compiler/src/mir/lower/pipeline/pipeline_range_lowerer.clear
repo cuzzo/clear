@@ -282,7 +282,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE rhs = aST__node_right(cursor);
       IF aST__pipeline_fusible_stage?( UNWRAP (rhs)) THEN
         stages = ([rhs] + stages);
-        cursor = cursor.left();
+        cursor = locatable__left(cursor);
       ELSE
         RETURN NIL;
       END
