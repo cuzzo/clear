@@ -8343,7 +8343,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         RETURN COPY replacement.shape.expression;
       END
-      RETURN TypeExpression{ kind: TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY UNWRAP (typeExpressionKind__name(kind)), arguments: COPY (typeExpressionKind__arguments(kind) OR_ELSE List[]) |> SELECT typeAnalysisSession__apply_expression_subst(&rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: COPY UNWRAP (typeExpressionKind__name(kind)), arguments: COPY (typeExpressionKind__arguments(kind) OR_ELSE List[]) |> SELECT TRY (typeAnalysisSession__apply_expression_subst(&rtoc_self_view, _, subst))  } }, capabilities: COPY cap };
     ELSE_IF (kind IS_A TypeProjectionExpression) THEN
       MUTABLE binding: ?GenericBinding = COPY subst[UNWRAP (typeExpressionKind__owner(kind))];
       IF binding EXISTS AS binding_value THEN
@@ -8379,18 +8379,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE signature = TRY (type__function_type_for_expression(UNWRAP (castTypeExpressionKindToFunctionTypeExpression(kind))));
       RETURN TypeExpression{ kind: COPY type__function_type_expression_for(FunctionType{ params: COPY signature.params |> SELECT FunctionTypeParam{ type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(_.type), subst)) AS Type), mutable: FALSE }, return_type: CAST(COPY TRY (typeAnalysisSession__apply_type_subst(&rtoc_self_view, castTypeToTypeTypeInput__type_analysis_session(signature.return_type), subst)) AS Type), reentrant: signature.reentrant, source_signature: COPY signature.source_signature, abi: COPY signature.abi }), capabilities: COPY cap };
     ELSE_IF kind IS_A TupleTypeExpression AS rtoc_tuple_type_expression THEN
-      RETURN TypeExpression{ kind: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY rtoc_tuple_type_expression.items |> SELECT typeAnalysisSession__apply_expression_subst(&rtoc_self_view, _, subst)  } }, capabilities: COPY cap };
+      RETURN TypeExpression{ kind: TypeExpressionKind{ TupleTypeExpression: COPY TupleTypeExpression{ items: COPY rtoc_tuple_type_expression.items |> SELECT TRY (typeAnalysisSession__apply_expression_subst(&rtoc_self_view, _, subst))  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A OptionalTypeExpression AS rtoc_optional_type_expression THEN
       RETURN TypeExpression{ kind: TypeExpressionKind{ OptionalTypeExpression: COPY OptionalTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(&rtoc_self_view, rtoc_optional_type_expression.inner, subst)  } }, capabilities: COPY cap };
-    ELSE_IF (kind IS_A FallibleTypeExpression) THEN
+    ELSE_IF kind IS_A FallibleTypeExpression AS rtoc_fallible_type_expression THEN
       MUTABLE error_set: ?TypeExpression = typeExpressionKind__error_set(kind);
-      RETURN TypeExpression{ kind: COPY FallibleTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(&rtoc_self_view, kind.inner, subst), error_set: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_186: ?Void = NIL;
+      RETURN TypeExpression{ kind: TypeExpressionKind{ FallibleTypeExpression: COPY FallibleTypeExpression{ inner: COPY TRY (typeAnalysisSession__apply_expression_subst(&rtoc_self_view, rtoc_fallible_type_expression.inner, subst)), error_set: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_186: ?TypeExpression = NIL;
       IF (error_set == NIL) THEN
         rtoc_ternary_value_186 = NIL;
       ELSE
-        rtoc_ternary_value_186 = typeAnalysisSession__apply_expression_subst(&rtoc_self_view, error_set, subst);
+        rtoc_ternary_value_186 = TRY (typeAnalysisSession__apply_expression_subst(&rtoc_self_view, error_set, subst));
       END
-      rtoc_ternary_value_186? } }, capabilities: COPY cap };
+      rtoc_ternary_value_186 } } }, capabilities: COPY cap };
     ELSE_IF kind IS_A FutureTypeExpression AS rtoc_future_type_expression THEN
       RETURN TypeExpression{ kind: TypeExpressionKind{ FutureTypeExpression: COPY FutureTypeExpression{ inner: COPY typeAnalysisSession__apply_expression_subst(&rtoc_self_view, rtoc_future_type_expression.inner, subst)  } }, capabilities: COPY cap };
     ELSE_IF kind IS_A LinearTypeExpression AS rtoc_linear_type_expression THEN
