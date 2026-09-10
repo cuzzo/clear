@@ -542,3 +542,40 @@ FN castOptionalLocatableToOptionalIdentifier(value: ?Locatable) RETURNS ?Identif
   END
   RETURN NIL;
 END
+
+# Ruby writes `fact_frames.each { |frame| frame.record_* }` straight off the
+# session. A CLEAR session is reached through a POLYMORPHIC view, whose fields
+# carry no sync family, so the LOCAL-requiring recorders cannot be called on
+# them there. These take the frames by value and hand back the updated list,
+# which the caller stores straight back on the session.
+PUB FN ownershipTransportFrames__record_read(MUTABLE frames: []OwnershipTransportFacts, node: Identifier, ancestors: []Locatable) RETURNS Void ->
+  FOR MUTABLE rtoc_frame IN frames DO
+    ownershipTransportFacts__record_read(&rtoc_frame, node, ancestors);
+  END
+END
+
+PUB FN ownershipTransportFrames__record_mutation(MUTABLE frames: []OwnershipTransportFacts, node: Locatable, identifier: Identifier, ancestors: []Locatable) RETURNS Void ->
+  FOR MUTABLE rtoc_frame IN frames DO
+    ownershipTransportFacts__record_mutation(&rtoc_frame, node, identifier, ancestors);
+  END
+END
+
+PUB FN ownershipTransportFrames__record_mutation_id(MUTABLE frames: []OwnershipTransportFacts, node: Locatable, binding_id: Int64, ancestors: []Locatable) RETURNS Void ->
+  FOR MUTABLE rtoc_frame IN frames DO
+    ownershipTransportFacts__record_mutation_id(&rtoc_frame, node, binding_id, ancestors);
+  END
+END
+
+PUB FN ownershipTransportFrames__record_alias(MUTABLE frames: []OwnershipTransportFacts, node: Node, ancestors: []Locatable) RETURNS Void ->
+  MUTABLE rtoc_last: Int64 = (frames.length() - 1);
+  IF frames[rtoc_last] EXISTS AS MUTABLE rtoc_frame THEN
+    ownershipTransportFacts__record_alias(&rtoc_frame, node, ancestors);
+  END
+END
+
+PUB FN ownershipTransportFrames__record_transfer(MUTABLE frames: []OwnershipTransportFacts, container: Locatable, slot: OwnershipTransportSlot, source: Identifier) RETURNS Void ->
+  MUTABLE rtoc_last: Int64 = (frames.length() - 1);
+  IF frames[rtoc_last] EXISTS AS MUTABLE rtoc_frame THEN
+    ownershipTransportFacts__record_transfer(&rtoc_frame, container, slot, source);
+  END
+END

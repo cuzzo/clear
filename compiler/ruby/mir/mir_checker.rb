@@ -2534,7 +2534,9 @@ class MIRChecker
 
     verify_ownership_contract_operands!(
       ownership,
-      "#{node_kind} ownership_contract",
+      # Name the callee: an operand-missing report against a bare
+      # "ownership_contract" leaves the reader guessing which call it was.
+      "#{node_kind} #{label} ownership_contract",
       transfers,
       require_operands: function_signature_takes_ownership?(sig, contract.checked_arg_count),
     )
@@ -2609,7 +2611,9 @@ class MIRChecker
 
       verify_ownership_contract_operands!(
         contract,
-        "ownership_contract",
+        # Name the node: an operand-missing report against a bare
+        # "ownership_contract" leaves the reader guessing which call it was.
+        "#{ownership_node_name(node)} ownership_contract",
         transfers,
         require_operands: stdlib_takes_ownership?(node),
       )
@@ -3023,7 +3027,10 @@ class MIRChecker
     # Ownership errors name a binding, never a place. The `CLR:` markers the
     # lowering already emits say where each binding was introduced, so the
     # reader gets a line instead of a whole function to search.
-    line = @line_by_name&.[](name.to_s) || @current_clr_line
+    # Some labels are a binding name plus a qualifier ("xs ownership_contract");
+    # the binding is what has a source line.
+    key = name.to_s
+    line = @line_by_name&.[](key) || @line_by_name&.[](key.split(" ").first.to_s) || @current_clr_line
     suffix = line ? " @@PL=#{line}@@PC=1" : ""
     "[#{kind}] #{@fn_name}::#{name} -- #{msg}#{suffix}"
   end

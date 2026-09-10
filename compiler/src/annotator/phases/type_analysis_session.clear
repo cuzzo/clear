@@ -1271,24 +1271,31 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (typeAnalysisSession__language_mode(&rtoc_self_view) == :strict) THEN
       RETURN;
     END
-    MUTABLE fact_frames: []OwnershipTransportFacts@multiowned = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
-    MUTABLE facts: ?OwnershipTransportFacts@multiowned = COPY fact_frames.last();
-    IF facts EXISTS AS facts_value THEN
-      MUTABLE facts_value_mutable = COPY facts_value;
-      MUTABLE ancestors = (rtoc_self_view.traversal_state.annotation_ancestors |> LIMIT (rtoc_self_view.traversal_state.annotation_ancestors.length() - 1));
+    MUTABLE facts: ?OwnershipTransportFacts = COPY rtoc_self_view.audit_inputs.ownership_transport_frames.last();
+    IF facts != NIL THEN
+      MUTABLE ancestors: []Locatable = [];
+      MUTABLE rtoc_anc_limit: Int64 = (rtoc_self_view.traversal_state.annotation_ancestors.length() - 1);
+      MUTABLE rtoc_anc_idx = 0;
+      WHILE rtoc_anc_idx < rtoc_anc_limit DO
+        &ancestors.append(COPY UNWRAP (rtoc_self_view.traversal_state.annotation_ancestors[rtoc_anc_idx]));
+        rtoc_anc_idx = rtoc_anc_idx + 1;
+      END
       IF node IS_A Identifier AS identifier THEN
         MUTABLE identifier_mutable = COPY identifier;
-        FOR MUTABLE rtoc_mutable_block_param_22 IN fact_frames DO
-        ownershipTransportFacts__record_read(&rtoc_mutable_block_param_22, identifier_mutable, ancestors);
-        END
+        MUTABLE rtoc_frames_in: []OwnershipTransportFacts = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
+        ownershipTransportFrames__record_read(&rtoc_frames_in, identifier_mutable, ancestors);
+        rtoc_self_view.audit_inputs.ownership_transport_frames = COPY rtoc_frames_in;
         RETURN;
       END
       IF ((((node IS_A VarDecl OR node IS_A BindExpr)) AND (locatable__ownership_transport_plan(node) != NIL)) AND (UNWRAP (locatable__ownership_transport_plan(node)).action == :pending)) THEN
-        ownershipTransportFacts__record_alias(&facts_value_mutable, castLocatableToNode__type_analysis_session(node), ancestors);
+        MUTABLE rtoc_frames_in: []OwnershipTransportFacts = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
+        MUTABLE rtoc_alias_node = castLocatableToNode__type_analysis_session(node);
+        ownershipTransportFrames__record_alias(&rtoc_frames_in, rtoc_alias_node, ancestors);
+        rtoc_self_view.audit_inputs.ownership_transport_frames = COPY rtoc_frames_in;
       END
       IF node IS_A Assignment AS assignment THEN
         MUTABLE assignment_mutable = COPY assignment;
-        MUTABLE target = assignment_mutable.name;
+        MUTABLE target = COPY assignment_mutable.name;
         MUTABLE root_branch_value: ?Identifier = NIL;
         IF ((target IS_A Identifier OR target IS_A GetField) OR target IS_A GetIndex) THEN
           root_branch_value = aST__root_identifier(castAssignmentNameToLocatable__type_analysis_session(target));
@@ -1297,28 +1304,35 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         MUTABLE root: ?Identifier = root_branch_value;
         IF (root != NIL) THEN
-          FOR MUTABLE rtoc_mutable_block_param_23 IN fact_frames DO
-          ownershipTransportFacts__record_mutation(&rtoc_mutable_block_param_23, Locatable{ Assignment: COPY assignment_mutable }, root, ancestors);
-          END
+          MUTABLE rtoc_frames_in: []OwnershipTransportFacts = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
+          MUTABLE rtoc_mut_node = Locatable{ Assignment: COPY assignment_mutable };
+          ownershipTransportFrames__record_mutation(&rtoc_frames_in, rtoc_mut_node, root, ancestors);
+          rtoc_self_view.audit_inputs.ownership_transport_frames = COPY rtoc_frames_in;
         END
-        MUTABLE value = assignment_mutable.value;
+        MUTABLE value: Locatable = COPY assignment_mutable.value;
         IF (IF value IS_A Identifier AS rtoc_transfer_ident THEN (rtoc_transfer_ident.ownership_pending_transfer == TRUE) ELSE FALSE END) THEN
-          ownershipTransportFacts__record_transfer(&facts_value_mutable, Locatable{ Assignment: COPY assignment_mutable }, OwnershipTransportSlot{ StringValue: COPY "value" }, UNWRAP (castLocatableToIdentifier(value)));
+          MUTABLE rtoc_frames_in: []OwnershipTransportFacts = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
+          MUTABLE rtoc_xfer_node = Locatable{ Assignment: COPY assignment_mutable };
+          MUTABLE rtoc_xfer_slot = OwnershipTransportSlot{ StringValue: COPY "value" };
+          MUTABLE rtoc_xfer_src = UNWRAP (castLocatableToIdentifier(value));
+          ownershipTransportFrames__record_transfer(&rtoc_frames_in, rtoc_xfer_node, rtoc_xfer_slot, rtoc_xfer_src);
+          rtoc_self_view.audit_inputs.ownership_transport_frames = COPY rtoc_frames_in;
         END
       ELSE_IF (IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :decl) ELSE FALSE END) THEN
         MUTABLE entry: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_24 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
         scope__resolve_entry(rtoc_local_receiver_24, CAST(locatable__name(node) AS String)) };
         IF entry EXISTS AS entry_value THEN
           MUTABLE entry_value_mutable = COPY entry_value;
-          FOR MUTABLE rtoc_mutable_block_param_25 IN fact_frames DO
-          ownershipTransportFacts__record_mutation_id(&rtoc_mutable_block_param_25, node, entry_value_mutable.ownership_binding_id, ancestors);
-          END
+          MUTABLE rtoc_frames_in: []OwnershipTransportFacts = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
+          ownershipTransportFrames__record_mutation_id(&rtoc_frames_in, node, entry_value_mutable.ownership_binding_id, ancestors);
+          rtoc_self_view.audit_inputs.ownership_transport_frames = COPY rtoc_frames_in;
         END
       END
       IF (node IS_A FuncCall OR node IS_A MethodCall) THEN
         MUTABLE actuals: []Locatable = List[];
         IF node IS_A MethodCall THEN
-          &actuals.append(COPY UNWRAP (locatable__object(node)));
+          MUTABLE rtoc_receiver: Locatable = COPY UNWRAP (locatable__object(node));
+          &actuals.append(rtoc_receiver);
         END
         FOR rtoc_actual IN (locatable__args(node) OR_ELSE List[]) DO
           &actuals.append(COPY rtoc_actual);
@@ -1332,9 +1346,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ((UNWRAP (rtoc_each_items_26[rtoc_idx]).mutable OR_ELSE FALSE) AND (argument != NIL)) THEN
                 MUTABLE root: ?Identifier = aST__root_identifier(argument);
                 IF (root != NIL) THEN
-                  FOR MUTABLE rtoc_mutable_block_param_27 IN fact_frames DO
-                  ownershipTransportFacts__record_mutation(&rtoc_mutable_block_param_27, node, root, ancestors);
-                  END
+                  MUTABLE rtoc_frames_in: []OwnershipTransportFacts = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
+                  ownershipTransportFrames__record_mutation(&rtoc_frames_in, node, root, ancestors);
+                  rtoc_self_view.audit_inputs.ownership_transport_frames = COPY rtoc_frames_in;
                 END
       END
     rtoc_idx = rtoc_idx + 1;
@@ -1345,7 +1359,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF actuals[rtoc_idx] EXISTS AS rtoc_actual_v THEN
       IF rtoc_actual_v IS_A Identifier AS rtoc_actual_ident THEN
         IF (locatable__ownership_pending_transfer(rtoc_actual_v) == TRUE) THEN
-            ownershipTransportFacts__record_transfer(&facts_value_mutable, node, OwnershipTransportSlot{ Int64Value: rtoc_idx }, rtoc_actual_ident);
+            MUTABLE rtoc_frames_in: []OwnershipTransportFacts = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
+            ownershipTransportFrames__record_transfer(&rtoc_frames_in, node, OwnershipTransportSlot{ Int64Value: rtoc_idx }, rtoc_actual_ident);
+            rtoc_self_view.audit_inputs.ownership_transport_frames = COPY rtoc_frames_in;
+        MUTABLE rtoc_xfer_slot2 = OwnershipTransportSlot{ Int64Value: rtoc_idx };
         END
       END
     END
@@ -1355,7 +1372,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         FOR rtoc_each_key IN struct_lit.fields.keys() DO
     MUTABLE value = COPY UNWRAP (struct_lit.fields[rtoc_each_key]);
         IF (value IS_A Identifier AND (locatable__ownership_pending_transfer(value) == TRUE)) THEN
-          ownershipTransportFacts__record_transfer(&facts_value_mutable, Locatable{ StructLit: COPY struct_lit }, OwnershipTransportSlot{ StringValue: COPY rtoc_each_key }, UNWRAP (castLocatableToIdentifier(value)));
+          MUTABLE rtoc_frames_in: []OwnershipTransportFacts = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
+          ownershipTransportFrames__record_transfer(&rtoc_frames_in, Locatable{ StructLit: COPY struct_lit }, OwnershipTransportSlot{ StringValue: COPY rtoc_each_key }, UNWRAP (castLocatableToIdentifier(value)));
+          rtoc_self_view.audit_inputs.ownership_transport_frames = COPY rtoc_frames_in;
+        MUTABLE rtoc_xfer_node3 = Locatable{ StructLit: COPY struct_lit };
+        MUTABLE rtoc_xfer_slot3 = OwnershipTransportSlot{ StringValue: COPY rtoc_each_key };
+        MUTABLE rtoc_xfer_src3 = UNWRAP (castLocatableToIdentifier(value));
         END
         END
       END
