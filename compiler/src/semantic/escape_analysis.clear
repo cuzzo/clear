@@ -2010,33 +2010,33 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
 END
 PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
   MUTABLE rtoc_node_loc: ?Locatable = escapeAnalysis__unwrap_orelse_left(UNWRAP (expr));
-  MUTABLE node: ?DynamicValue = castOptionalLocatableToOptionalDynamicValue(rtoc_node_loc);
-  IF ((aST__node_storage(UNWRAP (castDynamicValueToLocatable(UNWRAP (node)))) EXISTS) AND ([:rodata, :borrow]).contains?(symbolEntry__storage(node))) THEN
+  IF (rtoc_node_loc == NIL) THEN
     RETURN FALSE;
   END
-  IF (TRUE AND symbolEntry__rodata_provenance?(node)) THEN
-    RETURN FALSE;
+  MUTABLE node: Locatable = COPY rtoc_node_loc;
+  IF aST__node_storage(node) EXISTS AS rtoc_node_storage THEN
+    IF ([:rodata, :borrow]).contains?(rtoc_node_storage) THEN
+      RETURN FALSE;
+    END
   END
-  IF (TRUE AND symbolEntry__borrow_provenance?(node)) THEN
-    RETURN FALSE;
+  IF aST__node__symbol(node) EXISTS AS rtoc_node_symbol THEN
+    IF symbolEntry__rodata_provenance?(rtoc_node_symbol) THEN
+      RETURN FALSE;
+    END
+    IF symbolEntry__borrow_provenance?(rtoc_node_symbol) THEN
+      RETURN FALSE;
+    END
+    IF symbolEntry__heap_storage?(rtoc_node_symbol) THEN
+      RETURN TRUE;
+    END
   END
-  IF (TRUE AND symbolEntry__heap_storage?(node)) THEN
+  IF aST__node_heap_storage?(node) THEN
     RETURN TRUE;
   END
-  IF ((aST__node__symbol(UNWRAP (castDynamicValueToLocatable(UNWRAP (node)))) EXISTS) AND ((node.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_34 = ((node.symbol)?);
-  symbolEntry__heap_storage?(rtoc_local_receiver_34) })) THEN
+  IF escapeAnalysis__string_concat_expr?(node) THEN
     RETURN TRUE;
   END
-  IF node IS_A StringConcat THEN
-    RETURN TRUE;
-  END
-  IF (node IS_A BinaryOp AND node.string_concat) THEN
-    RETURN TRUE;
-  END
-  IF !(node IS_A Locatable) THEN
-    RETURN FALSE;
-  END
-  MUTABLE ti = TRY (aST__full_type_mut(UNWRAP (castDynamicValueToLocatable(UNWRAP (node)))));
+  MUTABLE ti = TRY (aST__full_type_mut(node));
   RETURN (TRY (type__heap_ptr?(ti)) OR TRY (type__recursive_cleanup_shape?(ti, NIL)));
 END
 PUB FN escapeAnalysis__function_def_has_return_lifetime?(fn_value: FunctionDef) RETURNS Bool ->
