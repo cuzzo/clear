@@ -2366,7 +2366,7 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "lower_body" do
-    it "lowers array of statements" do
+    it "lowers array of statements, discarding each unused value" do
       stmts = [
         make_lit(:NUMBER, 1.0),
         make_lit(:NUMBER, 2.0),
@@ -2374,7 +2374,8 @@ RSpec.describe MIRLowering do
       result = lowering.lower_body(stmts)
       lits = result.reject { |n| n.is_a?(MIR::Comment) }
       expect(lits.length).to eq(2)
-      expect(lits.all? { |n| n.is_a?(MIR::Lit) }).to eq(true)
+      expect(lits.all? { |n| n.is_a?(MIR::ExprStmt) && T.unsafe(n).discard }).to eq(true)
+      expect(lits.map { |n| T.unsafe(n).expr }.all? { |n| n.is_a?(MIR::Lit) }).to eq(true)
     end
 
   end

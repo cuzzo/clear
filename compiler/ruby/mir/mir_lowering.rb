@@ -2163,7 +2163,14 @@ class MIRLowering
     # A statement-position `TRY (call)` discards the success payload the
     # same way the bare call would; Zig otherwise rejects the ignored value.
     ast_stmt = T.unsafe(ast_stmt).right while ast_stmt.is_a?(AST::UnaryOp) && ast_stmt.op == :TRY
-    return false unless AST.call?(ast_stmt) || ast_stmt.is_a?(AST::BinaryOp)
+
+    # Whether Zig ignores a value is a property of the value, not of the
+    # syntax that produced it: a bare `NIL;` is discarded exactly as a call's
+    # result is. Naming only calls and binary operators here left every other
+    # value-shaped statement emitting code Zig rejects. A statement that hands
+    # ownership somewhere is the exception -- its value is not dropped, it is
+    # given away, and wrapping it in `_ =` hides the transfer.
+    return false if stmt.is_a?(AST::MoveNode)
 
     resolved = stmt.resolved_type
     !!(resolved && resolved != :Void)

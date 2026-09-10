@@ -1,0 +1,15 @@
+# Test: a bare NIL in statement position is a discarded value, not emitted code.
+# Zig rejects an ignored non-void expression, so `NIL;` used to abort the build
+# with "value of type '@TypeOf(null)' ignored" long after the compiler had
+# already accepted the program.
+
+FN noisy(label: String) RETURNS Void ->
+    print(label);
+    NIL;
+END
+
+FN main() RETURNS Void ->
+    noisy("first");
+    noisy("second");
+    ASSERT TRUE, "the program links and runs";
+END
