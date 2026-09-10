@@ -20,6 +20,12 @@ PUB FN intrinsicRegistry__name_string(name: Name) RETURNS String ->
   RETURN COPY CAST(name AS String);
 END
 
+# Ruby reads `registry.keys` off the raw table. The typed registry is reached
+# by name, so the names come from the same table lookup the overloads use.
+PUB FN intrinsicRegistry__method_names(registry: String@symbol) RETURNS ![]String ->
+  MUTABLE table = TRY (stdLibRegistry__table(registry));
+  RETURN table.keys() |> SELECT COPY _;
+END
 PUB FN intrinsicRegistry__overloads(registry: String@symbol, name: String) RETURNS ![]FunctionSignature@multiowned ->
   MUTABLE table = TRY (stdLibRegistry__table(registry));
   MUTABLE found: ?[]FunctionSignature@multiowned = COPY table[name];

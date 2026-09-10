@@ -10616,7 +10616,19 @@ PUB FN collectionMethodConfig__label(self: CollectionMethodConfig, obj_type: Typ
   END
   RETURN "${self.label_container}<Unknown>";
 END
-PRIVATE FN typeAnalysisSession__resolve_typed_method(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, obj_type: Type, registry: {RegistryKey}RawRegistryEntry, tag_field: String@symbol, type_label: String) RETURNS !?Bool
+# Ruby stores a Proc on the signature and calls it. The registry names its
+# validators instead, so the dispatch is by name -- and the ported bodies land
+# here as they are written. Until then a named validator is a no-op, exactly
+# as it is for a registry entry that declares none.
+PRIVATE FN typeAnalysisSession__run_intrinsic_arg_validator_mut(MUTABLE self: TypeAnalysisSession, validator: String@symbol, MUTABLE node: MethodCall, obj_type: Type) RETURNS !Void
+  REQUIRES self: LOCAL
+->
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    RETURN;
+}
+END
+
+PRIVATE FN typeAnalysisSession__resolve_typed_method(MUTABLE self: TypeAnalysisSession, MUTABLE node: MethodCall, obj_type: Type, registry: String@symbol, tag_field: String@symbol, type_label: String) RETURNS !?Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -10633,15 +10645,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         RETURN TRUE;
       END
-      MUTABLE arg_validator: ?Any@multiowned = functionSignature__arg_validator(defn_value_mutable);
+      MUTABLE arg_validator: ?String@symbol = functionSignature__arg_validator(defn_value_mutable);
       IF arg_validator EXISTS AS arg_validator_value THEN
-        runtimeCallSpec__call(CAST(arg_validator_value AS RuntimeCallSpec), node, node.args, obj_type, method(CAST(symbol("error!") AS String)));
+        TRY (typeAnalysisSession__run_intrinsic_arg_validator_mut(&rtoc_self_view, arg_validator_value, &node, obj_type));
       END
       MUTABLE element_type: ?Type = TRY (type__element_type(obj_type));
-      IF ((((element_type != NIL) AND TRY (type__node_reference?(UNWRAP (element_type)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
+      IF ((((element_type != NIL) AND TRY (type__node_reference?(element_type))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         actual_type = TRY (aST__full_type_mut(value_arg));
-        IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
+        IF (!(TRY (type__node_reference?(UNWRAP (actual_type)))) AND TRY (type__accepts?(element_type, UNWRAP (actual_type)))) THEN
           locatable__set_coerced_type_object_mut(&value_arg, element_type);
         END
       END
@@ -10654,7 +10666,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         panic("resolve_typed_method: unknown collection tag field {}");
       END
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_242 = (TRY (functionSignature__return_def(defn_value_mutable)));
+    MUTABLE rtoc_typed_node_loc = Locatable{ MethodCall: COPY node };
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &rtoc_typed_node_loc, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_242 = (TRY (functionSignature__return_def(defn_value_mutable)));
       TRY (functionReturn__resolve(rtoc_local_receiver_242, obj_type, ( { MUTABLE rtoc_empty_list_241: []Locatable = List[]; rtoc_empty_list_241 } ))) }));
       node.container_borrow = TRY (functionSignature__intrinsic_container_borrow?(defn_value_mutable));
       MUTABLE sharded_pattern: ?FunctionSignatureReturnValue = TRY (functionSignature__intrinsic_template(defn_value_mutable, IntrinsicTemplateKind.ShardedZig));
@@ -10673,11 +10686,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         TRY (functionSignature__intrinsic_alloc(&defn_value_mutable, IntrinsicAllocationKind.Alloc))
       END;
+      MUTABLE resolved_defn: ?FunctionSignature@multiowned = NIL;
       IF zig EXISTS AS zig_value THEN
         MUTABLE resolved_defn = TRY (functionSignature__with_intrinsic_override(defn_value_mutable, castFunctionSignatureReturnValueToIntrinsicEmitStrOrSym(zig_value), alloc));
         node.zig_pattern = castFunctionSignatureReturnValueToOptionalStringSymbol(zig_value);
-        node.matched_stdlib_def = resolved_defn;
-        node.matched_signature = resolved_defn;
+        node.matched_stdlib_def = KEEP resolved_defn;
+        node.matched_signature = KEEP resolved_defn;
       END
       MUTABLE defn_allocates = TRY (functionSignature__emits_allocating?(defn_value_mutable));
       node.stdlib_allocates = defn_allocates;
@@ -10685,7 +10699,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (TRY (functionSignature__mutates_receiver?(defn_value_mutable)) OR (TRY (functionSignature__intrinsic_argument_takes_indices(defn_value_mutable))).any?()) THEN
         TRY (typeAnalysisSession__verify_function_signature_mut(&rtoc_self_view, FunctionCallNode{ MethodCall: COPY node }, TRY (typeAnalysisSession__collection_effect_signature(&rtoc_self_view, &node, obj_type, &defn_value_mutable)), ([node.object] + node.args)));
         IF ((zig != NIL) AND TRUE) THEN
-          node.matched_signature = resolved_defn;
+          node.matched_signature = KEEP UNWRAP (resolved_defn);
         END
       END
       TRY (typeAnalysisSession__narrow_receiver_collection_mut(&rtoc_self_view, &node, obj_type, &defn_value_mutable));
@@ -10698,17 +10712,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.can_fail = (((IF node.can_fail != NIL THEN node.can_fail ELSE functionSignature__can_fail(defn_value_mutable) END) != NIL) OR defn_allocates);
       node.error_kind = TRY (functionSignature__intrinsic_error_kind(defn_value_mutable));
       node.error_type = TRY (functionSignature__intrinsic_error_type(defn_value_mutable));
-      IF ((((element_type != NIL) AND TRY (type__node_reference?(UNWRAP (element_type)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
+      IF ((((element_type != NIL) AND TRY (type__node_reference?(element_type))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         actual_type = TRY (aST__full_type_mut(value_arg));
-        IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
+        IF (!(TRY (type__node_reference?(UNWRAP (actual_type)))) AND TRY (type__accepts?(element_type, UNWRAP (actual_type)))) THEN
           locatable__set_coerced_type_object_mut(&value_arg, element_type);
         END
       END
       RETURN TRUE;
     ELSE
-      MUTABLE available = registry.keys().join(", ");
-      TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ TokenMultiowned: COPY node.token }, node.name, registry.keys() |> SELECT _.toString(), "Unknown method '${node.name}' on ${type_label}. Available: ${available}", "method of ${type_label}", :type, TRUE));
+      MUTABLE available = (TRY (intrinsicRegistry__method_names(registry))).join(", ");
+      TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ TokenMultiowned: COPY node.token }, node.name, TRY (intrinsicRegistry__method_names(registry)) |> SELECT _.toString(), "Unknown method '${node.name}' on ${type_label}. Available: ${available}", "method of ${type_label}", :type, TRUE));
       RETURN TRUE;
     END
 }
