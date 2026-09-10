@@ -3997,7 +3997,7 @@ PUB STRUCT MatchStatement {
   exhaustive: Bool,
   takes: ?Bool,
   can_fail: ?Bool,
-  case_result_types: ?[]Type,
+  case_result_types: ?[]?Type,
   coerced_type_object: ?Type,
   collection_return: ?Type,
   container_borrow: ?Bool,

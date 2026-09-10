@@ -5101,7 +5101,11 @@ FN rtocChildrenOfWalkNodeMatchStatement(v: MatchStatement) RETURNS []WalkNode ->
   END
   &out.append(WalkNode{ ArrayValue: COPY v.string_match });
   &out.append(WalkNode{ ArrayValue: COPY v.expr_mode });
-  &out.append(WalkNode{ ArrayValue: COPY v.case_result_types });
+  FOR rtoc_crt IN (v.case_result_types OR_ELSE List[]) DO
+    IF rtoc_crt EXISTS AS rtoc_crt_value THEN
+      &out.append(WalkNode{ Type: COPY rtoc_crt_value });
+    END
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.default_result_type });
   RETURN out;
 END

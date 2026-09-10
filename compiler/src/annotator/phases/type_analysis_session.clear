@@ -14185,12 +14185,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__visit(&rtoc_self_view, node.expr));
     MUTABLE plan = TRY (typeAnalysisSession__match_subject_plan(&rtoc_self_view, &node));
     TRY (typeAnalysisSession__consume_match_subject_if_takes_mut(&rtoc_self_view, &node, plan));
-    MUTABLE branches: FN() -> []Any@multiowned = ( { MUTABLE rtoc_empty_list_341: FN() -> []Any@multiowned = List[]; rtoc_empty_list_341 } );
+    MUTABLE branches: []FN() -> ?[]DeferredDrop = [];
     FOR MUTABLE rtoc_for_item_14131 IN node.cases DO
-    &rtoc_for_item_14131.append(%() USE(node, plan, rtoc_for_item_14131, MUTABLE rtoc_self_view, MUTABLE rtoc_for_item_14131) -> {
+    &branches.append(%() USE(plan, MUTABLE node, MUTABLE rtoc_self_view, MUTABLE rtoc_for_item_14131) -> {
     TRY (typeAnalysisSession__analyze_match_case_mut(&rtoc_self_view, &node, &rtoc_for_item_14131, plan));
-    typeAnalysisSession__with_conditional_context(&rtoc_self_view, %() USE(rtoc_for_item_14131, MUTABLE rtoc_self_view) -> {
-      rtoc_lambda_result_342 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, TRY (matchCase__body(rtoc_for_item_14131))));
+    typeAnalysisSession__with_conditional_context(&rtoc_self_view, %() USE(MUTABLE rtoc_self_view, MUTABLE rtoc_for_item_14131) -> {
+      MUTABLE rtoc_lambda_result_342 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, TRY (matchCase__body(rtoc_for_item_14131))));
       rtoc_lambda_result_342
     });
     TRY (typeAnalysisSession__collect_scope_drops(&rtoc_self_view, node))
@@ -14198,22 +14198,27 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF node.default_case EXISTS AS default_case_value THEN
       MUTABLE default_case_value_mutable = COPY default_case_value;
-      &rtoc_for_item_14131.append(%() USE(node, MUTABLE rtoc_self_view, MUTABLE rtoc_for_item_14131) -> {
-    typeAnalysisSession__with_conditional_context(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
-      rtoc_lambda_result_343 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, default_case_value_mutable));
+      &branches.append(%() USE(default_case_value_mutable, MUTABLE node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_conditional_context(&rtoc_self_view, %() USE(default_case_value_mutable, MUTABLE rtoc_self_view) -> {
+      MUTABLE rtoc_lambda_result_343 = TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, default_case_value_mutable));
       rtoc_lambda_result_343
     });
     TRY (typeAnalysisSession__collect_scope_drops(&rtoc_self_view, node))
       });
     END
     MUTABLE all_drops: []?[]DeferredDrop = TRY (typeAnalysisSession__analyze_control_flow_branches(&rtoc_self_view, branches));
-    IF node.default_case EXISTS AS default_case_value THEN
-      node.default_drops = UNWRAP (&all_drops.pop());
+    IF (node.default_case != NIL) THEN
+      MUTABLE rtoc_last_drop: ?[]DeferredDrop = UNWRAP (&all_drops.pop());
+      node.default_drops = COPY rtoc_last_drop;
     END
     node.case_drops = all_drops |> SELECT (_ OR_ELSE List[]);
     TRY (typeAnalysisSession__reject_duplicate_match_patterns_mut(&rtoc_self_view, &node, plan));
     TRY (typeAnalysisSession__check_match_exhaustiveness_mut(&rtoc_self_view, &node, plan));
-    node.case_result_types = node.cases |> SELECT TRY (typeAnalysisSession__expr_result_type(&rtoc_self_view, TRY (matchCase__body(_))));
+    MUTABLE rtoc_case_types: []?Type = [];
+    FOR rtoc_case IN node.cases DO
+      &rtoc_case_types.append(TRY (typeAnalysisSession__expr_result_type(&rtoc_self_view, TRY (matchCase__body(rtoc_case)))));
+    END
+    node.case_result_types = COPY rtoc_case_types;
     node.default_result_type = TRY (typeAnalysisSession__expr_result_type(&rtoc_self_view, (node.default_case OR_ELSE List[])));
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MatchStatement: COPY node }, :Void));
 }
@@ -19080,11 +19085,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     result_type = (result_type OR_ELSE (((IF value_types |> FIND !(type__any?(_)) != NIL THEN value_types |> FIND !(type__any?(_)) ELSE value_types.first() END)) OR_ELSE then_result));
     IF !(TRY (type__implicitly_copyable?(UNWRAP (result_type), %(t: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, t))))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IfStatement: COPY if_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IF_EXPR_RESULT_NOT_COPYABLE }, [], CAST({:type: type__resolved(result_type)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IfStatement: COPY if_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IF_EXPR_RESULT_NOT_COPYABLE }, [], CAST({:type: type__resolved(UNWRAP (result_type))} AS {String@symbol}Any)));
     END
     if_node.expr_mode = TRUE;
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ IfStatement: COPY if_node }, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_453: ?Type = NIL;
-    IF ((TRY (type__string?(UNWRAP (result_type))) AND !(type__symbol?(result_type)))) THEN
+    IF ((TRY (type__string?(UNWRAP (result_type))) AND !(type__symbol?(UNWRAP (result_type))))) THEN
       rtoc_ternary_value_453 = TRY (type__new(TypeConstructionInput{ SymbolValue: :String }, NIL, NIL, NIL, :rodata));
     ELSE
       rtoc_ternary_value_453 = result_type;
@@ -19108,7 +19113,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (!(default_type) AND !(match_node.exhaustive)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :PARTIAL_MATCH_EXPR_NEEDS_DEFAULT }));
     END
-    MUTABLE all_types = case_types |> WHERE TRUE;
+    MUTABLE all_types: []Type = [];
+    FOR rtoc_ct IN case_types DO
+      IF rtoc_ct EXISTS AS rtoc_ct_value THEN
+        &all_types.append(COPY rtoc_ct_value);
+      END
+    END
     IF default_type EXISTS AS default_type_value THEN
       &all_types.append(default_type_value);
     END
@@ -19132,13 +19142,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (!(result_type) AND (resolved_types.length() > 1)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_EXPR_BRANCHES_INCOMPATIBLE }, [], CAST({:types: resolved_types.join(", ")} AS {String@symbol}Any)));
     END
-    result_type = (result_type OR_ELSE (value_types.first() OR all_types.first()));
+    IF (result_type == NIL) THEN
+      result_type = COPY (value_types.first() OR_ELSE all_types.first());
+    END
     IF !(TRY (type__implicitly_copyable?(UNWRAP (result_type), %(t: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, t))))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_EXPR_RESULT_NOT_COPYABLE }, [], CAST({:type: type__resolved(result_type)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MatchStatement: COPY match_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MATCH_EXPR_RESULT_NOT_COPYABLE }, [], CAST({:type: type__resolved(UNWRAP (result_type))} AS {String@symbol}Any)));
     END
     match_node.expr_mode = TRUE;
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MatchStatement: COPY match_node }, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_454: ?Type = NIL;
-    IF ((TRY (type__string?(UNWRAP (result_type))) AND !(type__symbol?(result_type)))) THEN
+    IF ((TRY (type__string?(UNWRAP (result_type))) AND !(type__symbol?(UNWRAP (result_type))))) THEN
       rtoc_ternary_value_454 = TRY (type__new(TypeConstructionInput{ SymbolValue: :String }, NIL, NIL, NIL, :rodata));
     ELSE
       rtoc_ternary_value_454 = result_type;
