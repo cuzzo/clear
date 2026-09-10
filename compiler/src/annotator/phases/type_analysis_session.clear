@@ -11441,22 +11441,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       symbolEntry__set_sync(&symbol_value_mutable, type__sync(concrete));
       symbolEntry__set_layout(&symbol_value_mutable, type__layout(concrete));
     END
-    MUTABLE value: Any = NIL;
+    MUTABLE value: ?Locatable@boxed = NIL;
     MATCH decl START
       AutoConstraintCollectorDeclarationNode.VarDecl AS item ->
         value = COPY item.value;,
       AutoConstraintCollectorDeclarationNode.BindExpr AS item ->
         value = COPY item.value;,
     END
-    IF !(value) THEN
-      RETURN;
+    IF value EXISTS AS MUTABLE rtoc_auto_value THEN
+      MUTABLE current_value_type = TRY (typeAnalysisSession__auto_finalization_node_type(&rtoc_self_view, &rtoc_auto_value));
+      IF !((((slot.shape != NIL) OR type__auto?(current_value_type)) OR type__untyped?(current_value_type))) THEN
+        RETURN;
+      END
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &rtoc_auto_value, concrete));
+      locatable__set_coerced_type_object_mut(&rtoc_auto_value, concrete);
     END
-    MUTABLE current_value_type = TRY (typeAnalysisSession__auto_finalization_node_type(&rtoc_self_view, &value));
-    IF !((((slot.shape != NIL) OR type__auto?(current_value_type)) OR type__untyped?(current_value_type))) THEN
-      RETURN;
-    END
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &value, concrete));
-    locatable__set_coerced_type_object_mut(&value, concrete);
 }
 END
 PRIVATE FN typeAnalysisSession__restamp_auto_function_signature_mut(MUTABLE self: TypeAnalysisSession, MUTABLE fn_value: FunctionDef) RETURNS !Void
@@ -12103,8 +12102,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             TRY (typeAnalysisSession__conformance_requirement_mismatch(&rtoc_self_view, _, CAST(COPY member AS FunctionDef), resolutions[rtoc_idx]?))
           END)
       } |> WHERE _ != NIL;
-      MUTABLE extras = ((resolutions[rtoc_idx]?.members OR_ELSE {}).keys() - (((resolutions[rtoc_idx]?.protocol).requirements) |> SELECT _.name));
-      failures = (failures + extras |> SELECT "${_}: not declared by ${(resolutions[rtoc_idx]?.protocol).name}");
+      MUTABLE rtoc_req_names: [Set]String = Set[];
+      FOR rtoc_req IN UNWRAP (resolutions[rtoc_idx]).protocol.requirements DO
+        &rtoc_req_names.insert(COPY rtoc_req.name);
+      END
+      MUTABLE extras: [Set]String = Set[];
+      FOR rtoc_member IN UNWRAP (resolutions[rtoc_idx]).members.keys() DO
+        IF !(rtoc_req_names.contains?(rtoc_member)) THEN
+          &extras.insert(COPY rtoc_member);
+        END
+      END
+      failures = (failures + (extras |> SELECT "${_}: not declared by ${UNWRAP (resolutions[rtoc_idx]).protocol.name}"));
       IF (failures.length() == 0) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
