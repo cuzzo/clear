@@ -3688,19 +3688,29 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_26 = TRY (capabilityAuditSession__predicate_call_sites_store(rtoc_self_view));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_26.length() DO
-      MUTABLE call = COPY KEEP rtoc_each_items_26[rtoc_idx]?.call;
-      MUTABLE callee = COPY rtoc_each_items_26[rtoc_idx]?.callee;
+      MUTABLE call: ?PredicateCall = COPY UNWRAP (rtoc_each_items_26[rtoc_idx]).call;
+      MUTABLE callee: ?String = COPY rtoc_each_items_26[rtoc_idx]?.callee;
       MUTABLE reason: ?String = TRY (capabilityAuditSession__predicate_impurity_reason(rtoc_self_view, UNWRAP (castPredicateCallToCapabilityAuditCall(UNWRAP (call))), UNWRAP (callee)));
       IF !(reason) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE surface, hint = PARTIAL MATCH rtoc_each_items_26[rtoc_idx]?.kind START
-          :pre -> ["PRE clauses", "Move the impure work into the function body and validate the captured value there."],
-          :post -> ["DEBUG_POST clauses", "Move the impure work into the function body and assert against an unsynchronized snapshot value instead."],
-          DEFAULT -> ["WITH GUARD clauses", "Move the impure work before the WITH block and guard on the captured value."]
-      END;
-      TRY (capabilityAuditSession__error_mut(&rtoc_self_view, call, CapabilityAuditCodeOrMessage{ SymbolValue: :PURE_FN_CANNOT_CALL_IMPURE }, [], CAST({:surface: surface, :callee: callee, :reason: reason, :hint: hint} AS {String@symbol}Any)));
+      MUTABLE surface: String = COPY "WITH GUARD clauses";
+      MUTABLE hint: String = COPY "Move the impure work before the WITH block and guard on the captured value.";
+      IF UNWRAP (rtoc_each_items_26[rtoc_idx]).kind == :pre THEN
+        surface = COPY "PRE clauses";
+        hint = COPY "Move the impure work into the function body and validate the captured value there.";
+      ELSE_IF UNWRAP (rtoc_each_items_26[rtoc_idx]).kind == :post THEN
+        surface = COPY "DEBUG_POST clauses";
+        hint = COPY "Move the impure work into the function body and assert against an unsynchronized snapshot value instead.";
+      END
+      MUTABLE rtoc_call_anchor: ?DiagnosticAnchor = NIL;
+      IF call EXISTS AS rtoc_call_v THEN
+        IF castPredicateCallToLocatable(rtoc_call_v) EXISTS AS rtoc_call_loc THEN
+          rtoc_call_anchor = DiagnosticAnchor{ Locatable: COPY rtoc_call_loc };
+        END
+      END
+      TRY (capabilityAuditSession__error_mut(&rtoc_self_view, rtoc_call_anchor, CapabilityAuditCodeOrMessage{ SymbolValue: :PURE_FN_CANNOT_CALL_IMPURE }, [], CAST({:surface: surface, :callee: callee, :reason: reason, :hint: hint} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
     END
 }

@@ -172,3 +172,11 @@ FN castPredicateCallToCapabilityAuditCall(value: PredicateCall) RETURNS ?Capabil
   END
   RETURN NIL;
 END
+PUB FN castPredicateCallToLocatable(value: PredicateCall) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    PredicateCall.FuncCall AS item -> RETURN Locatable{ FuncCall: COPY item };,
+    PredicateCall.MethodCall AS item -> RETURN Locatable{ MethodCall: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

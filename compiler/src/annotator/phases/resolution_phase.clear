@@ -1371,15 +1371,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF type__tense?(type) THEN
       &nested.append(TRY (type__tense_type(type)));
     END
-    MUTABLE names = nested |> REDUCE(Set[]) {
-    FOR rtoc_merge_name IN resolutionSession__unbound_type_parameter_names(rtoc_self_view, _, seen) DO
-      &acc.insert(COPY rtoc_merge_name);
+    MUTABLE names: [Set]String@symbol = Set[];
+    FOR _ IN nested DO
+      FOR rtoc_merge_name IN TRY (resolutionSession__unbound_type_parameter_names(rtoc_self_view, _, seen)) DO
+        &names.insert(COPY rtoc_merge_name);
+      END
     END
-    acc
-    };
     MUTABLE resolved = type__resolved(type);
     IF compilerRegexMatch((CAST(resolved AS String)), compilerRegexCompile("\\A[A-Z]\\z")) THEN
-      &names.append(resolved);
+      &names.insert(COPY resolved);
     END
     RETURN names;
 }
