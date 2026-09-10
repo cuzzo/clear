@@ -24,6 +24,41 @@ RSpec.describe "Provenance annotation" do
     fn.body.find { |s| (s.is_a?(AST::BindExpr) || s.is_a?(AST::VarDecl)) && s.name == var_name }
   end
 
+  describe "a lambda's result" do
+    # The body result LEAVES the lambda: whoever calls it receives the value,
+    # so an owned one placed in the lambda's frame escapes the way a function's
+    # return does. Escape analysis marked a lambda's CAPTURES heap and never
+    # its result.
+    it "is placed on the heap" do
+      src = <<~CLEAR
+        STRUCT Sink { text: String }
+        FN sink__take(MUTABLE self: Sink, blk: FN() -> !String) RETURNS !Void ->
+          self.text = TRY (blk());
+          RETURN;
+        END
+        FN main() RETURNS !Void ->
+          MUTABLE s: Sink = Sink{ text: COPY "" };
+          TRY (sink__take(&s, %() -> {
+            MUTABLE parts: []String = ["a", "b"];
+            MUTABLE joined: String = parts.join("-");
+            joined
+          }));
+          RETURN;
+        END
+      CLEAR
+      ast, _ = annotate(src)
+      lambda_lit = nil
+      AST.each_locatable(ast, descend_functions: true) { |node| lambda_lit = node if node.is_a?(AST::LambdaLit) }
+      expect(lambda_lit).not_to be_nil
+      stmts = Array(lambda_lit.body).find { |m| m.is_a?(Array) } || []
+      joined = stmts.find do |s|
+        (s.is_a?(AST::BindExpr) || s.is_a?(AST::VarDecl)) && s.name.to_s == "joined"
+      end
+      expect(joined).not_to be_nil
+      expect(joined.symbol.storage).to eq(:heap)
+    end
+  end
+
   describe "string literal" do
     it "has :rodata provenance" do
       ast, _ = annotate('FN main() RETURNS Void -> x = "hello"; RETURN; END')

@@ -812,6 +812,36 @@ module EscapeAnalysis
   sig { params(node: AST::LambdaLit, context: EscapeContext).void }
   private_class_method def self.apply_lambda_escape_sink!(node, context)
     mark_lambda_captures_heap!(node, context.bg_heap, context.facts)
+    mark_lambda_result_heap!(node, context)
+  end
+
+  # A lambda's body result LEAVES the lambda: whoever calls it receives the
+  # value, so an owned one placed in the lambda's frame escapes exactly the way
+  # a function's return does. Without this the result of a `join`/`concat` in a
+  # lambda body was frame-allocated and then transferred out of it.
+  sig { params(node: AST::LambdaLit, context: EscapeContext).void }
+  private_class_method def self.mark_lambda_result_heap!(node, context)
+    tail = Array(node.body).last
+    return unless tail
+
+    tail = T.unsafe(tail).value if tail.is_a?(AST::ReturnNode)
+    return unless tail.is_a?(AST::Locatable)
+    return if borrow_return_expr?(tail)
+
+    ti = tail.full_type!(context: "lambda result placement")
+    ti = ti.value_payload_type
+    return unless ti
+    return if ti.primitive? || ti.void? || ti.any? || ti.rodata? || ti.symbol?
+    unless ti.string? || ti.heap_ptr? || ti.collection_value? ||
+           ti.recursive_cleanup_shape?(T.unsafe(context.schema_lookup))
+      return
+    end
+
+    # Only the NAMED local the lambda hands back: marking a call result or a
+    # literal here re-places the lambda expression itself.
+    return unless tail.is_a?(AST::Identifier)
+
+    mark_symbol_heap!(tail.symbol)
   end
 
   sig { params(node: AST::FuncCall, context: EscapeContext).void }
