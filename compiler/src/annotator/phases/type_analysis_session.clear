@@ -10053,7 +10053,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN CaptureAnalysis{ has_local: FALSE, has_rc: FALSE, has_shared: FALSE, has_sharded: FALSE, has_affine_locked: FALSE, has_outer_ref: FALSE, has_non_escaping_capture: FALSE, captures: {}, capture_symbols: {}, close_plans: {}, pointer_captures: Set[], string_captures: Set[], resource_captures: Set[], site_moved: Set[], site_copied: Set[], strategies: {}, move_mark_names: Set[], alloc_mark_entries: {} };
 }
 END
-PRIVATE FN typeAnalysisSession__with_fiber_capture_analysis(MUTABLE self: TypeAnalysisSession, MUTABLE is_parallel: ?Bool = FALSE, mark_moves: Bool = FALSE, blk: FN() -> Void) RETURNS !?CaptureAnalysis
+PRIVATE FN typeAnalysisSession__with_fiber_capture_analysis(MUTABLE self: TypeAnalysisSession, is_parallel: ?Bool = FALSE, mark_moves: Bool = FALSE, blk: FN() -> Void) RETURNS !?CaptureAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -17488,15 +17488,15 @@ PRIVATE FN typeAnalysisSession__visit_DoBlock(MUTABLE self: TypeAnalysisSession,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR MUTABLE rtoc_mutable_block_param_419 IN node.branches DO
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
-    typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, &rtoc_mutable_block_param_419, AsyncValidationNode{ DoBlock: COPY node }, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
-      full_analysis = typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, &rtoc_mutable_block_param_419.parallel, FALSE, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, AsyncBodyNode{ DoBranch: COPY rtoc_mutable_block_param_419 }, AsyncValidationNode{ DoBlock: COPY node }, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view, MUTABLE full_analysis) -> {
+      full_analysis = TRY (typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, rtoc_mutable_block_param_419.parallel, FALSE, %() USE(rtoc_mutable_block_param_419, MUTABLE rtoc_self_view, MUTABLE full_analysis) -> {
         TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, rtoc_mutable_block_param_419.body));
         rubyToClearVoid__type_analysis_session()
-      });
+      }));
       rubyToClearVoid__type_analysis_session()
     });
     MUTABLE analysis_result = full_analysis?;
-    selectOp__set_capture_analysis(&rtoc_mutable_block_param_419, analysis_result);
+    rtoc_mutable_block_param_419.capture_analysis = COPY analysis_result;
     IF rtoc_mutable_block_param_419.parallel THEN
         IF analysis_result.has_local THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ DoBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :LOCAL_VAR_NOT_IN_PARALLEL }));
@@ -17530,9 +17530,9 @@ PRIVATE FN typeAnalysisSession__visit_BgStreamBlock(MUTABLE self: TypeAnalysisSe
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("LOOP_UNBOUND")));
     MUTABLE stream_analysis: ?CaptureAnalysis = NIL;
-    MUTABLE yield_types: []Type@multiowned = TRY (typeAnalysisSession__with_stream_yield_frame(&rtoc_self_view, node, %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_420 = typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, AsyncBodyNode{ BgStreamBlock: COPY node }, AsyncValidationNode{ BgStreamBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view) -> {
-    stream_analysis = TRY (typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, FALSE, FALSE, %() USE(node, MUTABLE rtoc_self_view) -> {
+    MUTABLE yield_types: []Type@multiowned = TRY (typeAnalysisSession__with_stream_yield_frame(&rtoc_self_view, node, %() USE(node, MUTABLE rtoc_self_view, MUTABLE stream_analysis) -> {
+    MUTABLE rtoc_lambda_result_420: BodyScanSummary = typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, AsyncBodyNode{ BgStreamBlock: COPY node }, AsyncValidationNode{ BgStreamBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view, MUTABLE stream_analysis) -> {
+    stream_analysis = TRY (typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, FALSE, FALSE, %() USE(node, MUTABLE rtoc_self_view, MUTABLE stream_analysis) -> {
       TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, node.body));
       rubyToClearVoid__type_analysis_session()
     }));
@@ -17551,8 +17551,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (((node.declared_yield_type == NIL) AND (inferred_join.result_type != NIL)) AND TRY (typeAnalysisSession__stream_yields_contract_required?(&rtoc_self_view, UNWRAP (inferred_join.result_type)))) THEN
       TRY (typeAnalysisSession__emit_missing_stream_yields_contract_mut(&rtoc_self_view, &node, UNWRAP (inferred_join.result_type)));
     END
-    MUTABLE element_type = (IF node.declared_yield_type != NIL THEN node.declared_yield_type ELSE UNWRAP (inferred_join.result_type) END);
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BgStreamBlock: COPY node }, TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(StreamTypeExpression{ cardinality: TypeExpressionDimension{ SymbolValue: :FINITE }, item: COPY element_type.shape.expression }) }))));
+    MUTABLE element_type: Type = COPY UNWRAP (inferred_join.result_type);
+    IF node.declared_yield_type EXISTS AS rtoc_declared_yield THEN
+      element_type = COPY rtoc_declared_yield;
+    END
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BgStreamBlock: COPY node }, TRY (type__new(TypeConstructionInput{ TypeExpression: COPY typeExpression__of(TypeExpressionKind{ StreamTypeExpression: StreamTypeExpression{ cardinality: TypeExpressionDimension{ SymbolValue: :FINITE }, item: COPY element_type.shape.expression } }) }))));
     node.capture_analysis = stream_analysis_result;
     IF stream_analysis_result.has_non_escaping_capture THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ BgStreamBlock: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :BG_STREAM_CAPTURES_WITH_SCOPED }));
@@ -17653,14 +17656,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     DEFER rtoc_self_view.traversal_state.current_bg_pinned = prev_bg_pinned;
     MUTABLE last_type: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }));
     MUTABLE full_analysis: ?CaptureAnalysis = NIL;
-    typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, AsyncBodyNode{ BgBlock: COPY node }, AsyncValidationNode{ BgBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view) -> {
-    full_analysis = typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, &node.parallel, TRUE, %() USE(node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, AsyncBodyNode{ BgBlock: COPY node }, AsyncValidationNode{ BgBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view, MUTABLE full_analysis) -> {
+    full_analysis = TRY (typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, node.parallel, TRUE, %() USE(node, MUTABLE rtoc_self_view, MUTABLE full_analysis) -> {
       FOR MUTABLE rtoc_mutable_block_param_424 IN node.body DO
         TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_mutable_block_param_424));
         last_type = (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &rtoc_mutable_block_param_424, "BG body expression") OR_ELSE TRY (aST__full_type_mut((CAST(rtoc_mutable_block_param_424 AS Locatable)))));
       END
       rubyToClearVoid__type_analysis_session()
-    });
+    }));
     rubyToClearVoid__type_analysis_session()
     });
     MUTABLE analysis_result = full_analysis?;
@@ -17668,12 +17671,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF declared_payload EXISTS AS declared_payload_value THEN
       last_type = declared_payload?;
     END
-    IF (type__error_union?(last_type) AND ((node.body.last() != NIL) AND TRUE)) THEN
-      node.body.last().retain_error_channel = TRUE;
+    IF type__error_union?(last_type) THEN
+      IF node.body.last() EXISTS AS rtoc_bg_last THEN
+        MUTABLE rtoc_bg_last_mut: Locatable = COPY rtoc_bg_last;
+        locatable__set_retain_error_channel_mut(&rtoc_bg_last_mut, TRUE);
+      END
     END
     MUTABLE payload_type = TRY (typeAnalysisSession__owned_async_payload_type(&rtoc_self_view, last_type));
     node.async_result_shape = TRY (asyncResultShape__promise(CAST(payload_type AS Type)));
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${payload_type}") }))));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("~${type__to_s(payload_type)}") }))));
     IF node.arena_mode THEN
       node.pinned = TRUE;
       IF node.parallel THEN
