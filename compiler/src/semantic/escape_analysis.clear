@@ -969,7 +969,7 @@ END
 PUB FN escapeAnalysis__mark_expr_roots_heap_mut(expr: ?Locatable) RETURNS Void ->
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
   MUTABLE root_branch_value: ?Identifier = NIL;
-  IF UNWRAP (unwrapped) IS_A Locatable THEN
+  IF castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS THEN
     root_branch_value = aST__root_identifier(unwrapped);
   ELSE
     root_branch_value = NIL;
@@ -992,44 +992,57 @@ PUB FN escapeAnalysis__mark_expr_identifiers_heap_mut(expr: ?Locatable) RETURNS 
     IF (((node != NIL) AND (node IS_A CopyNode)) OR ((node != NIL) AND (node IS_A KeepNode))) THEN
       CONTINUE;
     END
-    MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(node));
-    IF !((node != NIL)) THEN
+    MUTABLE rtoc_dyn: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(node));
+    IF (rtoc_dyn == NIL) THEN
       CONTINUE;
     END
-    IF node IS_A Identifier AS identifier THEN
+    MUTABLE rtoc_loc: ?Locatable = castOptionalDynamicValueToOptionalLocatable(rtoc_dyn);
+    IF (rtoc_loc == NIL) THEN
+      CONTINUE;
+    END
+    MUTABLE unwrapped_node: Locatable = COPY rtoc_loc;
+    IF unwrapped_node IS_A Identifier AS identifier THEN
       IF escapeAnalysis__mark_node_symbol_heap_mut(identifier) THEN
         changed = TRUE;
       END
       CONTINUE;
     END
-    IF ((node != NIL) AND (node IS_A BlockExpr)) THEN
-      IF node.result THEN
-        &stack.append(node.result);
+    # Only a value-block's RESULT flows into the escape destination -- its body
+    # statements (a rewritten pipeline's loop source) do not escape.
+    IF unwrapped_node IS_A BlockExpr AS rtoc_block THEN
+      IF rtoc_block.result EXISTS AS rtoc_block_result THEN
+        &stack.append(COPY rtoc_block_result);
       END
       CONTINUE;
     END
-    IF escapeAnalysis__materializing_pipeline_expr?(node) THEN
+    # A materializing pipeline builds a FRESH list, so its source identifiers
+    # are not part of the escaping value.
+    IF escapeAnalysis__materializing_pipeline_expr?(unwrapped_node) THEN
       CONTINUE;
     END
-    MUTABLE root: ?Identifier = aST__root_identifier(UNWRAP (node));
+    MUTABLE root: ?Identifier = aST__root_identifier(unwrapped_node);
     IF root EXISTS AS root_value THEN
       IF escapeAnalysis__mark_node_symbol_heap_mut(root_value) THEN
         changed = TRUE;
       END
       CONTINUE;
     END
-    TRY (escapeAnalysis__push_locatable_children_mut(node, &stack));
+    TRY (escapeAnalysis__push_locatable_children_mut(unwrapped_node, &stack));
   END
   RETURN changed;
 END
 PUB FN escapeAnalysis__unwrap_value(node: ?DynamicValue) RETURNS ?DynamicValue ->
   MUTABLE current: ?DynamicValue = COPY node;
-  WHILE ((current != NIL) AND (current IS_A Locatable)) DO
-    IF aST__recovery_wrapper?(castOptionalDynamicValueToOptionalLocatable(current)) THEN
-      current = castLocatableToOptionalDynamicValue(aST__recovery_payload(castOptionalDynamicValueToLocatable(current)));
-    ELSE_IF aST__ownership_wrapper?(castOptionalDynamicValueToOptionalLocatable(current)) THEN
-      MUTABLE wrapper: Any@multiowned = CAST(current AS Any@multiowned);
-      current = wrapper.value();
+  WHILE current != NIL DO
+    MUTABLE rtoc_loc: ?Locatable = castOptionalDynamicValueToOptionalLocatable(current);
+    IF (rtoc_loc == NIL) THEN
+      BREAK;
+    END
+    MUTABLE rtoc_current: Locatable = COPY rtoc_loc;
+    IF aST__recovery_wrapper?(rtoc_current) THEN
+      current = castLocatableToOptionalDynamicValue(aST__recovery_payload(rtoc_current));
+    ELSE_IF aST__ownership_wrapper?(rtoc_current) THEN
+      current = castOptionalLocatableToOptionalDynamicValue(aST__node_value(rtoc_current));
     ELSE
       BREAK;
     END
@@ -1163,7 +1176,7 @@ PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Lo
   END
   MUTABLE value: ?Locatable = aST__node_value(node);
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(value));
-  IF (UNWRAP (unwrapped) IS_A Locatable AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
+  IF (castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
     RETURN TRUE;
   END
   MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(node);
@@ -1232,7 +1245,7 @@ PUB FN escapeAnalysis__heap_owned_transfer_source?(arg: ?Locatable) RETURNS Bool
   END
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(arg));
   MUTABLE root_branch_value: ?Identifier = NIL;
-  IF UNWRAP (unwrapped) IS_A Locatable THEN
+  IF castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS THEN
     root_branch_value = aST__root_identifier(unwrapped);
   ELSE
     root_branch_value = NIL;
@@ -1367,7 +1380,7 @@ PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes
     RETURN TRUE;
   END
   MUTABLE unwrapped: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(value));
-  IF (UNWRAP (unwrapped) IS_A Locatable AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
+  IF (castOptionalDynamicValueToOptionalLocatable(unwrapped) EXISTS AND escapeAnalysis__string_concat_expr?(unwrapped)) THEN
     RETURN FALSE;
   END
   IF TRY (escapeAnalysis__expr_has_owned_inline_value?(value)) THEN
