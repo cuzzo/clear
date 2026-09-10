@@ -65,6 +65,55 @@ pub fn compilerInspectValue() []const u8 {
     return "<value>";
 }
 
+// Ruby's `JSON.generate` string escaping, byte for byte: quotes, backslash and
+// the C0 controls are escaped, everything else -- UTF-8 included -- passes
+// through literally. A fingerprint built any other way would not match one the
+// Ruby compiler wrote.
+pub fn compilerJsonQuote(value: []const u8) []const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    out.append(allocator, '"') catch @panic("json quote allocation failed");
+    for (value) |byte| {
+        switch (byte) {
+            '"' => out.appendSlice(allocator, "\\\"") catch @panic("json quote allocation failed"),
+            '\\' => out.appendSlice(allocator, "\\\\") catch @panic("json quote allocation failed"),
+            0x08 => out.appendSlice(allocator, "\\b") catch @panic("json quote allocation failed"),
+            0x0c => out.appendSlice(allocator, "\\f") catch @panic("json quote allocation failed"),
+            '\n' => out.appendSlice(allocator, "\\n") catch @panic("json quote allocation failed"),
+            '\r' => out.appendSlice(allocator, "\\r") catch @panic("json quote allocation failed"),
+            '\t' => out.appendSlice(allocator, "\\t") catch @panic("json quote allocation failed"),
+            0x00...0x07, 0x0b, 0x0e...0x1f => {
+                var buf: [6]u8 = undefined;
+                const hex = "0123456789abcdef";
+                buf[0] = '\\';
+                buf[1] = 'u';
+                buf[2] = '0';
+                buf[3] = '0';
+                buf[4] = hex[byte >> 4];
+                buf[5] = hex[byte & 0x0f];
+                out.appendSlice(allocator, &buf) catch @panic("json quote allocation failed");
+            },
+            else => out.append(allocator, byte) catch @panic("json quote allocation failed"),
+        }
+    }
+    out.append(allocator, '"') catch @panic("json quote allocation failed");
+    return out.items;
+}
+
+// Ruby's `Digest::SHA256.hexdigest`, byte for byte: lowercase hex of the
+// digest. Fingerprints key the incremental build, so a self-hosted compiler
+// that hashed differently would silently stop reusing Ruby-built artifacts.
+pub fn compilerSha256Hex(value: []const u8) []const u8 {
+    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(value, &digest, .{});
+    const out = allocator.alloc(u8, digest.len * 2) catch @panic("sha256 allocation failed");
+    const hex = "0123456789abcdef";
+    for (digest, 0..) |byte, index| {
+        out[index * 2] = hex[byte >> 4];
+        out[index * 2 + 1] = hex[byte & 0x0f];
+    }
+    return out;
+}
+
 pub fn compilerRepeatString(value: []const u8, count: i64) []const u8 {
     if (count <= 0 or value.len == 0) return "";
     const repeat_count: usize = @intCast(count);
@@ -741,4 +790,29 @@ test "compiler string chomp matches Ruby String#chomp(separator)" {
     // A separator longer than the value cannot match.
     try std.testing.expectEqualStrings("a", compilerStringChomp("a", ";;;"));
     try std.testing.expectEqualStrings("foo", compilerStringChomp("foobar", "bar"));
+}
+
+test "compiler sha256 hex matches the published vectors" {
+    try std.testing.expectEqualStrings(
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        compilerSha256Hex(""),
+    );
+    try std.testing.expectEqualStrings(
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        compilerSha256Hex("abc"),
+    );
+    try std.testing.expectEqualStrings(
+        "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+        compilerSha256Hex("foo"),
+    );
+}
+
+test "compiler json quote matches Ruby JSON.generate string escaping" {
+    try std.testing.expectEqualStrings("\"\"", compilerJsonQuote(""));
+    try std.testing.expectEqualStrings("\"plain\"", compilerJsonQuote("plain"));
+    try std.testing.expectEqualStrings("\"a\\\"b\"", compilerJsonQuote("a\"b"));
+    try std.testing.expectEqualStrings("\"a\\\\b\"", compilerJsonQuote("a\\b"));
+    try std.testing.expectEqualStrings("\"a\\nb\"", compilerJsonQuote("a\nb"));
+    try std.testing.expectEqualStrings("\"a\\u0001b\"", compilerJsonQuote("a\x01b"));
+    try std.testing.expectEqualStrings("\"caf\u{00e9}\"", compilerJsonQuote("caf\u{00e9}"));
 }

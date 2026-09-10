@@ -22,8 +22,65 @@ PUB STRUCT DerivedFunctionFacts {
 PUB FN derivedFunctionFacts__to_h(self: DerivedFunctionFacts) RETURNS !{String}Any@multiowned ->
   RETURN CAST({"name": self.name, "return_type_key": self.return_type_key, "needs_runtime": self.needs_runtime, "can_fail": self.can_fail, "allocation_fault": self.allocation_fault, "error_fallible": self.error_fallible, "effects": self.effects, "return_strategy": self.return_strategy, "stack_tier": self.stack_tier, "requires": self.requires, "heap_carry_return": self.heap_carry_return, "reentrance_kind": self.reentrance_kind} AS {String}Any@multiowned);
 END
+# Ruby: Digest::SHA256.hexdigest(JSON.generate(to_h)). Both halves are
+# byte-exactness primitives -- a fingerprint written any other way would stop
+# the incremental build from reusing artifacts the Ruby compiler produced.
+EXTERN FN compilerSha256Hex(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerJsonQuote(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+
+PRIVATE FN derivedFunctionFactsJsonBool(value: Bool) RETURNS String ->
+  IF value THEN
+    RETURN COPY "true";
+  END
+  RETURN COPY "false";
+END
+
+PRIVATE FN derivedFunctionFactsJsonStringList(values: []String) RETURNS String ->
+  MUTABLE parts: []String = [];
+  FOR rtoc_value IN values DO
+    &parts.append(COPY compilerJsonQuote(rtoc_value));
+  END
+  MUTABLE joined: String = COPY parts.join(",");
+  RETURN COPY "[${joined}]";
+END
+
+PRIVATE FN derivedFunctionFactsJsonOptional(value: ?String) RETURNS String ->
+  IF value EXISTS AS rtoc_present THEN
+    RETURN COPY compilerJsonQuote(rtoc_present);
+  END
+  RETURN COPY "null";
+END
+
+PRIVATE FN derivedFunctionFactsJsonField(key: String, rendered: String) RETURNS String ->
+  MUTABLE quoted_key: String = COPY compilerJsonQuote(key);
+  RETURN COPY "${quoted_key}:${rendered}";
+END
+
 PUB FN derivedFunctionFacts__fingerprint(self: DerivedFunctionFacts) RETURNS !String ->
-  RETURN Digest.SHA256.hexdigest(generateJson(TRY (derivedFunctionFacts__to_h(self))));
+  # `requires` is a HashMap and has no insertion order to preserve, so its keys
+  # go out sorted -- the same facts still hash to the same string.
+  MUTABLE requires_parts: []String = [];
+  FOR rtoc_key IN (self.requires.keys() |> ORDER_BY _) DO
+    &requires_parts.append(COPY derivedFunctionFactsJsonField(rtoc_key, derivedFunctionFactsJsonStringList(UNWRAP (self.requires[rtoc_key]))));
+  END
+  MUTABLE requires_joined: String = COPY requires_parts.join(",");
+  MUTABLE requires_rendered: String = COPY "{${requires_joined}}";
+
+  MUTABLE fields: []String = [];
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "name", compilerJsonQuote(self.name)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "return_type_key", compilerJsonQuote(self.return_type_key)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "needs_runtime", derivedFunctionFactsJsonBool(self.needs_runtime)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "can_fail", derivedFunctionFactsJsonBool(self.can_fail)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "allocation_fault", derivedFunctionFactsJsonBool(self.allocation_fault)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "error_fallible", derivedFunctionFactsJsonBool(self.error_fallible)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "effects", derivedFunctionFactsJsonStringList(self.effects)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "return_strategy", derivedFunctionFactsJsonOptional(self.return_strategy)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "stack_tier", derivedFunctionFactsJsonOptional(self.stack_tier)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "requires", requires_rendered));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "heap_carry_return", derivedFunctionFactsJsonBool(self.heap_carry_return)));
+  &fields.append(COPY derivedFunctionFactsJsonField(COPY "reentrance_kind", derivedFunctionFactsJsonOptional(self.reentrance_kind)));
+  MUTABLE joined: String = COPY fields.join(",");
+  RETURN COPY compilerSha256Hex("{${joined}}");
 END
 PUB STRUCT DerivedProgramFacts {
   functions: {String}DerivedFunctionFacts

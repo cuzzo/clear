@@ -15,8 +15,17 @@ PUB STRUCT FunctionMIRFacts {
   needs_runtime: Bool
 }
 
+# Ruby: Digest::SHA256.hexdigest(JSON.generate([name, needs_runtime])).
+EXTERN FN compilerSha256Hex(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerJsonQuote(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+
 PUB FN functionMIRFacts__fingerprint(self: FunctionMIRFacts) RETURNS String ->
-  RETURN Digest.SHA256.hexdigest(generateJson(CAST(Tuple{self.name, self.needs_runtime} AS Tuple<String, Bool>)));
+  MUTABLE quoted_name: String = COPY compilerJsonQuote(self.name);
+  MUTABLE rendered_flag: String = COPY "false";
+  IF self.needs_runtime THEN
+    rendered_flag = COPY "true";
+  END
+  RETURN COPY compilerSha256Hex("[${quoted_name},${rendered_flag}]");
 END
 PUB STRUCT ProgramMIRFacts {
   functions: {String}FunctionMIRFacts
