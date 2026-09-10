@@ -623,8 +623,12 @@ PUB FN escapeAnalysis__param_accepts_caller_sync?(fn_node: FunctionDef, param: P
     RETURN TRUE;
   END
   MUTABLE requires: ?{String}[Set]String@symbol = fn_node.requires;
-  MUTABLE families = (TRUE AND requires[param.name]);
-  RETURN (families.contains?(:ATOMIC) OR families.contains?(:SNAPSHOTTED));
+  IF requires EXISTS AS rtoc_requires THEN
+    IF rtoc_requires[CAST(param.name AS String)] EXISTS AS families THEN
+      RETURN (families.contains?(:ATOMIC) OR families.contains?(:SNAPSHOTTED));
+    END
+  END
+  RETURN FALSE;
 END
 PUB FN escapeAnalysis__mark_body_escapes_mut(facts: FunctionFacts, fn_nodes: {String}FunctionDef, facts_by_name: {String}FunctionFacts, bg_heap: [Set]String, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Void ->
   MUTABLE context = EscapeContext{ fn: facts.fn, facts: COPY facts, fn_nodes: COPY fn_nodes, facts_by_name: COPY facts_by_name, bg_heap: COPY bg_heap, schema_lookup: schema_lookup };
@@ -1765,11 +1769,14 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
 END
 PUB FN escapeAnalysis__owning_return_type(fn_value: FunctionDef, MUTABLE expr: Locatable) RETURNS !?Type ->
   MUTABLE declared: ?Type = functionDef__declared_return_type(fn_value);
-  RETURN (declared OR (TRY (aST__full_type_mut(expr))));
+  IF declared EXISTS AS rtoc_declared THEN
+    RETURN COPY rtoc_declared;
+  END
+  RETURN TRY (aST__full_type_mut(expr));
 END
 PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, expr: Locatable) RETURNS !Void ->
   MUTABLE fn = COPY facts.fn;
-  IF !(fn.return_lifetime.empty?()) THEN
+  IF escapeAnalysis__function_def_has_return_lifetime?(fn) THEN
     RETURN;
   END
   MUTABLE ret: ?Type = functionDef__declared_return_type(fn);
@@ -1784,14 +1791,29 @@ PUB FN escapeAnalysis__mark_heap_return_mut(facts: FunctionFacts, expr: Locatabl
   IF !((escapeAnalysis__returned_call_result?(expr) OR escapeAnalysis__materializing_pipeline_expr?(expr))) THEN
     TRY (escapeAnalysis__collect_identifier_names_mut(expr, &names));
   END
-  &names.delete_if(%(name) USE(facts) -> (((facts.symbols[name]?.reg) != NIL) AND ((facts.symbols[name]?.reg) IS_A Param)));
+  # A parameter's storage is the caller's decision, so a returned view of a
+  # param needs no promotion here.
+  MUTABLE rtoc_kept: [Set]String = Set[];
+  FOR rtoc_name IN names DO
+    MUTABLE rtoc_is_param: Bool = FALSE;
+    IF facts.symbols[rtoc_name] EXISTS AS rtoc_named_symbol THEN
+      IF rtoc_named_symbol.reg EXISTS AS rtoc_named_reg THEN
+        rtoc_is_param = (rtoc_named_reg IS_A Param);
+      END
+    END
+    IF !(rtoc_is_param) THEN
+      &rtoc_kept.insert(COPY rtoc_name);
+    END
+  END
+  names = COPY rtoc_kept;
   IF names.empty?() THEN
     RETURN;
   END
-  fn.heap_carry_return_vars = (fn.heap_carry_return_vars OR_ELSE Set[]);
-  FOR _ IN names DO
-  &fn.heap_carry_return_vars.append(COPY _);
+  MUTABLE rtoc_carry: [Set]String = COPY (fn.heap_carry_return_vars OR_ELSE Set[]);
+  FOR rtoc_carry_name IN names DO
+    &rtoc_carry.insert(COPY rtoc_carry_name);
   END
+  fn.heap_carry_return_vars = COPY rtoc_carry;
   escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts, names);
 END
 # Ruby chains `node.is_a?(AST::BinaryOp)` straight off the unwrapped value; a
@@ -2052,7 +2074,10 @@ PUB FN escapeAnalysis__function_def_has_return_lifetime?(fn_value: FunctionDef) 
   IF ((IF rl IS_A String@symbol AS rl_payload THEN (rl_payload == :wildcard) ELSE FALSE END)) THEN
     RETURN TRUE;
   END
-  RETURN !(rl.empty?());
+  IF rl IS_A ArrayValue AS rl_nodes THEN
+    RETURN !(rl_nodes.empty?());
+  END
+  RETURN FALSE;
 END
 PUB FN escapeAnalysis__function_facts_have_owned_return_value?(facts: FunctionFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN facts.return_values |> ANY { MUTABLE rtoc_mutable_block_param_35 = COPY _;
