@@ -33,3 +33,100 @@ PUB FN allocDeclarationNode__set_storage_override_mut(MUTABLE value: AllocDeclar
     DEFAULT -> RETURN;
   END
 END
+
+# Ruby writes `slot_size` on whichever variant it holds.
+PUB FN allocDeclarationNode__set_slot_size_mut(MUTABLE value: AllocDeclarationNode, new_value: ?Int64) RETURNS Void ->
+  PARTIAL MATCH value START
+    AllocDeclarationNode.VarDecl AS MUTABLE item -> item.slot_size = COPY new_value;,
+    AllocDeclarationNode.BindExpr AS MUTABLE item -> item.slot_size = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END
+
+# The declaration's VALUE carries the finalized storage; writing through the
+# union payload is what makes the stamp land on the tree rather than a copy.
+PUB FN allocDeclarationNode__set_value_storage_override_mut(MUTABLE value: AllocDeclarationNode, new_value: ?String@symbol) RETURNS Void ->
+  PARTIAL MATCH value START
+    AllocDeclarationNode.VarDecl AS MUTABLE item -> locatable__set_storage_override_mut(&item.value, COPY new_value);,
+    AllocDeclarationNode.BindExpr AS MUTABLE item -> locatable__set_storage_override_mut(&item.value, COPY new_value);,
+    DEFAULT -> RETURN;
+  END
+END
+
+PUB FN allocDeclarationNode__set_type_object_mut(MUTABLE value: AllocDeclarationNode, new_value: ?Type) RETURNS Void ->
+  PARTIAL MATCH value START
+    AllocDeclarationNode.VarDecl AS MUTABLE item -> item.type_object = COPY new_value;,
+    AllocDeclarationNode.BindExpr AS MUTABLE item -> item.type_object = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END
+
+# Ruby: AllocHelper#finalize_storage! -- computes the slot size, decides where
+# the binding lives, and stamps the finalized type back on the declaration.
+PUB FN allocDeclarationNode__finalize_storage_mut(MUTABLE self: AllocDeclarationNode, final_type: Type, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !String@symbol ->
+  MUTABLE type_obj: Type = COPY final_type;
+  MUTABLE slot: Int64 = TRY (type__slot_size(type_obj, schema_lookup));
+  allocDeclarationNode__set_slot_size_mut(&self, slot);
+
+  MUTABLE node_value: ?Locatable = allocDeclarationNode__value(self);
+  MUTABLE value_type: ?Type = NIL;
+  IF node_value EXISTS AS rtoc_node_value THEN
+    value_type = locatable__type_object(rtoc_node_value);
+  END
+
+  MUTABLE storage: String@symbol = :stack;
+  IF value_type EXISTS AS rtoc_value_type THEN
+    storage = TRY (type__finalize_storage(rtoc_value_type, slot, locatable__storage(UNWRAP (node_value))));
+    # A declared pointer or sync capability overrides what the value's own
+    # type would have chosen; a declared @list needs a frame unless the value
+    # was already promoted to the heap.
+    IF (type__heap?(type_obj) OR type__any_sync?(type_obj)) THEN
+      storage = :heap;
+    END
+    IF (type__list_collection?(type_obj) AND (storage != :heap)) THEN
+      storage = :frame;
+    END
+    allocDeclarationNode__set_value_storage_override_mut(&self, storage);
+  ELSE
+    storage = TRY (type__finalize_storage(type_obj, slot, NIL));
+  END
+
+  MUTABLE value_sync: ?String@symbol = NIL;
+  IF value_type EXISTS AS rtoc_value_type_2 THEN
+    value_sync = type__sync(rtoc_value_type_2);
+  END
+
+  MUTABLE val_ti: ?Type = NIL;
+  IF node_value EXISTS AS rtoc_node_value_2 THEN
+    val_ti = TRY (aST__full_type_mut(rtoc_node_value_2));
+  END
+
+  # Preserve optional / error-union / generic wrappers and data capabilities:
+  # rebuilding from `resolved` alone would collapse `?String@symbol` to String.
+  # A function type is already its own full shape.
+  MUTABLE stamped: Type = COPY type_obj;
+  IF !(type__fn_type?(type_obj)) THEN
+    stamped = TRY (type__new(TypeConstructionInput{ Type: COPY type_obj }));
+    TRY (type__apply_finalized_value_shape_mut(&stamped, COPY type_obj, COPY val_ti));
+  END
+
+  IF val_ti EXISTS AS rtoc_val_ti THEN
+    IF type__link?(rtoc_val_ti) THEN
+      storage = :link;
+    END
+  END
+
+  TRY (type__apply_storage_capability_mut(&stamped, storage, value_sync));
+  IF value_type EXISTS AS rtoc_value_type_3 THEN
+    TRY (type__merge_capabilities_from_mut(&stamped, rtoc_value_type_3));
+  END
+  # Rank topology belongs to the declared comma dimensions; a List[] initializer
+  # is construction syntax, not an @list capability.
+  IF type__rank?(type_obj) THEN
+    stamped.collection = NIL;
+  END
+
+  allocDeclarationNode__set_type_object_mut(&self, COPY stamped);
+  allocDeclarationNode__set_storage_override_mut(&self, storage);
+  RETURN storage;
+END

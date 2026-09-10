@@ -10379,7 +10379,10 @@ PRIVATE FN typeAnalysisSession__finalize_decl_storage_mut(MUTABLE self: TypeAnal
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE storage = &node.finalize_storage_mut(final_type, %(n) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type__to_sym(n))));
+    MUTABLE storage: String@symbol = TRY (allocDeclarationNode__finalize_storage_mut(&node, TRY (type__new(castFinalTypeToTypeConstructionInput(final_type))), %(n: String@symbol) USE(MUTABLE rtoc_self_view) -> {
+      MUTABLE rtoc_schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, n));
+      (IF rtoc_schema EXISTS AS rtoc_schema_value THEN castSchemaValueToTypeSchemaLookupResult(rtoc_schema_value) ELSE NIL END)
+    }));
     storage = TRY (typeAnalysisSession__downgrade_frame_to_stack(&rtoc_self_view, &node, storage));
     IF (storage == :frame) THEN
       IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
