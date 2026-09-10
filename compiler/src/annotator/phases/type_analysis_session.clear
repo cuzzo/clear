@@ -17284,7 +17284,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__resolve_error_selectors_mut(&rtoc_self_view, &node, &clause, is_snapshot_txn));
     IF (clause.action == ErrorActionKind.Exit) THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, clause.message));
-    ELSE_IF (clause.action IS_A Return) THEN
+    ELSE_IF (clause.action == ErrorActionKind.Return) THEN
       TRY (typeAnalysisSession__visit(&rtoc_self_view, clause.value));
     ELSE_IF (clause.action == ErrorActionKind.Block) THEN
       TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, clause.body));
@@ -18318,14 +18318,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(t_left_type) THEN
       MUTABLE left_value_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.left)) }));
       IF TRY (typeAnalysisSession__fault_recoverable_result?(&rtoc_self_view, &node.left)) THEN
-        t_left_type = TRY ((type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(left_value_type)) OR_ELSE FALSE));
-        IF ((node.left IS_A BinaryOp AND (locatable__smooth?(node.left) OR_ELSE FALSE)) AND TRUE) THEN
-          node.left.error_union_type = t_left_type;
+        t_left_type = TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(left_value_type)));
+        IF (node.left IS_A BinaryOp AND (locatable__smooth?(node.left) OR_ELSE FALSE)) THEN
+          MUTABLE rtoc_or_else_left: Node = castLocatableToNode__type_analysis_session(node.left);
+          node__set_error_union_type_mut(&rtoc_or_else_left, t_left_type);
         END
-      ELSE_IF type__optional(left_value_type) THEN
+      ELSE_IF type__optional?(left_value_type) THEN
         t_left_type = COPY left_value_type;
-      ELSE_IF (node.left IS_A FuncCall AND (TRY (typeAnalysisSession__function_node_map(&rtoc_self_view))).contains?(locatable__name(node.left))) THEN
-        TRY (typeAnalysisSession__record_deferred_recovery_validation_mut(&rtoc_self_view, &node, castLocatableToFuncCall__type_analysis_session(node.left), node.left.name(), left_value_type));
+      ELSE_IF (node.left IS_A FuncCall AND (TRY (typeAnalysisSession__function_node_map(&rtoc_self_view))).contains?(locatable__name(node.left) OR_ELSE "")) THEN
+        TRY (typeAnalysisSession__record_deferred_recovery_validation_mut(&rtoc_self_view, &node, castLocatableToFuncCall__type_analysis_session(node.left), locatable__name(node.left) OR_ELSE "", left_value_type));
         t_left_type = TRY (type__error_union_of(castTypeToTypeTypeInput__type_analysis_session(left_value_type)));
       ELSE
         t_left_type = left_value_type;
@@ -18344,7 +18345,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plan_value: TenseOperationPlan = plan;
     node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY plan_value };
     IF (recovery == TenseRecovery.Fallback) THEN
-      TRY (typeAnalysisSession__coerce_empty_collection_fallback_mut(&rtoc_self_view, node.right, plan_value.result_type));
+      TRY (typeAnalysisSession__coerce_empty_collection_fallback_mut(&rtoc_self_view, &node.right, plan_value.result_type));
     END
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, plan_value.result_type));
 }
@@ -18736,10 +18737,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, result.type));
     IF result.left_coercion EXISTS AS left_coercion_value THEN
-      locatable__set_coerced_type_object_mut(&node.left, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: COPY COPY left_coercion_value })) })));
+      locatable__set_coerced_type_object_mut(&node.left, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY left_coercion_value })));
     END
     IF result.right_coercion EXISTS AS right_coercion_value THEN
-      locatable__set_coerced_type_object_mut(&node.right, COPY right_coercion_value);
+      locatable__set_coerced_type_object_mut(&node.right, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY right_coercion_value })));
     END
     IF result.storage EXISTS AS storage_value THEN
       node.storage_override = COPY storage_value;
@@ -18754,7 +18755,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE ti = TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node }));
       type__mark_frame_allocated_mut(&ti);
     END
-    RETURN COPY castTypeToOptionalTypeAnalysisSessionReturnValue(result.type);
+    RETURN COPY castTypeToOptionalTypeAnalysisSessionReturnValue(UNWRAP (result.type));
 }
 END
 PRIVATE FN typeAnalysisSession__short_circuit_non_nil_refinements(MUTABLE self: TypeAnalysisSession, node: Locatable, MUTABLE truthy: Bool) RETURNS !{Int64}Type
