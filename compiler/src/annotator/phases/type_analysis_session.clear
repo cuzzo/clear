@@ -17728,26 +17728,28 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ NextExpr: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :NEXT_NEEDS_FUTURE }, [], CAST({:got: TRY (aST__full_type_mut(expr))} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("SUSPENDS")));
-    MUTABLE async_shape: ?String@symbol = IF expr IS_A Identifier THEN
-      (IF locatable__symbol(expr) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_427: ?SymbolEntry@multiowned = (locatable__symbol(expr));
-    symbolEntry__async_result_shape(UNWRAP (rtoc_local_receiver_427)) }
-    ELSE
-      NIL
-    END)
-    ELSE
-      NIL
-    END;
-    IF async_shape.promise?() THEN
-      IF (IF expr IS_A Identifier AS identifier THEN !(async_shape.shared_promise?()) ELSE FALSE END) THEN
-        TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, expr.name(), expr.token(), :next));
+    MUTABLE async_shape: ?AsyncResultShape = NIL;
+    IF expr IS_A Identifier THEN
+      IF locatable__symbol(expr) EXISTS AS rtoc_next_symbol THEN
+        async_shape = COPY symbolEntry__async_result_shape(rtoc_next_symbol);
       END
-      MUTABLE result_type = COPY (TRY (typeAnalysisSession__publish_scalar_next_plan(&rtoc_self_view, &node, promise_type, (async_shape.shared_promise?() OR promise_type.shared_promise?())))).result_type;
+    END
+    MUTABLE rtoc_shape_promise: Bool = FALSE;
+    MUTABLE rtoc_shape_shared: Bool = FALSE;
+    IF async_shape EXISTS AS rtoc_async_shape THEN
+      rtoc_shape_promise = asyncResultShape__promise?(rtoc_async_shape);
+      rtoc_shape_shared = asyncResultShape__shared_promise?(rtoc_async_shape);
+    END
+    IF rtoc_shape_promise THEN
+      IF ((expr IS_A Identifier) AND !(rtoc_shape_shared)) THEN
+        TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, UNWRAP (locatable__name(expr)), locatable__token(expr), :next));
+      END
+      MUTABLE result_type = COPY (TRY (typeAnalysisSession__publish_scalar_next_plan(&rtoc_self_view, &node, promise_type, (rtoc_shape_shared OR type__shared_promise?(promise_type))))).result_type;
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, result_type));
       IF TRY (typeAnalysisSession__async_next_result_requires_heap?(&rtoc_self_view, result_type)) THEN
         node.storage_override = :heap;
       END
-    ELSE_IF promise_type.promise_list?() THEN
+    ELSE_IF type__promise_list?(promise_type) THEN
       IF expr IS_A Identifier AS identifier THEN
         TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, identifier__name(identifier), identifier.token, :next));
       END
@@ -17758,33 +17760,33 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF expr IS_A Identifier AS identifier THEN
         TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, identifier__name(identifier), identifier.token, :next));
       END
-      MUTABLE elem_sym = type__to_sym((TRY (type__element_type((TRY (type__tense_type(promise_type)))))));
+      MUTABLE elem_sym: String@symbol = COPY type__to_sym(UNWRAP (TRY (type__element_type((TRY (type__tense_type(promise_type)))))));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${elem_sym}[]") }))));
       node.storage_override = :heap;
     ELSE_IF TRY (type__split_open_stream?(promise_type)) THEN
-      elem_sym = type__to_sym((TRY (type__open_stream_element_type(promise_type))));
+      elem_sym = COPY type__to_sym(UNWRAP (TRY (type__open_stream_element_type(promise_type))));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("?${elem_sym}") }))));
     ELSE_IF TRY (type__dynamic_stream?(promise_type)) THEN
-      elem_sym = type__to_sym((TRY (type__element_type((TRY (type__tense_type(promise_type)))))));
+      elem_sym = COPY type__to_sym(UNWRAP (TRY (type__element_type((TRY (type__tense_type(promise_type)))))));
       IF type__canonical_stream?(promise_type) THEN
-        TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, TRY (type__stream_step_of(TRY (type__element_type((TRY (type__tense_type(promise_type)))))))));
+        TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, TRY (type__stream_step_of(castTypeToTypeTypeInput__type_analysis_session(UNWRAP (TRY (type__element_type((TRY (type__tense_type(promise_type)))))))))));
       ELSE
         TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("?${elem_sym}") }))));
       END
-    ELSE_IF promise_type.bounded_stream?() THEN
-      MUTABLE element_type = TRY (type__stream_element_type(promise_type));
+    ELSE_IF type__bounded_stream?(promise_type) THEN
+      MUTABLE element_type: Type = COPY UNWRAP (TRY (type__stream_element_type(promise_type)));
       IF type__canonical_stream?(promise_type) THEN
-        TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, TRY (type__stream_step_of(element_type))));
+        TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, TRY (type__stream_step_of(castTypeToTypeTypeInput__type_analysis_session(element_type)))));
       ELSE
-        TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, type__to_sym( UNWRAP (element_type))));
+        TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, type__to_sym(element_type)));
       END
-    ELSE_IF promise_type.shared_promise?() THEN
+    ELSE_IF type__shared_promise?(promise_type) THEN
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, (TRY (typeAnalysisSession__publish_scalar_next_plan(&rtoc_self_view, &node, promise_type, TRUE))).result_type));
     ELSE_IF (TRY (type__split_open_stream?(promise_type)) OR TRY (type__open_stream?(promise_type))) THEN
-      elem_sym = type__to_sym((TRY (type__open_stream_element_type(promise_type))));
+      elem_sym = COPY type__to_sym(UNWRAP (TRY (type__open_stream_element_type(promise_type))));
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("?${elem_sym}") }))));
-    ELSE_IF promise_type.inf_stream?() THEN
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, type__to_sym((TRY (type__inf_stream_element_type(promise_type))))));
+    ELSE_IF type__inf_stream?(promise_type) THEN
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ NextExpr: COPY node }, type__to_sym(UNWRAP (TRY (type__inf_stream_element_type(promise_type))))));
     ELSE
       IF expr IS_A Identifier AS identifier THEN
         TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, identifier__name(identifier), identifier.token, :next));
