@@ -11804,8 +11804,8 @@ PRIVATE FN typeAnalysisSession__record_body_fact_pipe_input_type_mut(MUTABLE sel
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR MUTABLE rtoc_mutable_block_param_278 IN TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view)) DO
-    &rtoc_mutable_block_param_278.summary.pipe_input_types.insert(COPY type_name);
+    FOR MUTABLE rtoc_frame IN rtoc_self_view.traversal_state.body_fact_frames DO
+    &rtoc_frame.summary.pipe_input_types.insert(COPY type_name);
     END
 }
 END
@@ -15190,7 +15190,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__finalize_pending_transfer_mut(MUTABLE self: TypeAnalysisSession, decision: TransferDecision) RETURNS !Void
+PRIVATE FN typeAnalysisSession__finalize_pending_transfer_mut(MUTABLE self: TypeAnalysisSession, MUTABLE decision: TransferDecision) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -15201,35 +15201,41 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY Locatable{ Identifier: COPY source } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_TRANSFER_REQUIRES_COPY }, [], CAST({:name: source.name} AS {String@symbol}Any)));
       END
       MUTABLE source_type = TRY (aST__full_type_mut(Locatable{ Identifier: COPY source }));
-      MUTABLE wrapper =     IF (TRY (type__any_rc?(source_type)) OR type__split?(source_type)) THEN
-        KeepNode{ token: COPY source.token, value: Locatable{ Identifier: COPY source }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, carrier_op: NIL }
-      ELSE
-        CopyNode{ token: COPY source.token, value: Locatable{ Identifier: COPY source }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL }
-      END;
-      typeAnalysisSession__record_capture_site_mut(&rtoc_self_view, &wrapper, TRUE);
-      IF wrapper IS_A KeepNode THEN
-        TRY (typeAnalysisSession__finish_previsited_keep_mut(&rtoc_self_view, &wrapper));
-      ELSE
-        TRY (typeAnalysisSession__finish_previsited_copy_mut(&rtoc_self_view, CAST(wrapper AS CopyNode)));
+      MUTABLE wrapper: Locatable = Locatable{ CopyNode: COPY CopyNode{ token: COPY source.token, value: Locatable{ Identifier: COPY source }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL } };
+      IF (TRY (type__any_rc?(source_type)) OR type__split?(source_type)) THEN
+        wrapper = Locatable{ KeepNode: COPY KeepNode{ token: COPY source.token, value: Locatable{ Identifier: COPY source }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, carrier_op: NIL } };
       END
-      MUTABLE container = COPY transfer.container;
-      IF container IS_A FuncCall AS func_call THEN
-        MUTABLE func_call_mutable = COPY func_call;
-        func_call_mutable.args[CAST(KEEP transfer.slot AS Int64)] = wrapper;
-      ELSE_IF (container IS_A MethodCall) THEN
-        MUTABLE index: Int64 = COPY CAST(KEEP transfer.slot AS Int64);
-        IF index.zero?() THEN
-          container.object = wrapper;
-        ELSE
-          MUTABLE rtoc_index_receiver_378 = container.args();
-          rtoc_index_receiver_378[(index - 1)] = wrapper;
-        END
-      ELSE_IF container IS_A StructLit AS struct_lit THEN
-        MUTABLE struct_lit_mutable = COPY struct_lit;
-        struct_lit_mutable.fields[CAST(KEEP transfer.slot AS String)] = wrapper;
-      ELSE_IF container IS_A Assignment AS assignment THEN
-        MUTABLE assignment_mutable = COPY assignment;
-        assignment_mutable.value = wrapper;
+      PARTIAL MATCH wrapper START
+        Locatable.KeepNode AS MUTABLE rtoc_keep ->
+          MUTABLE rtoc_keep_site: CaptureSiteNode = CaptureSiteNode{ KeepNode: COPY rtoc_keep };
+          typeAnalysisSession__record_capture_site_mut(&rtoc_self_view, &rtoc_keep_site, TRUE);
+          TRY (typeAnalysisSession__finish_previsited_keep_mut(&rtoc_self_view, &rtoc_keep));,
+        Locatable.CopyNode AS MUTABLE rtoc_copy ->
+          MUTABLE rtoc_copy_site: CaptureSiteNode = CaptureSiteNode{ CopyNode: COPY rtoc_copy };
+          typeAnalysisSession__record_capture_site_mut(&rtoc_self_view, &rtoc_copy_site, TRUE);
+          TRY (typeAnalysisSession__finish_previsited_copy_mut(&rtoc_self_view, &rtoc_copy));,
+        DEFAULT -> NIL;
+      END
+      MUTABLE index: Int64 = 0;
+      IF decision.transfer.slot IS_A Int64 AS rtoc_slot_i THEN
+        index = rtoc_slot_i;
+      END
+      PARTIAL MATCH decision.transfer.container START
+        Locatable.FuncCall AS MUTABLE func_call ->
+          func_call.args[index] = COPY wrapper;,
+        Locatable.MethodCall AS MUTABLE method_call ->
+          IF index.zero?() THEN
+            method_call.object = COPY wrapper;
+          ELSE
+            method_call.args[(index - 1)] = COPY wrapper;
+          END
+          NIL;,
+        Locatable.StructLit AS MUTABLE struct_lit ->
+          IF decision.transfer.slot IS_A String AS rtoc_slot_s THEN
+            struct_lit.fields[rtoc_slot_s] = COPY wrapper;
+          END
+          NIL;,
+        DEFAULT -> NIL;
       END
     ELSE
       source.was_moved = TRUE;

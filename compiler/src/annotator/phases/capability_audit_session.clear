@@ -3856,12 +3856,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_each_items_27: [Set]String@symbol = UNWRAP ((transitive[UNWRAP (callees[rtoc_idx])]));
       MUTABLE rtoc_idx_n4 = 0;
       WHILE rtoc_idx_n4 < rtoc_each_items_27.length() DO
-          MUTABLE fn_set: [Set]String@symbol = UNWRAP (transitive[rtoc_each_21]);
+          MUTABLE fn_set: [Set]String@symbol = COPY UNWRAP (transitive[rtoc_each_21]);
           IF fn_set.contains?(rtoc_each_items_27[rtoc_idx_n4]) THEN
                 rtoc_idx_n4 = rtoc_idx_n4 + 1;
     CONTINUE;
           END
           &fn_set.insert(COPY UNWRAP (rtoc_each_items_27[rtoc_idx_n4]));
+          transitive[rtoc_each_21] = COPY fn_set;
           changed = TRUE;
         rtoc_idx_n4 = rtoc_idx_n4 + 1;
       END
