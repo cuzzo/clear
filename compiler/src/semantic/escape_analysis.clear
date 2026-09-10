@@ -1391,36 +1391,44 @@ PUB FN escapeAnalysis__assignment_value_is_owned?(node: AssignmentNode, fn_nodes
   RETURN TRY (escapeAnalysis__call_result_is_heap?(UNWRAP (value), fn_nodes, schema_lookup, facts_by_name));
 END
 PUB FN escapeAnalysis__ownership_transferring_expr?(expr: ?Locatable, include_allocating_expr: Bool) RETURNS !Bool ->
-  MUTABLE value: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
-  IF (UNWRAP (value) IS_A BinaryOp AND (UNWRAP (value).op == symbol("OR_ELSE"))) THEN
-    value = escapeAnalysis__unwrap_value(value.left());
-  END
-  IF (value IS_A CopyNode OR value IS_A KeepNode) THEN
+  MUTABLE rtoc_expr_loc: ?Locatable = escapeAnalysis__unwrap_orelse_left(UNWRAP (expr));
+  MUTABLE value: ?DynamicValue = castOptionalLocatableToOptionalDynamicValue(rtoc_expr_loc);
+  IF ((IF rtoc_expr_loc EXISTS AS rtoc_ck THEN (rtoc_ck IS_A CopyNode OR rtoc_ck IS_A KeepNode) ELSE FALSE END)) THEN
     RETURN TRUE;
   END
-  IF (value IS_A Locatable AND escapeAnalysis__expr_has_heap_identifier?(value)) THEN
-    RETURN TRUE;
-  END
-  IF ((include_allocating_expr AND value IS_A Locatable) AND escapeAnalysis__string_concat_expr?(value)) THEN
-    RETURN TRUE;
-  END
-  IF (TRUE AND symbolEntry__heap_storage?(value)) THEN
-    RETURN TRUE;
-  END
-  IF ((aST__node__symbol(UNWRAP (castDynamicValueToLocatable(UNWRAP (value)))) EXISTS) AND ((value.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_19 = ((value.symbol)?);
-  symbolEntry__heap_storage?(rtoc_local_receiver_19) })) THEN
-    RETURN TRUE;
-  END
-  IF !(value IS_A Locatable) THEN
+  IF (rtoc_expr_loc == NIL) THEN
     RETURN FALSE;
   END
-  MUTABLE ti = TRY (aST__full_type_mut(UNWRAP (castDynamicValueToLocatable(UNWRAP (value)))));
-  RETURN !(!(((((!(TRY (type__string?(ti))) AND !(ti.rodata?())) AND (ti.provenance() != :borrow)) AND TRY (type__heap_ptr?(ti))))));
+  MUTABLE rtoc_value: Locatable = COPY rtoc_expr_loc;
+  IF escapeAnalysis__expr_has_heap_identifier?(rtoc_value) THEN
+    RETURN TRUE;
+  END
+  IF (include_allocating_expr AND escapeAnalysis__string_concat_expr?(rtoc_value)) THEN
+    RETURN TRUE;
+  END
+  IF aST__node_heap_storage?(rtoc_value) THEN
+    RETURN TRUE;
+  END
+  IF aST__node__symbol(rtoc_value) EXISTS AS rtoc_value_symbol THEN
+    IF symbolEntry__heap_storage?(rtoc_value_symbol) THEN
+      RETURN TRUE;
+    END
+  END
+  MUTABLE ti = TRY (aST__full_type_mut(rtoc_value));
+  RETURN !(!(((((!(TRY (type__string?(ti))) AND !(type__rodata?(ti))) AND (type__provenance(ti) != :borrow)) AND TRY (type__heap_ptr?(ti))))));
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
 PUB FN escapeAnalysis__string_concat_expr?(expr: ?Locatable) RETURNS Bool ->
-  RETURN (((expr != NIL) AND (expr IS_A StringConcat)) OR ((IF expr? IS_A BinaryOp AS binary_op THEN (binary_op.string_concat == TRUE) ELSE FALSE END)));
+  IF expr EXISTS AS rtoc_expr THEN
+    IF rtoc_expr IS_A StringConcat THEN
+      RETURN TRUE;
+    END
+    IF rtoc_expr IS_A BinaryOp AS binary_op THEN
+      RETURN (binary_op.string_concat == TRUE);
+    END
+  END
+  RETURN FALSE;
 END
 PUB FN escapeAnalysis__type_requires_owned_storage?(ti: ?Type, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF ti EXISTS AS ti_value THEN
@@ -1896,34 +1904,32 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
 PUB FN escapeAnalysis__call_result_is_heap?(value: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult, facts_by_name: {String}FunctionFacts) RETURNS !Bool ->
-  MUTABLE call: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(value)));
-  IF (call IS_A BinaryOp AND (call.op() == symbol("OR_ELSE"))) THEN
-    call = escapeAnalysis__unwrap_value(call.left());
-  END
-  IF !((call IS_A Locatable AND aST__call?(call))) THEN
+  MUTABLE rtoc_call_loc: ?Locatable = escapeAnalysis__unwrap_orelse_left(value);
+  IF (rtoc_call_loc == NIL) THEN
     RETURN FALSE;
   END
-  MUTABLE callee: ?FunctionDef = COPY fn_nodes[CAST(call.name() AS String)];
+  MUTABLE rtoc_call_node: Locatable = COPY rtoc_call_loc;
+  IF !(aST__call?(rtoc_call_node)) THEN
+    RETURN FALSE;
+  END
+  MUTABLE call: EscapeAnalysisCall = UNWRAP (castLocatableToEscapeAnalysisCall(rtoc_call_node));
+  MUTABLE rtoc_callee_name: String = COPY (aST__node_name(rtoc_call_node) OR_ELSE "");
+  MUTABLE callee: ?FunctionDef = COPY fn_nodes[rtoc_callee_name];
   IF ((callee != NIL) AND escapeAnalysis__function_def_has_return_lifetime?(callee)) THEN
     RETURN FALSE;
   END
-  MUTABLE callee_facts: ?FunctionFacts = COPY facts_by_name[CAST(call.name() AS String)];
+  MUTABLE callee_facts: ?FunctionFacts = COPY facts_by_name[rtoc_callee_name];
   IF callee EXISTS AS callee_value THEN
     RETURN TRY (escapeAnalysis__call_result_is_heap_for_callee?(call, callee_value, schema_lookup, callee_facts));
   END
-  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
-  IF (aST__node__matched_signature(call) EXISTS) THEN
-    sig_branch_value = functionSignature__unwrap(call.matched_signature);
-  ELSE
-    sig_branch_value = NIL;
-  END
+  MUTABLE sig_branch_value: ?FunctionSignature@multiowned = locatable__matched_signature(rtoc_call_node);
   MUTABLE sig: ?FunctionSignature@multiowned = sig_branch_value;
   IF sig EXISTS AS sig_value THEN
     MUTABLE sig_value_mutable = COPY sig_value;
     IF !(((TRY (functionSignature__return_lifetime(sig_value_mutable))).length() == 0)) THEN
       RETURN FALSE;
     END
-    MUTABLE dep = TRY (escapeAnalysis__signature_heap_return_from_args?(call, sig_value_mutable));
+    MUTABLE dep: ?Bool = TRY (escapeAnalysis__signature_heap_return_from_args?(call, sig_value_mutable));
     IF !((dep == NIL)) THEN
       RETURN dep;
     END
@@ -2003,10 +2009,8 @@ PUB FN escapeAnalysis__heap_return_from_args?(args: []Locatable, params: []Param
   END
 END
 PUB FN escapeAnalysis__expr_produces_heap?(expr: ?Locatable) RETURNS !Bool ->
-  MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
-  IF (UNWRAP (node) IS_A BinaryOp AND (UNWRAP (node).op == symbol("OR_ELSE"))) THEN
-    node = escapeAnalysis__unwrap_value(node.left());
-  END
+  MUTABLE rtoc_node_loc: ?Locatable = escapeAnalysis__unwrap_orelse_left(UNWRAP (expr));
+  MUTABLE node: ?DynamicValue = castOptionalLocatableToOptionalDynamicValue(rtoc_node_loc);
   IF ((aST__node_storage(UNWRAP (castDynamicValueToLocatable(UNWRAP (node)))) EXISTS) AND ([:rodata, :borrow]).contains?(symbolEntry__storage(node))) THEN
     RETURN FALSE;
   END
@@ -3117,6 +3121,15 @@ FN castDynamicValueToLocatable(value: DynamicValue) RETURNS ?Locatable ->
     DynamicValue.BenchmarkStmt AS item -> RETURN Locatable{ BenchmarkStmt: COPY item };,
     DynamicValue.SmashStmt AS item -> RETURN Locatable{ SmashStmt: COPY item };,
     DynamicValue.ProfileStmt AS item -> RETURN Locatable{ ProfileStmt: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+# Ruby narrows to `AST::FuncCall | AST::MethodCall` by asking `AST.call?`.
+FN castLocatableToEscapeAnalysisCall(value: Locatable) RETURNS ?EscapeAnalysisCall ->
+  PARTIAL MATCH value START
+    Locatable.FuncCall AS cast_payload -> RETURN EscapeAnalysisCall{ FuncCall: COPY cast_payload };,
+    Locatable.MethodCall AS cast_payload -> RETURN EscapeAnalysisCall{ MethodCall: COPY cast_payload };,
     DEFAULT -> RETURN NIL;
   END
   RETURN NIL;
