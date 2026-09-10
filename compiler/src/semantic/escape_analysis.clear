@@ -906,7 +906,7 @@ PUB FN escapeAnalysis__mark_receiver_allocations_in_loop_mut(body: []Node) RETUR
     RETURN;
   END
   MUTABLE declared_names = TRY (escapeAnalysis__loop_body_declared_names(body));
-  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(declared_names, MUTABLE node) -> {
+  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(declared_names) -> {
   IF (node IS_A MethodCall) THEN
       MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(node.matched_signature);
       IF sig EXISTS AS sig_value THEN
@@ -1360,11 +1360,13 @@ PUB FN escapeAnalysis__assigned_binding_name(node: AssignmentNode) RETURNS ?Stri
   END
   IF node IS_A Assignment AS assignment THEN
     MUTABLE target: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castAssignmentNameToDynamicValue(assignment.name)));
-    IF (target IS_A String OR target IS_A String@symbol) THEN
-      RETURN COPY CAST(target AS String);
+    IF castOptionalDynamicValueToOptionalString(target) EXISTS AS rtoc_target_name THEN
+      RETURN COPY rtoc_target_name;
     END
-    IF target IS_A Identifier THEN
-      RETURN COPY CAST(target.name() AS String);
+    IF castOptionalDynamicValueToOptionalLocatable(target) EXISTS AS rtoc_target_loc THEN
+      IF rtoc_target_loc IS_A Identifier THEN
+        RETURN COPY locatable__name(rtoc_target_loc);
+      END
     END
     RETURN NIL;
   ELSE
@@ -1449,12 +1451,14 @@ PUB FN escapeAnalysis__borrow_return_expr?(expr: ?Locatable) RETURNS !Bool ->
 END
 PUB FN escapeAnalysis__expr_has_heap_identifier?(expr: ?Locatable) RETURNS Bool ->
   MUTABLE found: Bool = FALSE;
-  aST__each_locatable_list(expr, FALSE, %(raw: Locatable) -> {
+  aST__each_locatable(UNWRAP (expr), FALSE, %(raw: Locatable) -> {
   MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(raw)));
-  IF node IS_A Identifier THEN
-      IF escapeAnalysis__symbol_heap?(node.symbol) THEN
+  IF castOptionalDynamicValueToOptionalLocatable(node) EXISTS AS rtoc_node_loc THEN
+    IF rtoc_node_loc IS_A Identifier AS rtoc_ident THEN
+      IF escapeAnalysis__symbol_heap?(rtoc_ident.symbol) THEN
         found = TRUE;
       END
+    END
   END
   rubyToClearVoid__escape_analysis()
   });
@@ -1462,26 +1466,34 @@ PUB FN escapeAnalysis__expr_has_heap_identifier?(expr: ?Locatable) RETURNS Bool 
 END
 PUB FN escapeAnalysis__expr_has_owned_inline_value?(expr: ?Locatable) RETURNS !Bool ->
   MUTABLE root: ?DynamicValue = escapeAnalysis__unwrap_value( castOptionalLocatableToOptionalDynamicValue(expr));
-  aST__each_locatable_list(expr, FALSE, %(raw: Locatable) USE(root) -> {
+  # Ruby returns straight out of the block; a CLEAR lambda cannot, so the
+  # answer rides a captured flag instead.
+  MUTABLE found: Bool = FALSE;
+  aST__each_locatable(UNWRAP (expr), FALSE, %(raw: Locatable) USE(root, MUTABLE found) -> {
   MUTABLE node: ?DynamicValue = escapeAnalysis__unwrap_value(UNWRAP (castLocatableToDynamicValue(raw)));
-  IF !(node IS_A Locatable) THEN
-      RETURN;
-  END
-  MUTABLE is_root = (aST__node_identity(node) == aST__node_identity(root));
-  IF !((is_root OR node IS_A Identifier)) THEN
-      IF node IS_A Literal THEN
-      IF node.value() IS_A String THEN
-        RETURN TRUE;
+  IF castOptionalDynamicValueToOptionalLocatable(node) EXISTS AS rtoc_node THEN
+    MUTABLE rtoc_root_loc: ?Locatable = castOptionalDynamicValueToOptionalLocatable(root);
+    MUTABLE is_root: Bool = FALSE;
+    IF rtoc_root_loc EXISTS AS rtoc_root THEN
+      is_root = (aST__node_identity(rtoc_node) == aST__node_identity(rtoc_root));
+    END
+    IF !((is_root OR rtoc_node IS_A Identifier)) THEN
+      IF rtoc_node IS_A Literal AS rtoc_literal THEN
+        IF rtoc_literal.value EXISTS AS rtoc_literal_value THEN
+          IF rtoc_literal_value IS_A String THEN
+            found = TRUE;
+          END
+        END
       END
+      MUTABLE ti = TRY (aST__full_type_mut(rtoc_node));
+      IF ((!(type__rodata?(ti)) AND (type__provenance(ti) != :borrow)) AND TRY (type__heap_ptr?(ti))) THEN
+        found = TRUE;
       END
-      MUTABLE ti = TRY (aST__full_type_mut(node));
-      IF ((!(ti.rodata?()) AND (ti.provenance() != :borrow)) AND TRY (type__heap_ptr?(ti))) THEN
-        RETURN TRUE;
-      END
+    END
   END
   rubyToClearVoid__escape_analysis()
   });
-  RETURN FALSE;
+  RETURN found;
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN FALSE;
 END
@@ -1617,7 +1629,7 @@ PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg
 END
 PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{Int64}[]Identifier ->
   MUTABLE refs: {Int64}[]Identifier = {};
-  aST__each_locatable(body, FALSE, %(node: Locatable) USE(MUTABLE refs, MUTABLE call, MUTABLE node, MUTABLE ti) -> {
+  aST__each_locatable(body, FALSE, %(node: Locatable) USE(MUTABLE refs, MUTABLE node, MUTABLE ti) -> {
   IF !(node IS_A LambdaLit) THEN
       RETURN;
   END
@@ -2371,6 +2383,18 @@ FN castNodeToLocatable__escape_analysis(value: Node) RETURNS Locatable ->
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
+END
+# Ruby asks `target.is_a?(String) || target.is_a?(Symbol)` before treating the
+# assignment target as a plain name.
+FN castOptionalDynamicValueToOptionalString(value: ?DynamicValue) RETURNS ?String ->
+  IF value EXISTS AS rtoc_value THEN
+    PARTIAL MATCH rtoc_value START
+      DynamicValue.StringValue AS cast_payload -> RETURN COPY cast_payload;,
+      DynamicValue.SymbolValue AS cast_payload -> RETURN COPY CAST(cast_payload AS String);,
+      DEFAULT -> RETURN NIL;
+    END
+  END
+  RETURN NIL;
 END
 FN castOptionalDynamicValueToLocatable(value: ?DynamicValue) RETURNS Locatable ->
   IF value == NIL THEN

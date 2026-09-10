@@ -6894,7 +6894,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_157 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_157, "_", NIL, (IF item_type EXISTS AS rtoc_wrap_6915 THEN SymbolEntryTypeInput{ Type: COPY rtoc_wrap_6915 } ELSE NIL END), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-      TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, UNWRAP (item_type), %() USE(node, MUTABLE rtoc_self_view, MUTABLE analysis) -> {
+      TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, UNWRAP (item_type), %() USE(node, MUTABLE rtoc_self_view) -> {
         MUTABLE rtoc_lambda_result_158: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
         rtoc_lambda_result_158
       }))
@@ -6950,7 +6950,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(item_type, node, MUTABLE rtoc_self_view) -> {
       MUTABLE rtoc_mutable_receiver_161 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       TRY (scope__declare(&rtoc_mutable_receiver_161, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-      TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view, MUTABLE analysis) -> {
+      TRY (typeAnalysisSession__with_soa_tracking(&rtoc_self_view, node, item_type, %() USE(node, MUTABLE rtoc_self_view) -> {
         MUTABLE rtoc_lambda_result_162: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
         rtoc_lambda_result_162
       }))
@@ -17488,7 +17488,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE stream_analysis: ?CaptureAnalysis = NIL;
     MUTABLE yield_types: []Type@multiowned = TRY (typeAnalysisSession__with_stream_yield_frame(&rtoc_self_view, node, %() USE(node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_420 = typeAnalysisSession__with_async_body_fact_frame(&rtoc_self_view, AsyncBodyNode{ BgStreamBlock: COPY node }, AsyncValidationNode{ BgStreamBlock: COPY node }, %() USE(node, MUTABLE rtoc_self_view) -> {
-    stream_analysis = typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, FALSE, FALSE, %() USE(node, MUTABLE rtoc_self_view, MUTABLE yield_types) -> {
+    stream_analysis = typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, FALSE, FALSE, %() USE(node, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, node.body));
       rubyToClearVoid__type_analysis_session()
     });
