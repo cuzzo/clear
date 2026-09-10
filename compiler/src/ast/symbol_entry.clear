@@ -490,7 +490,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((families != NIL)) THEN
       RETURN FALSE;
     END
-    RETURN !((UNWRAP (families)).empty?());
+    RETURN !((families).empty?());
 }
 END
 PRIVATE FN symbolEntry__lock_sync?(self: SymbolEntry) RETURNS Bool

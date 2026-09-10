@@ -86,7 +86,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   CONTINUE;
     END
     MUTABLE target = (emit__tail_resume_target( UNWRAP (segment_specs[rtoc_idx]?.tail)) OR_ELSE (rtoc_idx + 1));
-    bind_for_index[target] = TRY (emit__fsm_body_mir_items(UNWRAP (d).bind_stmts));
+    bind_for_index[target] = TRY (emit__fsm_body_mir_items(d.bind_stmts));
   rtoc_idx = rtoc_idx + 1;
   END
   MUTABLE body_fn_names_by_index: {Int64}String = {};
@@ -680,7 +680,7 @@ PRIVATE FN emit__register_recursive_destroy_actions_mut(MUTABLE ctx: FsmEmitCont
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    &ctx.destroy_actions.append(FsmDestroyAction{ FsmDestroyStmt: COPY FsmDestroyStmt{ source_kind: :capture, name: UNWRAP (COPY name), stmt: COPY ctx.capture_finalizers[rtoc_idx]? } });
+    &ctx.destroy_actions.append(FsmDestroyAction{ FsmDestroyStmt: COPY FsmDestroyStmt{ source_kind: :capture, name: COPY name, stmt: COPY ctx.capture_finalizers[rtoc_idx]? } });
   rtoc_idx = rtoc_idx + 1;
   END
 END
@@ -828,7 +828,7 @@ PRIVATE FN emit__register_owned_suspend_result_cleanups_mut(segment_specs: []Fsm
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE name = COPY CAST(UNWRAP (desc).result_var AS String);
+    MUTABLE name = COPY CAST(desc.result_var AS String);
     IF !(seen.add?(name)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -966,7 +966,7 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
     IF !(idx) THEN
       BREAK;
     END
-    IF visited[UNWRAP (idx)] THEN
+    IF visited[idx] THEN
       CONTINUE;
     END
     visited[idx] = TRUE;

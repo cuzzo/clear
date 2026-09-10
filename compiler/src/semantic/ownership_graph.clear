@@ -502,8 +502,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE mine_value: OwnershipNode = COPY UNWRAP (mine);
-      MUTABLE theirs_value: OwnershipNode = COPY UNWRAP (theirs);
+      MUTABLE mine_value: OwnershipNode = COPY mine;
+      MUTABLE theirs_value: OwnershipNode = COPY theirs;
       IF (mine_value.state != theirs_value.state) THEN
           IF ([mine_value.state, theirs_value.state] == [:live, :moved]) OR ([mine_value.state, theirs_value.state] == [:moved, :live]) THEN
             &errors.append("variable '${current_path.path}' is moved in one branch but live in the other");

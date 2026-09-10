@@ -312,7 +312,7 @@ PUB FN cleanupClassifier__promote_entry_to_heap_cleanup_mut(MUTABLE entry_obj: C
   IF !(ti_opt EXISTS) THEN
     RETURN;
   END
-  MUTABLE ti: Type = COPY UNWRAP (ti_opt);
+  MUTABLE ti: Type = COPY ti_opt;
   MUTABLE is_string = TRY (type__string?(ti));
   IF (type__symbol?(ti) OR (is_string AND type__rodata?(ti))) THEN
     RETURN;
@@ -398,7 +398,7 @@ PRIVATE FN cleanupClassifier__stamp_field_pre_cleanup_mut(MUTABLE assignment: As
   IF !(field_ti_opt EXISTS) THEN
     RETURN;
   END
-  MUTABLE field_ti: Type = COPY UNWRAP (field_ti_opt);
+  MUTABLE field_ti: Type = COPY field_ti_opt;
   MUTABLE lifecycle: ?LifecyclePlan@multiowned = NIL;
   IF lifecycle_registry EXISTS AS registry THEN
     lifecycle = COPY TRY (lifecycleRegistry__fetch(registry, field_ti));
@@ -821,7 +821,7 @@ PRIVATE FN cleanupClassifier__stamp_match_as_bindings_mut(match_stmt: MatchState
   IF !(schema EXISTS) THEN
     RETURN;
   END
-  MUTABLE variants: {String@symbol}?SchemasUnionSchemaVariantValue = COPY UNWRAP (schema).variants;
+  MUTABLE variants: {String@symbol}?SchemasUnionSchemaVariantValue = COPY schema.variants;
   FOR match_case IN match_stmt.cases DO
     IF match_case.binding EXISTS AS binding_name THEN
       IF cleanupClassifier__match_case_variant_name(match_case) EXISTS AS variant_name THEN
@@ -921,7 +921,7 @@ PRIVATE FN cleanupClassifier__capture_entry(expr: Locatable, classification_node
   IF !(inner_opt EXISTS) THEN
     RETURN NIL;
   END
-  MUTABLE inner_ti: Type = COPY UNWRAP (inner_opt);
+  MUTABLE inner_ti: Type = COPY inner_opt;
   MUTABLE e: ?CleanupEntry@multiowned = TRY (cleanupClassifier__classify_binding(inner_ti, classification_node, schema_lookup, lifecycle_registry));
   IF !(lifecycle_registry EXISTS) THEN
     IF !(e EXISTS) THEN
@@ -935,7 +935,7 @@ PRIVATE FN cleanupClassifier__capture_entry(expr: Locatable, classification_node
   IF !(e EXISTS) THEN
     RETURN NIL;
   END
-  MUTABLE entry_value = COPY UNWRAP (e);
+  MUTABLE entry_value = COPY e;
   IF TRY (cleanupClassifier__capture_expr_owned_alloc(expr, schema_lookup)) EXISTS AS capture_alloc THEN
     cleanupEntry__set_alloc_mut(&entry_value, capture_alloc);
   END
@@ -1218,7 +1218,7 @@ PUB FN cleanupClassifier__finalize_alloc_from_storage_mut(MUTABLE entry: ?Cleanu
   IF !(entry EXISTS) THEN
     RETURN NIL;
   END
-  MUTABLE finalized: CleanupEntry@multiowned = COPY UNWRAP (entry);
+  MUTABLE finalized: CleanupEntry@multiowned = COPY entry;
   IF cleanupEntry__fixed_alloc?(finalized) THEN
     RETURN COPY finalized;
   END
@@ -1754,7 +1754,7 @@ PUB FN cleanupClassifier__union_variants_need_cleanup?(schema: ?UnionSchema, sch
   IF !(schema EXISTS) THEN
     RETURN FALSE;
   END
-  MUTABLE concrete_schema: UnionSchema = COPY UNWRAP (schema);
+  MUTABLE concrete_schema: UnionSchema = COPY schema;
   FOR variant_name IN concrete_schema.variants.keys() DO
     IF TRY (cleanupClassifier__variant_type_needs_cleanup?(COPY concrete_schema.variants[variant_name], schema_lookup)) THEN
       RETURN TRUE;
@@ -1779,7 +1779,7 @@ PUB FN cleanupClassifier__elem_has_cleanup_fields?(schema: ?FieldBearingSchema, 
   IF !(schema EXISTS) THEN
     RETURN FALSE;
   END
-  MUTABLE concrete_schema: FieldBearingSchema = COPY UNWRAP (schema);
+  MUTABLE concrete_schema: FieldBearingSchema = COPY schema;
   MUTABLE borrowed: [Set]String = TRY (cleanupClassifier__borrowed_field_names(concrete_schema));
   FOR field_name IN cleanupClassifier__schema_field_names(concrete_schema) DO
     IF !(borrowed.contains?(COPY field_name)) THEN

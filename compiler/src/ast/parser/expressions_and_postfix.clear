@@ -1067,7 +1067,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF token_slot == NIL THEN
         RETURN FALSE;
       END
-      MUTABLE token: Token = UNWRAP (token_slot);
+      MUTABLE token: Token = token_slot;
       IF ((token.type == :CHAR) AND (token__text_is?(token, "<"))) THEN
         depth = (depth + 1);
       ELSE_IF ((token.type == :CHAR) AND (((token__text_is?(token, ">")) OR (token__text_is?(token, ">>"))))) THEN

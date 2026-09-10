@@ -390,7 +390,7 @@ PRIVATE FN hoist__composite_element_store?(call: MethodCall) RETURNS !Bool ->
   IF !(ti_opt EXISTS) THEN
     RETURN FALSE;
   END
-  MUTABLE ti: Type = COPY UNWRAP (ti_opt);
+  MUTABLE ti: Type = COPY ti_opt;
   IF !(type__collection?(ti)) THEN
     RETURN FALSE;
   END

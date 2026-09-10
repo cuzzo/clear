@@ -148,7 +148,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (symbol == NIL) THEN
       RETURN;
     END
-    MUTABLE symbol_value: SymbolEntry@multiowned = KEEP UNWRAP (symbol);
+    MUTABLE symbol_value: SymbolEntry@multiowned = KEEP symbol;
     MUTABLE root: ?Identifier = ownershipTransportFacts__source_root_identifier(rtoc_self_view, source);
     IF root EXISTS AS root_value THEN
       MUTABLE root_value_mutable = COPY root_value;

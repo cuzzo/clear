@@ -12641,7 +12641,7 @@ FN mIR__collect_nodes_inner(root: ?NodeRoot, stop_at_block_expr: Bool) RETURNS !
     IF node == NIL THEN
       RETURN out;
     END
-    MUTABLE node_value = COPY UNWRAP (node);
+    MUTABLE node_value = COPY node;
     &out.append(COPY node_value);
     IF stop_at_block_expr THEN
       IF node_value IS_A MIRBlockExpr THEN
@@ -12679,7 +12679,7 @@ FN mIR__collect_nodes_until_inner(root: ?NodeRoot, stop: FN(Emittable) -> Bool) 
     IF node == NIL THEN
       RETURN out;
     END
-    MUTABLE node_value = COPY UNWRAP (node);
+    MUTABLE node_value = COPY node;
     &out.append(COPY node_value);
     # The stopping node is reported, but nothing beneath it is.
     IF stop(node_value) THEN
@@ -12713,7 +12713,7 @@ FN mIR__surface_nodes(root: ?NodeRoot) RETURNS ![]Emittable EFFECTS REENTRANT ->
     IF node == NIL THEN
       RETURN out;
     END
-    MUTABLE node_value = COPY UNWRAP (node);
+    MUTABLE node_value = COPY node;
     &out.append(COPY node_value);
     IF node_value IS_A MIRBlockExpr THEN
       RETURN out;
@@ -12739,7 +12739,7 @@ FN mIR__each_node_inner(root: ?NodeRoot, stop_at_block_expr: Bool, stop: ?FN(Emi
     IF node == NIL THEN
       RETURN;
     END
-    MUTABLE node_value = COPY UNWRAP (node);
+    MUTABLE node_value = COPY node;
     blk(node_value);
     IF stop_at_block_expr THEN
     IF node_value IS_A MIRBlockExpr THEN
@@ -12777,7 +12777,7 @@ FN mIR__each_surface_node_inner(root: ?NodeRoot, blk: FN(Emittable) -> Void) RET
     IF node == NIL THEN
       RETURN;
     END
-    MUTABLE node_value = COPY UNWRAP (node);
+    MUTABLE node_value = COPY node;
     blk(node_value);
     IF node_value IS_A MIRBlockExpr THEN
       RETURN;

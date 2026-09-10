@@ -705,8 +705,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF ((key_res == NIL) OR (val_res == NIL)) THEN
         CONTINUE;
     END
-    MUTABLE key_resolution: Resolution = COPY UNWRAP (key_res);
-    MUTABLE val_resolution: Resolution = COPY UNWRAP (val_res);
+    MUTABLE key_resolution: Resolution = COPY key_res;
+    MUTABLE val_resolution: Resolution = COPY val_res;
     MUTABLE decl: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__auto_inference(key_resolution.slot.decl_node);
     MUTABLE k_sym: String@symbol = observedTypeSymbol(key_resolution.type);
     MUTABLE v_sym: String@symbol = observedTypeSymbol(val_resolution.type);

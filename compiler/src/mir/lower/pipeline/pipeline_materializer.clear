@@ -366,7 +366,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (metadata == NIL) THEN
       RETURN NIL;
     END
-    MUTABLE metadata_value: InlineAllocMetadata@multiowned = COPY UNWRAP (metadata);
+    MUTABLE metadata_value: InlineAllocMetadata@multiowned = COPY metadata;
     IF inlineAllocMetadata__empty?(metadata_value) THEN
       RETURN NIL;
     END

@@ -107,7 +107,7 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
   CONTINUE;
     END
     MUTABLE arm_families: [Set]String@symbol = Set[];
-    FOR arm IN UNWRAP (arms) DO
+    FOR arm IN arms DO
       &arm_families.insert(COPY arm.family);
     END
     MUTABLE required_families: [Set]String@symbol = Set[];
@@ -284,7 +284,7 @@ PUB FN withMatchCheck__family_of_arg(arg: Locatable) RETURNS ?String@symbol ->
   IF sym_opt == NIL THEN
     RETURN NIL;
   END
-  MUTABLE sym: SymbolEntry@multiowned = COPY KEEP UNWRAP (sym_opt);
+  MUTABLE sym: SymbolEntry@multiowned = COPY KEEP sym_opt;
   MUTABLE sync: ?String@symbol = symbolEntry__sync(sym);
   IF ((sync != NIL) AND ([:locked, :write_locked, :always_mutable]).contains?(sync)) THEN
     RETURN :LOCKED;

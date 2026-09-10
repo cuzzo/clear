@@ -11852,7 +11852,7 @@ PUB FN aST__capture_expr_owns_result?(node: ?Locatable) RETURNS !Bool ->
   IF !(node EXISTS) THEN
     RETURN FALSE;
   END
-  MUTABLE current: Locatable = COPY UNWRAP (node);
+  MUTABLE current: Locatable = COPY node;
   WHILE current IS_A Cast DO
     PARTIAL MATCH current START
       Locatable.Cast AS cast_node -> current = COPY cast_node.value;
@@ -12183,7 +12183,7 @@ PUB FN aST__body_slots(node: ?Locatable) RETURNS ![]ASTBodySlot ->
   IF !((node != NIL)) THEN
     RETURN slots;
   END
-  MUTABLE inner: Locatable = COPY UNWRAP (node);
+  MUTABLE inner: Locatable = COPY node;
   IF inner IS_A IfStatement AS if_statement THEN
     &slots.append(ASTBodySlot{ body: COPY if_statement.then_branch, name: :then_branch, index: 0 });
     IF (if_statement.else_branch != NIL) THEN

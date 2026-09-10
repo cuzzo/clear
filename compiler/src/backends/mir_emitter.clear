@@ -4550,7 +4550,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE target = "${root_name}.@\"${_.index.toString()}\"";
     MUTABLE close_plan: ?ResourceClosePlan = COPY _.close_plan;
     (  IF close_plan THEN
-        "${TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, UNWRAP (close_plan), target))};"
+        "${TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, close_plan, target))};"
       ELSE
         "CheatLib.cleanup(@TypeOf(${target}), ${alloc}, &${target});"
       END)

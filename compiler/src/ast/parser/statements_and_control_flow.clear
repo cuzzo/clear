@@ -242,7 +242,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF token_slot == NIL THEN
         RETURN FALSE;
       END
-      MUTABLE token: Token = UNWRAP (token_slot);
+      MUTABLE token: Token = token_slot;
       IF (token.type == :EOF) THEN
         RETURN FALSE;
       END
