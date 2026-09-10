@@ -1624,13 +1624,22 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
   });
   RETURN FunctionFacts{ fn: fn_value, symbols: symbols, binding_values: COPY binding_values, return_values: COPY return_values, assignment_nodes: COPY assignment_nodes, escape_nodes: COPY escape_nodes, lambda_body_identifier_refs: COPY TRY (escapeAnalysis__collect_lambda_identifier_refs(fn_value.body)) };
 END
+PUB FN escapeAnalysis__bindingNodeName(node: BindingNode) RETURNS String ->
+  PARTIAL MATCH node START
+    BindingNode.VarDecl AS item -> RETURN COPY CAST(item.name AS String);,
+    BindingNode.BindExpr AS item -> RETURN COPY CAST(item.name AS String);,
+    BindingNode.DestructureTarget AS item -> RETURN COPY CAST(item.name AS String);,
+    DEFAULT -> RETURN COPY "";
+  END
+  RETURN COPY "";
+END
 PUB FN escapeAnalysis__record_symbol_fact_mut(node: BindingNode, MUTABLE symbols: {String}SymbolEntry) RETURNS Void ->
   MUTABLE sym: ?SymbolEntry@multiowned = escapeAnalysis__symbol_for_binding_node(node);
-  IF sym THEN
-    symbols[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
+  IF sym EXISTS AS rtoc_sym THEN
+    symbols[escapeAnalysis__bindingNodeName(node)] = COPY rtoc_sym;
   END
 END
-PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbols: {String}SymbolEntry, binding_values: {String}[]Locatable) RETURNS Void ->
+PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbols: {String}SymbolEntry, MUTABLE binding_values: {String}[]Locatable) RETURNS Void ->
   escapeAnalysis__record_symbol_fact_mut(node, &symbols);
   MUTABLE value: ?Locatable = NIL;
   IF (node IS_A VarDecl OR node IS_A BindExpr) THEN
@@ -1639,7 +1648,7 @@ PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbol
   IF !((value != NIL)) THEN
     RETURN;
   END
-  MUTABLE binding_key: String = (MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END);
+  MUTABLE binding_key: String = escapeAnalysis__bindingNodeName(node);
   MUTABLE binding_entry = COPY (binding_values[binding_key] OR_ELSE List[]);
   &binding_entry.append(value);
   binding_values[binding_key] = COPY binding_entry;
@@ -1661,23 +1670,23 @@ PUB FN escapeAnalysis__mark_lambda_captures_heap_mut(node: LambdaLit, MUTABLE bg
     RETURN;
   END
   MUTABLE identifiers: ?[]Identifier = NIL;
-  IF facts?.lambda_body_identifier_refs != NIL THEN
-    identifiers = COPY ((facts?.lambda_body_identifier_refs)?[aST__node_identity(Locatable{ LambdaLit: COPY node })]);
+  IF facts EXISTS AS rtoc_facts THEN
+    identifiers = COPY rtoc_facts.lambda_body_identifier_refs[aST__node_identity(Locatable{ LambdaLit: COPY node })];
   END
-  identifiers = (identifiers OR_ELSE TRY (escapeAnalysis__collect_lambda_body_identifiers(node)));
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < UNWRAP (identifiers).length() DO
-    IF !(names.contains?(CAST(identifiers[rtoc_idx].name() AS String))) THEN
-      rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+  IF (identifiers == NIL) THEN
+    identifiers = TRY (escapeAnalysis__collect_lambda_body_identifiers(node));
+  END
+  MUTABLE rtoc_identifiers: []Identifier = COPY (identifiers OR_ELSE List[]);
+  FOR rtoc_ident IN rtoc_identifiers DO
+    MUTABLE rtoc_ident_name: String = COPY CAST(rtoc_ident.name AS String);
+    IF names.contains?(rtoc_ident_name) THEN
+      escapeAnalysis__mark_symbol_heap_mut(rtoc_ident.symbol, &bg_heap, rtoc_ident_name);
     END
-    escapeAnalysis__mark_symbol_heap_mut(identifiers[rtoc_idx].symbol, &bg_heap, CAST(identifiers[rtoc_idx].name() AS String));
-  rtoc_idx = rtoc_idx + 1;
   END
 END
 PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{Int64}[]Identifier ->
   MUTABLE refs: {Int64}[]Identifier = {};
-  aST__each_locatable(body, FALSE, %(node: Locatable) USE(MUTABLE refs, MUTABLE node, MUTABLE ti) -> {
+  aST__each_locatable_list(body |> SELECT castNodeToLocatable__escape_analysis(_), FALSE, %(node: Locatable) USE(MUTABLE refs) -> {
   IF !(node IS_A LambdaLit) THEN
       RETURN;
   END
@@ -1770,10 +1779,14 @@ PUB FN escapeAnalysis__borrowed_return?(fn_value: FunctionDef, expr: Locatable) 
     RETURN !((ruby_set_intersection_String_set__escape_analysis(returned, param_names)).empty?());
   END
   MUTABLE borrowed: [Set]String = Set[];
-  FOR _ IN fn_value.return_lifetime DO
-  IF (aST__node_name(_) EXISTS) THEN
-    &borrowed.insert(COPY CAST(_.name() AS String));
-  END
+  IF fn_value.return_lifetime EXISTS AS rtoc_return_lifetime THEN
+    IF rtoc_return_lifetime IS_A ArrayValue AS rtoc_lifetime_nodes THEN
+      FOR rtoc_lifetime_node IN rtoc_lifetime_nodes DO
+        IF aST__node_name(rtoc_lifetime_node) EXISTS AS rtoc_lifetime_name THEN
+          &borrowed.insert(COPY CAST(rtoc_lifetime_name AS String));
+        END
+      END
+    END
   END
   RETURN !((ruby_set_intersection_String_set__escape_analysis(returned, borrowed)).empty?());
 END
