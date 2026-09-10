@@ -2273,7 +2273,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
       IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
-        length = COPY CAST(((tokenValue__to_f(UNWRAP (castLocatableToLiteral(index))) + 1.0)) AS String);
+        length = COPY CAST(((tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(index)).value)) + 1.0)) AS String);
       ELSE
         length = "0";
       END
@@ -5652,8 +5652,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
       END
       IF UNWRAP (opts["size"]) IS_A Literal THEN
-        MUTABLE v = tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))));
-        IF (_ <= 0.0) THEN
+        MUTABLE v = tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))).value));
+        IF (v <= 0.0) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_POSITIVE }));
         END
       END
@@ -6618,7 +6618,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (IF expr IS_A UnaryOp AS rtoc_neg_op THEN (rtoc_neg_op.op == :SUB) ELSE FALSE END) THEN
         MUTABLE right: ?Locatable = aST__node_right(expr);
         IF UNWRAP (right) IS_A Literal THEN
-          RETURN (-tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (right)))));
+          RETURN (-tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (right))).value)));
         END
     END
     END
@@ -7498,7 +7498,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(((UNWRAP (castLocatableToLiteral(UNWRAP (lit))).type == :INT64) OR (UNWRAP (castLocatableToLiteral(UNWRAP (lit))).type == :PREFIXED_INT))) THEN
       RETURN NIL;
     END
-    RETURN (-tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (lit)))));
+    RETURN (-tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (lit))).value)));
 }
 END
 PRIVATE FN typeAnalysisSession__integer_range_target_type(MUTABLE self: TypeAnalysisSession, effective_type: TypeTypeInput) RETURNS !?String@symbol
