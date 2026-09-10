@@ -19440,3 +19440,24 @@ PUB FN locatable__layout(value: Locatable) RETURNS ?String@symbol ->
   END
   RETURN NIL;
 END
+PUB FN castClearParserConcurrentPipelineOpToLocatable(value: ClearParserConcurrentPipelineOp) RETURNS ?Locatable ->
+  PARTIAL MATCH value START
+    ClearParserConcurrentPipelineOp.SelectOpMultiowned AS item -> RETURN Locatable{ SelectOp: COPY item };,
+    ClearParserConcurrentPipelineOp.WhereOpMultiowned AS item -> RETURN Locatable{ WhereOp: COPY item };,
+    ClearParserConcurrentPipelineOp.EachOp AS item -> RETURN Locatable{ EachOp: COPY item };,
+    ClearParserConcurrentPipelineOp.SumOpMultiowned AS item -> RETURN Locatable{ SumOp: COPY item };,
+    ClearParserConcurrentPipelineOp.CountOpMultiowned AS item -> RETURN Locatable{ CountOp: COPY item };,
+    ClearParserConcurrentPipelineOp.MinOpMultiowned AS item -> RETURN Locatable{ MinOp: COPY item };,
+    ClearParserConcurrentPipelineOp.MaxOpMultiowned AS item -> RETURN Locatable{ MaxOp: COPY item };,
+    ClearParserConcurrentPipelineOp.AverageOpMultiowned AS item -> RETURN Locatable{ AverageOp: COPY item };,
+    ClearParserConcurrentPipelineOp.SelectOp AS item -> RETURN Locatable{ SelectOp: COPY item };,
+    ClearParserConcurrentPipelineOp.WhereOp AS item -> RETURN Locatable{ WhereOp: COPY item };,
+    ClearParserConcurrentPipelineOp.SumOp AS item -> RETURN Locatable{ SumOp: COPY item };,
+    ClearParserConcurrentPipelineOp.CountOp AS item -> RETURN Locatable{ CountOp: COPY item };,
+    ClearParserConcurrentPipelineOp.MinOp AS item -> RETURN Locatable{ MinOp: COPY item };,
+    ClearParserConcurrentPipelineOp.MaxOp AS item -> RETURN Locatable{ MaxOp: COPY item };,
+    ClearParserConcurrentPipelineOp.AverageOp AS item -> RETURN Locatable{ AverageOp: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END

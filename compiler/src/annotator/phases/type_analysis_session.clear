@@ -6693,14 +6693,14 @@ PRIVATE FN typeAnalysisSession__analyze_concurrent_op(MUTABLE self: TypeAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE conc = COPY node.right;
-    MUTABLE options: {String}Locatable = CAST(locatable__options(conc) AS {String}Locatable);
-    TRY (typeAnalysisSession__validate_concurrent_options_mut(&rtoc_self_view, node, castLocatableToConcurrentOp__type_analysis_session(conc), options));
+    MUTABLE conc: ConcurrentOp = castLocatableToConcurrentOp__type_analysis_session(node.right);
+    MUTABLE options: {String}Locatable = COPY conc.options;
+    TRY (typeAnalysisSession__validate_concurrent_options_mut(&rtoc_self_view, node, conc, options));
     TRY (typeAnalysisSession__stamp_concurrent_option_values_mut(&rtoc_self_view, options));
     MUTABLE lhs_type = TRY (aST__full_type_mut(node.left));
-    MUTABLE shard_node: ?ShardOp = TRY (typeAnalysisSession__prepare_concurrent_shard_context_mut(&rtoc_self_view, node, castLocatableToConcurrentOp__type_analysis_session(conc)));
-    MUTABLE proxy = BinaryOp{ token: COPY UNWRAP (locatable__token(Locatable{ BinaryOp: COPY node })), left: COPY UNWRAP (locatable__left(Locatable{ BinaryOp: COPY node })), op: :SMOOTH, right: COPY conc.op, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
-    IF (conc.op() IS_A SelectOp) OR (conc.op() IS_A WhereOp) THEN
+    MUTABLE shard_node: ?ShardOp = TRY (typeAnalysisSession__prepare_concurrent_shard_context_mut(&rtoc_self_view, node, &conc));
+    MUTABLE proxy = BinaryOp{ token: COPY UNWRAP (locatable__token(Locatable{ BinaryOp: COPY node })), left: COPY UNWRAP (locatable__left(Locatable{ BinaryOp: COPY node })), op: :SMOOTH, right: COPY UNWRAP (castClearParserConcurrentPipelineOpToLocatable(UNWRAP (conc.op))), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
+    IF (UNWRAP (conc.op) IS_A SelectOp) OR (UNWRAP (conc.op) IS_A WhereOp) THEN
       IF TRY (typeAnalysisSession__bounded_stream_source?(&rtoc_self_view, &node.left)) THEN
         TRY (typeAnalysisSession__analyze_concurrent_bounded_select_family_op(&rtoc_self_view, &node));
       ELSE_IF TRY (typeAnalysisSession__concurrent_stream_source?(&rtoc_self_view, node.left, lhs_type)) THEN
@@ -6708,55 +6708,57 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         TRY (typeAnalysisSession__analyze_select_family_op(&rtoc_self_view, &proxy));
       END
-    ELSE_IF (conc.op() IS_A EachOp) THEN
+    ELSE_IF (UNWRAP (conc.op) IS_A EachOp) THEN
       IF TRY (typeAnalysisSession__bounded_stream_source?(&rtoc_self_view, &node.left)) THEN
         TRY (typeAnalysisSession__analyze_concurrent_bounded_each_op(&rtoc_self_view, &node));
       ELSE_IF TRY (typeAnalysisSession__concurrent_stream_source?(&rtoc_self_view, node.left, lhs_type)) THEN
         TRY (typeAnalysisSession__analyze_concurrent_stream_each_op(&rtoc_self_view, &node));
       ELSE_IF shard_node THEN
-        TRY (typeAnalysisSession__analyze_shard_each_op(&rtoc_self_view, &node, UNWRAP (shard_node)));
+        TRY (typeAnalysisSession__analyze_shard_each_op(&rtoc_self_view, &node, shard_node));
       ELSE
         MUTABLE sharded_names = Set[];
-        FOR _ IN conc.op().body() DO
-        TRY (typeAnalysisSession__collect_sharded_names(&rtoc_self_view, _, &sharded_names));
+        FOR _ IN (clearParserConcurrentPipelineOp__body(UNWRAP (conc.op)) OR_ELSE List[]) DO
+        TRY (typeAnalysisSession__collect_sharded_names(&rtoc_self_view, castLocatableToShardScanNode(_), &sharded_names));
         END
-        conc.capture_analysis = typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, FALSE, FALSE, %() USE(conc, MUTABLE node, MUTABLE proxy, sharded_names, MUTABLE rtoc_self_view) -> {
+        conc.capture_analysis = typeAnalysisSession__with_fiber_capture_analysis(&rtoc_self_view, FALSE, FALSE, %() USE(MUTABLE conc, MUTABLE node, MUTABLE proxy, sharded_names, MUTABLE rtoc_self_view) -> {
     IF (sharded_names.length() > 1) THEN
-            TRY (typeAnalysisSession__emit_multi_map_warning(&rtoc_self_view, castLocatableToConcurrentOp__type_analysis_session(conc), sharded_names));
+            TRY (typeAnalysisSession__emit_multi_map_warning(&rtoc_self_view, conc, sharded_names));
             TRY (typeAnalysisSession__analyze_each_op(&rtoc_self_view, &proxy));
     ELSE_IF (sharded_names.length() == 1) THEN
-            TRY (typeAnalysisSession__analyze_auto_shard_each_op(&rtoc_self_view, &node, castLocatableToConcurrentOp__type_analysis_session(conc), proxy));
+            TRY (typeAnalysisSession__analyze_auto_shard_each_op(&rtoc_self_view, &node, &conc, proxy));
     ELSE
             TRY (typeAnalysisSession__analyze_each_op(&rtoc_self_view, &proxy));
     END
     rubyToClearVoid__type_analysis_session()
         });
       END
-    ELSE_IF (conc.op() IS_A SumOp) THEN
+    ELSE_IF (UNWRAP (conc.op) IS_A SumOp) THEN
       TRY (typeAnalysisSession__analyze_sum_op(&rtoc_self_view, &proxy));
-    ELSE_IF (conc.op() IS_A CountOp) THEN
+    ELSE_IF (UNWRAP (conc.op) IS_A CountOp) THEN
       TRY (typeAnalysisSession__analyze_count_op(&rtoc_self_view, &proxy));
-    ELSE_IF (conc.op() IS_A MinOp) THEN
+    ELSE_IF (UNWRAP (conc.op) IS_A MinOp) THEN
       TRY (typeAnalysisSession__analyze_min_op(&rtoc_self_view, &proxy));
-    ELSE_IF (conc.op() IS_A MaxOp) THEN
+    ELSE_IF (UNWRAP (conc.op) IS_A MaxOp) THEN
       TRY (typeAnalysisSession__analyze_max_op(&rtoc_self_view, &proxy));
-    ELSE_IF (conc.op() IS_A AverageOp) THEN
+    ELSE_IF (UNWRAP (conc.op) IS_A AverageOp) THEN
       TRY (typeAnalysisSession__analyze_average_op(&rtoc_self_view, &proxy));
     ELSE
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, conc, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_BAD_FOLLOWING_OP }, [], CAST({:got: DiagnosticKwValue{ StringValue: locatable__variant_name(conc.op()) }} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConcurrentOp: COPY conc } }, TypeAnalysisCodeOrMessage{ SymbolValue: :CONCURRENT_BAD_FOLLOWING_OP }, [], CAST({:got: DiagnosticKwValue{ StringValue: locatable__variant_name(UNWRAP (castClearParserConcurrentPipelineOpToLocatable(UNWRAP (conc.op)))) }} AS {String@symbol}Any)));
     END
-    MUTABLE inner_expr = PARTIAL MATCH conc.op() START
-      AST.SelectOp -> conc.op().expression(),
-      AST.WhereOp -> conc.op().expression(),
-      DEFAULT -> NIL
-    END;
-    IF (_ IS_A BinaryOp AND (_.op() == symbol("OR_ELSE"))) THEN
-      MUTABLE modifier = inner_expr.right();
+    MUTABLE inner_expr: ?Locatable = NIL;
+    IF (UNWRAP (conc.op) IS_A SelectOp OR UNWRAP (conc.op) IS_A WhereOp) THEN
+      inner_expr = clearParserConcurrentPipelineOp__expression(UNWRAP (conc.op));
+    END
+    IF (IF inner_expr EXISTS AS rtoc_ie THEN (IF rtoc_ie IS_A BinaryOp AS rtoc_ie_bin THEN (rtoc_ie_bin.op == symbol("OR_ELSE")) ELSE FALSE END) ELSE FALSE END) THEN
+      MUTABLE modifier = UNWRAP (locatable__right(UNWRAP (inner_expr)));
       IF (modifier IS_A OrElsePrune OR modifier IS_A OrElseRaise) THEN
-        MUTABLE inner_fn_type = inner_expr.left().full_type_mut({:context: "inner pipeline left"});
-        MUTABLE is_error_union = ((TRUE AND inner_expr.left().error_union_type));
+        MUTABLE inner_fn_type: ?Type = TRY (aST__full_type_mut(UNWRAP (locatable__left(UNWRAP (inner_expr)))));
+        MUTABLE is_error_union: Bool = FALSE;
+        IF locatable__error_union_type(UNWRAP (locatable__left(UNWRAP (inner_expr)))) != NIL THEN
+          is_error_union = TRUE;
+        END
         IF inner_fn_type != NIL THEN
-          is_error_union = inner_fn_type.error_union?();
+          is_error_union = (is_error_union OR type__error_union?(inner_fn_type));
         END
         IF !(is_error_union) THEN
           MUTABLE mod_name: String = "";
@@ -6765,24 +6767,26 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           ELSE
             mod_name = "OR_ELSE RAISE";
           END
-          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, modifier, TypeAnalysisCodeOrMessage{ SymbolValue: :MODIFIER_NEEDS_ERROR_UNION }, [], CAST({:name: mod_name, :got: inner_expr.left().resolved_type} AS {String@symbol}Any)));
+          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY modifier }, TypeAnalysisCodeOrMessage{ SymbolValue: :MODIFIER_NEEDS_ERROR_UNION }, [], CAST({:name: mod_name, :got: locatable__resolved_type(UNWRAP (locatable__left(UNWRAP (inner_expr))))} AS {String@symbol}Any)));
         END
         IF modifier IS_A OrElseRaise THEN
-          inner_expr.retain_error_channel = TRUE;
+      IF inner_expr EXISTS AS MUTABLE rtoc_ie_w THEN
+        locatable__set_retain_error_channel_mut(&rtoc_ie_w, TRUE);
+      END
         END
       END
     END
-    MUTABLE stream_op_analyzed = (aST__pipeline_stream_value_op?(conc.op()) AND ((TRY (typeAnalysisSession__bounded_stream_source?(&rtoc_self_view, &node.left)) OR TRY (typeAnalysisSession__concurrent_stream_source?(&rtoc_self_view, node.left, lhs_type)))));
-    IF !(_) THEN
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (aST__full_type_mut(proxy))));
-      node.storage_override = IF ((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })) == :Void)) THEN
+    MUTABLE stream_op_analyzed = (aST__pipeline_stream_value_op?(UNWRAP (castClearParserConcurrentPipelineOpToLocatable(UNWRAP (conc.op)))) AND ((TRY (typeAnalysisSession__bounded_stream_source?(&rtoc_self_view, &node.left)) OR TRY (typeAnalysisSession__concurrent_stream_source?(&rtoc_self_view, node.left, lhs_type)))));
+    IF !(stream_op_analyzed) THEN
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY proxy }))));
+      node.storage_override = IF ((type__resolved(TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node }))) == :Void)) THEN
         :stack
       ELSE
         :heap
       END;
     END
-    MUTABLE inner = conc.op();
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &_, TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node }))));
+    MUTABLE inner = UNWRAP (castClearParserConcurrentPipelineOpToLocatable(UNWRAP (conc.op)));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &inner, TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node }))));
     RETURN NIL;
 }
 END
