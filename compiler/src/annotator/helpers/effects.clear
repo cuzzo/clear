@@ -256,6 +256,11 @@ END
 
 # Module constants are not exported directly; the tree's pattern for a
 # cross-file constant is a PUB FN accessor.
+# Ruby: EffectAudit::RECURSION_YIELD_BUDGET. Bounded recursion deeper than this
+# would stall the scheduler, so the compiler injects the yield instead.
+PUB FN recursionYieldBudget() RETURNS Int64 EFFECTS REENTRANT ->
+  RETURN 4096;
+END
 PUB FN suspendsFamily() RETURNS [3]String@symbol EFFECTS REENTRANT ->
   RETURN [:SUSPENDS, :SUSPENDS_CONDITIONAL, :SUSPENDS_LOOP];
 END

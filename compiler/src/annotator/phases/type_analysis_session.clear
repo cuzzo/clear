@@ -8964,35 +8964,24 @@ PRIVATE FN typeAnalysisSession__bridge_reentrance_mut(MUTABLE self: TypeAnalysis
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < program_node.statements.length() DO
-      IF !(UNWRAP (program_node.statements[rtoc_idx]) IS_A FunctionDef) THEN
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
+    FOR MUTABLE rtoc_stmt IN program_node.statements DO
+      IF !(rtoc_stmt IS_A FunctionDef) THEN
+        CONTINUE;
       END
-      MUTABLE fn_node: ?Locatable = program_node.statements[rtoc_idx];
-      MUTABLE kind: ?String@symbol = typeAnalysisSession__canonical_reentrance_kind(rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node))));
-      IF fn_node EXISTS AS MUTABLE fn_node_present THEN
-        locatable__set_reentrance_kind_mut(&fn_node_present, kind);
-      END
+      MUTABLE kind: ?String@symbol = typeAnalysisSession__canonical_reentrance_kind(rtoc_self_view, UNWRAP (castLocatableToFunctionDef(rtoc_stmt)));
+      locatable__set_reentrance_kind_mut(&rtoc_stmt, kind);
       IF (kind == :reentrant_tail_call) THEN
-          IF fn_node EXISTS AS MUTABLE fn_node_present THEN
-            locatable__set_tail_call_mut(&fn_node_present, TRUE);
-          END
-      ELSE_IF (kind == :reentrant_not_logical) THEN
-    
+        locatable__set_tail_call_mut(&rtoc_stmt, TRUE);
       ELSE_IF (kind == :reentrant_max_depth) THEN
-          MUTABLE budget = symbol("RECURSION_YIELD_BUDGET");
-          IF (((locatable__max_depth_n(UNWRAP (fn_node)) OR_ELSE 0)) <= CAST(budget AS Int64)) THEN
-            MUTABLE rtoc_fn_slot = UNWRAP (fn_node); locatable__set_tight_reentrance_mut(&rtoc_fn_slot, TRUE);
-          ELSE
-            MUTABLE rtoc_fn_slot2 = UNWRAP (fn_node); locatable__set_tight_reentrance_mut(&rtoc_fn_slot2, FALSE);
-          END
+        IF (((locatable__max_depth_n(rtoc_stmt) OR_ELSE 0)) <= recursionYieldBudget()) THEN
+          locatable__set_tight_reentrance_mut(&rtoc_stmt, TRUE);
+        ELSE
+          locatable__set_tight_reentrance_mut(&rtoc_stmt, FALSE);
+        END
       END
-      TRY (typeAnalysisSession__validate_requires_clauses_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node)))));
-      TRY (typeAnalysisSession__validate_not_logical_return_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node)))));
-      TRY (typeAnalysisSession__offer_unconstrained_fn_param_fix_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(UNWRAP (fn_node)))));
-    rtoc_idx = rtoc_idx + 1;
+      TRY (typeAnalysisSession__validate_requires_clauses_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(rtoc_stmt))));
+      TRY (typeAnalysisSession__validate_not_logical_return_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(rtoc_stmt))));
+      TRY (typeAnalysisSession__offer_unconstrained_fn_param_fix_mut(&rtoc_self_view, UNWRAP (castLocatableToFunctionDef(rtoc_stmt))));
     END
 }
 END
@@ -11681,10 +11670,8 @@ PRIVATE FN typeAnalysisSession__with_body_fact_lambda_body<RESULT>(MUTABLE self:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE frames: []BodyFactFrame = ( { MUTABLE rtoc_empty_list_269: []BodyFactFrame = List[]; rtoc_empty_list_269 } );
-    MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_empty_list_270: []BodyFactContext = List[]; rtoc_empty_list_270 } );
-    frames = TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view));
-    snapshots = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
+    MUTABLE frames: []BodyFactFrame = TRY (typeAnalysisSession__body_fact_frames(&rtoc_self_view));
+    MUTABLE snapshots: []BodyFactContext = ( { MUTABLE rtoc_map_results = CAST([] AS []BodyFactContext); frames |> EACH { &rtoc_map_results.append(COPY bodyFactFrame__context(_)); }; rtoc_map_results } );
     DEFER {
       MUTABLE rtoc_restore_idx_2 = 0;
       WHILE rtoc_restore_idx_2 < frames.length() DO
@@ -11697,8 +11684,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_restore_idx_2 = rtoc_restore_idx_2 + 1;
       END
     }
-    FOR MUTABLE rtoc_mutable_block_param_271 IN frames DO
-    &rtoc_mutable_block_param_271.lambda_body_stack.append(COPY node);
+    FOR MUTABLE rtoc_lambda_frame IN rtoc_self_view.traversal_state.body_fact_frames DO
+    &rtoc_lambda_frame.lambda_body_stack.append(COPY node);
     END
     RETURN block();
 }
