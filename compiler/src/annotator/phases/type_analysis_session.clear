@@ -19452,18 +19452,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.storage_override = :stack;
     ELSE
       type__mark_heap_allocated_mut(&ti);
-      MUTABLE base_ti = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_466: ?Type = NIL;
+      MUTABLE base_ti: ?Type = NIL;
       IF type__optional?(ti) THEN
-        rtoc_ternary_value_466 = TRY (type__wrapped_type(ti));
+        base_ti = TRY (type__wrapped_type(ti));
       ELSE
-        rtoc_ternary_value_466 = ti;
+        base_ti = COPY ti;
       END
-      rtoc_ternary_value_466 };
-      IF ((!(type__multiowned?(ti)) AND !(type__shared?(ti))) AND ([:SymbolEntry, :Any]).contains?((IF base_ti != NIL THEN
-        base_ti.resolved()
-      ELSE
-        NIL
-      END))) THEN
+      MUTABLE rtoc_base_resolved: String@symbol = :Void;
+      IF base_ti EXISTS AS rtoc_base_ti THEN
+        rtoc_base_resolved = COPY type__resolved(rtoc_base_ti);
+      END
+      IF ((!(type__multiowned?(ti)) AND !(type__shared?(ti))) AND ([:SymbolEntry, :Any]).contains?(rtoc_base_resolved)) THEN
         TRY (type__apply_reference_ownership_mut(&ti, :multiowned));
       END
       node.storage_override = :heap;
@@ -19497,7 +19496,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(schemas__union?(schema)) THEN
         RETURN NIL;
       END
-      RETURN (((schemaValue__variants(UNWRAP (schema)) OR_ELSE {}))) |> ANY TRY (type__variant_has_heap?(_._1));
+      MUTABLE rtoc_variant_heap: Bool = FALSE;
+      PARTIAL MATCH UNWRAP (schema) START
+        SchemaValue.UnionSchemaMultiowned AS rtoc_union_schema ->
+        rtoc_variant_heap = (rtoc_union_schema.variants.values() |> ANY TRY (type__variant_has_heap?(_)));,
+        DEFAULT -> rtoc_variant_heap = FALSE;
+      END
+      RETURN rtoc_variant_heap;
     ELSE
       RETURN NIL;
     END
@@ -19552,7 +19557,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ResolveNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RESOLVE_NEEDS_LINK }, [], CAST({:got: locatable__resolved_type(node.value)} AS {String@symbol}Any)));
     END
-    MUTABLE source = (type__link_source(ti) OR :multiowned);
+    MUTABLE source: String@symbol = COPY (type__link_source(ti) OR_ELSE :multiowned);
     MUTABLE resolved_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("?${type__resolved(ti)}") }));
     TRY (type__apply_reference_ownership_mut(&resolved_type, IF (source == :shared) THEN
       :shared
@@ -19567,20 +19572,12 @@ PRIVATE FN typeAnalysisSession__visit_FreezeNode(MUTABLE self: TypeAnalysisSessi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     typeAnalysisSession__without_capture_moves(&rtoc_self_view, %() USE(node, MUTABLE rtoc_self_view) -> {
-    rtoc_lambda_result_470 = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
+    MUTABLE rtoc_lambda_result_470: ?Any@multiowned = TRY (typeAnalysisSession__visit(&rtoc_self_view, node.value));
     rtoc_lambda_result_470
     });
     MUTABLE ti = TRY (aST__full_type_mut(node.value));
-    IF !(((IF TRUE THEN
-      type__multiowned?(ti)
-    ELSE
-      NIL
-    END) OR_ELSE (IF TRUE THEN
-      type__shared?(ti)
-    ELSE
-      NIL
-    END))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FreezeNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :FREEZE_NEEDS_OWNED }, [], CAST({:got: node.value.resolved_type} AS {String@symbol}Any)));
+    IF !((type__multiowned?(ti) OR type__shared?(ti))) THEN
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ FreezeNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :FREEZE_NEEDS_OWNED }, [], CAST({:got: locatable__resolved_type(node.value)} AS {String@symbol}Any)));
     END
     MUTABLE base = compilerRegexReplaceFirst((CAST(type__resolved(ti) AS String)), compilerRegexCompile("^\\?"), "");
     MUTABLE result_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(base) }));
@@ -19747,21 +19744,22 @@ PRIVATE FN typeAnalysisSession__handle_assign_move(MUTABLE self: TypeAnalysisSes
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+    MUTABLE rtoc_assign_value: Locatable = COPY UNWRAP (aST__node_value(UNWRAP (castNodeToLocatable(node))));
     MUTABLE plan: ?OwnershipTransportPlan = aST__node_ownership_transport_plan( UNWRAP (castNodeToLocatable(node)));
     IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND (plan != NIL)) AND (plan.action != :move)) THEN
       RETURN;
     END
-    IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND aST__node_value(UNWRAP (castNodeToLocatable(node))) IS_A Identifier) AND (aST__node_value(UNWRAP (castNodeToLocatable(node))).ownership_pending_transfer == TRUE)) THEN
+    IF (((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND rtoc_assign_value IS_A Identifier) AND (locatable__ownership_pending_transfer(rtoc_assign_value) == TRUE)) THEN
       RETURN;
     END
-    IF aST__node_value(UNWRAP (castNodeToLocatable(node))) IS_A CopyNode THEN
+    IF rtoc_assign_value IS_A CopyNode THEN
       RETURN;
     END
-    IF ((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND aST__borrowed_ownership_view?(aST__node_value(UNWRAP (castNodeToLocatable(node))))) THEN
+    IF ((typeAnalysisSession__language_mode(&rtoc_self_view) != :strict) AND aST__borrowed_ownership_view?(rtoc_assign_value)) THEN
       RETURN;
     END
     TRY (typeAnalysisSession__reject_scoped_assignment_move_mut(&rtoc_self_view, node));
-    IF (aST__node_value(UNWRAP (castNodeToLocatable(node))) IS_A GetField OR aST__node_value(UNWRAP (castNodeToLocatable(node))) IS_A GetIndex) THEN
+    IF (rtoc_assign_value IS_A GetField OR rtoc_assign_value IS_A GetIndex) THEN
       TRY (typeAnalysisSession__handle_assignment_path_move_mut(&rtoc_self_view, node));
       RETURN;
     END
@@ -19964,9 +19962,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         MUTABLE args: []Locatable = args_branch_value?;
-        MUTABLE idx = (TRY (functionSignature__intrinsic_arg_specs(matched_def_value_mutable))).indexOf();
-        IF (idx AND (args[idx] != NIL)) THEN
-          RETURN COPY args[idx];
+        MUTABLE rtoc_arg_specs: []IntrinsicArgSpec = TRY (functionSignature__intrinsic_arg_specs(matched_def_value_mutable));
+        MUTABLE idx: ?Int64 = NIL;
+        MUTABLE rtoc_spec_i = 0;
+        WHILE rtoc_spec_i < rtoc_arg_specs.length() DO
+          IF (idx == NIL) THEN
+            IF (rtoc_arg_specs[rtoc_spec_i])?.name EXISTS AS rtoc_spec_name THEN
+              IF lifetimes.contains?(rtoc_spec_name) THEN
+                idx = rtoc_spec_i;
+              END
+            END
+          END
+          rtoc_spec_i = rtoc_spec_i + 1;
+        END
+        IF idx EXISTS AS rtoc_idx_value THEN
+          IF args[rtoc_idx_value] EXISTS AS rtoc_borrow_arg THEN
+            RETURN COPY rtoc_borrow_arg;
+          END
         END
         RETURN NIL;
       END
@@ -19977,7 +19989,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE func_type: ?FunctionSignature@multiowned = functionSignature__unwrap(X{ Type: COPY TRY (scope__resolve_type(scope_value, func_name)) });
       IF func_type EXISTS AS func_type_value THEN
         MUTABLE lifetime = TRY (functionSignature__return_lifetime(func_type_value));
-        IF ((lifetime.length() == 0) OR (lifetime == [:wildcard])) THEN
+        IF ((lifetime.length() == 0) OR ((lifetime.length() == 1) AND ruby_union_scalar_equal_optional_FunctionSignatureLifetimeSource_String_symbol(lifetime.first(), :wildcard))) THEN
           RETURN NIL;
         END
         MUTABLE primary: ?FunctionSignatureLifetimeSource = COPY lifetime.first();
@@ -19985,8 +19997,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           RETURN NIL;
         END
         MUTABLE primary_root: ?String = COPY (CAST(primary AS String)).split(".").first();
-        MUTABLE param_index = (TRY (functionSignature__params(func_type_value))).find_index(%(p: Param) USE(primary_root) -> (p.name == primary_root));
-        IF !(param_index) THEN
+        MUTABLE rtoc_sig_params: []Param = TRY (functionSignature__params(func_type_value));
+        MUTABLE param_index: ?Int64 = NIL;
+        MUTABLE rtoc_param_i = 0;
+        WHILE rtoc_param_i < rtoc_sig_params.length() DO
+          IF (param_index == NIL) THEN
+            IF ((rtoc_sig_params[rtoc_param_i])?.name == primary_root) THEN
+              param_index = rtoc_param_i;
+            END
+          END
+          rtoc_param_i = rtoc_param_i + 1;
+        END
+        IF param_index == NIL THEN
           RETURN NIL;
         END
         MUTABLE args_branch_value: ?[]Locatable = NIL;
