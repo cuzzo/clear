@@ -2275,6 +2275,11 @@ class MIRChecker
       names << name.delete_prefix("_m_") if name.start_with?("_m_")
     end, T::Set[String])
     param_names |= T.must(@captured_names) if @captured_names
+    # A MATCH arm's payload binding views the matched value; the AllocMark it
+    # would need belongs to that value, exactly as a parameter's does.
+    MIR.nodes(fn_def.body).each do |stmt|
+      param_names << stmt.name.to_s if stmt.is_a?(MIR::Let) && stmt.borrowed_view
+    end
     metadata_nodes.each do |node|
       alloc_metadata = allocator_metadata_for(node)
       next unless alloc_metadata && !alloc_metadata.empty?

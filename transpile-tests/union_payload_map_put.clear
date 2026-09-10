@@ -1,0 +1,24 @@
+# Test: a map put through a MATCH arm's `AS MUTABLE` payload binding. The
+# binding views the matched value and allocates nothing, but the allocator
+# check demanded an AllocMark of its own and aborted the build.
+
+STRUCT Bag { fields: {String}String }
+UNION Holder { Bag: Bag, Name: String }
+
+FN store(MUTABLE h: Holder) RETURNS Void ->
+    PARTIAL MATCH h START
+        Holder.Bag AS MUTABLE bag ->
+            bag.fields[COPY "a"] = COPY "1";,
+        DEFAULT -> NIL;
+    END
+END
+
+FN main() RETURNS Void ->
+    MUTABLE h = Holder{ Bag: Bag{ fields: {} } };
+    store(&h);
+    PARTIAL MATCH h START
+        Holder.Bag AS bag ->
+            ASSERT (bag.fields["a"] OR_ELSE "") == "1", "the put landed in the matched value";,
+        DEFAULT -> NIL;
+    END
+END

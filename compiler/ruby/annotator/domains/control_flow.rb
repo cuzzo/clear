@@ -537,7 +537,7 @@ module Annotator
           scope.declare(binding, condition, payload_type, condition.binding_mutable == true, false, nil, :stack)
           og_declare(binding, condition, payload_type)
           classify_ownership!(scope.local_entry!(binding))
-          borrow_match_payload_binding!(binding)
+          borrow_match_payload_binding!(binding, condition.left)
           return
         end
 
@@ -1020,7 +1020,7 @@ module Annotator
         current_scope.declare(binding, match_case, payload_type, mutable_binding, false, nil, :stack)
         og_declare(binding, match_case, payload_type)
         classify_ownership!(current_scope.local_entry!(binding))
-        borrow_match_payload_binding!(binding) unless node.takes
+        borrow_match_payload_binding!(binding, node.expr) unless node.takes
       end
 
       # A mutable arm binding writes through to the subject, so the subject
@@ -1064,11 +1064,22 @@ module Annotator
         apply_type_subst(payload, plan.union_subst)
       end
 
-      sig { params(binding: String).void }
-      def borrow_match_payload_binding!(binding)
+      sig { params(binding: String, subject: T.nilable(AST::Node)).void }
+      def borrow_match_payload_binding!(binding, subject = nil)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
         T.must(ownership_graph[binding]).kind = :borrowed
-        current_scope.entry_for_write!(binding).storage = :borrow
+        payload_view = current_scope.entry_for_write!(binding)
+        payload_view.storage = :borrow
+        # The arm binding names a view into the subject. Tying its lifetime
+        # there is what lets a later pass ask where the payload actually
+        # lives; without it the view looks frame-local and a write through it
+        # allocates in the wrong frame.
+        # Only a write-through binding needs this: a read-only view never
+        # allocates, so tying its lifetime would only move other decisions.
+        return unless payload_view.mutable
+
+        source = subject.is_a?(AST::Identifier) ? current_scope.resolve_entry(subject.name) : nil
+        payload_view.lifetime = [source] if source
       end
 
       sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, plan: MatchSubjectPlan).void }

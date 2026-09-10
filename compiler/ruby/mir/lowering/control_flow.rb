@@ -1192,7 +1192,9 @@ module MIRLoweringControlFlow
     payload = MIR::Deref.new(payload) if c.indirect_payload_as
     if c.binding
       binding = T.must(c.binding)
-      return [MIR::Let.new(binding, payload, is_mutable, nil, "_ = &#{binding};")]
+      let = MIR::Let.new(binding, payload, is_mutable, nil, "_ = &#{binding};")
+      let.borrowed_view = true
+      return [let]
     end
 
     destructure = c.destructure
@@ -1201,7 +1203,9 @@ module MIRLoweringControlFlow
     destructure.fields.filter_map do |f|
       next if f.wildcard?
       next unless f.bind?
-      MIR::Let.new(f.name.to_s, MIR::FieldGet.new(payload, f.name.to_s), false, nil, "_ = &#{f.name};")
+      let = MIR::Let.new(f.name.to_s, MIR::FieldGet.new(payload, f.name.to_s), false, nil, "_ = &#{f.name};")
+      let.borrowed_view = true
+      let
     end
   end
 

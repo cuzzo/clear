@@ -1211,6 +1211,16 @@ module MIR
     end
     sig { params(value: T::Boolean).void }
     def self_managed_alloc=(value); @self_managed_alloc = T.let(value, T.nilable(T::Boolean)); end
+    # This binding names a view INTO another value -- a MATCH arm's payload,
+    # for instance. It allocates nothing, so its allocation contract lives on
+    # the value it borrows from and never on the binding itself.
+    sig { returns(T::Boolean) }
+    def borrowed_view
+      @borrowed_view = T.let(nil, T.nilable(T::Boolean)) unless defined?(@borrowed_view)
+      @borrowed_view == true
+    end
+    sig { params(value: T::Boolean).void }
+    def borrowed_view=(value); @borrowed_view = T.let(value, T.nilable(T::Boolean)); end
     sig do
       params(
         name: T.any(String, Symbol),
