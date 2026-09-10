@@ -241,34 +241,39 @@ PUB FN escapeAnalysis__propagate_caller_sync_mut(fn_nodes: {String}FunctionDef, 
       CONTINUE;
         END
         IF !(escapeAnalysis__param_sync_was_declared?(callee_fn.params[rtoc_idx]?)) THEN
-            MUTABLE unified = escapeAnalysis__unify_caller_attr(sites, rtoc_idx, %(s) -> {
-          IF s.sync THEN
-                RETURN s.sync();
+            MUTABLE unified: ?String@symbol = escapeAnalysis__unify_caller_attr(sites, rtoc_idx, %(s: SymbolEntry) -> {
+          MUTABLE rtoc_sync: ?String@symbol = symbolEntry__sync(s);
+          IF rtoc_sync == NIL THEN
+            rtoc_sync = type__sync(symbolEntry__type(s));
           END
-          MUTABLE t = s.type();
-          t.sync()
+          rtoc_sync
             });
-            IF ((rtoc_key AND (symbolEntry__sync( entry) != rtoc_key)) AND escapeAnalysis__param_accepts_caller_sync?(callee_fn, callee_fn.params[rtoc_idx]?, rtoc_key)) THEN
-              symbolEntry__set_sync(&entry, unified);
-              changed = TRUE;
+            IF unified EXISTS AS rtoc_unified THEN
+              IF ((symbolEntry__sync(entry) != rtoc_unified) AND escapeAnalysis__param_accepts_caller_sync?(callee_fn, UNWRAP (callee_fn.params[rtoc_idx]), rtoc_unified)) THEN
+                symbolEntry__set_sync(&entry, rtoc_unified);
+                changed = TRUE;
+              END
             END
         END
-        MUTABLE unified_storage = escapeAnalysis__unify_caller_attr(sites, rtoc_idx, %(s) -> {
+        MUTABLE unified_storage: ?String@symbol = escapeAnalysis__unify_caller_attr(sites, rtoc_idx, %(s: SymbolEntry) -> {
+          MUTABLE rtoc_storage: ?String@symbol = NIL;
           IF symbolEntry__rc_stored?(s) THEN
-              RETURN s.storage();
+            rtoc_storage = symbolEntry__storage(s);
+          ELSE
+            MUTABLE t: Type = symbolEntry__type(s);
+            IF type__shared?(t) THEN
+              rtoc_storage = :shared;
+            ELSE_IF type__multiowned?(t) THEN
+              rtoc_storage = :multiowned;
+            END
           END
-          MUTABLE t = s.type();
-          IF type__shared?(t) THEN
-              RETURN :shared;
-          END
-          IF t.multiowned?() THEN
-              RETURN :multiowned;
-          END
-          NIL
+          rtoc_storage
         });
-        IF (unified_storage AND (symbolEntry__storage( UNWRAP (entry)) != unified_storage)) THEN
-            symbolEntry__set_storage(&entry, UNWRAP (unified_storage));
+        IF unified_storage EXISTS AS rtoc_unified_storage THEN
+          IF (symbolEntry__storage(entry) != rtoc_unified_storage) THEN
+            symbolEntry__set_storage(&entry, rtoc_unified_storage);
             changed = TRUE;
+          END
         END
       rtoc_idx = rtoc_idx + 1;
     END
@@ -474,13 +479,12 @@ PUB FN escapeAnalysis__kept_edge_arg_type(arg: Locatable) RETURNS !?Type ->
 END
 PUB FN escapeAnalysis__kept_family_conflict(source_type: ?Type, dest_family: String@symbol) RETURNS ?String@symbol ->
   IF source_type EXISTS AS source_type_value THEN
-    MUTABLE source_family =     IF type__shared?(source_type_value) THEN
-      :shared
+    MUTABLE source_family: ?String@symbol = NIL;
+    IF type__shared?(source_type_value) THEN
+      source_family = :shared;
     ELSE_IF type__multiowned?(source_type_value) THEN
-      :multiowned
-    ELSE
-      NIL
-    END;
+      source_family = :multiowned;
+    END
     IF (FALSE OR (source_family == dest_family)) THEN
       RETURN NIL;
     END
@@ -599,16 +603,33 @@ PUB FN escapeAnalysis__restamp_promoted_uses_in_node_mut(node: Locatable, name: 
   });
 END
 PUB FN escapeAnalysis__unify_caller_attr(sites: []CallSiteFact, idx: Int64, project: FN(SymbolEntry) -> ?String@symbol) RETURNS ?String@symbol ->
-  MUTABLE observed: []?String@symbol = sites |> SELECT { MUTABLE rtoc_value_block_marker = 0; MUTABLE arg: ?Locatable = COPY _.args[idx]; (IF !(((arg != NIL) AND (aST__node__symbol(arg) EXISTS))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE symbol: ?SymbolEntry@multiowned = locatable__symbol(arg); (IF !(TRUE) THEN NIL ELSE project(UNWRAP (symbol)) END) } END) };
-  IF (observed.length() == 0) THEN
+  MUTABLE observed_count: Int64 = 0;
+  MUTABLE unique: [Set]String@symbol = Set[];
+  MUTABLE saw_absent: Bool = FALSE;
+  FOR rtoc_site IN sites DO
+    observed_count = observed_count + 1;
+    MUTABLE rtoc_projected: ?String@symbol = NIL;
+    IF rtoc_site.args[idx] EXISTS AS arg THEN
+      IF locatable__symbol(arg) EXISTS AS rtoc_arg_symbol THEN
+        rtoc_projected = project(rtoc_arg_symbol);
+      END
+    END
+    IF rtoc_projected EXISTS AS rtoc_projected_value THEN
+      &unique.insert(COPY rtoc_projected_value);
+    ELSE
+      saw_absent = TRUE;
+    END
+  END
+  IF (observed_count == 0) THEN
     RETURN NIL;
   END
-  MUTABLE unique = CAST((observed |> DISTINCT _) AS []?String@symbol);
-  IF ((((unique).length() == 1) AND unique.first())) THEN
-    RETURN unique.first();
-  ELSE
+  IF (saw_absent OR (unique.length() != 1)) THEN
     RETURN NIL;
   END
+  FOR rtoc_only IN unique DO
+    RETURN COPY rtoc_only;
+  END
+  RETURN NIL;
 END
 PUB FN escapeAnalysis__param_sync_was_declared?(param: Param) RETURNS ?Bool ->
   MUTABLE t = COPY param.type;
