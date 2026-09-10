@@ -1036,12 +1036,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       mod_branch_value = TRY (moduleImporter__compile_file(&importer, node.path, resolutionSession__import_source_dir(rtoc_self_view)));
     END
     MUTABLE mod: ?CompiledModule = mod_branch_value;
-    MUTABLE mod_value: CompiledModule = mod?;
+    MUTABLE mod_value: CompiledModule = COPY UNWRAP (mod);
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ RequireNode: COPY node }, :Void));
-    MUTABLE same_dir = (((node.kind != :package)) AND ((mod_value.source_dir == resolutionSession__import_source_dir(rtoc_self_view))));FOR rtoc_each_1 IN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = CAST(mod_value.global_scope AS Scope);
-    TRY (scope__visible_entries(rtoc_local_receiver_21)) }).keys() DO
-    MUTABLE entry = (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_21 = CAST(mod_value.global_scope AS Scope);
-    TRY (scope__visible_entries(rtoc_local_receiver_21)) })[rtoc_each_1] OR_ELSE panic("missing hash key"));
+    MUTABLE same_dir = (((node.kind != :package)) AND ((mod_value.source_dir == resolutionSession__import_source_dir(rtoc_self_view))));
+    MUTABLE rtoc_module_scope: Scope@multiowned = KEEP mod_value.global_scope;
+    MUTABLE rtoc_module_entries = TRY (scope__visible_entries(rtoc_module_scope));
+    FOR rtoc_each_1 IN rtoc_module_entries.keys() DO
+
+    MUTABLE entry = (rtoc_module_entries[rtoc_each_1] OR_ELSE panic("missing hash key"));
+
     MUTABLE sig: ?FunctionSignature@multiowned = symbolEntry__fn_signature(entry);
     IF !(sig) THEN
         CONTINUE;
