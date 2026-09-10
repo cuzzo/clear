@@ -8897,8 +8897,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     effect = typeAnalysisSession__promote_suspends_for_current_context(&rtoc_self_view, effect);
-    (TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, UNWRAP (fn_ctx?.name)))).insert(COPY effect);
-    IF (typeAnalysisSession__inside_snapshot_transaction_body?(&rtoc_self_view) AND anySuspendsEffect(Set[effect])) THEN
+    MUTABLE rtoc_effs = TRY (typeAnalysisSession__effect_direct_effects_for(&rtoc_self_view, UNWRAP (fn_ctx?.name)));
+    rtoc_effs.insert(COPY effect);
+    IF (typeAnalysisSession__inside_snapshot_transaction_body?(&rtoc_self_view) AND (suspendsFamily() |> ANY (_ == effect))) THEN
       typeAnalysisSession__record_snapshot_txn_violation_mut(&rtoc_self_view, effect, UNWRAP (fn_ctx).name);
     END
     NIL;
