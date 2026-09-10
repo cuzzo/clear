@@ -1586,7 +1586,7 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
   &assignment_nodes.append(COPY _);
     END
     FOR _ IN hoist_bindings DO
-    escapeAnalysis__record_binding_fact_mut( BindingNode{ VarDecl: COPY _ }, &symbols, binding_values);
+    escapeAnalysis__record_binding_fact_mut( BindingNode{ VarDecl: COPY _ }, &symbols, &binding_values);
     END
     FOR _ IN summary_value_mutable.return_nodes DO
     IF _.value THEN
@@ -1597,45 +1597,44 @@ PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionB
     escape_nodes = ruby_array_concat_Locatable(escape_nodes, CAST(hoist_bindings AS []Locatable));
     RETURN FunctionFacts{ fn: COPY fn_value, symbols: symbols, binding_values: COPY binding_values, return_values: COPY return_values, assignment_nodes: COPY assignment_nodes, escape_nodes: COPY escape_nodes, lambda_body_identifier_refs: COPY summary_value_mutable.lambda_body_identifier_refs };
   END
-  escapeAnalysis__walk_body(fn_value.body, %(node) USE(MUTABLE assignment_nodes, binding_values, MUTABLE escape_nodes, MUTABLE return_values, symbols) -> {
-  IF node IS_A Locatable THEN
-      &escape_nodes.append(node);
-  END
-  IF (node IS_A ReturnNode AND node.value()) THEN
-      &return_values.append(node.value());
+  escapeAnalysis__walk_body(fn_value.body |> SELECT castLocatableToNode(_), %(node: Locatable) USE(MUTABLE assignment_nodes, MUTABLE binding_values, MUTABLE escape_nodes, MUTABLE return_values, MUTABLE symbols) -> {
+  &escape_nodes.append(COPY node);
+  IF node IS_A ReturnNode AS rtoc_return THEN
+    IF rtoc_return.value EXISTS AS rtoc_return_value THEN
+      &return_values.append(COPY rtoc_return_value);
+    END
   END
   IF (node IS_A Assignment OR node IS_A DestructuringAssignment) THEN
       &assignment_nodes.append(COPY node);
   END
-  IF (node IS_A VarDecl) THEN
-      escapeAnalysis__record_binding_fact_mut(node, &symbols, binding_values);
-  ELSE_IF (node IS_A BindExpr) THEN
-      IF (node.mode == :assign) THEN
+  IF node IS_A VarDecl AS rtoc_var_decl THEN
+      escapeAnalysis__record_binding_fact_mut(BindingNode{ VarDecl: COPY rtoc_var_decl }, &symbols, &binding_values);
+  ELSE_IF node IS_A BindExpr AS rtoc_bind_expr THEN
+      IF (rtoc_bind_expr.mode == :assign) THEN
         &assignment_nodes.append(COPY node);
       ELSE
-        escapeAnalysis__record_binding_fact_mut(node, &symbols, binding_values);
+        escapeAnalysis__record_binding_fact_mut(BindingNode{ BindExpr: COPY rtoc_bind_expr }, &symbols, &binding_values);
       END
-  ELSE_IF (node IS_A DestructuringAssignment) THEN
-      MUTABLE rtoc_each_items_23 = node.targets;
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < rtoc_each_items_23.length() DO
-      IF (UNWRAP (rtoc_each_items_23[rtoc_idx]).name() == "_") THEN
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      IF (IF UNWRAP (rtoc_each_items_23[rtoc_idx]).symbol != NIL THEN
-            (UNWRAP (rtoc_each_items_23[rtoc_idx]).symbol).reg
-          ELSE
-            NIL
-          END).equal?(UNWRAP (rtoc_each_items_23[rtoc_idx])) THEN
-            escapeAnalysis__record_binding_fact_mut(UNWRAP (rtoc_each_items_23[rtoc_idx]), &symbols, binding_values);
-      END
-    rtoc_idx = rtoc_idx + 1;
+  ELSE_IF node IS_A DestructuringAssignment AS rtoc_destructuring THEN
+      FOR rtoc_target IN rtoc_destructuring.targets DO
+        IF (CAST(rtoc_target.name AS String) != "_") THEN
+          # Ruby records only the target that OWNS its symbol; a target that
+          # merely aliases an existing binding is not a new fact.
+          IF rtoc_target.symbol EXISTS AS rtoc_target_symbol THEN
+            IF rtoc_target_symbol.reg EXISTS AS rtoc_target_reg THEN
+              IF rtoc_target_reg IS_A DestructureTarget AS rtoc_reg_target THEN
+                IF (aST__node_identity(Locatable{ DestructureTarget: COPY rtoc_reg_target }) == aST__node_identity(Locatable{ DestructureTarget: COPY rtoc_target })) THEN
+                  escapeAnalysis__record_binding_fact_mut(BindingNode{ DestructureTarget: COPY rtoc_target }, &symbols, &binding_values);
+                END
+              END
+            END
+          END
+        END
       END
   END
   NIL
   });
-  RETURN FunctionFacts{ fn: fn_value, symbols: symbols, binding_values: COPY binding_values, return_values: COPY return_values, assignment_nodes: COPY assignment_nodes, escape_nodes: COPY escape_nodes, lambda_body_identifier_refs: COPY TRY (escapeAnalysis__collect_lambda_identifier_refs(fn_value.body)) };
+  RETURN FunctionFacts{ fn: COPY fn_value, symbols: symbols, binding_values: COPY binding_values, return_values: COPY return_values, assignment_nodes: COPY assignment_nodes, escape_nodes: COPY escape_nodes, lambda_body_identifier_refs: COPY TRY (escapeAnalysis__collect_lambda_identifier_refs(fn_value.body |> SELECT castLocatableToNode(_))) };
 END
 PUB FN escapeAnalysis__bindingNodeName(node: BindingNode) RETURNS String ->
   PARTIAL MATCH node START

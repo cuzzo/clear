@@ -12,35 +12,32 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
   FOR rtoc_key IN fn_nodes.keys() DO
   MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
   MUTABLE params: {String}SymbolEntry@multiowned = {};
-  FOR _ IN fn_value.params DO
-    MUTABLE entry = _.symbol;
-    IF _ THEN
-        params[_.name] = entry;
+  FOR rtoc_param IN fn_value.params DO
+    IF rtoc_param.symbol EXISTS AS entry THEN
+      params[CAST(rtoc_param.name AS String)] = COPY entry;
     END
   END
   caller_params[rtoc_key] = params;
   END
   MUTABLE kept_param_indexes: {String}[]Int64 = {};
-  MUTABLE refresh_kept: FN() -> Void = %() USE(fn_nodes, MUTABLE kept_param_indexes, MUTABLE entry) -> {
+  MUTABLE refresh_kept: FN() -> Void = %() USE(fn_nodes, MUTABLE kept_param_indexes) -> {
   &kept_param_indexes.clear();
-  FOR rtoc_key IN fn_nodes.keys() DO
-    MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_key]);
-    MUTABLE indexes: []Int64 = ( { MUTABLE rtoc_empty_list_1: []Int64 = List[]; rtoc_empty_list_1 } );
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < fn_value.params.length() DO
-        MUTABLE entry = fn_value.params[rtoc_idx]?.symbol;
-        IF (IF rtoc_key != NIL THEN
-            { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = CAST(entry AS SymbolEntry);
-        symbolEntry__kept_identity(rtoc_local_receiver_2) }
-          ELSE
-            NIL
-          END) THEN
-            &indexes.append(COPY rtoc_idx);
+  FOR rtoc_fn_name IN fn_nodes.keys() DO
+    MUTABLE fn_value: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_fn_name]);
+    MUTABLE indexes: []Int64 = [];
+    MUTABLE rtoc_param_idx: Int64 = 0;
+    WHILE rtoc_param_idx < fn_value.params.length() DO
+      IF fn_value.params[rtoc_param_idx] EXISTS AS rtoc_param THEN
+        IF rtoc_param.symbol EXISTS AS rtoc_param_symbol THEN
+          IF (symbolEntry__kept_identity(rtoc_param_symbol) != NIL) THEN
+            &indexes.append(COPY rtoc_param_idx);
+          END
         END
-      rtoc_idx = rtoc_idx + 1;
+      END
+      rtoc_param_idx = rtoc_param_idx + 1;
     END
-    IF !((indexes.length() == 0)) THEN
-        kept_param_indexes[rtoc_key] = indexes;
+    IF !(indexes.empty?()) THEN
+      kept_param_indexes[rtoc_fn_name] = COPY indexes;
     END
   END
   NIL
@@ -48,55 +45,23 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
   refresh_kept();
   FOR rtoc_counter_keep IN (0_i64 ..< fn_nodes.count()) DO
   MUTABLE changed: Bool = FALSE;
-  FOR rtoc_key IN body_summaries.keys() DO
-    MUTABLE summary: FunctionBodySummary = COPY UNWRAP (body_summaries[rtoc_key]);
-    MUTABLE params: ?{String}SymbolEntry@multiowned = COPY caller_params[rtoc_key];
-    IF ((params == NIL) OR (params.count == 0)) THEN
-        CONTINUE;
-    END
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < summary.call_site_facts.length() DO
-        IF summary.call_site_facts[rtoc_idx]?.fn_var_call THEN
-          rtoc_idx = rtoc_idx + 1;
-      CONTINUE;
-        END
-        MUTABLE kept: ?[]Int64 = COPY kept_param_indexes[UNWRAP (summary.call_site_facts[rtoc_idx]?.callee_name)];
-        IF !(rtoc_key) THEN
-            rtoc_idx = rtoc_idx + 1;
-      CONTINUE;
-        END
-        MUTABLE rtoc_idx_2 = 0;
-        WHILE rtoc_idx_2 < rtoc_key.length() DO
-            MUTABLE arg: ?Locatable = COPY (summary.call_site_facts[rtoc_idx]?.args)[kept[rtoc_idx_2]];
-            IF !(((arg != NIL) AND (arg IS_A Identifier))) THEN
-                rtoc_idx_2 = rtoc_idx_2 + 1;
-          CONTINUE;
-            END
-            MUTABLE entry: ?SymbolEntry@multiowned = COPY params[locatable__name(arg)];
-            MUTABLE rtoc_kept_entry = UNWRAP (entry);
-            IF ((entry == NIL) OR symbolEntry__kept_identity(rtoc_kept_entry)) THEN
-                rtoc_idx_2 = rtoc_idx_2 + 1;
-          CONTINUE;
-            END
-            MUTABLE callee_param = ((fn_nodes[summary.call_site_facts[rtoc_idx]?.callee_name])?.params[kept[rtoc_idx_2]]);
-            MUTABLE inherited: ?KeptIdentityContract = NIL;
-            IF (IF callee_param != NIL THEN
-                callee_param.symbol
-              ELSE
-                NIL
-              END) != NIL THEN
-                inherited = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = (((IF callee_param != NIL THEN
-                callee_param.symbol
-              ELSE
-                NIL
-              END))?);
-            symbolEntry__kept_identity(rtoc_local_receiver_5) };
+  FOR rtoc_caller_name IN body_summaries.keys() DO
+    MUTABLE summary: FunctionBodySummary = COPY UNWRAP (body_summaries[rtoc_caller_name]);
+    MUTABLE params: ?{String}SymbolEntry@multiowned = COPY caller_params[rtoc_caller_name];
+    IF params EXISTS AS rtoc_params THEN
+      IF !(rtoc_params.empty?()) THEN
+        FOR rtoc_site IN summary.call_site_facts DO
+          IF !(rtoc_site.fn_var_call) THEN
+            IF kept_param_indexes[rtoc_site.callee_name] EXISTS AS rtoc_kept THEN
+              FOR rtoc_kept_idx IN rtoc_kept DO
+                IF keepAnalysis__inherit_kept_identity_mut(rtoc_site, rtoc_kept_idx, rtoc_params, fn_nodes) THEN
+                  changed = TRUE;
+                END
               END
-            symbolEntry__set_kept_identity(&entry, (inherited OR_ELSE KeptIdentityContract{ family: :multiowned, sink: "${summary.call_site_facts[rtoc_idx]?.callee_name} kept position ${kept[rtoc_idx_2]}" }));
-            changed = TRUE;
-          rtoc_idx_2 = rtoc_idx_2 + 1;
+            END
+          END
         END
-      rtoc_idx = rtoc_idx + 1;
+      END
     END
   END
   IF !(changed) THEN
@@ -104,6 +69,36 @@ PUB FN keepAnalysis__propagate_kept_identity_mut(fn_nodes: {String}FunctionDef, 
   END
   refresh_kept();
   END
+END
+
+# Ruby leaves the per-argument body with `next`; a CLEAR loop cannot, so one
+# kept argument is inherited per call and `next` becomes a plain RETURN.
+PRIVATE FN keepAnalysis__inherit_kept_identity_mut(site: CallSiteFact, idx: Int64, params: {String}SymbolEntry@multiowned, fn_nodes: {String}FunctionDef) RETURNS Bool ->
+  IF site.args[idx] EXISTS AS arg THEN
+    IF arg IS_A Identifier THEN
+      IF params[(locatable__name(arg) OR_ELSE "")] EXISTS AS entry THEN
+        IF (symbolEntry__kept_identity(entry) != NIL) THEN
+          RETURN FALSE;
+        END
+        MUTABLE inherited: ?KeptIdentityContract = NIL;
+        IF fn_nodes[site.callee_name] EXISTS AS rtoc_callee THEN
+          IF rtoc_callee.params[idx] EXISTS AS callee_param THEN
+            IF callee_param.symbol EXISTS AS rtoc_callee_symbol THEN
+              inherited = COPY symbolEntry__kept_identity(rtoc_callee_symbol);
+            END
+          END
+        END
+        MUTABLE rtoc_entry: SymbolEntry@multiowned = KEEP entry;
+        IF inherited EXISTS AS rtoc_inherited THEN
+          symbolEntry__set_kept_identity(&rtoc_entry, rtoc_inherited);
+        ELSE
+          symbolEntry__set_kept_identity(&rtoc_entry, KeptIdentityContract{ family: :multiowned, sink: COPY "${site.callee_name} kept position ${idx.toString()}" });
+        END
+        RETURN TRUE;
+      END
+    END
+  END
+  RETURN FALSE;
 END
 # End Ruby module KeepAnalysis
 FN rubyToClearVoid__keep_analysis() RETURNS Void ->
