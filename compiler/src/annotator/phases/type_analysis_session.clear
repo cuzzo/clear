@@ -8891,7 +8891,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(fn_ctx?.name) THEN
       RETURN;
     END
-    (TRY (typeAnalysisSession__effect_call_site_arg_families_for(&rtoc_self_view, UNWRAP (fn_ctx?.name), callee_name))).append(COPY arg_family_sets);
+    MUTABLE rtoc_caller: String = COPY UNWRAP (fn_ctx?.name);
+    MUTABLE rtoc_fams = TRY (typeAnalysisSession__effect_call_site_arg_families_for(&rtoc_self_view, rtoc_caller, callee_name));
+    &rtoc_fams.append(COPY arg_family_sets);
+    MUTABLE rtoc_caller_map = COPY UNWRAP (typeAnalysisSession__effect_call_site_arg_families(&rtoc_self_view)[rtoc_caller]);
+    rtoc_caller_map[callee_name] = COPY rtoc_fams;
+    typeAnalysisSession__set_call_site_arg_families_mut(&rtoc_self_view, rtoc_caller, COPY rtoc_caller_map);
 }
 END
 PRIVATE FN typeAnalysisSession__validate_tight_body_mut(MUTABLE self: TypeAnalysisSession, stmts: AstScanInput, loop_node: TightLoopNode) RETURNS !Void
