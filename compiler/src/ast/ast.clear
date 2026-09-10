@@ -8572,6 +8572,14 @@ PUB FN locatable__set_layout_transport_mut(MUTABLE value: Locatable, new_value: 
     DEFAULT -> RETURN;
   END
 END
+# Ruby writes `observable_dest` on whichever variant it holds. A variant either
+# carries the field or it does not, so the write lands only where it fits.
+PUB FN locatable__set_observable_dest_mut(MUTABLE value: Locatable, new_value: ?Bool) RETURNS Void ->
+  PARTIAL MATCH value START
+    Locatable.BinaryOp AS MUTABLE item -> item.observable_dest = COPY new_value;,
+    DEFAULT -> RETURN;
+  END
+END
 PUB FN aST__node_storage_override(node: Locatable) RETURNS ?String@symbol ->
   PARTIAL MATCH node START
     Locatable.Program AS item -> RETURN COPY item.storage_override;,

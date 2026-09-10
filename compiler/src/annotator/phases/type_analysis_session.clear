@@ -14560,23 +14560,25 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((type__future?( UNWRAP (target)) AND type__observable?( UNWRAP (target)))) THEN
       RETURN NIL;
     END
-    MUTABLE pipe: ?Type = NIL;
+    MUTABLE pipe: ?Locatable@boxed = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         pipe = COPY item.value;,
       DeclarationNode.BindExpr AS item ->
         pipe = COPY item.value;,
     END
-    IF !((UNWRAP (pipe) IS_A BinaryOp AND UNWRAP locatable__smooth?(UNWRAP ((pipe))))) THEN
+    IF !((UNWRAP (pipe) IS_A BinaryOp AND (locatable__smooth?(UNWRAP (pipe)) OR_ELSE FALSE))) THEN
       RETURN NIL;
     END
-    IF !(type__observable_terminal(pipe)) THEN
+    MUTABLE rtoc_pipe_v: Locatable = UNWRAP (pipe);
+    MUTABLE rtoc_pipe_pre_type = TRY (aST__full_type_mut(rtoc_pipe_v));
+    IF (type__observable_terminal(rtoc_pipe_pre_type) == NIL) THEN
       RETURN NIL;
     END
-    pipe.observable_dest = TRUE;
-    MUTABLE pipe_type = TRY (aST__full_type_mut(pipe));
+    locatable__set_observable_dest_mut(&rtoc_pipe_v, TRUE);
+    MUTABLE pipe_type = TRY (aST__full_type_mut(rtoc_pipe_v));
     IF type__observable_terminal(pipe_type) THEN
-      MUTABLE pipe_terminal = type__observable_terminal(pipe_type);
+      MUTABLE pipe_terminal: ?String@symbol = type__observable_terminal(pipe_type);
       MUTABLE target_t: ?Type = NIL;
       MATCH node START
         DeclarationNode.VarDecl AS item ->
@@ -14584,23 +14586,24 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         DeclarationNode.BindExpr AS item ->
           target_t = COPY item.type;,
       END
-      IF ((type__observable_terminal( UNWRAP (target_t)) != NIL) AND (type__observable_terminal( UNWRAP (target_t)) != pipe_terminal)) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :OBSERVABLE_TERMINAL_MISMATCH }, [], CAST({:lhs: compilerInspectValue(), :pipe: compilerInspectValue()} AS {String@symbol}Any)));
+      MUTABLE rtoc_target_tv: Type = UNWRAP (target_t);
+      IF ((type__observable_terminal(rtoc_target_tv) != NIL) AND (type__observable_terminal(rtoc_target_tv) != pipe_terminal)) THEN
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, diagnosticAnchor__of(UNWRAP (castDeclarationNodeToLocatable(node))), TypeAnalysisCodeOrMessage{ SymbolValue: :OBSERVABLE_TERMINAL_MISMATCH }, [], CAST({:lhs: compilerInspectValue(), :pipe: compilerInspectValue()} AS {String@symbol}Any)));
       END
-      TRY (type__stamp_observable_terminal_mut(&target_t, UNWRAP (pipe_terminal)));
+      TRY (type__stamp_observable_terminal_mut(&rtoc_target_tv, UNWRAP (pipe_terminal)));
       MATCH node START
         DeclarationNode.VarDecl AS item ->
           MUTABLE item_mutable = COPY item;
-          item_mutable.type = target_t;
+          item_mutable.type = COPY rtoc_target_tv;
           MUTABLE node = DeclarationNode{ VarDecl: item_mutable };,
         DeclarationNode.BindExpr AS item ->
           MUTABLE item_mutable = COPY item;
-          item_mutable.type = target_t;
+          item_mutable.type = COPY rtoc_target_tv;
           MUTABLE node = DeclarationNode{ BindExpr: item_mutable };,
       END
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, castDeclarationNodeToLocatable(node), target_t));
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, UNWRAP (castDeclarationNodeToLocatable(node)), COPY rtoc_target_tv));
     END
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &pipe, declarationNode__type(node)));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &rtoc_pipe_v, declarationNode__type(node)));
 }
 END
 PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode, MUTABLE mutable_flag: Bool) RETURNS !Void
@@ -16462,19 +16465,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF type__map?(expected_map_value) THEN
       MUTABLE expected_key = TRY ( type__key_type(UNWRAP (expected_map)));
       MUTABLE expected_value = TRY (type__value_type(UNWRAP (expected_map)));
-      FOR rtoc_each_key IN node.pairs.keys() DO
-    MUTABLE value: Locatable = COPY UNWRAP (node.pairs[rtoc_each_key]);
+      FOR rtoc_pair IN node.pairs DO
+    MUTABLE rtoc_each_key: Locatable = COPY rtoc_pair._0;
+    MUTABLE value: Locatable = COPY rtoc_pair._1;
     locatable__set_coerced_type_object_mut(&rtoc_each_key, expected_key);
     locatable__set_coerced_type_object_mut(&value, expected_value);
     TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_each_key));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, value));
     MUTABLE actual_key = TRY (aST__full_type_mut(rtoc_each_key));
     MUTABLE actual_value = TRY (aST__full_type_mut(value));
-    IF !(((type__any?(expected_key) OR TRY (type__accepts?(expected_key, actual_key))) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, actual_key, castTypeToTypeTypeInput__type_analysis_session(expected_key))))) THEN
-          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, rtoc_each_key, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_MISMATCH_ASSIGN }, [], CAST({:got: actual_key.resolved(), :expected: expected_key} AS {String@symbol}Any)));
+    IF !(((type__any?(expected_key) OR TRY (type__accepts?(expected_key, actual_key))) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, SourceType{ Type: COPY actual_key }, castTypeToTypeTypeInput__type_analysis_session(expected_key))))) THEN
+          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY rtoc_each_key }, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_MISMATCH_ASSIGN }, [], CAST({:got: type__resolved(actual_key), :expected: expected_key} AS {String@symbol}Any)));
     END
-    IF !(((type__any?(expected_value) OR TRY (type__accepts?(expected_value, actual_value))) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, actual_value, castTypeToTypeTypeInput__type_analysis_session(expected_value))))) THEN
-          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY value }, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_MISMATCH_ASSIGN }, [], CAST({:got: actual_value.resolved(), :expected: expected_value} AS {String@symbol}Any)));
+    IF !(((type__any?(expected_value) OR TRY (type__accepts?(expected_value, actual_value))) OR TRY (typeAnalysisSession__is_safe_autocast?(rtoc_self_view, SourceType{ Type: COPY actual_value }, castTypeToTypeTypeInput__type_analysis_session(expected_value))))) THEN
+          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY value }, TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_MISMATCH_ASSIGN }, [], CAST({:got: type__resolved(actual_value), :expected: expected_value} AS {String@symbol}Any)));
     END
       END
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ HashLit: COPY node }, expected_map));
@@ -16487,36 +16491,57 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.storage = :stack;
       RETURN;
     END
-    FOR rtoc_inner_key IN node.pairs.keys() DO
-    MUTABLE v: Locatable = COPY UNWRAP (node.pairs[rtoc_inner_key]);
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_inner_key));
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, v));
+    FOR rtoc_pair2 IN node.pairs DO
+    MUTABLE rtoc_k2: Locatable = COPY rtoc_pair2._0;
+    MUTABLE rtoc_v2: Locatable = COPY rtoc_pair2._1;
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_k2));
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_v2));
     END
-    MUTABLE rtoc_inner_key = node.pairs.values();
-    IF rtoc_inner_key |> ALL TRY (type__string?((TRY (type__new(_.resolved_type))))) THEN
-      MUTABLE value_type = IF values |> ALL { MUTABLE rtoc_mutable_block_param_403 = COPY _;
-      type__symbol?((TRY (aST__full_type_mut(rtoc_mutable_block_param_403)))) } THEN
-        symbol("String@symbol")
+    MUTABLE values: []Locatable = node.pairs |> SELECT COPY _._1;
+    MUTABLE all_string = TRUE;
+    FOR rtoc_v3 IN values DO
+      IF !(TRY (type__string?(TRY (type__new(TypeConstructionInput{ SymbolValue: COPY UNWRAP (locatable__resolved_type(rtoc_v3)) }))))) THEN
+        all_string = FALSE;
+      END
+    END
+    MUTABLE value_type: String@symbol = symbol("Any");
+    IF all_string THEN
+      MUTABLE all_symbol = TRUE;
+      FOR MUTABLE rtoc_v4 IN values DO
+        IF !(type__symbol?(TRY (aST__full_type_mut(rtoc_v4)))) THEN
+          all_symbol = FALSE;
+        END
+      END
+      IF all_symbol THEN
+        value_type = symbol("String@symbol");
       ELSE
-        :String
-      END;
+        value_type = symbol("String");
+      END
     ELSE
-      MUTABLE value_type = values.first().resolved_type;
-      MUTABLE symbol_key_map = node.pairs.keys() |> ALL (IF _ IS_A Literal AS literal THEN (literal.type == :SYMBOL) ELSE FALSE END);
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < values.length() DO
-    IF (values[rtoc_idx]?.resolved_type != value_type) THEN
+      value_type = UNWRAP (locatable__resolved_type(UNWRAP (values.first())));
+      MUTABLE symbol_key_map = TRUE;
+      FOR rtoc_pair3 IN node.pairs DO
+        MUTABLE rtoc_k3: ?Literal = castLocatableToLiteral(rtoc_pair3._0);
+        IF rtoc_k3 EXISTS AS literal THEN
+          IF (literal.type != :SYMBOL) THEN
+            symbol_key_map = FALSE;
+          END
+        ELSE
+          symbol_key_map = FALSE;
+        END
+      END
+      FOR rtoc_v5 IN values DO
+        IF (locatable__resolved_type(rtoc_v5) != value_type) THEN
           IF symbol_key_map THEN
-            TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ HashLit: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: symbol("HashMap<String@symbol, Auto>") }))));
+            TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ HashLit: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<String@symbol, Auto>") }))));
             node.storage = :stack;
             RETURN;
           END
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ HashLit: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :HASHMAP_MIXED_VALUES }));
-    END
-    rtoc_idx = rtoc_idx + 1;
+        END
       END
     END
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ HashLit: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${rtoc_inner_key}>") }))));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ HashLit: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${value_type}>") }))));
     node.storage = :stack;
 }
 END
