@@ -12687,20 +12687,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_each_items_300 = node.args;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_300.length() DO
-      IF (UNWRAP (rtoc_each_items_300[rtoc_idx])[1] AND TRY (typeAnalysisSession__intrinsic_arg_matches?(&rtoc_self_view, UNWRAP (rtoc_each_items_300[rtoc_idx])[1], &UNWRAP (rtoc_each_items_300[rtoc_idx])[0]))) THEN
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
+      MUTABLE rtoc_arg = UNWRAP (rtoc_each_items_300[rtoc_idx]);
+      MUTABLE rtoc_expected: ?IntrinsicArgSpec = COPY expected_args[rtoc_idx];
+      IF rtoc_expected EXISTS AS rtoc_expected_v THEN
+        IF !(TRY (typeAnalysisSession__intrinsic_arg_matches?(&rtoc_self_view, rtoc_expected_v, &rtoc_arg))) THEN
+          MUTABLE actual: ?String@symbol = locatable__resolved_type(rtoc_arg);
+          IF !((actual == :Any)) THEN
+            TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StaticCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_ARG_TYPE }, [], CAST({:index: (rtoc_idx + 1), :type: type_name, :method: node.method_name, :expected: rtoc_expected_v.type, :got: actual} AS {String@symbol}Any)));
+          END
+        END
       END
-      MUTABLE actual = UNWRAP (rtoc_each_items_300[rtoc_idx])[0].resolved_type;
-      IF (_ == :Any) THEN
-            rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StaticCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_ARG_TYPE }, [], CAST({:index: (rtoc_idx + 1), :type: type_name, :method: node.method_name, :expected: ((IF UNWRAP (rtoc_each_items_300[rtoc_idx])[1] != NIL THEN
-            (UNWRAP (rtoc_each_items_300[rtoc_idx])[1]).type()
-          ELSE
-            NIL
-          END) OR_ELSE :Any), :got: actual} AS {String@symbol}Any)));
     rtoc_idx = rtoc_idx + 1;
       END
       node.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__type_analysis_session(TRY (functionSignature__intrinsic_pattern(method_def_value_mutable)));
@@ -12731,7 +12727,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_held_12624: ?Token = locatable__token(node.type_name);
       IF rtoc_held_12624 THEN
         MUTABLE anchor = typeAnalysisSession__anchor_at(&rtoc_self_view, rtoc_held_12624.line, ((rtoc_held_12624.column + (CAST(locatable__name(node.type_name) AS String)).codepointCount()) + 2));
-        TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ AnchorToken: COPY rtoc_held_12624 }, node.method_name, static_methods.keys(), "Type Error: No static method '${node.method_name}' on '${type_name}'. Available: ${available}.", "static method of ${type_name}", :type, TRUE));
+        TRY (typeAnalysisSession__emit_typo_suggestion_mut(&rtoc_self_view, TypoToken{ Token: COPY rtoc_held_12624 }, node.method_name, static_methods.keys(), "Type Error: No static method '${node.method_name}' on '${type_name}'. Available: ${available}.", "static method of ${type_name}", :type, TRUE));
       ELSE
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ StaticCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :STATIC_UNKNOWN_METHOD }, [], CAST({:method: node.method_name, :type: type_name, :available: available} AS {String@symbol}Any)));
       END
