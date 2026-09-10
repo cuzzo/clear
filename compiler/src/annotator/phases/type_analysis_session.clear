@@ -17322,14 +17322,18 @@ PRIVATE FN typeAnalysisSession__reject_bare_atomic_ptr_mutation_mut(MUTABLE self
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE root: GetField = COPY field_node;
-    WHILE (TRUE AND !(Locatable{ GetField: COPY root } IS_A Identifier)) DO
-      root = castLocatableToGetField__type_analysis_session(COPY root.target);
+    MUTABLE root: Locatable = Locatable{ GetField: COPY field_node };
+    WHILE !(root IS_A Identifier) DO
+      IF locatable__target(root) EXISTS AS rtoc_root_target THEN
+        root = COPY rtoc_root_target;
+      ELSE
+        BREAK;
+      END
     END
-    IF !(Locatable{ GetField: COPY root } IS_A Identifier) THEN
+    IF !(root IS_A Identifier) THEN
       RETURN;
     END
-    MUTABLE sym: ?SymbolEntry = root.symbol;
+    MUTABLE sym: ?SymbolEntry@multiowned = locatable__symbol(root);
     IF sym EXISTS AS sym_value THEN
       IF !(symbolEntry__atomic?(sym_value)) THEN
         RETURN;
@@ -17337,7 +17341,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((TRUE AND symbolEntry__indirect?(sym_value))) THEN
         RETURN;
       END
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Assignment: COPY assignment_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ATOMIC_FIELD_WRITE }, [], CAST({:name: getField__name(root), :field: typeAnalysisSession__field_name_for_msg(&rtoc_self_view, &field_node)} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Assignment: COPY assignment_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ATOMIC_FIELD_WRITE }, [], CAST({:name: locatable__name(root), :field: typeAnalysisSession__field_name_for_msg(&rtoc_self_view, &field_node)} AS {String@symbol}Any)));
     ELSE
       RETURN;
     END
@@ -19706,9 +19710,16 @@ PRIVATE FN typeAnalysisSession__finish_previsited_keep_mut(MUTABLE self: TypeAna
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE type = TRY (aST__full_type_mut(node.value));
     MUTABLE root = typeAnalysisSession__get_root_object(&rtoc_self_view, node.value);
-    MUTABLE retained_projection = ((TRUE AND TRY (type__any_rc?(type))) AND (node.value != root));
-    IF ((IF root IS_A Identifier AS identifier THEN ((identifier.symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_472 = ((identifier.symbol)?);
-    symbolEntry__non_escaping(rtoc_local_receiver_472) }) ELSE FALSE END) AND !(retained_projection)) THEN
+    # Ruby asks whether the root object IS the KEPT value; get_root_object only
+    # walks GetField/GetIndex, so a projection is exactly those two shapes.
+    MUTABLE retained_projection = (TRY (type__any_rc?(type)) AND ((node.value IS_A GetField) OR (node.value IS_A GetIndex)));
+    MUTABLE rtoc_root_non_escaping: Bool = FALSE;
+    IF root IS_A Identifier AS identifier THEN
+      IF identifier.symbol EXISTS AS rtoc_root_symbol THEN
+        rtoc_root_non_escaping = symbolEntry__non_escaping(rtoc_root_symbol);
+      END
+    END
+    IF (rtoc_root_non_escaping AND !(retained_projection)) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ KeepNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :KEEP_WITH_SCOPED }, [], CAST({:name: locatable__name(root)} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ KeepNode: COPY node }, TRY (aST__full_type_mut(node.value))));
