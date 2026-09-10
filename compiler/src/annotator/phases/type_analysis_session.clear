@@ -15077,7 +15077,7 @@ PRIVATE FN typeAnalysisSession__prepare_implicit_ownership_transport_mut(MUTABLE
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE detail: String = "";
-    MUTABLE plan: Any = NIL;
+    MUTABLE plan: ?OwnershipTransportPlan = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         plan = COPY item.ownership_transport_plan;,
@@ -15087,7 +15087,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (typeAnalysisSession__language_mode(&rtoc_self_view) == :strict) THEN
       RETURN;
     END
-    IF !(FALSE) THEN
+    IF (plan == NIL) THEN
       MUTABLE source: ?Locatable = NIL;
       MATCH node START
         DeclarationNode.VarDecl AS item ->
@@ -15121,43 +15121,41 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF TRY (type__implicitly_copyable?(source_type, %(name: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, name)))) THEN
       RETURN;
     END
-    IF plan.conflicting_mutation THEN
-      MUTABLE mutation = plan.conflicting_mutation;
-      MUTABLE last_line = (((IF plan.last_alias_use != NIL THEN
-        (plan.last_alias_use).token().line
-      ELSE
-        NIL
-      END) OR_ELSE (IF mutation.token() != NIL THEN
-        (mutation.token()).line
-      ELSE
-        NIL
-      END)) OR (MATCH node START DeclarationNode.VarDecl AS item -> item.token.line, DeclarationNode.BindExpr AS item -> item.token.line END));
-      detail = "Aliasing Error: `${plan.destination} = ${plan.source}` creates an inferred alias, but mutation occurs on line ${((IF mutation.token() != NIL THEN
-        (mutation.token()).line
-      ELSE
-        NIL
-      END) OR_ELSE (MATCH node START DeclarationNode.VarDecl AS item -> item.token.line, DeclarationNode.BindExpr AS item -> item.token.line END))} while `${plan.destination}` remains live through line ${last_line}. CLEAR will not infer snapshot-versus-shared mutation semantics in EASY, DEFAULT, or STRICT. Write `${plan.destination} = COPY ${plan.source}` for an independent value, or explicitly use @multiowned/@shared and `KEEP ${plan.source}`.";
-      MUTABLE source_token = (MATCH node START DeclarationNode.VarDecl AS item -> item.value.token(), DeclarationNode.BindExpr AS item -> item.value.token() END);
+    IF plan.conflicting_mutation EXISTS AS mutation THEN
+      MUTABLE rtoc_node_line = (MATCH node START DeclarationNode.VarDecl AS item -> item.token.line, DeclarationNode.BindExpr AS item -> item.token.line END);
+      MUTABLE rtoc_mut_line: Int64 = rtoc_node_line;
+      IF locatable__token(mutation) EXISTS AS rtoc_mut_tok THEN
+        rtoc_mut_line = rtoc_mut_tok.line;
+      END
+      MUTABLE last_line: Int64 = rtoc_mut_line;
+      IF plan.last_alias_use EXISTS AS rtoc_last_alias THEN
+        IF locatable__token(Locatable{ Identifier: COPY rtoc_last_alias }) EXISTS AS rtoc_last_tok THEN
+          last_line = rtoc_last_tok.line;
+        END
+      END
+      detail = "Aliasing Error: `${plan.destination} = ${plan.source}` creates an inferred alias, but mutation occurs on line ${rtoc_mut_line.toString()} while `${plan.destination}` remains live through line ${last_line.toString()}. CLEAR will not infer a borrow across a mutation.";
+      MUTABLE source_token = (MATCH node START DeclarationNode.VarDecl AS item -> UNWRAP (locatable__token(item.value)), DeclarationNode.BindExpr AS item -> UNWRAP (locatable__token(item.value)) END);
       MUTABLE fixes: []Fix = [TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :PREFIX_COPY_SNAPSHOT)), [edit__new(span__new(NIL, source_token.line, source_token.column, 0), "COPY ")], :interactive))];
       IF (TRY (type__any_rc?(source_type)) OR type__split?(source_type)) THEN
         &fixes.append(TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :PREFIX_EXPLICIT_OWNERSHIP_COST, CAST({:keyword: DiagnosticKwValue{ StringValue: COPY "KEEP" }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, source_token.line, source_token.column, 0), "KEEP ")], :interactive)));
       END
-      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, mutation, :ownership, fixes, NIL, :INFERRED_ALIAS_MUTATION, :error, TRUE, CAST({:detail: detail} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY mutation }, :ownership, fixes, NIL, :INFERRED_ALIAS_MUTATION, :error, TRUE, CAST({:detail: detail} AS {String@symbol}Any)));
     END
     IF (plan.action == :borrow) THEN
-      node.storage = :borrow;
+      declarationNode__set_storage_override_mut(&node, :borrow);
       RETURN;
     END
     IF !((plan.action == :materialize)) THEN
       RETURN;
     END
+    MUTABLE source: ?Locatable@boxed = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         source = COPY item.value;,
       DeclarationNode.BindExpr AS item ->
         source = COPY item.value;,
     END
-    source_type = TRY (aST__full_type_mut(source));
+    MUTABLE source_type: Type = TRY (aST__full_type_mut(UNWRAP (source)));
     MUTABLE keyword: String = "";
     IF (TRY (type__any_rc?(source_type)) OR type__split?(source_type)) THEN
       keyword = "KEEP";
@@ -15170,13 +15168,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         "deep copy"
       END}. Write `${plan.destination} = ${keyword} ${plan.source}` explicitly, or shorten the lifetime so this is a move/borrow.";
-      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :ownership, [TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :PREFIX_EXPLICIT_OWNERSHIP_COST, CAST({:keyword: DiagnosticKwValue{ StringValue: COPY keyword }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, source.token().line, source.token().column, 0), "${keyword} ")], :auto))], NIL, :STRICT_IMPLICIT_OWNERSHIP_COST, :error, TRUE, CAST({:detail: detail} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :ownership, [TRY (fix__new(TRY (typeAnalysisSession__fix_description(rtoc_self_view, :PREFIX_EXPLICIT_OWNERSHIP_COST, CAST({:keyword: DiagnosticKwValue{ StringValue: COPY keyword }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (locatable__token(UNWRAP (source))).line, UNWRAP (locatable__token(UNWRAP (source))).column, 0), "${keyword} ")], :auto))], NIL, :STRICT_IMPLICIT_OWNERSHIP_COST, :error, TRUE, CAST({:detail: detail} AS {String@symbol}Any)));
     END
-    MUTABLE wrapper =   IF (keyword == "KEEP") THEN
-      KeepNode{ token: COPY source.token(), value: COPY source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, carrier_op: NIL }
-    ELSE
-      CopyNode{ token: COPY source.token(), value: COPY source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL }
-    END;
+    MUTABLE wrapper: Locatable = Locatable{ KeepNode: COPY KeepNode{ token: COPY UNWRAP (locatable__token(UNWRAP (source))), value: COPY UNWRAP (source), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, carrier_op: NIL } };
+    IF !((keyword == "KEEP")) THEN
+      wrapper = Locatable{ CopyNode: COPY CopyNode{ token: COPY UNWRAP (locatable__token(UNWRAP (source))), value: COPY UNWRAP (source), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL } };
+    END
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         MUTABLE item_mutable = COPY item;
