@@ -942,28 +942,22 @@ PUB FN typeAnalysisSession__reject_kept_function_values_mut(MUTABLE self: TypeAn
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE kept_fns = fn_nodes.each_with_object({}, %(tuple_param_0: Tuple<String,FunctionDef>, map) -> {
-    MUTABLE name = tuple_param_0._0;
-    MUTABLE fn = tuple_param_0._1;
-    MUTABLE kept_param = fn.params |> FIND (IF _.symbol != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_12: ?SymbolEntry@multiowned = (_.symbol);
-    symbolEntry__kept_identity(UNWRAP (rtoc_local_receiver_12)) }
-      ELSE
-        NIL
-      END);
-    IF kept_param THEN
-      map[name] = kept_param;
-      RETURN;
+    MUTABLE kept_fns: {String}Param = {};
+    FOR rtoc_fn_name IN fn_nodes.keys() DO
+      MUTABLE fn: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_fn_name]);
+      MUTABLE kept_param: ?Param = fn.params |> FIND (IF _.symbol EXISTS AS rtoc_p_sym THEN (symbolEntry__kept_identity(rtoc_p_sym) != NIL) ELSE FALSE END);
+      IF kept_param EXISTS AS rtoc_kp THEN
+        kept_fns[rtoc_fn_name] = COPY rtoc_kp;
+      END
     END
-    NIL
-    });
     IF kept_fns.empty?() THEN
       RETURN;
     END
-    FOR _ IN fn_nodes.values() DO
-    FOR _ IN _.body DO
-    TRY (typeAnalysisSession__scan_kept_fn_value_use_mut(&rtoc_self_view, _, _));
-    END
+    FOR rtoc_fn_name2 IN fn_nodes.keys() DO
+      MUTABLE rtoc_fn2: FunctionDef = COPY UNWRAP (fn_nodes[rtoc_fn_name2]);
+      FOR rtoc_stmt IN rtoc_fn2.body DO
+        TRY (typeAnalysisSession__scan_kept_fn_value_use_mut(&rtoc_self_view, rtoc_stmt, kept_fns));
+      END
     END
     MUTABLE rtoc_each_items_13 = ((COPY resolution.program).statements);
     MUTABLE rtoc_idx = 0;
@@ -972,7 +966,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (typeAnalysisSession__scan_kept_fn_value_use_mut(&rtoc_self_view, UNWRAP (rtoc_each_items_13[rtoc_idx]), _));
+      TRY (typeAnalysisSession__scan_kept_fn_value_use_mut(&rtoc_self_view, UNWRAP (rtoc_each_items_13[rtoc_idx]), kept_fns));
     rtoc_idx = rtoc_idx + 1;
     END
 }
