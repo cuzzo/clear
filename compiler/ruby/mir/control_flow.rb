@@ -955,6 +955,7 @@ class OwnershipDataflow
 
   sig { params(ti: Type, heap_storage: T::Boolean).returns(T::Boolean) }
   def ownership_tracked_type?(ti, heap_storage:)
+    ti = ti.non_optional_type
     return true if ti.string? && !ti.symbol? && heap_storage
 
     is_atomic_ptr = ti.atomic_ptr?
@@ -1267,7 +1268,10 @@ class OwnershipDataflow
   # ownership (handled by was_moved from the annotator).
   sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
-    ti = ident.full_type!(context: "ownership dataflow copy type")
+    # `?T` owns exactly what `T` owns -- the optional wrapper adds a tag, not
+    # a buffer -- but every predicate below reads `resolved`, which spells the
+    # wrapper out. Ask about the payload.
+    ti = ident.full_type!(context: "ownership dataflow copy type").non_optional_type
     # Heap-allocated strings own their backing buffer; RETURN/move
     # transfers ownership to the receiver (just like a heap-allocated
     # collection or struct). Rodata / frame / param strings are still

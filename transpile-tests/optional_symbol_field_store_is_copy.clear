@@ -1,0 +1,14 @@
+# Test: storing an optional symbol into a field leaves the source readable. The
+# ownership dataflow read `resolved`, which spells out the `?` wrapper, so every
+# "is this a Copy type" predicate said no for `?String@symbol` and the store
+# read as a move -- `?T` owns exactly what `T` owns.
+
+STRUCT Holder { op: ?String@symbol }
+
+FN main() RETURNS Void ->
+    MUTABLE h = Holder{ op: NIL };
+    operation: ?String@symbol = :put;
+    h.op = operation;
+    ASSERT operation == :put, "the source is still readable after the store";
+    ASSERT h.op == :put, "the field holds the symbol";
+END
