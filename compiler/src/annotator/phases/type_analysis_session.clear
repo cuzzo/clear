@@ -19340,54 +19340,58 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY val_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :STORE_WITH_SCOPED_INTO_CONTAINER }, [], CAST({:name: locatable__name(val_node), :container: (container_desc OR_ELSE "a container")} AS {String@symbol}Any)));
     END
-    MUTABLE expected_t = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_463: ?TypeTypeInput = NIL;
-    IF ((expected_type != NIL) AND (expected_type IS_A Type)) THEN
-      rtoc_ternary_value_463 = expected_type;
-    ELSE
-      rtoc_ternary_value_463 = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_462: ?Type = NIL;
-    IF expected_type != NIL THEN
-      rtoc_ternary_value_462 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(expected_type)));
-    ELSE
-      rtoc_ternary_value_462 = NIL;
+    MUTABLE expected_t: ?Type = NIL;
+    IF expected_type EXISTS AS rtoc_expected_input THEN
+      IF rtoc_expected_input IS_A Type AS rtoc_expected_as_type THEN
+        expected_t = COPY rtoc_expected_as_type;
+      ELSE
+        expected_t = TRY (type__new(castTypeTypeInputToTypeConstructionInput__type_analysis_session(rtoc_expected_input)));
+      END
     END
-    rtoc_ternary_value_462? });
+    MUTABLE rtoc_expected_symbol: Bool = FALSE;
+    IF expected_t EXISTS AS rtoc_expected_sym_t THEN
+      rtoc_expected_symbol = type__symbol?(rtoc_expected_sym_t);
     END
-    rtoc_ternary_value_463 };
-    IF (((expected_t != NIL) AND type__symbol?(UNWRAP (expected_t))) AND type__symbol?(vti)) THEN
+    IF (rtoc_expected_symbol AND type__symbol?(vti)) THEN
       RETURN NIL;
     END
     IF type__list_collection?(vti) THEN
-      MUTABLE et = COPY expected_t;
+      MUTABLE et: ?Type = COPY expected_t;
       IF et EXISTS AS et_value THEN
-        IF et_value.list_collection?() THEN
+        IF type__list_collection?(et_value) THEN
         RETURN NIL;
       END
       END
-      MUTABLE copy = CopyNode{ token: COPY aST__node__token(node), value: COPY val_node, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL };
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ CopyNode: COPY copy }, (expected_t OR TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })))));
-      copy.storage = COPY container_alloc;
+      MUTABLE copy = CopyNode{ token: COPY aST__node__token(val_node), value: COPY val_node, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL };
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ CopyNode: COPY copy }, (expected_t OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })))));
+      copy.storage_override = COPY container_alloc;
       copy.alloc = COPY container_alloc;
       MUTABLE elem: ?Type = TRY (type__element_type(vti));
       IF elem EXISTS AS elem_value THEN
         MUTABLE es: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, type__resolved(elem_value)));
-        copy.deep_copy = (schemas__union?(es) AND ((((schemaValue__variants(UNWRAP (es)) OR_ELSE {}))) |> ANY TRY (type__variant_has_heap?(_._1))));
+        MUTABLE rtoc_deep_copy: Bool = FALSE;
+        PARTIAL MATCH UNWRAP (es) START
+          SchemaValue.UnionSchemaMultiowned AS rtoc_union_schema ->
+          rtoc_deep_copy = (rtoc_union_schema.variants.values() |> ANY TRY (type__variant_has_heap?(_)));,
+          DEFAULT -> rtoc_deep_copy = FALSE;
+        END
+        copy.deep_copy = rtoc_deep_copy;
       END
       RETURN Locatable{ CopyNode: COPY copy };
     END
     IF (TRY (type__string?(vti)) AND type__rodata?(vti)) THEN
-      MUTABLE copy = CopyNode{ token: COPY aST__node__token(node), value: COPY val_node, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL };
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ CopyNode: COPY copy }, TRY (type__new(string_type, NIL, NIL, NIL, container_alloc))));
-      copy.storage = COPY container_alloc;
+      MUTABLE copy = CopyNode{ token: COPY aST__node__token(val_node), value: COPY val_node, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL };
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ CopyNode: COPY copy }, TRY (type__new(TypeConstructionInput{ SymbolValue: :String }, NIL, NIL, NIL, container_alloc))));
+      copy.storage_override = COPY container_alloc;
       copy.alloc = COPY container_alloc;
       RETURN Locatable{ CopyNode: COPY copy };
     END
     IF ((TRY (type__string?(vti)) AND val_node IS_A Identifier) AND (container_desc != NIL)) THEN
-      MUTABLE sym = aST__node__symbol(node);
-      IF !((IF sym != NIL THEN
-        symbolEntry__heap_storage?(sym)
-      ELSE
-        NIL
-      END)) THEN
+      MUTABLE rtoc_val_heap: Bool = FALSE;
+      IF aST__node__symbol(val_node) EXISTS AS rtoc_val_sym THEN
+        rtoc_val_heap = symbolEntry__heap_storage?(rtoc_val_sym);
+      END
+      IF !(rtoc_val_heap) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY val_node }, TypeAnalysisCodeOrMessage{ SymbolValue: :STORE_STRING_NEEDS_COPY }, [], CAST({:name: locatable__name(val_node), :container: container_desc} AS {String@symbol}Any)));
       END
     END
@@ -20125,7 +20129,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE loc: String = "";
           IF TRUE THEN
-            loc = " (line ${UNWRAP (info.reg).line})";
+            loc = " (line ${aST__node__token(castSymbolEntryRegInputToLocatable(UNWRAP (info.reg))).line.toString()})";
           ELSE
             loc = "";
           END
@@ -20149,11 +20153,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF !((symbolEntry__read(info) OR (((symbolEntryRegInput__var_used(info.reg) != NIL) AND info.reg.var_used)))) THEN
+      MUTABLE rtoc_reg_var_used: Bool = FALSE;
+      IF info.reg EXISTS AS rtoc_used_reg THEN
+        rtoc_reg_var_used = (symbolEntryRegInput__var_used(rtoc_used_reg) OR_ELSE FALSE);
+      END
+      IF !((symbolEntry__read(info) OR rtoc_reg_var_used)) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF ((symbolEntryRegInput__var_mutated(info.reg) != NIL) AND info.reg.var_mutated) THEN
+      MUTABLE rtoc_reg_var_mutated: Bool = FALSE;
+      IF info.reg EXISTS AS rtoc_mutated_reg THEN
+        rtoc_reg_var_mutated = (symbolEntryRegInput__var_mutated(rtoc_mutated_reg) OR_ELSE FALSE);
+      END
+      IF rtoc_reg_var_mutated THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -20223,7 +20235,7 @@ PRIVATE FN typeAnalysisSession__get_path_to_root(MUTABLE self: TypeAnalysisSessi
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE path = List[];
+    MUTABLE path: []String@symbol = List[];
     MUTABLE curr = COPY node;
     WHILE ((curr IS_A GetField OR curr IS_A GetIndex) OR curr IS_A OptionalUnwrap) DO
       IF curr IS_A GetField THEN
@@ -20234,11 +20246,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       curr = (castLocatableToNode__type_analysis_session(UNWRAP (locatable__target(UNWRAP (castNodeToLocatable(curr))))));
     END
-    IF !(curr IS_A Identifier) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_504: []String@symbol = List[]; rtoc_empty_list_504 } ) AS []String@symbol);
+    IF curr IS_A Identifier AS rtoc_curr_ident THEN
+      path = ([symbol(rtoc_curr_ident.name)] + path);
+      RETURN path;
     END
-    path = ([symbol(curr.name())] + path);
-    RETURN path;
+    RETURN CAST(( { MUTABLE rtoc_empty_list_504: []String@symbol = List[]; rtoc_empty_list_504 } ) AS []String@symbol);
 }
 END
 PRIVATE FN typeAnalysisSession__verify_tied_assignment_mut(MUTABLE self: TypeAnalysisSession, assign_node: Assignment) RETURNS !Void
@@ -20251,7 +20263,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (sources.length() == 0) THEN
       RETURN;
     END
-    IF (TRUE AND ((sources.length() == 1) AND (sources[0] == sym))) THEN
+    MUTABLE rtoc_only_source: ?SymbolEntry@multiowned = sources[0];
+    IF (TRUE AND ((sources.length() == 1) AND (rtoc_only_source == sym))) THEN
       RETURN;
     END
     MUTABLE dest_depth: ?Int64 = TRY (typeAnalysisSession__dest_scope_depth_for_target(&rtoc_self_view, castAssignmentNameToLocatable__type_analysis_session(assign_node.name)));
@@ -20267,7 +20280,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE source_name = (typeAnalysisSession__lookup_source_name(&rtoc_self_view, sources[rtoc_idx]?) OR_ELSE "(unnamed)");
-      MUTABLE msg = "Lifetime Error: cannot store value tied to '${source_name}' (declared at scope depth ${sources[rtoc_idx]?.scope_depth}) into a destination at scope depth ${dest_depth_value.toString()} -- the destination outlives the source. Move the destination into the same scope, or COPY the value.";
+      MUTABLE msg = "Lifetime Error: cannot store value tied to '${source_name}' (declared at scope depth ${(sources[rtoc_idx]?.scope_depth OR_ELSE 0).toString()}) into a destination at scope depth ${dest_depth_value.toString()} -- the destination outlives the source. Move the destination into the same scope, or COPY the value.";
       MUTABLE fix: ?Fix@multiowned = TRY (typeAnalysisSession__build_atomic_escape_migration_fix(&rtoc_self_view, sources[rtoc_idx]?, source_name));
       IF fix EXISTS AS fix_value THEN
             TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ Assignment: COPY assign_node } }, :escape, [fix_value], NIL, :ATOMIC_ESCAPE_ASSIGN, :error, TRUE, CAST({:detail: msg} AS {String@symbol}Any)));
@@ -20401,21 +20414,20 @@ PRIVATE FN typeAnalysisSession__dest_scope_depth_for_target(MUTABLE self: TypeAn
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF target_node IS_A Identifier AS identifier THEN
-      MUTABLE sym: ?SymbolEntry = identifier.symbol;
-      sym = (sym OR_ELSE (IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, identifier__name(identifier))) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_508: ?Scope@multiowned = (TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, identifier__name(identifier))));
-      scope__resolve_entry(UNWRAP (rtoc_local_receiver_508), identifier__name(identifier)) }
-      ELSE
-        NIL
-      END));
-      IF sym != NIL THEN
-    RETURN sym.scope_depth;
-      ELSE
-    RETURN NIL;
+      MUTABLE sym: ?SymbolEntry@multiowned = identifier.symbol;
+      IF sym == NIL THEN
+        IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, identifier__name(identifier))) EXISTS AS rtoc_lookup_scope THEN
+          MUTABLE rtoc_resolved_sym: ?SymbolEntry@multiowned = scope__resolve_entry(rtoc_lookup_scope, identifier__name(identifier));
+          sym = rtoc_resolved_sym;
+        END
       END
+      IF sym EXISTS AS rtoc_dest_sym THEN
+        RETURN COPY rtoc_dest_sym.scope_depth;
+      END
+      RETURN NIL;
     END
     IF (target_node IS_A GetField OR target_node IS_A GetIndex) THEN
-      RETURN TRY (typeAnalysisSession__dest_scope_depth_for_target(&rtoc_self_view, locatable__target(target_node)));
+      RETURN TRY (typeAnalysisSession__dest_scope_depth_for_target(&rtoc_self_view, UNWRAP (locatable__target(target_node))));
     END
     RETURN NIL;
 }
