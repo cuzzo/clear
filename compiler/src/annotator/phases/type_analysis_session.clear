@@ -18127,78 +18127,68 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_ctx = typeAnalysisSession__current_fn_ctx_mut(&rtoc_self_view);
     MUTABLE expected = COPY fn_ctx.return_type;
     MUTABLE raw_value: ?Locatable@boxed = COPY node.value;
-    MUTABLE value: ?Locatable = raw_value;
-    MUTABLE return_payload = (TRY (type__plain_return_payload_type(expected)) OR_ELSE expected);
-    IF (value IS_A BgBlock AND TRY (type__single_future?(return_payload))) THEN
-      value.declared_async_payload = TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(TRY (type__tense_type(return_payload)))));
+    MUTABLE value: ?Locatable = COPY raw_value;
+    MUTABLE return_payload = (TRY (type__plain_return_payload_type(expected)) OR_ELSE COPY expected);
+    IF ((value)? IS_A BgBlock AND TRY (type__single_future?(return_payload))) THEN
+      MUTABLE rtoc_bg_value: Locatable = COPY UNWRAP (value);
+      locatable__set_declared_async_payload_mut(&rtoc_bg_value, TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(TRY (type__tense_type(return_payload))))));
     END
-    IF (value IS_A ListLit AND ((type__collection?(return_payload) OR type__tuple?(return_payload)))) THEN
-      locatable__set_coerced_type_object_mut(&value, return_payload);
-    ELSE_IF (value IS_A HashLit AND type__map?(return_payload)) THEN
-      locatable__set_coerced_type_object_mut(&value, return_payload);
+    IF ((value)? IS_A ListLit AND ((type__collection?(return_payload) OR type__tuple?(return_payload)))) THEN
+      MUTABLE rtoc_list_value: Locatable = COPY UNWRAP (value);
+      locatable__set_coerced_type_object_mut(&rtoc_list_value, return_payload);
+    ELSE_IF ((value)? IS_A HashLit AND type__map?(return_payload)) THEN
+      MUTABLE rtoc_hash_value: Locatable = COPY UNWRAP (value);
+      locatable__set_coerced_type_object_mut(&rtoc_hash_value, return_payload);
     END
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, value));
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, COPY value));
     MUTABLE inline_bg_sources = CAST((TRY (typeAnalysisSession__collect_bg_sources_in_expr(&rtoc_self_view, UNWRAP (castLocatableToBgSourceWalkValue(UNWRAP (value))))) |> DISTINCT _) AS []SymbolEntry@multiowned);
     IF (inline_bg_sources).any?() THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ReturnNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_BORROWED_NO_COPY_OR_LIFETIME }, [], {:type: CAST((TRY (aST__full_type_mut(UNWRAP (value)))) AS String)}));
     END
     IF typeAnalysisSession__inside_with_block?(&rtoc_self_view) THEN
-      IF (value IS_A Identifier AND ((locatable__symbol(UNWRAP (value)) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_437 = ((locatable__symbol(UNWRAP (value)))?);
+      IF ((value)? IS_A Identifier AND ((locatable__symbol(UNWRAP (value)) != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_437 = ((locatable__symbol(UNWRAP (value)))?);
       symbolEntry__non_escaping(rtoc_local_receiver_437) })) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ReturnNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_FROM_WITH_SCOPED }, [], CAST({:name: locatable__name(UNWRAP (value))} AS {String@symbol}Any)));
-      ELSE_IF ((value IS_A GetField AND TRUE) AND ((locatable__target(UNWRAP (value)).symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_438 = ((locatable__target(UNWRAP (value)).symbol)?);
-      symbolEntry__non_escaping(rtoc_local_receiver_438) })) THEN
+      ELSE_IF (((value)? IS_A GetField AND TRUE) AND ((locatable__symbol(UNWRAP (locatable__target(UNWRAP (value)))) != NIL) AND symbolEntry__non_escaping(UNWRAP (locatable__symbol(UNWRAP (locatable__target(UNWRAP (value)))))))) THEN
         MUTABLE returned_type = TRY (aST__full_type_mut(UNWRAP (value)));
         IF !(TRY (type__implicitly_copyable?(returned_type, %(type: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, type))))) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ReturnNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_FIELD_FROM_WITH_SCOPED }));
         END
-      ELSE_IF ((value IS_A GetIndex AND TRUE) AND ((locatable__target(UNWRAP (value)).symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_439 = ((locatable__target(UNWRAP (value)).symbol)?);
-      symbolEntry__non_escaping(rtoc_local_receiver_439) })) THEN
-        returned_type = TRY (aST__full_type_mut(value));
+      ELSE_IF (((value)? IS_A GetIndex AND TRUE) AND ((locatable__symbol(UNWRAP (locatable__target(UNWRAP (value)))) != NIL) AND symbolEntry__non_escaping(UNWRAP (locatable__symbol(UNWRAP (locatable__target(UNWRAP (value)))))))) THEN
+        returned_type = TRY (aST__full_type_mut(UNWRAP (value)));
         IF !(TRY (type__implicitly_copyable?(returned_type, %(type: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, type))))) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ReturnNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_INDEX_FROM_WITH_SCOPED }));
         END
       END
     END
-    IF value IS_A IfStatement THEN
-      TRY (typeAnalysisSession__promote_to_expr_if_mut(&rtoc_self_view, Locatable{ ReturnNode: COPY node }, &value));
+    IF (value)? IS_A IfStatement AS rtoc_return_if THEN
+      MUTABLE rtoc_return_if_mut: IfStatement = COPY rtoc_return_if;
+      TRY (typeAnalysisSession__promote_to_expr_if_mut(&rtoc_self_view, Locatable{ ReturnNode: COPY node }, &rtoc_return_if_mut));
     END
-    IF value IS_A MatchStatement THEN
-      TRY (typeAnalysisSession__promote_to_expr_match_mut(&rtoc_self_view, Locatable{ ReturnNode: COPY node }, &value));
+    IF (value)? IS_A MatchStatement AS rtoc_return_match THEN
+      MUTABLE rtoc_return_match_mut: MatchStatement = COPY rtoc_return_match;
+      TRY (typeAnalysisSession__promote_to_expr_match_mut(&rtoc_self_view, Locatable{ ReturnNode: COPY node }, &rtoc_return_match_mut));
     END
-    MUTABLE rtoc_open_1 = UNWRAP (value);
+    MUTABLE rtoc_ret_value: Locatable = COPY UNWRAP (value);
+    MUTABLE rtoc_open_1: Locatable = COPY UNWRAP (value);
     TRY (typeAnalysisSession__verify_return(&rtoc_self_view, &rtoc_open_1));
     TRY (typeAnalysisSession__verify_tied_return_mut(&rtoc_self_view, node));
     MUTABLE actual: ?String@symbol = locatable__resolved_type(UNWRAP (value));
-    MUTABLE rtoc_open_2 = UNWRAP (value);
+    MUTABLE rtoc_open_2: Locatable = COPY UNWRAP (value);
     MUTABLE actual_full = TRY (typeAnalysisSession__return_value_type(&rtoc_self_view, &rtoc_open_2));
-    IF value IS_A Identifier THEN
-      MUTABLE vti = TRY (aST__full_type_mut(value));
-      IF (vti AND !(TRY (type__implicitly_copyable?(vti, %(t: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, t)))))) THEN
-        value.was_moved = TRUE;
+    IF (value)? IS_A Identifier THEN
+      MUTABLE rtoc_ident_value: Locatable = COPY UNWRAP (value);
+      MUTABLE vti: Type = TRY (aST__full_type_mut(rtoc_ident_value));
+      IF !(TRY (type__implicitly_copyable?(vti, %(t: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, t))))) THEN
+        locatable__set_was_moved_mut(&rtoc_ident_value, TRUE);
       END
-      MUTABLE vt_branch_value: ?Type = NIL;
-      IF vti IS_A Type THEN
-        vt_branch_value = vti;
-      ELSE
-        vt_branch_value = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_440: ?Type = NIL;
-        IF vti THEN
-          rtoc_ternary_value_440 = TRY (type__new(vti));
-        ELSE
-          rtoc_ternary_value_440 = NIL;
-        END
-        rtoc_ternary_value_440? });
-      END
-      MUTABLE vt: ?Type = vt_branch_value;
-      IF vt EXISTS AS vt_value THEN
-        IF type__future?(vt_value) THEN
-        TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, locatable__name(UNWRAP (value)), locatable__token(UNWRAP (value)), :return));
-      END
+      IF type__future?(vti) THEN
+        TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, UNWRAP (locatable__name(rtoc_ident_value)), locatable__token(rtoc_ident_value), :return));
       END
     END
-    IF !(value IS_A Identifier) THEN
-      IF ((type__heap_return_storage?(expected) AND TRUE) AND TRY (type__requires_move?((TRY (aST__full_type_mut(value)))))) THEN
-        value.storage = :heap;
+    IF !((value)? IS_A Identifier) THEN
+      IF (type__heap_return_storage?(expected) AND TRY (type__requires_move?((TRY (aST__full_type_mut(rtoc_ret_value)))))) THEN
+        locatable__set_storage_override_mut(&rtoc_ret_value, :heap);
       END
     END
     MUTABLE actual_is_auto = type__auto?(actual_full);
@@ -18206,19 +18196,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE return_checkable = (((!(actual_is_auto) AND !(expected_is_auto)) AND !((type__resolved(expected) == :Void))) AND !((type__resolved(expected) == :Any)));
     IF (return_checkable AND !(TRY (typeAnalysisSession__return_type_compatible?(&rtoc_self_view, CAST(actual_full AS Type), expected)))) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ReturnNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RETURN_MISMATCH }, [], {:expected: TRY (typeAnalysisSession__type_display(&rtoc_self_view, expected)), :got: TRY (typeAnalysisSession__type_display(&rtoc_self_view, CAST(actual_full AS Type)))}));
-    ELSE_IF (return_checkable AND (actual != expected)) THEN
-      MUTABLE value_is_fallible = (!((TRY (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &value, "return value")) == NIL)) OR type__error_union?(actual_full));
-      MUTABLE coerce_target =     IF (!(value_is_fallible) AND (TRY (type__plain_return_payload_type(expected)) != NIL)) THEN
-        TRY (type__plain_return_payload_type(expected))
-      ELSE
-        expected
-      END;
-      locatable__set_coerced_type_object_mut(&value, coerce_target);
-      TRY (typeAnalysisSession__check_prefixed_int_range_mut(&rtoc_self_view, value, coerce_target));
+    ELSE_IF (return_checkable AND (actual != type__resolved(expected))) THEN
+      MUTABLE value_is_fallible = (!((TRY (typeAnalysisSession__recoverable_result_type(&rtoc_self_view, &rtoc_ret_value, "return value")) == NIL)) OR type__error_union?(actual_full));
+      MUTABLE coerce_target: Type = COPY expected;
+      IF !(value_is_fallible) THEN
+        IF TRY (type__plain_return_payload_type(expected)) EXISTS AS rtoc_payload_target THEN
+          coerce_target = COPY rtoc_payload_target;
+        END
+      END
+      locatable__set_coerced_type_object_mut(&rtoc_ret_value, coerce_target);
+      TRY (typeAnalysisSession__check_prefixed_int_range_mut(&rtoc_self_view, rtoc_ret_value, castTypeToTypeTypeInput__type_analysis_session(coerce_target)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ ReturnNode: COPY node }, actual));
-    MUTABLE return_fact_type: Bool = (locatable__coerced_type_info(UNWRAP (value)) OR actual_full);
-    &fn_ctx.returns.append(COPY ReturnFact{ storage: COPY CAST(locatable__storage(UNWRAP (value)) AS ?String@symbol), type: COPY symbol((TRY (type__coercion_surface_name(castTypeToTypeTypeInput__type_analysis_session(return_fact_type))))), metatype: COPY CAST(aST__metatype(value) AS ?String@symbol) });
+    MUTABLE return_fact_type: Type = COPY (locatable__coerced_type_info(rtoc_ret_value) OR_ELSE actual_full);
+    &fn_ctx.returns.append(COPY ReturnFact{ storage: COPY locatable__storage(rtoc_ret_value), type: COPY symbol((TRY (type__coercion_surface_name(castTypeToTypeTypeInput__type_analysis_session(return_fact_type))))), metatype: COPY COPY aST__metatype(rtoc_ret_value) });
     rtoc_self_view.traversal_state.branch_terminated = TRUE;
     RETURN TRUE;
 }
