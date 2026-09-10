@@ -2302,7 +2302,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
       IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
-        length = COPY CAST(((tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(index)).value)) + 1.0)) AS String);
+        length = COPY CAST(((tokenValue__to_f(UNWRAP (castLocatableToLiteral(index))) + 1.0)) AS String);
       ELSE
         length = "0";
       END
@@ -5676,7 +5676,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_NUMBER }, [], CAST({:got: size_type} AS {String@symbol}Any)));
       END
       IF UNWRAP (opts["size"]) IS_A Literal THEN
-        MUTABLE v = tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))).value));
+        MUTABLE v = tokenValue__to_f(UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))));
         IF (v <= 0.0) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_POSITIVE }));
         END
@@ -5687,9 +5687,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((IF UNWRAP (opts["time"]) IS_A Literal AS rtoc_time_lit THEN (rtoc_time_lit.type == :STRING) ELSE FALSE END)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["time"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_NEEDS_STRING_LIT }));
       END
-      MUTABLE ns: ?Int64 = TRY (typeAnalysisSession__parse_batch_window_time_ns(&rtoc_self_view, CAST(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["time"]))).value) AS String)));
+      MUTABLE ns: ?Int64 = TRY (typeAnalysisSession__parse_batch_window_time_ns(&rtoc_self_view, CAST(UNWRAP (castLocatableToLiteral(UNWRAP (opts["time"]))) AS String)));
       IF !(ns) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["time"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_BAD_FORMAT }, [], CAST({:got: CAST(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["time"]))).value) AS String)} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["time"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_BAD_FORMAT }, [], CAST({:got: CAST(UNWRAP (castLocatableToLiteral(UNWRAP (opts["time"]))) AS String)} AS {String@symbol}Any)));
       END
       IF (UNWRAP (ns) <= 0) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["time"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_NEEDS_POSITIVE }));
@@ -8541,13 +8541,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(declarationNode__type(node)) THEN
       RETURN;
     END
-    MUTABLE final_type_info = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_197: ?AnnotationTypeShape = NIL;
-    IF final_type IS_A Type THEN
-      rtoc_ternary_value_197 = COPY final_type;
-    ELSE
-      rtoc_ternary_value_197 = AnnotationTypeShape{ Type: COPY UNWRAP (castTypeConstructionInputToType(TRY (type__new(TypeConstructionInput{ Type: COPY castAnnotationTypeShapeToTypeConstructionInput(final_type) }))))};
+    MUTABLE final_type_info: Type = TRY (type__new(castAnnotationTypeShapeToTypeConstructionInput(final_type)));
+    IF final_type IS_A Type AS rtoc_final_ty THEN
+      final_type_info = COPY rtoc_final_ty;
     END
-    rtoc_ternary_value_197? };
     IF ((MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A BgStreamBlock, DeclarationNode.BindExpr AS item -> item.value IS_A BgStreamBlock END) AND (MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__inf_stream?(UNWRAP (item.type))), DeclarationNode.BindExpr AS item -> TRY (type__inf_stream?(UNWRAP (item.type))) END)) THEN
       MUTABLE stream: ?Locatable = NIL;
       MATCH node START
@@ -8568,16 +8565,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF ((MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A BgStreamBlock, DeclarationNode.BindExpr AS item -> item.value IS_A BgStreamBlock END) AND (MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))), DeclarationNode.BindExpr AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))) END)) THEN
       value_type = (MATCH node START DeclarationNode.VarDecl AS item -> TRY (aST__full_type_mut(item.value)), DeclarationNode.BindExpr AS item -> TRY (aST__full_type_mut(item.value)) END);
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, UNWRAP (declarationNode__value(node)), TRY (type__new(value_type, :split))));
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, UNWRAP (declarationNode__value(node)), TRY (type__new(UNWRAP (value_type), :split))));
     END
-    IF (MATCH node START DeclarationNode.VarDecl AS item -> type__shard_count(item.type), DeclarationNode.BindExpr AS item -> type__shard_count(item.type) END) THEN
-      TRY (type__copy_topology_from_mut(&final_type_info, declarationNode__type(node)));
+    IF (MATCH node START DeclarationNode.VarDecl AS item -> type__shard_count(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__shard_count(UNWRAP (item.type)) END) THEN
+      TRY (type__copy_topology_from_mut(&final_type_info, UNWRAP (declarationNode__type(node))));
     END
-    IF ((MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A BgBlock, DeclarationNode.BindExpr AS item -> item.value IS_A BgBlock END) AND (MATCH node START DeclarationNode.VarDecl AS item -> type__shared_promise?(item.type), DeclarationNode.BindExpr AS item -> type__shared_promise?(item.type) END)) THEN
+    IF ((MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A BgBlock, DeclarationNode.BindExpr AS item -> item.value IS_A BgBlock END) AND (MATCH node START DeclarationNode.VarDecl AS item -> type__shared_promise?(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__shared_promise?(UNWRAP (item.type)) END)) THEN
       value_type = (MATCH node START DeclarationNode.VarDecl AS item -> TRY (aST__full_type_mut(item.value)), DeclarationNode.BindExpr AS item -> TRY (aST__full_type_mut(item.value)) END);
-      MUTABLE rtoc_writer_receiver_198: Void = UNWRAP (declarationNode__value(node));
-      rtoc_writer_receiver_198.async_result_shape = TRY (asyncResultShape__promise(Type{ Type: COPY TRY (type__tense_type(value_type)) }, TRUE));
-      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, UNWRAP (declarationNode__value(node)), TRY (type__new(value_type, :shared))));
+      MUTABLE rtoc_writer_receiver_198: Locatable = UNWRAP (declarationNode__value(node));
+      locatable__set_async_result_shape_mut(&rtoc_writer_receiver_198, TRY (asyncResultShape__promise(TRY (type__tense_type(TRY (type__new(UNWRAP (value_type))))), TRUE)));
+      TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, UNWRAP (declarationNode__value(node)), TRY (type__new(UNWRAP (value_type), :shared))));
     END
 }
 END
