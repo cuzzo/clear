@@ -4137,13 +4137,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE scc_set = scc |> DISTINCT _;
     MUTABLE participating = edges |> WHERE (scc_set.contains?(_.held) AND scc_set.contains?(_.acquired));
     MUTABLE sample: ?LockEdge = COPY participating.first();
-    MUTABLE site_lines = (CAST(((participating |> SELECT {
-    MUTABLE line: String = "?";
-    IF COPY _.site_token != NIL THEN
-        line = (UNWRAP (COPY _.site_token)).line.toString();
+    MUTABLE rtoc_site_list: []String = [];
+    FOR rtoc_edge IN participating DO
+      MUTABLE line: String = COPY "?";
+      IF rtoc_edge.site_token EXISTS AS rtoc_site_tok THEN
+        line = COPY rtoc_site_tok.line.toString();
       END
-    "  - ${_.fn_name} (line ${line}): holds :${_.held}, acquires :${_.acquired}"
-    }) |> DISTINCT _) AS []String)).join("\n");
+      &rtoc_site_list.append(COPY "  - ${rtoc_edge.fn_name} (line ${line}): holds :${rtoc_edge.held}, acquires :${rtoc_edge.acquired}");
+    END
+    MUTABLE rtoc_seen_sites: [Set]String = Set[];
+    MUTABLE rtoc_unique_sites: []String = [];
+    FOR rtoc_site IN rtoc_site_list DO
+      IF !(rtoc_seen_sites.contains?(rtoc_site)) THEN
+        &rtoc_seen_sites.insert(COPY rtoc_site);
+        &rtoc_unique_sites.append(COPY rtoc_site);
+      END
+    END
+    MUTABLE site_lines = rtoc_unique_sites.join("\n");
     MUTABLE types_str = (scc |> SELECT ":${_}").join(", ");
     MUTABLE kind: String = "";
     IF (scc.length() == 1) THEN
