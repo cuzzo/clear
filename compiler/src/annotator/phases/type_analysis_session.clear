@@ -87,6 +87,7 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f726567
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f7369676e61747572655f72657475726e732e636c656172" AS function_signature_returns
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f66756e6374696f6e5f72657475726e2e636c656172" AS function_return
 REQUIRE "pkg:rtoc_6173742f6572726f725f72656769737472792e636c656172" AS error_registry
+REQUIRE "pkg:rtoc_636f6d70696c65722f656e747279706f696e742e636c656172" AS entrypoint
 # Ruby: source_dir ? File.expand_path(source_dir) : Dir.pwd
 # path's expand preMirTypeCheck__leaves() a relative path alone without a base, so the working
 # directory is the base, which is what File.expand_path resolves against.
@@ -17895,7 +17896,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE decl: SyncPolicyDecl = COPY castLocatableToSyncPolicyDecl(UNWRAP (decls.first()));
-    MUTABLE has_main = program_node.statements |> ANY (IF _ IS_A FunctionDef AS function_def THEN (function_def.name == name) ELSE FALSE END);
+    MUTABLE has_main = program_node.statements |> ANY (IF _ IS_A FunctionDef AS function_def THEN (function_def.name == entrypointName()) ELSE FALSE END);
     IF !(has_main) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ SyncPolicyDecl: COPY decl } }, TypeAnalysisCodeOrMessage{ SymbolValue: :SYNC_POLICY_NEEDS_MAIN_FILE }));
     END
@@ -18896,8 +18897,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF operand IS_A Identifier AS identifier THEN
       MUTABLE token = identifier.token;
       MUTABLE span = span__new(NIL, token.line, token.column, identifier__name(identifier).codepointCount());
-      &fixes.append(TRY (fix__new(TRY (diagnosticRegistry__fix_description(:TEST_OPTIONAL_BOOL_PRESENCE, CAST({:name: DiagnosticKwValue{ StringValue: COPY identifier__name(identifier) }} AS {String@symbol}String))), [edit__new(span, "${identifier__name(identifier)} EXISTS")], :interactive)));
-      &fixes.append(TRY (fix__new(TRY (diagnosticRegistry__fix_description(:DEFAULT_OPTIONAL_BOOL_PAYLOAD, CAST({:name: DiagnosticKwValue{ StringValue: COPY identifier__name(identifier) }} AS {String@symbol}String))), [edit__new(span, "(${identifier__name(identifier)} OR_ELSE FALSE)")], :interactive)));
+      &fixes.append(TRY (fix__new(TRY (diagnosticRegistry__fix_description(:TEST_OPTIONAL_BOOL_PRESENCE, {:name: COPY identifier__name(identifier)})), [edit__new(span, "${identifier__name(identifier)} EXISTS")], :interactive)));
+      &fixes.append(TRY (fix__new(TRY (diagnosticRegistry__fix_description(:DEFAULT_OPTIONAL_BOOL_PAYLOAD, {:name: COPY identifier__name(identifier)})), [edit__new(span, "(${identifier__name(identifier)} OR_ELSE FALSE)")], :interactive)));
     END
     TRY (typeAnalysisSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY operand }, :type, fixes, NIL, :AMBIGUOUS_OPTIONAL_BOOL_LOGIC, :error, FALSE, CAST({:op: op} AS {String@symbol}Any)));
 }

@@ -33,6 +33,7 @@ REQUIRE "pkg:rtoc_73656d616e7469632f62675f636170747572655f636c61737369666965722e
 REQUIRE "pkg:rtoc_73656d616e7469632f6566666563745f696e666572656e63652e636c656172" AS effect_inference
 REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f776974685f6d617463685f636865636b2e636c656172" AS with_match_check
 REQUIRE "pkg:rtoc_73656d616e7469632f636f6e63757272656e63795f636865636b732e636c656172" AS concurrency_checks
+REQUIRE "pkg:rtoc_636f6d70696c65722f656e747279706f696e742e636c656172" AS entrypoint
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN STRUCT CompilerRegexScanner {} CLOSE "deinit" FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
@@ -4745,6 +4746,3 @@ END
 
 # `Compiler::Entrypoint::NAME`. A module constant is not exported across CLEAR
 # files; the tree's pattern is a PUB FN reader.
-PUB FN entrypointName() RETURNS String EFFECTS REENTRANT ->
-  RETURN "main";
-END

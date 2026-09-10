@@ -1,3 +1,11 @@
 # Ruby module Compiler
 # Ruby module Compiler::Entrypoint
+# The entry function's CLEAR name and the Zig symbol it lowers to. Ruby keeps
+# these as Compiler::Entrypoint constants; every reader shares this one pair.
+PUB FN entrypointName() RETURNS String EFFECTS REENTRANT ->
+  RETURN "main";
+END
+PUB FN entrypointZigName() RETURNS String EFFECTS REENTRANT ->
+  RETURN "clearMain";
+END
 # End Ruby module Compiler
