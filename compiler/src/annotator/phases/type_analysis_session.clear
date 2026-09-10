@@ -20336,22 +20336,35 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE fn_node: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(&rtoc_self_view, typeAnalysisSession__current_fn_ctx(&rtoc_self_view)?.name));
-    MUTABLE rl: ?Any = COPY fn_node?.return_lifetime;
-    IF (rl == :wildcard) THEN
-      RETURN;
-    END
-    MUTABLE declared = (rl OR_ELSE List[]);
-    MUTABLE declared_names = declared |> UNNEST {
-    MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, _));
-    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_506: ?[]Any = NIL;
-      IF (path.length() == 0) THEN
-        rtoc_ternary_value_506 = List[];
-      ELSE
-        rtoc_ternary_value_506 = [CAST(symbol(UNWRAP (path.first())) AS String)];
+    MUTABLE rl: ?ClearParserReturnLifetime = COPY fn_node?.return_lifetime;
+    MUTABLE declared: []Locatable = List[];
+    IF rl EXISTS AS rtoc_return_lifetime THEN
+      PARTIAL MATCH rtoc_return_lifetime START
+        ClearParserReturnLifetime.SymbolValue AS rtoc_lifetime_symbol ->
+        IF (rtoc_lifetime_symbol == :wildcard) THEN
+          RETURN;
+        END,
+        ClearParserReturnLifetime.ArrayValue AS rtoc_lifetime_nodes ->
+        declared = COPY rtoc_lifetime_nodes;,
       END
-      rtoc_ternary_value_506? })
-    };
-    MUTABLE source_names = (sources |> SELECT TRY (typeAnalysisSession__lookup_source_name(&rtoc_self_view, _))) |> WHERE _ != NIL;
+    END
+    MUTABLE declared_names: []String = List[];
+    MUTABLE rtoc_declared_i = 0;
+    WHILE rtoc_declared_i < declared.length() DO
+      MUTABLE path = TRY (typeAnalysisSession__get_path_to_root(&rtoc_self_view, castLocatableToNode__type_analysis_session(UNWRAP (declared[rtoc_declared_i]))));
+      IF path.first() EXISTS AS rtoc_path_root THEN
+        &declared_names.append(CAST(rtoc_path_root AS String));
+      END
+      rtoc_declared_i = rtoc_declared_i + 1;
+    END
+    MUTABLE source_names: []String = List[];
+    MUTABLE rtoc_source_i = 0;
+    WHILE rtoc_source_i < sources.length() DO
+      IF TRY (typeAnalysisSession__lookup_source_name(&rtoc_self_view, UNWRAP (sources[rtoc_source_i]))) EXISTS AS rtoc_source_name THEN
+        &source_names.append(COPY rtoc_source_name);
+      END
+      rtoc_source_i = rtoc_source_i + 1;
+    END
     MUTABLE matched = source_names |> ANY declared_names.contains?(_);
     IF matched THEN
       RETURN;
@@ -20368,12 +20381,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       declared_msg = "`RETURNS ${declared_names.join(", ")}:T`";
     END
-    MUTABLE msg = "Lifetime Error: cannot RETURN a value whose lifetime is tied to ${sources_msg}, because the enclosing function declares ${declared_msg} -- the caller's scope outlives the source. Either declare the function as `RETURNS ${source_names.first()}:T` (propagates the lifetime to the caller), or COPY the value before returning it.";
-    MUTABLE atomic_fix: Any = NIL;
+    MUTABLE msg = "Lifetime Error: cannot RETURN a value whose lifetime is tied to ${sources_msg}, because the enclosing function declares ${declared_msg} -- the caller's scope outlives the source. Either declare the function as `RETURNS ${(source_names.first() OR_ELSE "")}:T` (propagates the lifetime to the caller), or COPY the value before returning it.";
+    MUTABLE atomic_fix: ?Fix@multiowned = NIL;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < sources.length() DO
-      MUTABLE name = ((source_names[rtoc_idx] OR TRY (typeAnalysisSession__lookup_source_name(&rtoc_self_view, sources[rtoc_idx]))) OR "(unnamed)");
-      MUTABLE f: ?Fix@multiowned = TRY (typeAnalysisSession__build_atomic_escape_migration_fix(&rtoc_self_view, sources[rtoc_idx], name));
+      MUTABLE name: String = COPY ((source_names[rtoc_idx] OR_ELSE TRY (typeAnalysisSession__lookup_source_name(&rtoc_self_view, UNWRAP (sources[rtoc_idx])))) OR_ELSE "(unnamed)");
+      MUTABLE f: ?Fix@multiowned = TRY (typeAnalysisSession__build_atomic_escape_migration_fix(&rtoc_self_view, UNWRAP (sources[rtoc_idx]), name));
       IF f EXISTS AS f_value THEN
           atomic_fix = f_value;
           BREAK;
