@@ -2132,28 +2132,42 @@ PRIVATE FN resolutionSession__equivalent_extern_type_schema?(MUTABLE self: Resol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !((scopeScopeTypeSchema__variant_name(existing) == scopeScopeTypeSchema__variant_name(incoming))) THEN
+    MUTABLE rtoc_vn_existing = scopeScopeTypeSchema__variant_name(existing);
+    MUTABLE rtoc_vn_incoming = scopeScopeTypeSchema__variant_name(incoming);
+    IF !((rtoc_vn_existing == rtoc_vn_incoming)) THEN
       RETURN FALSE;
     END
-    IF !((resolutionSession__extern_type_schema?(&rtoc_self_view, existing) AND resolutionSession__extern_type_schema?(&rtoc_self_view, incoming))) THEN
+    MUTABLE rtoc_ext_existing = resolutionSession__extern_type_schema?(&rtoc_self_view, existing);
+    MUTABLE rtoc_ext_incoming = resolutionSession__extern_type_schema?(&rtoc_self_view, incoming);
+    IF !((rtoc_ext_existing AND rtoc_ext_incoming)) THEN
       RETURN FALSE;
     END
-    IF !((scopeScopeTypeSchema__extern_module(existing) == scopeScopeTypeSchema__extern_module(incoming))) THEN
+    MUTABLE rtoc_em_existing: ?String = COPY scopeScopeTypeSchema__extern_module(existing);
+    MUTABLE rtoc_em_incoming: ?String = COPY scopeScopeTypeSchema__extern_module(incoming);
+    IF !((rtoc_em_existing == rtoc_em_incoming)) THEN
       RETURN FALSE;
     END
-    IF !((schemaValue__as_type(existing) == schemaValue__as_type(incoming))) THEN
+    MUTABLE rtoc_at_existing: ?String = COPY schemaValue__as_type(existing);
+    MUTABLE rtoc_at_incoming: ?String = COPY schemaValue__as_type(incoming);
+    MUTABLE rtoc_at_eq = (rtoc_at_existing == rtoc_at_incoming);
+    IF !(rtoc_at_eq) THEN
       RETURN FALSE;
     END
-    IF !((schemaValue__type_params(existing) == schemaValue__type_params(incoming))) THEN
+    MUTABLE rtoc_tp_existing = schemaValue__type_params(existing);
+    MUTABLE rtoc_tp_incoming = schemaValue__type_params(incoming);
+    IF !((rtoc_tp_existing == rtoc_tp_incoming)) THEN
       RETURN FALSE;
     END
-    IF !(resolutionSession__equivalent_struct_fields?(&rtoc_self_view, schemaValue__fields(existing), schemaValue__fields(incoming))) THEN
+    MUTABLE rtoc_f_existing = schemaValue__fields(existing);
+    MUTABLE rtoc_f_incoming = schemaValue__fields(incoming);
+    MUTABLE rtoc_fields_eq = resolutionSession__equivalent_struct_fields?(&rtoc_self_view, rtoc_f_existing, rtoc_f_incoming);
+    IF !(rtoc_fields_eq) THEN
       RETURN FALSE;
     END
-    IF existing IS_A ResourceSchema AS resource_schema THEN
-    IF incoming IS_A ResourceSchema AS resource_schema THEN
-      RETURN (resource_schema.close_plan == resource_schema.close_plan);
-    END
+    IF existing IS_A ResourceSchema AS rtoc_existing_res THEN
+      IF incoming IS_A ResourceSchema AS rtoc_incoming_res THEN
+        RETURN (rtoc_existing_res.close_plan == rtoc_incoming_res.close_plan);
+      END
     END
     RETURN TRUE;
 }

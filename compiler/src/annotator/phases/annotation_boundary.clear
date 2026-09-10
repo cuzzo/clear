@@ -27,14 +27,15 @@ PUB FN annotationBoundary__verify_mut(MUTABLE program: Program, products: Annota
         panic("annotation boundary missing function signature for {}");
   END
   MUTABLE derived: ?DerivedFunctionFacts = NIL;
-  IF (COPY products.capability_audit?.derived_program)?.functions != NIL THEN
-        derived = COPY (((COPY products.capability_audit?.derived_program)?.functions)?[rtoc_each_key]);
-      END
+  IF products.capability_audit EXISTS AS rtoc_cap_audit THEN
+    MUTABLE rtoc_derived_prog = rtoc_cap_audit.derived_program;
+    derived = COPY rtoc_derived_prog.functions[rtoc_each_key];
+  END
   IF !(derived) THEN
         panic("annotation boundary missing derived function facts for {}");
   END
   MUTABLE rtoc_signature = signature;
-  IF !(((derived).return_type_key == type__semantic_type_key(functionSignature__return_type(rtoc_signature)))) THEN
+  IF !((derived.return_type_key == type__semantic_type_key(functionSignature__return_type(rtoc_signature)))) THEN
         panic("annotation boundary derived return contract mismatch for {}");
   END
     END
