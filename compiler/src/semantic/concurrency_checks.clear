@@ -27,34 +27,28 @@ PRIVATE FN concurrencyChecks__check_hold_across_yield_mut(fn_value: FunctionDef,
   IF (TRY (concurrencyChecks__lock_holding_names(CAST(COPY with_block AS WithBlock)))).empty?() THEN
       RETURN;
   END
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < scope.length() DO
-      MUTABLE offender_token = NIL;
-      MUTABLE reason = NIL;
-      IF (scope[rtoc_idx]? IS_A BgBlock) THEN
-          offender_token = locatable__token(scope[rtoc_idx]?);
-          reason = "BG";
-      ELSE_IF scope[rtoc_idx]? IS_A NextExpr AS next_expr THEN
-          offender_token = next_expr.token;
-          reason = "NEXT";
-      ELSE_IF scope[rtoc_idx]? IS_A FuncCall AS func_call THEN
-          MUTABLE callee: ?FunctionDef = COPY fn_nodes[CAST(funcCall__name(func_call) AS String)];
-          IF callee EXISTS AS callee_value THEN
+  MUTABLE rtoc_with_line: Int64 = with_block.token.line;
+  FOR rtoc_node IN scope DO
+      MUTABLE offender_token: ?Token = NIL;
+      MUTABLE reason: String = COPY "";
+      IF rtoc_node IS_A BgBlock THEN
+          offender_token = locatable__token(rtoc_node);
+          reason = COPY "BG";
+      ELSE_IF rtoc_node IS_A NextExpr AS next_expr THEN
+          offender_token = COPY next_expr.token;
+          reason = COPY "NEXT";
+      ELSE_IF rtoc_node IS_A FuncCall AS func_call THEN
+          IF fn_nodes[CAST(funcCall__name(func_call) AS String)] EXISTS AS callee_value THEN
             IF callee_value.effects.contains?(symbol("YIELD")) THEN
-            offender_token = func_call.token;
-            reason = "call to '${funcCall__name(func_call)}' which yields";
-          END
+              offender_token = COPY func_call.token;
+              reason = COPY "call to '${CAST(funcCall__name(func_call) AS String)}' which yields";
+            END
           END
       END
-      IF !(offender_token) THEN
-          RETURN;
+      IF offender_token EXISTS AS rtoc_offender THEN
+        MUTABLE rtoc_offender_line: Int64 = rtoc_offender.line;
+        error_handler(rtoc_node, COPY "Hold-lock-across-yield: ${reason} at line ${rtoc_offender_line.toString()} executes inside the WITH at line ${rtoc_with_line.toString()}, while a lock is held. Move the suspending operation outside the WITH, or restructure so the lock is released before suspension.");
       END
-      error_handler(with_block, "Hold-lock-across-yield: ${reason} at line ${offender_token.line} executes inside the WITH at line ${(IF with_block.token != NIL THEN
-          with_block.token.line
-        ELSE
-          NIL
-        END)}, while a lock is held. Move the suspending operation outside the WITH, or restructure so the lock is released before suspension.");
-    rtoc_idx = rtoc_idx + 1;
   END
   rubyToClearVoid__concurrency_checks()
   });
@@ -82,11 +76,13 @@ PRIVATE FN concurrencyChecks__check_naked_nested_with_mut(with_blocks: []WithBlo
       IF TRY (concurrencyChecks__any_lock_rank?(castLocatableToWithBlock(inner), lock_ranks)) THEN
           RETURN;
       END
-      MUTABLE names = (inner_lock_names - outer_lock_names);
+      MUTABLE names: [Set]String = inner_lock_names.difference(outer_lock_names);
       IF names.empty?() THEN
           RETURN;
       END
-      MUTABLE suggested_names = (((outer_lock_names + names)) |> SELECT COPY _);
+      MUTABLE rtoc_all_names: [Set]String = COPY outer_lock_names;
+      &rtoc_all_names.merge(names);
+      MUTABLE suggested_names: []String = rtoc_all_names |> SELECT COPY _;
       error_handler(inner, "Naked nested WITH on a different binding (${((names |> SELECT COPY _)).join(", ")}) while ${(outer_lock_names |> SELECT COPY _).join(", ")} is held \u{2014} symmetric callers may deadlock. Use the multi-resource form for safe ordering:\n    WITH EXCLUSIVE ${suggested_names.join(", ")} AS (${(suggested_names |> SELECT ("i_" $+ _)).join(", ")}) { ... }");
     rtoc_idx = rtoc_idx + 1;
   END
@@ -115,42 +111,44 @@ PRIVATE FN concurrencyChecks__check_reentrant_mut(fn_value: FunctionDef, with_bl
   IF held_params.empty?() THEN
       RETURN;
   END
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < scope.length() DO
-      IF !((IF scope[rtoc_idx]? IS_A FuncCall AS func_call THEN TRUE ELSE FALSE END)) THEN
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalSigLookupReturnToOptionalX(sig_lookup(CAST((emittable__name(UNWRAP (scope[rtoc_idx]))) AS String))));
-      IF !((((sig != NIL) AND TRY (functionSignature__requires(sig))) AND !(((TRY (functionSignature__requires(sig))).count == 0)))) THEN
-          RETURN;
-      END
-      MUTABLE rtoc_each_items_1 = (TRY (functionSignature__params(sig)));
-      MUTABLE rtoc_idx_n1 = 0;
-      WHILE rtoc_idx_n1 < rtoc_each_items_1.length() DO
-          MUTABLE pname = COPY CAST((rtoc_each_items_1[rtoc_idx_n1]?.name) AS String);
-          IF !((TRY (functionSignature__requires(sig))).contains?(pname)) THEN
-              RETURN;
-          END
-          MUTABLE arg = (scope[rtoc_idx]?.args())[rtoc_idx_n1];
-          IF !(arg) THEN
-              RETURN;
-          END
-          MUTABLE arg_name = aST__node_name(arg);
-          IF !((TRUE AND held_params.contains?(arg_name))) THEN
-              RETURN;
-          END
-          error_handler(scope[rtoc_idx_n1]?, "Reentrant lock acquisition: '${scope[rtoc_idx_n1]?.name()}' has REQUIRES '${pname}: ${(((TRY (functionSignature__requires(sig)))[pname]) |> SELECT COPY _).join(" | ")}' and is called with '${arg_name}', which is already held by the WITH at line ${(IF with_block.token != NIL THEN
-              with_block.token.line
-            ELSE
-              NIL
-            END)}. Pass the unwrapped inner alias instead of the wrapped binding.");
-        rtoc_idx_n1 = rtoc_idx_n1 + 1;
-      END
-    rtoc_idx = rtoc_idx + 1;
+  FOR rtoc_scope_node IN scope DO
+    IF rtoc_scope_node IS_A FuncCall AS rtoc_call THEN
+      concurrencyChecks__report_reentrant_call_mut(rtoc_call, sig_lookup, held_params, CAST(COPY with_block AS WithBlock), error_handler);
+    END
   END
   rubyToClearVoid__concurrency_checks()
   });
+END
+
+# Ruby leaves each parameter with `next`; a CLEAR loop cannot, so the per-call
+# report lives in its own function.
+PRIVATE FN concurrencyChecks__report_reentrant_call_mut(call: FuncCall, sig_lookup: FN(String) -> ?SigLookupReturn, held_params: [Set]String, with_block: WithBlock, error_handler: FN(Locatable, String) -> Void) RETURNS Void ->
+  MUTABLE rtoc_call_name: String = COPY CAST(funcCall__name(call) AS String);
+  MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(castOptionalSigLookupReturnToOptionalX(sig_lookup(rtoc_call_name)));
+  IF (sig == NIL) THEN
+    RETURN;
+  END
+  MUTABLE rtoc_requires: {String}[Set]String@symbol = (functionSignature__requires(sig) OR_ELSE {});
+  IF rtoc_requires.empty?() THEN
+    RETURN;
+  END
+  MUTABLE rtoc_with_line: Int64 = with_block.token.line;
+  MUTABLE rtoc_params: []Param = (functionSignature__params(sig) OR_ELSE List[]);
+  MUTABLE rtoc_idx: Int64 = 0;
+  WHILE rtoc_idx < rtoc_params.length() DO
+    MUTABLE pname: String = COPY CAST(UNWRAP (rtoc_params[rtoc_idx]).name AS String);
+    IF rtoc_requires[pname] EXISTS AS rtoc_families THEN
+      IF call.args[rtoc_idx] EXISTS AS arg THEN
+        IF aST__node_name(arg) EXISTS AS arg_name THEN
+          IF held_params.contains?(CAST(arg_name AS String)) THEN
+            MUTABLE rtoc_family_text: String = COPY (rtoc_families |> SELECT COPY _).join(" | ");
+            error_handler(Locatable{ FuncCall: COPY call }, COPY "Reentrant lock acquisition: '${rtoc_call_name}' has REQUIRES '${pname}: ${rtoc_family_text}' and is called with '${CAST(arg_name AS String)}', which is already held by the WITH at line ${rtoc_with_line.toString()}. Pass the unwrapped inner alias instead of the wrapped binding.");
+          END
+        END
+      END
+    END
+    rtoc_idx = rtoc_idx + 1;
+  END
 END
 FN concurrencyChecks__each_with_scope(with_blocks: []WithBlock, with_scope_nodes: {Int64}[]Locatable, blk: FN(WithBlock, Locatable[]) -> Void) RETURNS Void ->
   FOR _ IN with_blocks DO
