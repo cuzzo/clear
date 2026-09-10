@@ -5667,7 +5667,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF UNWRAP (opts["size"]) IS_A Literal THEN
         MUTABLE v = tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["size"]))).value));
-        IF (_ <= 0) THEN
+        IF (v <= 0.0) THEN
           TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["size"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_SIZE_NEEDS_POSITIVE }));
         END
       END
@@ -5677,60 +5677,41 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !((IF UNWRAP (opts["time"]) IS_A Literal AS rtoc_time_lit THEN (rtoc_time_lit.type == :STRING) ELSE FALSE END)) THEN
         TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["time"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_NEEDS_STRING_LIT }));
       END
-      MUTABLE ns: ?Int64 = TRY (typeAnalysisSession__parse_batch_window_time_ns(&rtoc_self_view, opts["time"].value()));
-      IF !(_) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, opts["time"], TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_BAD_FORMAT }, [], CAST({:got: opts["time"].value()} AS {String@symbol}Any)));
+      MUTABLE ns: ?Int64 = TRY (typeAnalysisSession__parse_batch_window_time_ns(&rtoc_self_view, CAST(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["time"]))).value) AS String)));
+      IF !(ns) THEN
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["time"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_BAD_FORMAT }, [], CAST({:got: CAST(UNWRAP (UNWRAP (castLocatableToLiteral(UNWRAP (opts["time"]))).value) AS String)} AS {String@symbol}Any)));
       END
-      IF (_ <= 0) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, opts["time"], TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_NEEDS_POSITIVE }));
+      IF (UNWRAP (ns) <= 0) THEN
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (opts["time"]) }, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_TIME_NEEDS_POSITIVE }));
       END
     END
-    MUTABLE left_ti = TRY (aST__full_type_mut(node.left));
-    MUTABLE item_type_branch_value: ?Any@multiowned = NIL;
+    MUTABLE left_ti: ?Type = TRY (aST__full_type_mut(node.left));
+    MUTABLE item_type: String@symbol = :Any;
     IF left_ti EXISTS AS left_ti_value THEN
-      IF left_ti_value.inf_stream?() THEN
-      item_type_branch_value = type__resolved((TRY (type__inf_stream_element_type(left_ti))));
-    ELSE_IF (IF left_ti != NIL THEN
-      TRY (type__open_stream?(left_ti))
-    ELSE
-      NIL
-    END) THEN
+      IF type__inf_stream?(left_ti_value) THEN
+        item_type = type__resolved(UNWRAP (TRY (type__inf_stream_element_type(left_ti_value))));
+      ELSE_IF TRY (type__open_stream?(left_ti_value)) THEN
+        item_type = type__resolved(UNWRAP (TRY (type__open_stream_element_type(left_ti_value))));
+      ELSE_IF TRY (type__dynamic_stream?(left_ti_value)) THEN
+        item_type = type__resolved(UNWRAP (TRY (type__element_type(TRY (type__tense_type(left_ti_value))))));
+      ELSE_IF type__bounded_stream?(left_ti_value) THEN
+        item_type = type__resolved(UNWRAP (TRY (type__stream_element_type(left_ti_value))));
+      ELSE_IF TRY (type__element_type(left_ti_value)) != NIL THEN
+        item_type = type__resolved(UNWRAP (TRY (type__element_type(left_ti_value))));
+      ELSE
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node.left }, TypeAnalysisCodeOrMessage{ SymbolValue: :BATCH_WINDOW_NEEDS_STREAM }));
+      END
     END
-      item_type_branch_value = type__resolved((TRY (type__open_stream_element_type(left_ti))));
-    ELSE_IF (IF left_ti != NIL THEN
-      TRY (type__dynamic_stream?(left_ti))
-    ELSE
-      NIL
-    END) THEN
-      item_type_branch_value = type__resolved((TRY (type__element_type((TRY (type__tense_type(left_ti)))))));
-    ELSE_IF (IF left_ti != NIL THEN
-      left_ti.bounded_stream?()
-    ELSE
-      NIL
-    END) THEN
-      item_type_branch_value = type__resolved((TRY (type__stream_element_type(left_ti))));
-    ELSE_IF (IF left_ti != NIL THEN
-      TRY (type__element_type(left_ti))
-    ELSE
-      NIL
-    END) THEN
-      item_type_branch_value = (TRY (type__element_type(left_ti))).resolved();
-    ELSE
-      item_type_branch_value = TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.left, TypeAnalysisCodeOrMessage{ SymbolValue: :WINDOW_NEEDS_COLLECTION_INPUT }));
-    END
-    MUTABLE item_type: Any@multiowned = item_type_branch_value?;
-    typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(bw, item_type, MUTABLE rtoc_self_view, MUTABLE expr_type, MUTABLE _) -> {
+    typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(bw, item_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_120 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
     TRY (scope__declare(&rtoc_mutable_receiver_120, "_", NIL, SymbolEntryTypeInput{ SymbolValue: COPY symbol("${item_type}[]") }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, bw.expression()))
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__expression(bw)))
     });
-    MUTABLE rtoc_held_5699 = aST__full_type_mut(UNWRAP (locatable__expression(bw)));
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${type__resolved(_).toString()}[]") }))));
+    MUTABLE expr_type: Type = TRY (aST__full_type_mut(UNWRAP (locatable__expression(bw))));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${type__resolved(expr_type).toString()}[]") }))));
     node.storage_override = :heap;
-    IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
-        MUTABLE rtoc_held_5703: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
-        MUTABLE rtoc_open_0 = UNWRAP (_);
-        functionContext__record_frame_use_mut(&_);
+    IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) EXISTS AS MUTABLE rtoc_bw_ctx THEN
+      functionContext__record_frame_use_mut(&rtoc_bw_ctx);
     END
     RETURN NIL;
 }
