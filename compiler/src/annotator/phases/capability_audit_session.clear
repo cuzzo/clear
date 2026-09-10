@@ -2726,21 +2726,24 @@ PRIVATE FN capabilityAuditSession__fallibility_call_site_edits(self: CapabilityA
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE summary: ?FunctionBodySummary = COPY (TRY (capabilityAuditSession__function_body_summaries(rtoc_self_view)))[name];
     IF summary EXISTS AS summary_value THEN
-      RETURN summary_value.call_site_facts |> REDUCE(List[]) {
-    IF !(_.propagates_failure) THEN
+      MUTABLE edits: []Edit = [];
+      FOR rtoc_fact IN summary_value.call_site_facts DO
+        IF !(rtoc_fact.propagates_failure) THEN
           CONTINUE;
-    END
-    IF !(TRY (capabilityAuditSession__fallible_call_site_fact?(rtoc_self_view, _))) THEN
+        END
+        IF !(TRY (capabilityAuditSession__fallible_call_site_fact?(rtoc_self_view, rtoc_fact))) THEN
           CONTINUE;
-    END
-    MUTABLE range: ?SourceRange = locatable__source_range((COPY _.node));
-    IF (((UNWRAP (range)).start_line <= 0) OR ((UNWRAP (range)).end_line <= 0)) THEN
-          CONTINUE;
-    END
-    &acc.append(edit__new(span__new(UNWRAP (range).file, (UNWRAP (range)).start_line, (UNWRAP (range)).start_column, 0), "TRY ("));
-    &acc.append(edit__new(span__new(UNWRAP (range).file, (UNWRAP (range)).end_line, UNWRAP (range).end_column, 0), ")"));
-    acc
-      };
+        END
+        MUTABLE range: ?SourceRange = locatable__source_range(COPY rtoc_fact.node);
+        IF range EXISTS AS rtoc_range THEN
+          IF ((rtoc_range.start_line <= 0) OR (rtoc_range.end_line <= 0)) THEN
+            CONTINUE;
+          END
+          &edits.append(edit__new(span__new(rtoc_range.file, rtoc_range.start_line, rtoc_range.start_column, 0), "TRY ("));
+          &edits.append(edit__new(span__new(rtoc_range.file, rtoc_range.end_line, rtoc_range.end_column, 0), ")"));
+        END
+      END
+      RETURN edits;
     ELSE
       RETURN CAST(( { MUTABLE rtoc_empty_list_18: []Edit = List[]; rtoc_empty_list_18 } ) AS []Edit);
     END
