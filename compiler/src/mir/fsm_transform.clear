@@ -124,7 +124,7 @@ PRIVATE FN fsmTransform__collect_body_locals(stmts: []Locatable) RETURNS ![]Prom
   MUTABLE out: []PromotedLocalFact = ( { MUTABLE rtoc_empty_list_8: []PromotedLocalFact = List[]; rtoc_empty_list_8 } );
   MUTABLE seen: {String}Bool = {};
   aST__each_locatable_list(stmts, FALSE, %(MUTABLE node: Locatable) USE(MUTABLE out, MUTABLE seen) -> {
-  MUTABLE entry: ?PromotedLocalFact = TRY (fsmTransform__local_entry_for_node(&node));
+  MUTABLE entry: ?PromotedLocalFact = TRY (fsmTransform__local_entry_for_node(node));
   IF !(entry) THEN
       RETURN;
   END
@@ -138,7 +138,7 @@ PRIVATE FN fsmTransform__collect_body_locals(stmts: []Locatable) RETURNS ![]Prom
   });
   RETURN out;
 END
-PRIVATE FN fsmTransform__local_entry_for_node(MUTABLE node: Locatable) RETURNS !?PromotedLocalFact ->
+PRIVATE FN fsmTransform__local_entry_for_node(node: Locatable) RETURNS !?PromotedLocalFact ->
   IF node IS_A VarDecl AS var_decl THEN
     MUTABLE var_decl_mutable = COPY var_decl;
     RETURN TRY (fsmTransform__local_entry(var_decl_mutable.name, TRY (aST__full_type_mut( Locatable{ VarDecl: COPY var_decl_mutable }))));

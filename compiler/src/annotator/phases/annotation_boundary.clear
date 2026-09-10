@@ -10,7 +10,7 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f7068617365732f646572697665645f70726f677261
 # Ruby module Annotator
 # Ruby module Annotator::Phases
 # Ruby module Annotator::Phases::AnnotationBoundary
-PUB FN annotationBoundary__verify_mut(MUTABLE program: Program, products: AnnotationProducts) RETURNS !Void ->
+PUB FN annotationBoundary__verify_mut(program: Program, products: AnnotationProducts) RETURNS !Void ->
   MUTABLE typed_program: ?TypedProgramFacts = COPY products.typed_program;
   IF typed_program EXISTS AS typed_program_value THEN
     MUTABLE typed_program_value_mutable = COPY typed_program_value;

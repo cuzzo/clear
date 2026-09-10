@@ -12115,7 +12115,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF name EXISTS AS string_name THEN
+      MUTABLE string_name = COPY name;
+      IF TRUE THEN
         IF !((string_name.length() == 0)) THEN
           &names.append(COPY string_name);
         END

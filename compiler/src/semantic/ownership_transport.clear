@@ -566,14 +566,14 @@ PUB FN ownershipTransportFrames__record_mutation_id(MUTABLE frames: []OwnershipT
   END
 END
 
-PUB FN ownershipTransportFrames__record_alias(MUTABLE frames: []OwnershipTransportFacts, node: Node, ancestors: []Locatable) RETURNS Void ->
+PUB FN ownershipTransportFrames__record_alias(frames: []OwnershipTransportFacts, node: Node, ancestors: []Locatable) RETURNS Void ->
   MUTABLE rtoc_last: Int64 = (frames.length() - 1);
   IF frames[rtoc_last] EXISTS AS MUTABLE rtoc_frame THEN
     ownershipTransportFacts__record_alias(&rtoc_frame, node, ancestors);
   END
 END
 
-PUB FN ownershipTransportFrames__record_transfer(MUTABLE frames: []OwnershipTransportFacts, container: Locatable, slot: OwnershipTransportSlot, source: Identifier) RETURNS Void ->
+PUB FN ownershipTransportFrames__record_transfer(frames: []OwnershipTransportFacts, container: Locatable, slot: OwnershipTransportSlot, source: Identifier) RETURNS Void ->
   MUTABLE rtoc_last: Int64 = (frames.length() - 1);
   IF frames[rtoc_last] EXISTS AS MUTABLE rtoc_frame THEN
     ownershipTransportFacts__record_transfer(&rtoc_frame, container, slot, source);

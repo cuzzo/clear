@@ -1751,7 +1751,7 @@ PUB FN type__apply_finalized_value_shape_mut(MUTABLE self: Type, final_type: Typ
   END;
   RETURN CAST(TRY (type__apply_capabilities_mut(&self, TypeCapabilitiesMaybeSymbol{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, type__capability_symbol_or_unset(type__sync(final_type)), type__capability_symbol_or_unset(type__layout(final_type)), TypeCapabilitiesMaybeInteger{ TypeCapabilityUnset: COPY TypeCapabilityUnset{} }, type__capability_symbol_or_unset(value_collection), type__capability_integer_or_unset(final_shard_count), type__capability_boolean_or_unset(final_soa), type__capability_symbol_or_unset(elem_ownership), type__capability_symbol_or_unset(elem_sync), type__capability_symbol_or_unset(elem_layout), type__capability_symbol_or_unset(link_src), type__capability_boolean_or_unset(observable), type__capability_symbol_or_unset(observable_terminal))) AS TypeCapabilities);
 END
-PUB FN type__merge_capabilities_from_mut(MUTABLE self: Type, source: Type, MUTABLE preserve_existing: Bool = TRUE, include_affine_ownership: Bool = FALSE) RETURNS !TypeCapabilities ->
+PUB FN type__merge_capabilities_from_mut(MUTABLE self: Type, source: Type, preserve_existing: Bool = TRUE, include_affine_ownership: Bool = FALSE) RETURNS !TypeCapabilities ->
   MUTABLE source_ownership: ?String@symbol = type__ownership(source);
   MUTABLE source_collection: ?String@symbol = type__collection(source);
   MUTABLE source_shard_count: ?Int64 = type__shard_count(source);
@@ -3787,7 +3787,7 @@ PUB FN type__render_zig_type(self: Type, is_param: Bool = FALSE, is_field: Bool 
   MUTABLE mutable_is_field: Bool = is_field;
   mutable_is_param = is_param;
   mutable_is_field = is_field;
-  RETURN TRY (type__compute_zig_type(self, &mutable_is_param, &mutable_is_field));
+  RETURN TRY (type__compute_zig_type(self, mutable_is_param, mutable_is_field));
 END
 PUB FN type__finalize_storage(self: Type, size: Int64, current_storage: ?String@symbol = NIL) RETURNS !String@symbol ->
   IF (type__frozen?(self) OR (current_storage == :frozen)) THEN
@@ -4440,7 +4440,7 @@ PRIVATE FN type__map_zig_type(self: Type) RETURNS !String EFFECTS REENTRANT ->
   END
   RETURN "CheatLib.StringMap(${val_zig})";
 END
-PRIVATE FN type__compute_zig_type(self: Type, MUTABLE is_param: Bool = FALSE, MUTABLE is_field: Bool = FALSE) RETURNS !String EFFECTS REENTRANT ->
+PRIVATE FN type__compute_zig_type(self: Type, is_param: Bool = FALSE, is_field: Bool = FALSE) RETURNS !String EFFECTS REENTRANT ->
   MUTABLE base_zig: String = "";
   MUTABLE current_shard_count: Int64 = 0_i64;
   MUTABLE inner_zig: String = "";

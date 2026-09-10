@@ -103,7 +103,7 @@ PUB FN pipelineLoweringBridge__lower_node_with_decl_alloc(MUTABLE self: Pipeline
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIRLowering__pipeline_lower_node_with_decl_alloc(&rtoc_self_view.lowering, &node, alloc));
+    RETURN TRY (mIRLowering__pipeline_lower_node_with_decl_alloc(&rtoc_self_view.lowering, node, alloc));
 }
 END
 PUB FN pipelineLoweringBridge__lower_body(MUTABLE self: PipelineLoweringBridge, nodes: []Locatable) RETURNS ![]Emittable
@@ -190,7 +190,7 @@ PUB FN pipelineLoweringBridge__pipeline_index_insert_with_ownership(MUTABLE self
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (mIRLowering__pipeline_index_insert_with_ownership(&rtoc_self_view.lowering, &insert, &value, value_owns, target_alloc));
+    RETURN TRY (mIRLowering__pipeline_index_insert_with_ownership(&rtoc_self_view.lowering, insert, &value, value_owns, target_alloc));
 }
 END
 PUB FN pipelineLoweringBridge__with_runtime_binding_name<U>(MUTABLE self: PipelineLoweringBridge, rt_name: String, blk: FN() -> U) RETURNS U

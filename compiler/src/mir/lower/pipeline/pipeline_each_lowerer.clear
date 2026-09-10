@@ -33,13 +33,13 @@ PUB STRUCT PipelineEachLowerer {
 }
 
 PUB FN pipelineEachLowerer__lower(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp) RETURNS !?PipelineEachResult ->
-  RETURN TRY (pipelineEachLowerer__lower_plan(self, TRY (pipelineEachLowerer__each_plan(self, &list_node, each_op))));
+  RETURN TRY (pipelineEachLowerer__lower_plan(self, TRY (pipelineEachLowerer__each_plan(self, list_node, each_op))));
 END
-PRIVATE FN pipelineEachLowerer__each_plan(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp) RETURNS !PipelineEachPlan ->
+PRIVATE FN pipelineEachLowerer__each_plan(self: PipelineEachLowerer, list_node: Locatable, each_op: EachOp) RETURNS !PipelineEachPlan ->
   MUTABLE lhs_type = TRY (aST__full_type_mut(list_node));
   MUTABLE bc_target = pipelineEachLowerer__bc_target_call(self);
   MUTABLE range_chain: ?PipelineRangeChain = pipelineEachLowerer__range_chain_call(self, list_node);
-  RETURN PipelineEachPlan{ source_kind: COPY pipelineEachLowerer__each_source_kind(self, list_node, lhs_type, range_chain, &bc_target), list_node: COPY list_node, each_op: COPY each_op, lhs_type: COPY lhs_type, range_chain: COPY range_chain, bc_target: bc_target };
+  RETURN PipelineEachPlan{ source_kind: COPY pipelineEachLowerer__each_source_kind(self, list_node, lhs_type, range_chain, bc_target), list_node: COPY list_node, each_op: COPY each_op, lhs_type: COPY lhs_type, range_chain: COPY range_chain, bc_target: bc_target };
 END
 PRIVATE FN pipelineEachLowerer__lower_plan(self: PipelineEachLowerer, MUTABLE plan: PipelineEachPlan) RETURNS !?PipelineEachResult ->
   RETURN TRY (pipelineEachLowerer__lower_source_plan(self, plan.source_kind, &plan));
@@ -55,7 +55,7 @@ PRIVATE FN pipelineEachLowerer__lower_source_plan(self: PipelineEachLowerer, sou
     MUTABLE chain = COPY UNWRAP (plan.range_chain);
     RETURN PipelineEachResult{ ScopeBlock: COPY pipelineEachLowerer__lower_each_range_call(self, chain.source, chain.stages, plan.each_op) };
   ELSE_IF (source_kind == PipelineEachSourceKind.List) THEN
-    RETURN PipelineEachResult{ ScopeBlock: COPY TRY (pipelineEachLowerer__lower_list_each(self, &plan.list_node, plan.each_op, plan.bc_target)) };
+    RETURN PipelineEachResult{ ScopeBlock: COPY TRY (pipelineEachLowerer__lower_list_each(self, plan.list_node, plan.each_op, plan.bc_target)) };
   ELSE_IF (source_kind == PipelineEachSourceKind.Set) THEN
     RETURN PipelineEachResult{ ScopeBlock: COPY TRY (pipelineEachLowerer__lower_set_each(self, plan.list_node, plan.each_op)) };
   ELSE_IF (source_kind == PipelineEachSourceKind.RangeLiteral) THEN
@@ -66,7 +66,7 @@ PRIVATE FN pipelineEachLowerer__lower_source_plan(self: PipelineEachLowerer, sou
     RETURN NIL;
   END
 END
-PRIVATE FN pipelineEachLowerer__each_source_kind(self: PipelineEachLowerer, list_node: Locatable, lhs_type: Type, range_chain: ?PipelineRangeChain, MUTABLE bc_target: Bool) RETURNS PipelineEachSourceKind ->
+PRIVATE FN pipelineEachLowerer__each_source_kind(self: PipelineEachLowerer, list_node: Locatable, lhs_type: Type, range_chain: ?PipelineRangeChain, bc_target: Bool) RETURNS PipelineEachSourceKind ->
   IF (type__sharded?(lhs_type) AND !(bc_target)) THEN
     RETURN PipelineEachSourceKind.Sharded;
   END
@@ -130,7 +130,7 @@ PRIVATE FN pipelineEachLowerer__lower_bc_indexed_each(self: PipelineEachLowerer,
   &body.append(Emittable{ Set: COPY Set{ target: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ Ident: COPY src_ident }, index: Emittable{ Ident: COPY Ident{ name: COPY idx_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: "__each_item", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
   RETURN ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ ListLength: COPY ListLength{ expr: Emittable{ Ident: COPY src_ident }, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: COPY idx_name, body: body, index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
-PRIVATE FN pipelineEachLowerer__lower_list_each(self: PipelineEachLowerer, MUTABLE list_node: Locatable, each_op: EachOp, bc_target: Bool) RETURNS !ScopeBlock ->
+PRIVATE FN pipelineEachLowerer__lower_list_each(self: PipelineEachLowerer, list_node: Locatable, each_op: EachOp, bc_target: Bool) RETURNS !ScopeBlock ->
   MUTABLE source_mir = pipelineEachLowerer__visit_mir_call(self, list_node);
   MUTABLE list_body_mir = TRY (pipelineEachLowerer__visit_body_with_placeholder_call(self, each_op.body, "__each_item"));
   IF bc_target THEN

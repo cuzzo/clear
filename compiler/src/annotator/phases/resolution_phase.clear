@@ -214,7 +214,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE declarations = TRY (declarationIndexer__index(program));
     rtoc_self_view.local_type_declaration_names = (declarations.type_declarations |> SELECT symbol(UNWRAP (aST__node_name(UNWRAP (castTypeDeclarationToLocatable(_)))))) |> DISTINCT _;
     FOR MUTABLE rtoc_for_elem_99 IN declarations.imports DO
-    TRY (resolutionSession__visit_RequireNode(&rtoc_self_view, &rtoc_for_elem_99));
+    TRY (resolutionSession__visit_RequireNode(&rtoc_self_view, rtoc_for_elem_99));
     END
     TRY (resolutionSession__register_type_declarations(&rtoc_self_view, declarations));
     MUTABLE conformance_resolutions = TRY (resolutionSession__resolve_conformance_declarations_mut(&rtoc_self_view, declarations));
@@ -252,7 +252,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF node IS_A UnionDef AS union_def THEN
       TRY (resolutionSession__register_type_declaration(&rtoc_self_view, TypeDeclaration{ UnionDef: COPY union_def }));
     ELSE_IF node IS_A ExternFnDecl AS MUTABLE extern_fn_decl THEN
-      TRY (resolutionSession__register_extern_function_signature(&rtoc_self_view, &extern_fn_decl));
+      TRY (resolutionSession__register_extern_function_signature(&rtoc_self_view, extern_fn_decl));
     END
 }
 END
@@ -1021,7 +1021,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN members;
 }
 END
-PRIVATE FN resolutionSession__visit_RequireNode(MUTABLE self: ResolutionSession, MUTABLE node: RequireNode) RETURNS !Void
+PRIVATE FN resolutionSession__visit_RequireNode(MUTABLE self: ResolutionSession, node: RequireNode) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1465,7 +1465,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resolutionSession__register_function_signature(&rtoc_self_view, CAST(COPY _ AS FunctionDef)));
     END
     FOR MUTABLE rtoc_for_elem_1332 IN declarations.extern_function_declarations DO
-    TRY (resolutionSession__register_extern_function_signature(&rtoc_self_view, &rtoc_for_elem_1332));
+    TRY (resolutionSession__register_extern_function_signature(&rtoc_self_view, rtoc_for_elem_1332));
     END
     resolutionSession__clear_synthetic_function_definitions_mut(&rtoc_self_view);
     FOR _ IN declarations.union_method_declarations DO
@@ -1513,7 +1513,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     members[node.source_name] = COPY signature;
 }
 END
-PRIVATE FN resolutionSession__register_extern_function_signature(MUTABLE self: ResolutionSession, MUTABLE node: ExternFnDecl) RETURNS !Void
+PRIVATE FN resolutionSession__register_extern_function_signature(MUTABLE self: ResolutionSession, node: ExternFnDecl) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1745,7 +1745,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN declarations.type_declarations DO
     IF _ IS_A ProtocolDef AS protocol_def THEN
       MUTABLE protocol_def_mutable = COPY protocol_def;
-      TRY (resolutionSession__register_protocol_declaration(&rtoc_self_view, &protocol_def_mutable));
+      TRY (resolutionSession__register_protocol_declaration(&rtoc_self_view, protocol_def_mutable));
     END
     END
     MUTABLE rtoc_idx = 0;
@@ -1759,7 +1759,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN resolutionSession__register_protocol_declaration(MUTABLE self: ResolutionSession, MUTABLE node: ProtocolDef) RETURNS !Void
+PRIVATE FN resolutionSession__register_protocol_declaration(MUTABLE self: ResolutionSession, node: ProtocolDef) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1972,15 +1972,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A StructDef AS MUTABLE struct_def THEN
       TRY (resolutionSession__register_struct_declaration(&rtoc_self_view, &struct_def));
     ELSE_IF node IS_A ExternStructDecl AS MUTABLE extern_struct_decl THEN
-      TRY (resolutionSession__register_extern_struct_declaration(&rtoc_self_view, &extern_struct_decl));
+      TRY (resolutionSession__register_extern_struct_declaration(&rtoc_self_view, extern_struct_decl));
     ELSE_IF node IS_A EnumDef AS MUTABLE enum_def THEN
-      TRY (resolutionSession__register_enum_declaration(&rtoc_self_view, &enum_def));
+      TRY (resolutionSession__register_enum_declaration(&rtoc_self_view, enum_def));
     ELSE_IF node IS_A UnionDef AS MUTABLE union_def THEN
-      TRY (resolutionSession__register_union_declaration(&rtoc_self_view, &union_def));
+      TRY (resolutionSession__register_union_declaration(&rtoc_self_view, union_def));
     END
 }
 END
-PRIVATE FN resolutionSession__register_extern_struct_declaration(MUTABLE self: ResolutionSession, MUTABLE node: ExternStructDecl) RETURNS !Void
+PRIVATE FN resolutionSession__register_extern_struct_declaration(MUTABLE self: ResolutionSession, node: ExternStructDecl) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2070,7 +2070,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     type__replace_shape_mut(&type, rtoc_mutable_alias_arg_59);
 }
 END
-PRIVATE FN resolutionSession__register_enum_declaration(MUTABLE self: ResolutionSession, MUTABLE node: EnumDef) RETURNS !Void
+PRIVATE FN resolutionSession__register_enum_declaration(MUTABLE self: ResolutionSession, node: EnumDef) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2078,7 +2078,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (resolutionSession__stamp_type_mut(rtoc_self_view, Locatable{ EnumDef: COPY node }, :Void));
 }
 END
-PRIVATE FN resolutionSession__register_union_declaration(MUTABLE self: ResolutionSession, MUTABLE node: UnionDef) RETURNS !Void
+PRIVATE FN resolutionSession__register_union_declaration(MUTABLE self: ResolutionSession, node: UnionDef) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

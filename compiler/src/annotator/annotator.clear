@@ -60,7 +60,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       panic("annotation pipeline did not publish complete products");
     END
     rtoc_self_view.semantic_index = TRY (semanticIndex__from_products(rtoc_self_view.annotation_products, semanticAnnotator__semantic_id_index(rtoc_self_view)));
-    TRY (annotationBoundary__verify_mut(&program, rtoc_self_view.annotation_products));
+    TRY (annotationBoundary__verify_mut(program, rtoc_self_view.annotation_products));
 }
 END
 PUB FN semanticAnnotator__semantic_root_scope(self: SemanticAnnotator) RETURNS !Scope@multiowned

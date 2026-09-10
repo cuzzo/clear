@@ -671,7 +671,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN FALSE;
 }
 END
-PUB FN clearParser__parse_match_expr(MUTABLE self: ClearParser, MUTABLE partial_value: Bool = FALSE) RETURNS !MatchStatement
+PUB FN clearParser__parse_match_expr(MUTABLE self: ClearParser, partial_value: Bool = FALSE) RETURNS !MatchStatement
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
@@ -721,7 +721,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN clearParser__parse_match_statement(MUTABLE self: ClearParser, MUTABLE partial_value: Bool = FALSE) RETURNS !MatchStatement
+PRIVATE FN clearParser__parse_match_statement(MUTABLE self: ClearParser, partial_value: Bool = FALSE) RETURNS !MatchStatement
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

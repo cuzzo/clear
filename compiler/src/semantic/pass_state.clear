@@ -74,7 +74,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 # Ruby asks `program.respond_to?(:mir_pass_state)`; Program is the only node
 # that carries the state, so the answer is a narrowing.
-PUB FN mIRPassState__for_mut(MUTABLE program: PassStateProgram) RETURNS MIRPassState@multiowned ->
+PUB FN mIRPassState__for_mut(program: PassStateProgram) RETURNS MIRPassState@multiowned ->
   IF program IS_A Program AS program_node THEN
     MUTABLE program_mutable = COPY program_node;
     # Ruby's `mir_pass_state` is T.nilable(MIRPassState) and the CLEAR field

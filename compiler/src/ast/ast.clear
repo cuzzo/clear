@@ -6515,7 +6515,7 @@ PRIVATE FN aST__walk_children_TupleLit_mut(MUTABLE item: TupleLit, MUTABLE desce
   aST__each_locatable_list_mut(&items_items, &descend_functions, visitor);
   item.items = COPY items_items;
 END
-PRIVATE FN aST__walk_children_LambdaLit_mut(MUTABLE item: LambdaLit, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
+PRIVATE FN aST__walk_children_LambdaLit_mut(item: LambdaLit, descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
   # Ruby's generic walk descends into every Struct member but only YIELDS a
   # Locatable. A DeferredDrop is name/type/resource -- it holds none, so the
   # walk visits nothing here.
@@ -7072,7 +7072,7 @@ PUB FN aST__each_locatable_mut(MUTABLE root: Locatable, MUTABLE descend_function
     Locatable.CallSiteOverride AS MUTABLE item -> aST__walk_children_CallSiteOverride_mut(&item, &descend_functions, visitor);,
     Locatable.ListLit AS MUTABLE item -> aST__walk_children_ListLit_mut(&item, &descend_functions, visitor);,
     Locatable.TupleLit AS MUTABLE item -> aST__walk_children_TupleLit_mut(&item, &descend_functions, visitor);,
-    Locatable.LambdaLit AS MUTABLE item -> aST__walk_children_LambdaLit_mut(&item, &descend_functions, visitor);,
+    Locatable.LambdaLit AS MUTABLE item -> aST__walk_children_LambdaLit_mut(item, descend_functions, visitor);,
     Locatable.IfStatement AS MUTABLE item -> aST__walk_children_IfStatement_mut(&item, &descend_functions, visitor);,
     Locatable.IfBind AS MUTABLE item -> aST__walk_children_IfBind_mut(&item, &descend_functions, visitor);,
     Locatable.WhileLoop AS MUTABLE item -> aST__walk_children_WhileLoop_mut(&item, &descend_functions, visitor);,

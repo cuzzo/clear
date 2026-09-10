@@ -169,7 +169,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Ident{ name: COPY pipelineMaterializer__source_binding_name(rtoc_self_view, pipelineMaterializerRuntimeHost__materializer_current_label(rtoc_self_view.host)), lowered_node_id: NIL, ownership_consumption: NIL };
 }
 END
-PUB FN pipelineMaterializer__pipeline_block(MUTABLE self: PipelineMaterializer, MUTABLE list_node: Locatable, blk: FN(String, String) -> ![]Emittable) RETURNS !MIRBlockExpr
+PUB FN pipelineMaterializer__pipeline_block(MUTABLE self: PipelineMaterializer, list_node: Locatable, blk: FN(String, String) -> ![]Emittable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -326,7 +326,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(value_expr AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
 }
 END
-PUB FN pipelineMaterializer__concurrent_source_setup(MUTABLE self: PipelineMaterializer, MUTABLE lhs: Locatable) RETURNS ![]Emittable
+PUB FN pipelineMaterializer__concurrent_source_setup(MUTABLE self: PipelineMaterializer, lhs: Locatable) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

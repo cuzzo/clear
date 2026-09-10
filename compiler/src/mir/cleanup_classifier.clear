@@ -39,7 +39,7 @@ PUB FN frozenCleanupFacts__from_bindings(bindings: {String}CleanupEntry) RETURNS
   MUTABLE entry: CleanupEntry = COPY UNWRAP (bindings[rtoc_each_key]);
   entries[placeId__from_path(Path{ StringValue: COPY rtoc_each_key })] = COPY entry;
   END
-  RETURN frozenCleanupFacts__build(&entries);
+  RETURN frozenCleanupFacts__build(entries);
 END
 PUB FN frozenCleanupFacts__from_function(fn_node: FunctionDef, bindings: {String}CleanupEntry, MUTABLE entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
   MUTABLE _ = COPY fn_node;
@@ -48,9 +48,9 @@ PUB FN frozenCleanupFacts__from_function(fn_node: FunctionDef, bindings: {String
   MUTABLE place_key = placeId__from_path(Path{ StringValue: COPY rtoc_inner_key });
   entries[place_key] = (entries[place_key] OR_ELSE entry);
   END
-  RETURN frozenCleanupFacts__build(&entries);
+  RETURN frozenCleanupFacts__build(entries);
 END
-PUB FN frozenCleanupFacts__build(MUTABLE entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
+PUB FN frozenCleanupFacts__build(entries: {PlaceId}CleanupEntry) RETURNS FrozenCleanupFacts ->
   RETURN FrozenCleanupFacts{ entries_by_place: COPY entries };
 END
 PUB FN frozenCleanupFacts__empty?(self: FrozenCleanupFacts) RETURNS Bool EFFECTS REENTRANT ->
@@ -120,7 +120,7 @@ PUB FN frozenCleanupFacts__without_names(self: FrozenCleanupFacts, names: []Name
       END
     END
   END
-  RETURN frozenCleanupFacts__build(&kept);
+  RETURN frozenCleanupFacts__build(kept);
 END
 PUB FN frozenCleanupFacts__bindings(self: FrozenCleanupFacts) RETURNS !{String}CleanupEntry@multiowned ->
   MUTABLE out: {String}CleanupEntry@multiowned = {};
@@ -885,12 +885,12 @@ PUB FN cleanupClassifier__walk_capture_bindings(MUTABLE body: []Locatable, schem
   aST__each_locatable_list_mut(&body, FALSE, %(MUTABLE node: Locatable) USE(MUTABLE bindings, lifecycle_registry, schema_lookup) -> {
   PARTIAL MATCH node START
     Locatable.WhileBindLoop AS while_bind -> TRY (cleanupClassifier__capture_binding_mut(COPY while_bind.binding_name, COPY while_bind.condition, COPY while_bind.condition, schema_lookup, lifecycle_registry, &bindings));,
-    Locatable.IfBind AS MUTABLE if_bind -> TRY (cleanupClassifier__if_bind_captures_mut(&if_bind, schema_lookup, lifecycle_registry, &bindings));
+    Locatable.IfBind AS MUTABLE if_bind -> TRY (cleanupClassifier__if_bind_captures_mut(if_bind, schema_lookup, lifecycle_registry, &bindings));
   END
   rubyToClearVoid__cleanup_classifier()
   });
 END
-PRIVATE FN cleanupClassifier__if_bind_captures_mut(MUTABLE if_bind: IfBind, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
+PRIVATE FN cleanupClassifier__if_bind_captures_mut(if_bind: IfBind, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry, MUTABLE bindings: {String}CleanupEntry) RETURNS !Void ->
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < if_bind.bindings.length() DO
     MUTABLE binding: Binding = COPY UNWRAP (if_bind.bindings[rtoc_idx]);
@@ -1131,7 +1131,7 @@ PUB FN cleanupClassifier__classify_binding(ti: Type, node: Locatable, schema_loo
       entry = (entry OR_ELSE cleanupClassifier__entry(:uniform, :heap, TRUE));
     END
   END
-  MUTABLE finalized: ?CleanupEntry@multiowned = TRY (cleanupClassifier__finalize_alloc_from_storage_mut(&entry, node, ti, schema_lookup));
+  MUTABLE finalized: ?CleanupEntry@multiowned = TRY (cleanupClassifier__finalize_alloc_from_storage_mut(entry, node, ti, schema_lookup));
   IF lifecycle EXISTS AS lifecycle_value THEN
     IF finalized EXISTS AS finalized_value THEN
       MUTABLE finalized_mutable = COPY finalized_value;
@@ -1214,7 +1214,7 @@ END
 PUB FN cleanupClassifier__binding_container_borrow?(node: Locatable) RETURNS Bool ->
   RETURN (aST__container_borrow?(node) OR aST__container_borrow?(cleanupClassifier__binding_value(node)));
 END
-PUB FN cleanupClassifier__finalize_alloc_from_storage_mut(MUTABLE entry: ?CleanupEntry, node: Locatable, ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
+PUB FN cleanupClassifier__finalize_alloc_from_storage_mut(entry: ?CleanupEntry, node: Locatable, ti: Type, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !?CleanupEntry@multiowned ->
   IF !(entry EXISTS) THEN
     RETURN NIL;
   END

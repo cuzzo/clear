@@ -396,7 +396,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE it_var = pipelineRewriter__next_var(&rtoc_self_view, "__it");
     MUTABLE token = COPY smooth_node.token;
     MUTABLE body = List[];
-    MUTABLE init_nodes = TRY (pipelineRewriter__build_init(&rtoc_self_view, &terminal, res_var, token, &smooth_node));
+    MUTABLE init_nodes = TRY (pipelineRewriter__build_init(&rtoc_self_view, terminal, res_var, token, &smooth_node));
     body = ruby_array_concat_Any__pipeline_rewriter(body, CAST(init_nodes AS []Any));
     MUTABLE current_it = Identifier{ token: COPY token, name: COPY it_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
     MUTABLE src_t = TRY (type__new(&source.full_type_mut("fused pipeline source")));
@@ -512,7 +512,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN block;
 }
 END
-PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, MUTABLE terminal: ?Locatable, res_var: String, token: Token, MUTABLE smooth_node: BinaryOp) RETURNS ![]Node
+PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal: ?Locatable, res_var: String, token: Token, MUTABLE smooth_node: BinaryOp) RETURNS ![]Node
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {

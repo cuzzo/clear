@@ -127,12 +127,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN result;
     END
     MUTABLE token = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
-    TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, &token));
+    TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, token));
     clearParser__apply_element_capability_mut(&rtoc_self_view, &result, TRY (token__text_mut(token)));
     IF TRY (clearParser__match?(&rtoc_self_view, :CHAR, ":")) THEN
       TRY (clearParser__consume(&rtoc_self_view, :CHAR, ":"));
       token = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
-      TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, &token));
+      TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, token));
       clearParser__apply_element_capability_mut(&rtoc_self_view, &result, TRY (token__text_mut(token)));
     END
     RETURN result;
@@ -222,7 +222,7 @@ PRIVATE FN clearParser__apply_capability_mut(MUTABLE self: ClearParser, MUTABLE 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, &token));
+    TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, token));
     MUTABLE ownership: ?String@symbol = COPY clearParser__ownership_sigils()[value];
     IF ownership EXISTS AS ownership_value THEN
       MUTABLE current: ?String@symbol = COPY result.ownership;
@@ -645,7 +645,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE attrs_value: SigilAttrs = attrs?;
       MUTABLE next_tok = TRY (clearParser__consume(&rtoc_self_view, :VAR_ID));
-      TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, &next_tok));
+      TRY (clearParser__emit_boxed_capability_migration(rtoc_self_view, next_tok));
       TRY (clearParser__apply_cap_dim_mut(&rtoc_self_view, next_tok, attrs_value, &dims));
       TRY (clearParser__parse_lock_rank_arg_mut(&rtoc_self_view, next_tok, attrs_value, &dims));
     END

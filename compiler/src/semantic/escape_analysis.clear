@@ -1148,7 +1148,7 @@ PUB FN escapeAnalysis__mark_takes_args_heap_mut(args: []Locatable, params: []Par
       ELSE
         NIL
       END;
-    IF !((TRY (escapeAnalysis__ownership_bearing_transfer_expr?(&arg, schema_lookup)) OR TRY (escapeAnalysis__type_requires_owned_storage?(arg_type, schema_lookup)))) THEN
+    IF !((TRY (escapeAnalysis__ownership_bearing_transfer_expr?(arg, schema_lookup)) OR TRY (escapeAnalysis__type_requires_owned_storage?(arg_type, schema_lookup)))) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1185,7 +1185,7 @@ PUB FN escapeAnalysis__mark_receiver_for_owned_sink_mut(receiver: Locatable, arg
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    IF !((TRY (escapeAnalysis__ownership_bearing_transfer_expr?(&arg, schema_lookup)) OR TRY (escapeAnalysis__call_result_is_heap?( arg, fn_nodes, schema_lookup, facts_by_name)))) THEN
+    IF !((TRY (escapeAnalysis__ownership_bearing_transfer_expr?(arg, schema_lookup)) OR TRY (escapeAnalysis__call_result_is_heap?( arg, fn_nodes, schema_lookup, facts_by_name)))) THEN
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1203,14 +1203,14 @@ PUB FN escapeAnalysis__loop_body_has_frame_allocation_candidate?(body: []Node) R
   IF found THEN
       RETURN;
   END
-  IF TRY (escapeAnalysis__loop_binding_frame_allocation_candidate?(&node)) THEN
+  IF TRY (escapeAnalysis__loop_binding_frame_allocation_candidate?(node)) THEN
       found = TRUE;
   END
   rubyToClearVoid__escape_analysis()
   }));
   RETURN found;
 END
-PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(MUTABLE node: Locatable) RETURNS !Bool ->
+PUB FN escapeAnalysis__loop_binding_frame_allocation_candidate?(node: Locatable) RETURNS !Bool ->
   IF !((node IS_A VarDecl OR node IS_A BindExpr)) THEN
     RETURN FALSE;
   END
@@ -1282,7 +1282,7 @@ PUB FN escapeAnalysis__each_loop_body_node(body: []Node, block: FN(Locatable) ->
   END
   NIL;
 END
-PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(MUTABLE arg: ?Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+PUB FN escapeAnalysis__ownership_bearing_transfer_expr?(arg: ?Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   IF arg? IS_A MoveNode AS move_node THEN
     RETURN TRY (escapeAnalysis__type_requires_owned_storage?(TRY (aST__full_type_mut(move_node.value)), schema_lookup));
   END
@@ -1810,7 +1810,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
   IF TRY (escapeAnalysis__borrowed_return?(fn_value, expr)) THEN
     RETURN FALSE;
   END
-  MUTABLE ti: ?Type = TRY (escapeAnalysis__owning_return_type(fn_value, &expr));
+  MUTABLE ti: ?Type = TRY (escapeAnalysis__owning_return_type(fn_value, expr));
   IF !(ti) THEN
     RETURN FALSE;
   END
@@ -1836,7 +1836,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
   END
   RETURN (((top_heap_ptr OR (type__ownership(ti) != :affine)) OR TRY (type__ownership_bearing?(ti, schema_lookup))) OR TRY (type__needs_explicit_cleanup?(ti, :heap, schema_lookup)));
 END
-PUB FN escapeAnalysis__owning_return_type(fn_value: FunctionDef, MUTABLE expr: Locatable) RETURNS !?Type ->
+PUB FN escapeAnalysis__owning_return_type(fn_value: FunctionDef, expr: Locatable) RETURNS !?Type ->
   MUTABLE declared: ?Type = functionDef__declared_return_type(fn_value);
   IF declared EXISTS AS rtoc_declared THEN
     RETURN COPY rtoc_declared;

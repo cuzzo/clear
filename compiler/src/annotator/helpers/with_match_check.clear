@@ -395,7 +395,8 @@ PUB FN withMatchCheck__warn_polymorphic_unhandled_errors_mut(node: WithBlock, bo
         END
         FOR possible_error IN possible DO
           IF !(handled.contains?(possible_error)) THEN
-            IF warn_handler EXISTS AS warn_handler_value THEN
+            MUTABLE warn_handler_value = COPY warn_handler;
+            IF TRUE THEN
               warn_handler_value(Locatable{ WithBlock: COPY node }, "Polymorphic error `${possible_error}` may fire under `REQUIRES ${bound_param}: ${family_names}` but no ON clause or SYNC POLICY handles it");
             END
           END

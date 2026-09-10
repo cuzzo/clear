@@ -60,7 +60,7 @@ PUB FN annotationTypeInventory__scan(program: Program) RETURNS !AnnotationTypeIn
   IF ignored_node_ids.contains?(aST__node_identity(node)) THEN
       RETURN;
   END
-  MUTABLE node_type = TRY (annotationTypeInventory__node_type(&node));
+  MUTABLE node_type = TRY (annotationTypeInventory__node_type(node));
   IF (type__untyped?(node_type) OR type__auto?(node_type)) THEN
       &violations.append(Violation{ class_name: COPY annotationTypeInventory__class_name(node), location: COPY annotationTypeInventory__location(node), type_name: COPY type__to_s(node_type) });
   ELSE
@@ -96,7 +96,7 @@ PRIVATE FN annotationTypeInventory__add_lifetime_metadata_node_ids_mut(MUTABLE i
     END
   END
 END
-PRIVATE FN annotationTypeInventory__node_type(MUTABLE node: Locatable) RETURNS !Type ->
+PRIVATE FN annotationTypeInventory__node_type(node: Locatable) RETURNS !Type ->
   IF !(locatable__typed?(node)) THEN
     RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped }));
   END

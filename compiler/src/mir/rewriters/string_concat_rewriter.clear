@@ -14,14 +14,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN body;
 }
 END
-PRIVATE FN stringConcatRewriter__rewrite_in_node_mut(MUTABLE self: StringConcatRewriter, MUTABLE node: ?Locatable) RETURNS !?Locatable
+PRIVATE FN stringConcatRewriter__rewrite_in_node_mut(MUTABLE self: StringConcatRewriter, node: ?Locatable) RETURNS !?Locatable
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node EXISTS AS node_value THEN
       MUTABLE node_value_mutable = COPY node_value;
-      TRY (stringConcatRewriter__rewrite_children_mut(&rtoc_self_view, &node_value_mutable));
+      TRY (stringConcatRewriter__rewrite_children_mut(&rtoc_self_view, node_value_mutable));
       MUTABLE parts = TRY (stringConcatRewriter__collect_parts(&rtoc_self_view, node_value_mutable));
       IF (parts.length() > 2) THEN
         IF node_value_mutable IS_A BinaryOp AS binary_op THEN
@@ -55,7 +55,7 @@ PRIVATE FN stringConcatRewriter__rewrite_required_node_mut(MUTABLE self: StringC
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE node_mutable = COPY node;
-    RETURN UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, &node_mutable)));
+    RETURN UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, node_mutable)));
 }
 END
 PRIVATE FN stringConcatRewriter__rewrite_body_mut(MUTABLE self: StringConcatRewriter, MUTABLE body: []Locatable) RETURNS !Void
@@ -70,7 +70,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN stringConcatRewriter__rewrite_children_mut(MUTABLE self: StringConcatRewriter, MUTABLE node: Locatable) RETURNS !Void
+PRIVATE FN stringConcatRewriter__rewrite_children_mut(MUTABLE self: StringConcatRewriter, node: Locatable) RETURNS !Void
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->

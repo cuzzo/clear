@@ -723,7 +723,7 @@ PRIVATE FN emit__rewrite_promoted_fsm_node(MUTABLE node: PromotableFsmValue, pro
   END
   RETURN COPY node;
 END
-PRIVATE FN emit__rewrite_promoted_fsm_struct_fields_mut(MUTABLE node: Emittable, promoted_names: []String, id: Int64) RETURNS Void ->
+PRIVATE FN emit__rewrite_promoted_fsm_struct_fields_mut(node: Emittable, promoted_names: []String, id: Int64) RETURNS Void ->
   IF !(node IS_A Struct) THEN
     RETURN;
   END

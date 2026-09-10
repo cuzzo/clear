@@ -1202,7 +1202,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN capabilityAuditSession__emit_return_borrowed_no_copy_error_mut(MUTABLE self: CapabilityAuditSession, MUTABLE node: Locatable) RETURNS !Void
+PRIVATE FN capabilityAuditSession__emit_return_borrowed_no_copy_error_mut(MUTABLE self: CapabilityAuditSession, node: Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1394,7 +1394,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (capabilityAuditSession__fixable_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ WithBlock: COPY node } }, :capability, [fix], NIL, :WITH_GUARD_MUTABLE_MUTATED, :error, TRUE, kw));
 }
 END
-PRIVATE FN capabilityAuditSession__emit_with_read_needs_write_lock_mut(MUTABLE self: CapabilityAuditSession, node: WithBlock, name: String, MUTABLE var_node: Locatable) RETURNS !Void
+PRIVATE FN capabilityAuditSession__emit_with_read_needs_write_lock_mut(MUTABLE self: CapabilityAuditSession, node: WithBlock, name: String, var_node: Locatable) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -2441,7 +2441,7 @@ PRIVATE FN capabilityAuditSession__compute_needs_rt_mut(MUTABLE self: Capability
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE needs_rt = TRY (capabilityAuditSession__initial_needs_rt_map(rtoc_self_view, fn_nodes));
-    TRY (capabilityAuditSession__seed_imported_needs_rt_mut(&rtoc_self_view, &needs_rt));
+    TRY (capabilityAuditSession__seed_imported_needs_rt_mut(&rtoc_self_view, needs_rt));
     TRY (capabilityAuditSession__propagate_needs_rt_mut(&rtoc_self_view, &needs_rt));
 }
 END
@@ -2452,12 +2452,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE needs_rt: {String}Bool = {};
     fn_nodes.keys() |> EACH {
     MUTABLE fn_node: FunctionDef = (fn_nodes[_] OR_ELSE CAST(panic("missing hash key") AS FunctionDef));
-    needs_rt[_] = TRY (capabilityAuditSession__function_needs_runtime_directly?(rtoc_self_view, _, &fn_node));
+    needs_rt[_] = TRY (capabilityAuditSession__function_needs_runtime_directly?(rtoc_self_view, _, fn_node));
     };
     RETURN needs_rt;
 }
 END
-PRIVATE FN capabilityAuditSession__function_needs_runtime_directly?(self: CapabilityAuditSession, name: String, MUTABLE fn_node: FunctionDef) RETURNS !Bool
+PRIVATE FN capabilityAuditSession__function_needs_runtime_directly?(self: CapabilityAuditSession, name: String, fn_node: FunctionDef) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -2475,7 +2475,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN ((((((((functionDef__uses_runtime?(fn_node) OR heap_return) OR (TRY (capabilityAuditSession__function_has_fnptr_call?(rtoc_self_view, name)))) OR has_takes_heap) OR has_catch) OR has_raise) OR thunk_uses_rt) OR yield_uses_rt) OR (name == name));
 }
 END
-PRIVATE FN capabilityAuditSession__seed_imported_needs_rt_mut(MUTABLE self: CapabilityAuditSession, MUTABLE needs_rt: {String}Bool) RETURNS !Void
+PRIVATE FN capabilityAuditSession__seed_imported_needs_rt_mut(MUTABLE self: CapabilityAuditSession, needs_rt: {String}Bool) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -3900,7 +3900,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN capabilityAuditSession__build_lock_graph(self: CapabilityAuditSession, MUTABLE include_opted_out: Bool = FALSE) RETURNS LockGraph
+PRIVATE FN capabilityAuditSession__build_lock_graph(self: CapabilityAuditSession, include_opted_out: Bool = FALSE) RETURNS LockGraph
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
