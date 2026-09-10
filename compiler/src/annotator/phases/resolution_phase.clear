@@ -926,18 +926,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE binders = COPY declaration.binders;
     IF (binders.length() == 0) THEN
-      MUTABLE names = ((TRY (type__generic_args(declaration.protocol_type))) |> SELECT:? {
-    MUTABLE kind = COPY _.shape.expression.kind;
-    (    IF ((kind IS_A NamedTypeExpression AND UNWRAP (typeExpressionKind__arguments(kind)).empty?()) AND !(resolutionSession__builtin_type_parameter_names().contains?(typeExpressionKind__name(kind)))) THEN
-          CAST(typeExpressionKind__name(kind) AS String)
-        ELSE
-          NIL
-        END)
-      } |> WHERE _ != NIL) |> DISTINCT _ |> SELECT:? COPY _;
+      MUTABLE rtoc_name_list: []String = [];
+      FOR rtoc_garg IN (TRY (type__generic_args(declaration.protocol_type))) DO
+        MUTABLE kind = COPY rtoc_garg.shape.expression.kind;
+        IF ((kind IS_A NamedTypeExpression AND UNWRAP (typeExpressionKind__arguments(kind)).empty?()) AND !(resolutionSession__builtin_type_parameter_names().contains?(typeExpressionKind__name(kind)))) THEN
+          &rtoc_name_list.append(COPY CAST(typeExpressionKind__name(kind) AS String));
+        END
+      END
+      MUTABLE names = rtoc_name_list |> DISTINCT _;
       IF ((names).length() != owner_params.length()) THEN
         TRY (resolutionSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ ConformanceDef: COPY declaration } }, ResolutionCodeOrMessage{ SymbolValue: :CONFORMANCE_BINDERS_CANNOT_INFER }, [], CAST({:owner: owner_name, :expected: owner_params.length(), :got: (names).length()} AS {String@symbol}Any)));
       END
-      binders = names |> SELECT GenericParamDecl{ token: declaration.token, name: COPY UNWRAP (_), bounds: List[] };
+      binders = names |> SELECT GenericParamDecl{ token: declaration.token, name: COPY _, bounds: List[] };
       declaration.binders = binders;
     END
     IF (binders.length() != owner_params.length()) THEN
