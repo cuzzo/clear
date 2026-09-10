@@ -18988,7 +18988,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE plan = TRY (tenseOperationPlanner__unwrap(CAST(plan_input AS Type)));
     node.tense_plan = TensePlanValue{ TenseOperationPlan: COPY plan };
     MUTABLE result = COPY plan.result_type;
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MethodCall: COPY node }, result));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ OptionalUnwrap: COPY node }, result));
     node.storage_override = aST__node_storage(node.target);
     IF type__error_union?(result) THEN
       node.error_union_type = result;
@@ -19284,35 +19284,28 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(node.value IS_A Identifier) THEN
       TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MoveNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MOVE_NEEDS_IDENTIFIER }));
     END
-    IF (IF locatable__symbol(node.value) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_458: ?SymbolEntry@multiowned = (locatable__symbol(node.value));
-    symbolEntry__owned_optional_capture(UNWRAP (rtoc_local_receiver_458)) }
-    ELSE
-      NIL
-    END) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MoveNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MOVE_OWNED_OPTIONAL_CAPTURE }, [], CAST({:name: locatable__name(node.value)} AS {String@symbol}Any)));
+    IF locatable__symbol(node.value) EXISTS AS rtoc_move_symbol THEN
+      IF symbolEntry__owned_optional_capture(rtoc_move_symbol) THEN
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MoveNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :MOVE_OWNED_OPTIONAL_CAPTURE }, [], CAST({:name: locatable__name(node.value)} AS {String@symbol}Any)));
+      END
     END
-    MUTABLE ti = UNWRAP (TRY (aST__full_type_mut(node.value)));
-    MUTABLE is_resource = FALSE;
+    MUTABLE ti: Type = TRY (aST__full_type_mut(node.value));
+    MUTABLE is_resource: Bool = FALSE;
     IF node.value IS_A Identifier THEN
-      MUTABLE info: ?SymbolEntry@multiowned = locatable__symbol(node.value);
-      is_resource = (IF info != NIL THEN
-        symbolEntry__resource(info)
-      ELSE
-        NIL
-      END);
+      IF locatable__symbol(node.value) EXISTS AS info THEN
+        is_resource = (symbolEntry__resource(info) OR_ELSE FALSE);
+      END
     END
     MUTABLE is_copy = TRY (type__implicitly_copyable?(ti, %(t: String@symbol) USE(MUTABLE rtoc_self_view) -> TRY (typeAnalysisSession__schema_lookup_result(&rtoc_self_view, t))));
-    IF !(((((ti.multiowned?() OR type__shared?(ti)) OR TRY (type__requires_move?(ti))) OR is_resource) OR !(is_copy))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MoveNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GIVE_ON_COPY_TYPE }, [], CAST({:type: node.value.resolved_type} AS {String@symbol}Any)));
+    IF !(((((type__multiowned?(ti) OR type__shared?(ti)) OR TRY (type__requires_move?(ti))) OR is_resource) OR !(is_copy))) THEN
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MoveNode: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :GIVE_ON_COPY_TYPE }, [], CAST({:type: locatable__resolved_type(node.value)} AS {String@symbol}Any)));
     END
     TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ MoveNode: COPY node }, TRY (aST__full_type_mut(node.value))));
     node.storage_override = aST__node_storage(node.value);
-    IF TRUE THEN
-      node.value.was_moved = TRUE;
-    END
+    locatable__set_was_moved_mut(&node.value, TRUE);
     node.was_moved = TRUE;
-    RETURN TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, node.value.name(), node.value.token(), :give));
+    TRY (typeAnalysisSession__og_set_moved(&rtoc_self_view, (locatable__name(node.value) OR_ELSE ""), locatable__token(node.value), :give));
+    RETURN NIL;
 }
 END
 PRIVATE FN typeAnalysisSession__ensure_owned_value_mut(MUTABLE self: TypeAnalysisSession, MUTABLE val_node: Locatable, expected_type: ?TypeTypeInput, container_desc: ?String = NIL, container_alloc: String@symbol = :heap) RETURNS !?Locatable
