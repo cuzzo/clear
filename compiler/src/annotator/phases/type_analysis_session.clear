@@ -987,12 +987,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE shadowed = (((TRUE AND ((functionSignature__unwrap(X{ Type: COPY symbolEntry__type(UNWRAP (sym)) })) == NIL)) AND !((FALSE))) AND (type__resolved(symbolEntry__type(UNWRAP (sym))) != :Any));
       IF !(shadowed) THEN
         MUTABLE param = COPY UNWRAP (kept_fns[UNWRAP (locatable__name(node))]);
-        MUTABLE contract = UNWRAP ((IF param.symbol != NIL THEN
-          symbolEntry__kept_identity(UNWRAP (param.symbol))
-        ELSE
-          NIL
-        END));
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :KEPT_FN_VALUE_ABI }, [], CAST({:name: locatable__name(node), :param: param.name, :sink: contract.sink, :fn_type: "FN(...)"} AS {String@symbol}Any)));
+        MUTABLE contract: ?KeptIdentityContract = NIL;
+        IF param.symbol EXISTS AS rtoc_param_sym THEN
+          contract = symbolEntry__kept_identity(rtoc_param_sym);
+        END
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, TypeAnalysisCodeOrMessage{ SymbolValue: :KEPT_FN_VALUE_ABI }, [], CAST({:name: locatable__name(node), :param: param.name, :sink: UNWRAP (contract).sink, :fn_type: "FN(...)"} AS {String@symbol}Any)));
       END
     END
     aST__each_child_node(node, %(child: Locatable) USE(kept_fns, MUTABLE rtoc_self_view) -> {
@@ -3132,18 +3131,24 @@ PRIVATE FN typeAnalysisSession__analyze_routine(MUTABLE self: TypeAnalysisSessio
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__verify_captures_mut(&rtoc_self_view, node));
-    MUTABLE found_returns = typeAnalysisSession__collect_routine_returns(&rtoc_self_view, %() USE(body, node, MUTABLE rtoc_self_view) -> {
-    typeAnalysisSession__with_routine_analysis_scope(&rtoc_self_view, &node, %() USE(body, node, MUTABLE rtoc_self_view) -> {
+    MUTABLE found_returns: []ReturnFact = TRY (typeAnalysisSession__collect_routine_returns(&rtoc_self_view, %() USE(body, MUTABLE node, MUTABLE rtoc_self_view) -> {
+    typeAnalysisSession__with_routine_analysis_scope(&rtoc_self_view, &node, %() USE(body, MUTABLE node, MUTABLE rtoc_self_view) -> {
       TRY (typeAnalysisSession__declare_and_verify_params(&rtoc_self_view, node));
       TRY (typeAnalysisSession__declare_captures(&rtoc_self_view, node));
-      MUTABLE parameter_ids_branch_value: ?Set = NIL;
+      MUTABLE parameter_ids_branch_value: ?[Set]Int64 = NIL;
         IF node IS_A LambdaLit AS lambda_lit THEN
-          parameter_ids_branch_value = ((lambda_lit.params OR_ELSE List[]) |> SELECT:? ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_39 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-          scope__resolve_entry(rtoc_local_receiver_39, CAST(_.name AS String)) })?.binding_id |> WHERE _ != NIL) |> DISTINCT _;
+          MUTABLE rtoc_pids: [Set]Int64 = Set[];
+          FOR _ IN (lambda_lit.params OR_ELSE List[]) DO
+            MUTABLE rtoc_pscope = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
+            IF scope__resolve_entry(rtoc_pscope, CAST(_.name AS String)) EXISTS AS rtoc_pentry THEN
+              &rtoc_pids.insert(rtoc_pentry.binding_id);
+            END
+          END
+          parameter_ids_branch_value = rtoc_pids;
         ELSE
-          parameter_ids_branch_value = Set[];
+          parameter_ids_branch_value = CAST(Set[] AS [Set]Int64);
         END
-      MUTABLE parameter_ids: Set = parameter_ids_branch_value?;
+      MUTABLE parameter_ids: [Set]Int64 = UNWRAP (parameter_ids_branch_value);
       MUTABLE transport_facts = ownershipTransportFacts__new(parameter_ids);
       IF !((typeAnalysisSession__language_mode(&rtoc_self_view) == :strict)) THEN
           &rtoc_self_view.audit_inputs.ownership_transport_frames.append(KEEP transport_facts);
@@ -3151,15 +3156,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF node IS_A FunctionDef AS node_narrowed THEN
           TRY (typeAnalysisSession__visit_pre_clauses_mut(&rtoc_self_view, node_narrowed));
       END
-      DEFER IF !((typeAnalysisSession__language_mode(&rtoc_self_view) == :strict)) THEN
-          MUTABLE popped: ?OwnershipTransportFacts@multiowned = rtoc_self_view.audit_inputs.ownership_transport_frames.pop();
+      MUTABLE rtoc_pops_frame = !((typeAnalysisSession__language_mode(&rtoc_self_view) == :strict));
+      DEFER IF rtoc_pops_frame THEN
+          MUTABLE rtoc_frames = COPY rtoc_self_view.audit_inputs.ownership_transport_frames;
+          MUTABLE popped: ?OwnershipTransportFacts@multiowned = &rtoc_frames.pop();
           IF (popped == NIL) THEN
             panic("BUG: ownership transport fact frame mismatch");
           END
       END
       IF body IS_A []Node AS array THEN
           MUTABLE array_mutable = COPY array;
-          TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, array_mutable));
+          TRY (typeAnalysisSession__visit_stmts(&rtoc_self_view, (array_mutable |> SELECT UNWRAP (castNodeToOptionalLocatable__type_analysis_session(_)))));
       ELSE
           TRY (typeAnalysisSession__visit(&rtoc_self_view, castRoutineBodyToOptionalLocatable(body)));
       END
@@ -3173,24 +3180,24 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       rubyToClearVoid__type_analysis_session()
     });
     rubyToClearVoid__type_analysis_session()
-    });
-    TRY (typeAnalysisSession__verify_returns(&rtoc_self_view, node, found_returns, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_40: ?Void = NIL;
+    }));
+    TRY (typeAnalysisSession__verify_returns(&rtoc_self_view, node, found_returns, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_40: ?TypeTypeInput = NIL;
     IF is_implicit THEN
       rtoc_ternary_value_40 = NIL;
     ELSE
-      rtoc_ternary_value_40 = declared_return;
+      rtoc_ternary_value_40 = COPY declared_return;
     END
-    rtoc_ternary_value_40? }));
-    MUTABLE return_type =   IF body IS_A []Node THEN
-      ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_42: ?Type = NIL;
+    rtoc_ternary_value_40 }));
+    MUTABLE return_type: ?String@symbol =   IF body IS_A []Node THEN
+      ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_42: ?String@symbol = NIL;
     IF (found_returns.length() > 0) THEN
       rtoc_ternary_value_42 = (UNWRAP (found_returns.first())).type;
     ELSE
       rtoc_ternary_value_42 = :Any;
     END
-    rtoc_ternary_value_42? })
+    rtoc_ternary_value_42 })
     ELSE
-      body.resolved_type
+      locatable__resolved_type(UNWRAP (castRoutineBodyToOptionalLocatable(body)))
     END;
     IF (((is_implicit OR ruby_union_scalar_equal_optional_TypeTypeInput_String_symbol(declared_return, :Any))) AND ((found_returns.length() > 0))) THEN
       MUTABLE inferred = (UNWRAP (found_returns.first())).type;
@@ -3198,7 +3205,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         return_type = inferred;
       END
     END
-    RETURN castTypeToOptionalStringSymbol(return_type);
+    RETURN return_type;
 }
 END
 PRIVATE FN typeAnalysisSession__module_variable_scope(MUTABLE self: TypeAnalysisSession) RETURNS Scope@multiowned
