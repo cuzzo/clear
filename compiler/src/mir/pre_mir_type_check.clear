@@ -512,7 +512,9 @@ END
 FN rtocChildrenOfWalkNodeAllOp(v: AllOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -575,7 +577,9 @@ END
 FN rtocChildrenOfWalkNodeAllOpMultiowned(v: AllOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -638,7 +642,9 @@ END
 FN rtocChildrenOfWalkNodeAnyOp(v: AnyOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -701,7 +707,9 @@ END
 FN rtocChildrenOfWalkNodeAnyOpMultiowned(v: AnyOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -764,8 +772,8 @@ END
 FN rtocChildrenOfWalkNodeAssert(v: Assert) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.condition });
-  &out.append(WalkNode{ ArrayValue: COPY v.message });
+  &out.append(castLocatableToWalkNode(v.condition));
+  # message: AssertMessage holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -828,9 +836,11 @@ END
 FN rtocChildrenOfWalkNodeAssertRaises(v: AssertRaises) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.kind });
-  &out.append(WalkNode{ ArrayValue: COPY v.error_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  &out.append(WalkNode{ StringValue: COPY v.kind });
+  IF v.error_name EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
+  &out.append(castLocatableToWalkNode(v.expression));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -893,9 +903,11 @@ END
 FN rtocChildrenOfWalkNodeAssertRaisesMultiowned(v: AssertRaises) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.kind });
-  &out.append(WalkNode{ ArrayValue: COPY v.error_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  &out.append(WalkNode{ StringValue: COPY v.kind });
+  IF v.error_name EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
+  &out.append(castLocatableToWalkNode(v.expression));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -960,7 +972,9 @@ FN rtocChildrenOfWalkNodeAssignment(v: Assignment) RETURNS []WalkNode ->
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castAssignmentNameToWalkNode(COPY v.name));
   &out.append(castLocatableToWalkNode(COPY v.value));
-  &out.append(WalkNode{ ArrayValue: COPY v.compound_op });
+  IF v.compound_op EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1018,16 +1032,22 @@ FN rtocChildrenOfWalkNodeAssignment(v: Assignment) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.auto_lock });
-  &out.append(WalkNode{ ArrayValue: COPY v.field_pre_cleanup });
-  &out.append(WalkNode{ ArrayValue: COPY v.field_lifecycle_plan });
-  &out.append(WalkNode{ ArrayValue: COPY v.auto_atomic_op });
+  # auto_lock: ?AutoLockPlan holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.field_pre_cleanup EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  # field_lifecycle_plan: ?LifecyclePlan holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.auto_atomic_op EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeAverageOp(v: AverageOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1090,7 +1110,9 @@ END
 FN rtocChildrenOfWalkNodeAverageOpMultiowned(v: AverageOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1153,8 +1175,12 @@ END
 FN rtocChildrenOfWalkNodeBatchWindowOp(v: BatchWindowOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.options });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  FOR rtoc_walk_item IN v.options DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1217,8 +1243,12 @@ END
 FN rtocChildrenOfWalkNodeBatchWindowOpMultiowned(v: BatchWindowOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.options });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  FOR rtoc_walk_item IN v.options DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1281,8 +1311,8 @@ END
 FN rtocChildrenOfWalkNodeBenchmarkStmt(v: BenchmarkStmt) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
-  &out.append(WalkNode{ ArrayValue: COPY v.iterations });
+  &out.append(castLocatableToWalkNode(v.expression));
+  # iterations: Int64 holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1345,8 +1375,8 @@ END
 FN rtocChildrenOfWalkNodeBenchmarkStmtMultiowned(v: BenchmarkStmt) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
-  &out.append(WalkNode{ ArrayValue: COPY v.iterations });
+  &out.append(castLocatableToWalkNode(v.expression));
+  # iterations: Int64 holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1409,9 +1439,13 @@ END
 FN rtocChildrenOfWalkNodeBgStreamBlock(v: BgStreamBlock) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.body });
-  &out.append(WalkNode{ ArrayValue: COPY v.deferred_drops });
-  &out.append(WalkNode{ ArrayValue: COPY v.stack_size });
+  FOR rtoc_walk_item IN v.body DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
+  # deferred_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.stack_size EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1469,10 +1503,16 @@ FN rtocChildrenOfWalkNodeBgStreamBlock(v: BgStreamBlock) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.computed_stack_tier });
-  &out.append(WalkNode{ ArrayValue: COPY v.capture_analysis });
-  &out.append(WalkNode{ ArrayValue: COPY v.spawn_form });
-  &out.append(WalkNode{ ArrayValue: COPY v.fsm_ineligible_reason });
+  IF v.computed_stack_tier EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  # capture_analysis: ?CaptureAnalysis holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.spawn_form EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  IF v.fsm_ineligible_reason EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.fsm_suspend_points });
   IF v.declared_yield_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
@@ -1548,11 +1588,21 @@ FN rtocChildrenOfWalkNodeBinaryOp(v: BinaryOp) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.string_concat });
-  &out.append(WalkNode{ ArrayValue: COPY v.or_fallback_dupe });
-  &out.append(WalkNode{ ArrayValue: COPY v.error_union_type });
-  &out.append(WalkNode{ ArrayValue: COPY v.observable_terminal });
-  &out.append(WalkNode{ ArrayValue: COPY v.observable_dest });
+  IF v.string_concat EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.or_fallback_dupe EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.error_union_type EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
+  END
+  IF v.observable_terminal EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.observable_dest EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   IF v.retain_error_channel EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1561,12 +1611,14 @@ END
 FN rtocChildrenOfWalkNodeBindExpr(v: BindExpr) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ StringValue: COPY v.name });
   IF v.type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
-  &out.append(WalkNode{ ArrayValue: COPY v.compound_op });
+  &out.append(castLocatableToWalkNode(v.value));
+  IF v.compound_op EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1624,10 +1676,14 @@ FN rtocChildrenOfWalkNodeBindExpr(v: BindExpr) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.mode });
-  &out.append(WalkNode{ ArrayValue: COPY v.reassign_cleanup });
-  &out.append(WalkNode{ ArrayValue: COPY v.mir_binding_entry });
-  &out.append(WalkNode{ ArrayValue: COPY v.auto_atomic_op });
+  IF v.mode EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  # reassign_cleanup: ?ReassignPlan holds no Locatable -- Ruby's walk stops at its leaves.
+  # mir_binding_entry: ?CleanupEntry@multiowned holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.auto_atomic_op EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.ownership_transport_plan });
   RETURN out;
 END
@@ -1696,9 +1752,9 @@ END
 FN rtocChildrenOfWalkNodeCallSiteOverride(v: CallSiteOverride) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.kind });
-  &out.append(WalkNode{ ArrayValue: COPY v.n });
-  &out.append(WalkNode{ ArrayValue: COPY v.inner });
+  &out.append(WalkNode{ SymbolValue: COPY v.kind });
+  # n: Int64 holds no Locatable -- Ruby's walk stops at its leaves.
+  &out.append(castLocatableToWalkNode(v.inner));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -1761,11 +1817,17 @@ END
 FN rtocChildrenOfWalkNodeCapabilityWrap(v: CapabilityWrap) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
-  &out.append(WalkNode{ ArrayValue: COPY v.ownership });
-  &out.append(WalkNode{ ArrayValue: COPY v.sync });
-  &out.append(WalkNode{ ArrayValue: COPY v.layout });
-  &out.append(WalkNode{ ArrayValue: COPY v.lock_rank });
+  &out.append(castLocatableToWalkNode(v.value));
+  IF v.ownership EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  IF v.sync EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  IF v.layout EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  # lock_rank: ?Int64 holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2015,7 +2077,9 @@ FN rtocChildrenOfWalkNodeConcurrentOp(v: ConcurrentOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.op });
-  &out.append(WalkNode{ ArrayValue: COPY v.options });
+  FOR rtoc_walk_item IN v.options DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2074,7 +2138,7 @@ FN rtocChildrenOfWalkNodeConcurrentOp(v: ConcurrentOp) RETURNS []WalkNode ->
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
   &out.append(WalkNode{ ArrayValue: COPY v.shard_context });
-  &out.append(WalkNode{ ArrayValue: COPY v.capture_analysis });
+  # capture_analysis: ?CaptureAnalysis holds no Locatable -- Ruby's walk stops at its leaves.
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeConformanceDef(v: ConformanceDef) RETURNS []WalkNode ->
@@ -2206,7 +2270,7 @@ END
 FN rtocChildrenOfWalkNodeCopy(v: Copy) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
+  &out.append(castLocatableToWalkNode(v.value));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2327,9 +2391,15 @@ FN rtocChildrenOfWalkNodeCopyNode(v: CopyNode) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.deep_copy });
-  &out.append(WalkNode{ ArrayValue: COPY v.carrier_op });
-  &out.append(WalkNode{ ArrayValue: COPY v.own });
+  IF v.deep_copy EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.carrier_op EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  IF v.own EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   IF v.alloc EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -2338,7 +2408,9 @@ END
 FN rtocChildrenOfWalkNodeCountOp(v: CountOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2401,7 +2473,9 @@ END
 FN rtocChildrenOfWalkNodeCountOpMultiowned(v: CountOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2464,8 +2538,8 @@ END
 FN rtocChildrenOfWalkNodeDefaultArrayLit(v: DefaultArrayLit) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.type_info });
-  &out.append(WalkNode{ ArrayValue: COPY v.storage });
+  &out.append(WalkNode{ TypeMultiowned: COPY v.type_info });
+  &out.append(WalkNode{ SymbolValue: COPY v.storage });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2590,7 +2664,7 @@ END
 FN rtocChildrenOfWalkNodeDestructuringAssignment(v: DestructuringAssignment) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
+  &out.append(castLocatableToWalkNode(v.value));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2653,7 +2727,9 @@ END
 FN rtocChildrenOfWalkNodeDieNode(v: DieNode) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.status });
+  IF v.status EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2716,7 +2792,9 @@ END
 FN rtocChildrenOfWalkNodeDistinctOp(v: DistinctOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2779,7 +2857,9 @@ END
 FN rtocChildrenOfWalkNodeDistinctOpMultiowned(v: DistinctOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2841,8 +2921,8 @@ FN rtocChildrenOfWalkNodeDistinctOpMultiowned(v: DistinctOp) RETURNS []WalkNode 
 END
 FN rtocChildrenOfWalkNodeDrop(v: Drop) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
-  &out.append(WalkNode{ ArrayValue: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ TokenMultiowned: COPY v.token });
+  &out.append(WalkNode{ StringValue: COPY v.name });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2900,13 +2980,15 @@ FN rtocChildrenOfWalkNodeDrop(v: Drop) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.cleanup_entry });
+  # cleanup_entry: ?CleanupEntry@multiowned holds no Locatable -- Ruby's walk stops at its leaves.
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeEachOp(v: EachOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.body });
+  FOR rtoc_walk_item IN v.body DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -2969,11 +3051,13 @@ END
 FN rtocChildrenOfWalkNodeExternFnDecl(v: ExternFnDecl) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ StringValue: COPY v.name });
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.from_module });
+  IF v.from_module EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
   IF v.owner_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -2983,7 +3067,7 @@ FN rtocChildrenOfWalkNodeExternFnDecl(v: ExternFnDecl) RETURNS []WalkNode ->
   FOR rtoc_arr_child IN v.fn_type_params DO
     &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.extern_source });
+  # extern_source: ?ExternSource holds no Locatable -- Ruby's walk stops at its leaves.
   &out.append(WalkNode{ ArrayValue: COPY v.return_lifetime });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -3047,7 +3131,7 @@ END
 FN rtocChildrenOfWalkNodeExternStructDecl(v: ExternStructDecl) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ StringValue: COPY v.name });
   IF v.from_module EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -3060,7 +3144,7 @@ FN rtocChildrenOfWalkNodeExternStructDecl(v: ExternStructDecl) RETURNS []WalkNod
   IF v.as_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.extern_source });
+  # extern_source: ?ExternSource holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3122,10 +3206,16 @@ FN rtocChildrenOfWalkNodeExternStructDecl(v: ExternStructDecl) RETURNS []WalkNod
 END
 FN rtocChildrenOfWalkNodeFieldCleanup(v: FieldCleanup) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
-  &out.append(WalkNode{ ArrayValue: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.target_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.field });
-  &out.append(WalkNode{ ArrayValue: COPY v.alloc });
+  &out.append(WalkNode{ TokenMultiowned: COPY v.token });
+  IF v.target_name EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
+  IF v.field EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  IF v.alloc EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3188,7 +3278,9 @@ END
 FN rtocChildrenOfWalkNodeFindOp(v: FindOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3251,7 +3343,9 @@ END
 FN rtocChildrenOfWalkNodeFindOpMultiowned(v: FindOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3314,11 +3408,13 @@ END
 FN rtocChildrenOfWalkNodeForEach(v: ForEach) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.var_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.collection });
-  &out.append(WalkNode{ ArrayValue: COPY v.body });
-  &out.append(WalkNode{ ArrayValue: COPY v.deferred_drops });
-  &out.append(WalkNode{ ArrayValue: COPY v.is_mutable });
+  &out.append(WalkNode{ StringValue: COPY v.var_name });
+  &out.append(castLocatableToWalkNode(v.collection));
+  FOR rtoc_walk_item IN v.body DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
+  # deferred_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
+  &out.append(WalkNode{ BoolValue: COPY v.is_mutable });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3376,22 +3472,26 @@ FN rtocChildrenOfWalkNodeForEach(v: ForEach) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.mark_per_iter });
+  IF v.mark_per_iter EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   &out.append(WalkNode{ BoolValue: COPY v.tight });
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeForRange(v: ForRange) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.var_name });
+  &out.append(WalkNode{ StringValue: COPY v.var_name });
   &out.append(castLocatableToWalkNode(COPY v.start_expr));
   &out.append(castLocatableToWalkNode(COPY v.end_expr));
   &out.append(WalkNode{ BoolValue: COPY v.inclusive });
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.deferred_drops });
-  &out.append(WalkNode{ ArrayValue: COPY v.mark_per_iter });
+  # deferred_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.mark_per_iter EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   &out.append(WalkNode{ BoolValue: COPY v.tight });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -3455,7 +3555,7 @@ END
 FN rtocChildrenOfWalkNodeFreezeNode(v: FreezeNode) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
+  &out.append(castLocatableToWalkNode(v.value));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3579,17 +3679,29 @@ FN rtocChildrenOfWalkNodeFuncCall(v: FuncCall) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.module_alias });
-  &out.append(WalkNode{ ArrayValue: COPY v.extern_call });
-  &out.append(WalkNode{ ArrayValue: COPY v.extern_effects });
-  &out.append(WalkNode{ ArrayValue: COPY v.extern_source });
-  &out.append(WalkNode{ ArrayValue: COPY v.generic_type_args });
-  &out.append(WalkNode{ ArrayValue: COPY v.fn_var_call });
-  &out.append(WalkNode{ ArrayValue: COPY v.pipe_lhs });
-  &out.append(WalkNode{ ArrayValue: COPY v.heap_dupe_result });
-  &out.append(WalkNode{ ArrayValue: COPY v.arg_families });
-  &out.append(WalkNode{ ArrayValue: COPY v.collapsed_errors });
-  &out.append(WalkNode{ ArrayValue: COPY v.error_union_type });
+  IF v.module_alias EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
+  IF v.extern_call EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  # extern_effects: ?{String@symbol}ExternEffectValue holds no Locatable -- Ruby's walk stops at its leaves.
+  # extern_source: ?ExternSource holds no Locatable -- Ruby's walk stops at its leaves.
+  # generic_type_args: ?[]String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.fn_var_call EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.pipe_lhs EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  IF v.heap_dupe_result EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  # arg_families: ?[][Set]String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
+  # collapsed_errors: ?[Set]String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.error_union_type EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
+  END
   IF v.protocol_name EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -3604,7 +3716,7 @@ END
 FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ StringValue: COPY v.name });
   &out.append(WalkNode{ ArrayValue: COPY v.captures });
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
@@ -3614,31 +3726,39 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
   &out.append(WalkNode{ ArrayValue: COPY v.catch_clauses });
-  &out.append(WalkNode{ ArrayValue: COPY v.default_catch });
-  &out.append(WalkNode{ ArrayValue: COPY v.visibility });
-  &out.append(WalkNode{ ArrayValue: COPY v.deferred_drops });
-  &out.append(WalkNode{ ArrayValue: COPY v.uses_frame });
-  &out.append(WalkNode{ ArrayValue: COPY v.explicit_return_type });
+  IF v.default_catch EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_item IN rtoc_opt_child DO
+      &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+    END
+  END
+  &out.append(WalkNode{ SymbolValue: COPY v.visibility });
+  # deferred_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.uses_frame EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  &out.append(WalkNode{ BoolValue: COPY v.explicit_return_type });
   FOR rtoc_arr_child IN v.type_params DO
     &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.tail_call });
-  &out.append(WalkNode{ ArrayValue: COPY v.requires });
+  &out.append(WalkNode{ BoolValue: COPY v.tail_call });
+  # requires: ?{String}[Set]String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
   &out.append(WalkNode{ TokenMultiowned: COPY v.arrow_token });
   IF v.name_token EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.effects_decl });
-  &out.append(WalkNode{ ArrayValue: COPY v.effects_span });
-  &out.append(WalkNode{ ArrayValue: COPY v.max_depth_n });
-  &out.append(WalkNode{ ArrayValue: COPY v.tight_reentrance });
-  &out.append(WalkNode{ ArrayValue: COPY v.requires_clauses });
+  IF v.effects_decl EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  # effects_span: ?EffectSpan holds no Locatable -- Ruby's walk stops at its leaves.
+  # max_depth_n: ?Int64 holds no Locatable -- Ruby's walk stops at its leaves.
+  &out.append(WalkNode{ BoolValue: COPY v.tight_reentrance });
+  # requires_clauses: ?{String}String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.return_type_token EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
   &out.append(WalkNode{ ArrayValue: COPY v.pre_clauses });
   &out.append(WalkNode{ ArrayValue: COPY v.post_clauses });
-  &out.append(WalkNode{ ArrayValue: COPY v.is_method });
+  &out.append(WalkNode{ BoolValue: COPY v.is_method });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3696,28 +3816,52 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.effect_set });
-  &out.append(WalkNode{ ArrayValue: COPY v.inferred_effects });
-  &out.append(WalkNode{ ArrayValue: COPY v.reentrance_kind });
+  # effect_set: ?EffectSet@multiowned holds no Locatable -- Ruby's walk stops at its leaves.
+  # inferred_effects: ?EffectSet@multiowned holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.reentrance_kind EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.thunk_plan });
   &out.append(WalkNode{ ArrayValue: COPY v.mutual_thunk_plan });
-  &out.append(WalkNode{ ArrayValue: COPY v.needs_rt });
-  &out.append(WalkNode{ ArrayValue: COPY v.fn_value_ref });
-  &out.append(WalkNode{ ArrayValue: COPY v.alloc_fault });
-  &out.append(WalkNode{ ArrayValue: COPY v.error_fallible });
-  &out.append(WalkNode{ ArrayValue: COPY v.uses_heap });
-  &out.append(WalkNode{ ArrayValue: COPY v.uses_alloc });
-  &out.append(WalkNode{ ArrayValue: COPY v.uses_rt });
-  &out.append(WalkNode{ ArrayValue: COPY v.effects });
-  &out.append(WalkNode{ ArrayValue: COPY v.snapshot_types });
-  &out.append(WalkNode{ ArrayValue: COPY v.stack_tier });
-  &out.append(WalkNode{ ArrayValue: COPY v.stack_vars_bytes });
-  &out.append(WalkNode{ ArrayValue: COPY v.moved_guard_info });
-  &out.append(WalkNode{ ArrayValue: COPY v.cleanup_bindings });
-  &out.append(WalkNode{ ArrayValue: COPY v.heap_carry_return });
-  &out.append(WalkNode{ ArrayValue: COPY v.heap_carry_return_vars });
-  &out.append(WalkNode{ ArrayValue: COPY v.fsm_eligible });
-  &out.append(WalkNode{ ArrayValue: COPY v.fsm_ineligible_reason });
+  IF v.needs_rt EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.fn_value_ref EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.alloc_fault EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.error_fallible EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.uses_heap EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.uses_alloc EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.uses_rt EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  # effects: ?[Set]String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
+  # snapshot_types: ?[Set]String holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.stack_tier EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  # stack_vars_bytes: ?Int64 holds no Locatable -- Ruby's walk stops at its leaves.
+  # moved_guard_info: ?PassStateValue holds no Locatable -- Ruby's walk stops at its leaves.
+  # cleanup_bindings: ?PassStateValue holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.heap_carry_return EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  # heap_carry_return_vars: ?[Set]String holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.fsm_eligible EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.fsm_ineligible_reason EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.fsm_suspend_points });
   IF v.conformance_protocol EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
@@ -3731,7 +3875,7 @@ END
 FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ StringValue: COPY v.name });
   &out.append(WalkNode{ ArrayValue: COPY v.captures });
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
@@ -3741,31 +3885,39 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
   &out.append(WalkNode{ ArrayValue: COPY v.catch_clauses });
-  &out.append(WalkNode{ ArrayValue: COPY v.default_catch });
-  &out.append(WalkNode{ ArrayValue: COPY v.visibility });
-  &out.append(WalkNode{ ArrayValue: COPY v.deferred_drops });
-  &out.append(WalkNode{ ArrayValue: COPY v.uses_frame });
-  &out.append(WalkNode{ ArrayValue: COPY v.explicit_return_type });
+  IF v.default_catch EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_item IN rtoc_opt_child DO
+      &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+    END
+  END
+  &out.append(WalkNode{ SymbolValue: COPY v.visibility });
+  # deferred_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.uses_frame EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  &out.append(WalkNode{ BoolValue: COPY v.explicit_return_type });
   FOR rtoc_arr_child IN v.type_params DO
     &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.tail_call });
-  &out.append(WalkNode{ ArrayValue: COPY v.requires });
+  &out.append(WalkNode{ BoolValue: COPY v.tail_call });
+  # requires: ?{String}[Set]String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
   &out.append(WalkNode{ TokenMultiowned: COPY v.arrow_token });
   IF v.name_token EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.effects_decl });
-  &out.append(WalkNode{ ArrayValue: COPY v.effects_span });
-  &out.append(WalkNode{ ArrayValue: COPY v.max_depth_n });
-  &out.append(WalkNode{ ArrayValue: COPY v.tight_reentrance });
-  &out.append(WalkNode{ ArrayValue: COPY v.requires_clauses });
+  IF v.effects_decl EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  # effects_span: ?EffectSpan holds no Locatable -- Ruby's walk stops at its leaves.
+  # max_depth_n: ?Int64 holds no Locatable -- Ruby's walk stops at its leaves.
+  &out.append(WalkNode{ BoolValue: COPY v.tight_reentrance });
+  # requires_clauses: ?{String}String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.return_type_token EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
   &out.append(WalkNode{ ArrayValue: COPY v.pre_clauses });
   &out.append(WalkNode{ ArrayValue: COPY v.post_clauses });
-  &out.append(WalkNode{ ArrayValue: COPY v.is_method });
+  &out.append(WalkNode{ BoolValue: COPY v.is_method });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3823,28 +3975,52 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.effect_set });
-  &out.append(WalkNode{ ArrayValue: COPY v.inferred_effects });
-  &out.append(WalkNode{ ArrayValue: COPY v.reentrance_kind });
+  # effect_set: ?EffectSet@multiowned holds no Locatable -- Ruby's walk stops at its leaves.
+  # inferred_effects: ?EffectSet@multiowned holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.reentrance_kind EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.thunk_plan });
   &out.append(WalkNode{ ArrayValue: COPY v.mutual_thunk_plan });
-  &out.append(WalkNode{ ArrayValue: COPY v.needs_rt });
-  &out.append(WalkNode{ ArrayValue: COPY v.fn_value_ref });
-  &out.append(WalkNode{ ArrayValue: COPY v.alloc_fault });
-  &out.append(WalkNode{ ArrayValue: COPY v.error_fallible });
-  &out.append(WalkNode{ ArrayValue: COPY v.uses_heap });
-  &out.append(WalkNode{ ArrayValue: COPY v.uses_alloc });
-  &out.append(WalkNode{ ArrayValue: COPY v.uses_rt });
-  &out.append(WalkNode{ ArrayValue: COPY v.effects });
-  &out.append(WalkNode{ ArrayValue: COPY v.snapshot_types });
-  &out.append(WalkNode{ ArrayValue: COPY v.stack_tier });
-  &out.append(WalkNode{ ArrayValue: COPY v.stack_vars_bytes });
-  &out.append(WalkNode{ ArrayValue: COPY v.moved_guard_info });
-  &out.append(WalkNode{ ArrayValue: COPY v.cleanup_bindings });
-  &out.append(WalkNode{ ArrayValue: COPY v.heap_carry_return });
-  &out.append(WalkNode{ ArrayValue: COPY v.heap_carry_return_vars });
-  &out.append(WalkNode{ ArrayValue: COPY v.fsm_eligible });
-  &out.append(WalkNode{ ArrayValue: COPY v.fsm_ineligible_reason });
+  IF v.needs_rt EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.fn_value_ref EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.alloc_fault EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.error_fallible EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.uses_heap EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.uses_alloc EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.uses_rt EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  # effects: ?[Set]String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
+  # snapshot_types: ?[Set]String holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.stack_tier EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  # stack_vars_bytes: ?Int64 holds no Locatable -- Ruby's walk stops at its leaves.
+  # moved_guard_info: ?PassStateValue holds no Locatable -- Ruby's walk stops at its leaves.
+  # cleanup_bindings: ?PassStateValue holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.heap_carry_return EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  # heap_carry_return_vars: ?[Set]String holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.fsm_eligible EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.fsm_ineligible_reason EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.fsm_suspend_points });
   IF v.conformance_protocol EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
@@ -3859,7 +4035,7 @@ FN rtocChildrenOfWalkNodeGetField(v: GetField) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castLocatableToWalkNode(COPY v.target));
-  &out.append(WalkNode{ ArrayValue: COPY v.field });
+  &out.append(WalkNode{ StringValue: COPY v.field });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3917,9 +4093,15 @@ FN rtocChildrenOfWalkNodeGetField(v: GetField) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.is_assignment_lhs });
-  &out.append(WalkNode{ ArrayValue: COPY v.indirect_field });
-  &out.append(WalkNode{ ArrayValue: COPY v.safe_nav_chain });
+  IF v.is_assignment_lhs EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.indirect_field EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.safe_nav_chain EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeGetIndex(v: GetIndex) RETURNS []WalkNode ->
@@ -3984,7 +4166,9 @@ FN rtocChildrenOfWalkNodeGetIndex(v: GetIndex) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.safe_nav_chain });
+  IF v.safe_nav_chain EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   IF v.protocol_operation EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -3993,7 +4177,7 @@ END
 FN rtocChildrenOfWalkNodeHashLit(v: HashLit) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.storage });
+  &out.append(WalkNode{ SymbolValue: COPY v.storage });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4114,17 +4298,29 @@ FN rtocChildrenOfWalkNodeIdentifier(v: Identifier) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.fn_ref });
-  &out.append(WalkNode{ ArrayValue: COPY v.heap_dupe_result });
-  &out.append(WalkNode{ ArrayValue: COPY v.atomic_borrow });
-  &out.append(WalkNode{ ArrayValue: COPY v.ownership_pending_transfer });
+  IF v.fn_ref EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.heap_dupe_result EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.atomic_borrow EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.ownership_pending_transfer EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeIfBind(v: IfBind) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.then_branch });
-  &out.append(WalkNode{ ArrayValue: COPY v.else_branch });
+  FOR rtoc_walk_item IN v.then_branch DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
+  FOR rtoc_walk_item IN v.else_branch DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4196,8 +4392,8 @@ FN rtocChildrenOfWalkNodeIfStatement(v: IfStatement) RETURNS []WalkNode ->
       &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
     END
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.then_drops });
-  &out.append(WalkNode{ ArrayValue: COPY v.else_drops });
+  # then_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
+  # else_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
   &out.append(WalkNode{ BoolValue: COPY v.comptime });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -4256,16 +4452,24 @@ FN rtocChildrenOfWalkNodeIfStatement(v: IfStatement) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.expr_mode });
-  &out.append(WalkNode{ ArrayValue: COPY v.then_result_type });
-  &out.append(WalkNode{ ArrayValue: COPY v.else_result_type });
+  IF v.expr_mode EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.then_result_type EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
+  END
+  IF v.else_result_type EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeImplementationDef(v: ImplementationDef) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.owner_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.owner_token });
+  &out.append(WalkNode{ StringValue: COPY v.owner_name });
+  IF v.owner_token EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ TokenMultiowned: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4328,7 +4532,9 @@ END
 FN rtocChildrenOfWalkNodeIndexOp(v: IndexOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4391,7 +4597,9 @@ END
 FN rtocChildrenOfWalkNodeIndexOpMultiowned(v: IndexOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4454,9 +4662,11 @@ END
 FN rtocChildrenOfWalkNodeIsA(v: IsA) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.left });
+  &out.append(castLocatableToWalkNode(v.left));
   &out.append(WalkNode{ ArrayValue: COPY v.right });
-  &out.append(WalkNode{ ArrayValue: COPY v.binding });
+  IF v.binding EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4514,16 +4724,26 @@ FN rtocChildrenOfWalkNodeIsA(v: IsA) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.runtime_variant_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.runtime_payload_type });
-  &out.append(WalkNode{ ArrayValue: COPY v.runtime_indirect_payload_as });
+  IF v.runtime_variant_name EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
+  IF v.runtime_payload_type EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
+  END
+  IF v.runtime_indirect_payload_as EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeJoinOp(v: JoinOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.right_source });
-  &out.append(WalkNode{ ArrayValue: COPY v.key_expr });
+  IF v.right_source EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  IF v.key_expr EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4644,7 +4864,9 @@ FN rtocChildrenOfWalkNodeKeepNode(v: KeepNode) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.carrier_op });
+  IF v.carrier_op EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeLambdaLit(v: LambdaLit) RETURNS []WalkNode ->
@@ -4652,8 +4874,10 @@ FN rtocChildrenOfWalkNodeLambdaLit(v: LambdaLit) RETURNS []WalkNode ->
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ ArrayValue: COPY v.captures });
   &out.append(castLambdaBodyToWalkNode(COPY v.body));
-  &out.append(WalkNode{ ArrayValue: COPY v.storage });
-  &out.append(WalkNode{ ArrayValue: COPY v.deferred_drops });
+  IF v.storage EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  # deferred_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4716,7 +4940,7 @@ END
 FN rtocChildrenOfWalkNodeLetBinding(v: LetBinding) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ StringValue: COPY v.name });
   &out.append(castLocatableToWalkNode(COPY v.expr));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -4780,7 +5004,9 @@ END
 FN rtocChildrenOfWalkNodeLimitOp(v: LimitOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.count });
+  IF v.count EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4843,7 +5069,7 @@ END
 FN rtocChildrenOfWalkNodeLinkNode(v: LinkNode) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
+  &out.append(castLocatableToWalkNode(v.value));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4909,7 +5135,7 @@ FN rtocChildrenOfWalkNodeListLit(v: ListLit) RETURNS []WalkNode ->
   FOR rtoc_arr_child IN v.items DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.storage });
+  &out.append(WalkNode{ SymbolValue: COPY v.storage });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4972,9 +5198,11 @@ END
 FN rtocChildrenOfWalkNodeLiteral(v: Literal) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.type });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
-  &out.append(WalkNode{ ArrayValue: COPY v.storage });
+  &out.append(WalkNode{ SymbolValue: COPY v.type });
+  # value: ?TokenValue holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.storage EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5038,10 +5266,12 @@ FN rtocChildrenOfWalkNodeMatchStatement(v: MatchStatement) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castLocatableToWalkNode(COPY v.expr));
-  &out.append(WalkNode{ ArrayValue: COPY v.case_drops });
-  &out.append(WalkNode{ ArrayValue: COPY v.default_drops });
+  # case_drops: [][]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
+  # default_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
   &out.append(WalkNode{ BoolValue: COPY v.exhaustive });
-  &out.append(WalkNode{ ArrayValue: COPY v.takes });
+  IF v.takes EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5099,20 +5329,28 @@ FN rtocChildrenOfWalkNodeMatchStatement(v: MatchStatement) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.string_match });
-  &out.append(WalkNode{ ArrayValue: COPY v.expr_mode });
+  IF v.string_match EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.expr_mode EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   FOR rtoc_crt IN (v.case_result_types OR_ELSE List[]) DO
     IF rtoc_crt EXISTS AS rtoc_crt_value THEN
       &out.append(WalkNode{ Type: COPY rtoc_crt_value });
     END
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.default_result_type });
+  IF v.default_result_type EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeMaxOp(v: MaxOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5175,7 +5413,9 @@ END
 FN rtocChildrenOfWalkNodeMaxOpMultiowned(v: MaxOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5238,7 +5478,9 @@ END
 FN rtocChildrenOfWalkNodeMinOp(v: MinOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5301,7 +5543,9 @@ END
 FN rtocChildrenOfWalkNodeMinOpMultiowned(v: MinOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5427,7 +5671,7 @@ END
 FN rtocChildrenOfWalkNodeMutableBorrow(v: MutableBorrow) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.target });
+  &out.append(castLocatableToWalkNode(v.target));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5615,9 +5859,15 @@ END
 FN rtocChildrenOfWalkNodeOrElseExit(v: OrElseExit) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.kind });
-  &out.append(WalkNode{ ArrayValue: COPY v.error_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.message });
+  IF v.kind EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  IF v.error_name EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
+  IF v.message EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5866,7 +6116,9 @@ END
 FN rtocChildrenOfWalkNodeOrderByOp(v: OrderByOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -5929,7 +6181,9 @@ END
 FN rtocChildrenOfWalkNodeOrderByOpMultiowned(v: OrderByOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6116,7 +6370,7 @@ END
 FN rtocChildrenOfWalkNodeProfileStmt(v: ProfileStmt) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  &out.append(castLocatableToWalkNode(v.expression));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6179,7 +6433,7 @@ END
 FN rtocChildrenOfWalkNodeProfileStmtMultiowned(v: ProfileStmt) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  &out.append(castLocatableToWalkNode(v.expression));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6242,9 +6496,9 @@ END
 FN rtocChildrenOfWalkNodeProtocolDef(v: ProtocolDef) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
-  &out.append(WalkNode{ ArrayValue: COPY v.name_token });
-  &out.append(WalkNode{ ArrayValue: COPY v.visibility });
+  &out.append(WalkNode{ StringValue: COPY v.name });
+  &out.append(WalkNode{ TokenMultiowned: COPY v.name_token });
+  &out.append(WalkNode{ SymbolValue: COPY v.visibility });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6376,9 +6630,15 @@ END
 FN rtocChildrenOfWalkNodeRaise(v: Raise) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.kind });
-  &out.append(WalkNode{ ArrayValue: COPY v.error_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.message_expr });
+  IF v.kind EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  IF v.error_name EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
+  IF v.message_expr EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6440,9 +6700,11 @@ FN rtocChildrenOfWalkNodeRaise(v: Raise) RETURNS []WalkNode ->
 END
 FN rtocChildrenOfWalkNodeReassignCleanup(v: ReassignCleanup) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
-  &out.append(WalkNode{ ArrayValue: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
-  &out.append(WalkNode{ ArrayValue: COPY v.alloc });
+  &out.append(WalkNode{ TokenMultiowned: COPY v.token });
+  &out.append(WalkNode{ StringValue: COPY v.name });
+  IF v.alloc EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6505,7 +6767,9 @@ END
 FN rtocChildrenOfWalkNodeRecoverOp(v: RecoverOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.default_expr });
+  IF v.default_expr EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6568,8 +6832,12 @@ END
 FN rtocChildrenOfWalkNodeReduceOp(v: ReduceOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.initial_value });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.initial_value EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6632,8 +6900,12 @@ END
 FN rtocChildrenOfWalkNodeReduceOpMultiowned(v: ReduceOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.initial_value });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.initial_value EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6696,7 +6968,7 @@ END
 FN rtocChildrenOfWalkNodeRequire(v: Require) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.path });
+  &out.append(WalkNode{ StringValue: COPY v.path });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6759,9 +7031,9 @@ END
 FN rtocChildrenOfWalkNodeRequireNode(v: RequireNode) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.path });
-  &out.append(WalkNode{ ArrayValue: COPY v.namespace });
-  &out.append(WalkNode{ ArrayValue: COPY v.kind });
+  &out.append(WalkNode{ StringValue: COPY v.path });
+  &out.append(WalkNode{ StringValue: COPY v.namespace });
+  &out.append(WalkNode{ SymbolValue: COPY v.kind });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6824,7 +7096,7 @@ END
 FN rtocChildrenOfWalkNodeResolveNode(v: ResolveNode) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
+  &out.append(castLocatableToWalkNode(v.value));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6886,8 +7158,8 @@ FN rtocChildrenOfWalkNodeResolveNode(v: ResolveNode) RETURNS []WalkNode ->
 END
 FN rtocChildrenOfWalkNodeReturn(v: Return) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
-  &out.append(WalkNode{ ArrayValue: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.escaped_vars });
+  &out.append(WalkNode{ TokenMultiowned: COPY v.token });
+  # escaped_vars: ?[Set]String holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6950,7 +7222,9 @@ END
 FN rtocChildrenOfWalkNodeReturnNode(v: ReturnNode) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
+  IF v.value EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7013,11 +7287,15 @@ END
 FN rtocChildrenOfWalkNodeSelectOp(v: SelectOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
-  &out.append(WalkNode{ ArrayValue: COPY v.effect_mode });
-  &out.append(WalkNode{ ArrayValue: COPY v.stream_mode });
-  &out.append(WalkNode{ ArrayValue: COPY v.modifier_order });
-  &out.append(WalkNode{ ArrayValue: COPY v.capture_analysis });
+  &out.append(castLocatableToWalkNode(v.expression));
+  IF v.effect_mode EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  &out.append(WalkNode{ BoolValue: COPY v.stream_mode });
+  IF v.modifier_order EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
+  # capture_analysis: ?CaptureAnalysis holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7080,11 +7358,15 @@ END
 FN rtocChildrenOfWalkNodeSelectOpMultiowned(v: SelectOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
-  &out.append(WalkNode{ ArrayValue: COPY v.effect_mode });
-  &out.append(WalkNode{ ArrayValue: COPY v.stream_mode });
-  &out.append(WalkNode{ ArrayValue: COPY v.modifier_order });
-  &out.append(WalkNode{ ArrayValue: COPY v.capture_analysis });
+  &out.append(castLocatableToWalkNode(v.expression));
+  IF v.effect_mode EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  &out.append(WalkNode{ BoolValue: COPY v.stream_mode });
+  IF v.modifier_order EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
+  END
+  # capture_analysis: ?CaptureAnalysis holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7147,8 +7429,12 @@ END
 FN rtocChildrenOfWalkNodeShardOp(v: ShardOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.key_expr });
-  &out.append(WalkNode{ ArrayValue: COPY v.target_map });
+  IF v.key_expr EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  IF v.target_map EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7274,7 +7560,9 @@ END
 FN rtocChildrenOfWalkNodeSkipOp(v: SkipOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.count });
+  IF v.count EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7337,10 +7625,14 @@ END
 FN rtocChildrenOfWalkNodeSlice(v: Slice) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.target });
-  &out.append(WalkNode{ ArrayValue: COPY v.start });
-  &out.append(WalkNode{ ArrayValue: COPY v.end });
-  &out.append(WalkNode{ ArrayValue: COPY v.exclusive });
+  &out.append(castLocatableToWalkNode(v.target));
+  IF v.start EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  IF v.end EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  &out.append(WalkNode{ BoolValue: COPY v.exclusive });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7403,7 +7695,7 @@ END
 FN rtocChildrenOfWalkNodeSmashStmt(v: SmashStmt) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  &out.append(castLocatableToWalkNode(v.expression));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7466,7 +7758,7 @@ END
 FN rtocChildrenOfWalkNodeSmashStmtMultiowned(v: SmashStmt) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  &out.append(castLocatableToWalkNode(v.expression));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7529,9 +7821,11 @@ END
 FN rtocChildrenOfWalkNodeStaticCall(v: StaticCall) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.type_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.method_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.args });
+  &out.append(castLocatableToWalkNode(v.type_name));
+  &out.append(WalkNode{ StringValue: COPY v.method_name });
+  FOR rtoc_walk_item IN v.args DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7589,8 +7883,12 @@ FN rtocChildrenOfWalkNodeStaticCall(v: StaticCall) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.error_union_type });
-  &out.append(WalkNode{ ArrayValue: COPY v.retain_error_channel });
+  IF v.error_union_type EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
+  END
+  IF v.retain_error_channel EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   IF v.inherent_call EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ FuncCall: COPY rtoc_opt_child });
   END
@@ -7665,7 +7963,9 @@ FN rtocChildrenOfWalkNodeStructLit(v: StructLit) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ SymbolValue: COPY v.name });
-  &out.append(WalkNode{ ArrayValue: COPY v.storage });
+  IF v.storage EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   IF v.type_args EXISTS AS rtoc_opt_child THEN
     FOR rtoc_arr_child IN rtoc_opt_child DO
       &out.append(WalkNode{ TypeMultiowned: COPY rtoc_arr_child });
@@ -7728,13 +8028,15 @@ FN rtocChildrenOfWalkNodeStructLit(v: StructLit) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.borrowed_field_names });
+  # borrowed_field_names: ?[Set]String holds no Locatable -- Ruby's walk stops at its leaves.
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeStructPattern(v: StructPattern) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.partial });
+  IF v.partial EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7797,8 +8099,8 @@ END
 FN rtocChildrenOfWalkNodeStubDecl(v: StubDecl) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.function_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.kind });
+  &out.append(WalkNode{ StringValue: COPY v.function_name });
+  &out.append(WalkNode{ SymbolValue: COPY v.kind });
   &out.append(WalkNode{ ArrayValue: COPY v.value });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -7862,7 +8164,9 @@ END
 FN rtocChildrenOfWalkNodeSumOp(v: SumOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7925,7 +8229,9 @@ END
 FN rtocChildrenOfWalkNodeSumOpMultiowned(v: SumOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -7987,8 +8293,8 @@ FN rtocChildrenOfWalkNodeSumOpMultiowned(v: SumOp) RETURNS []WalkNode ->
 END
 FN rtocChildrenOfWalkNodeSuppressCleanup(v: SuppressCleanup) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
-  &out.append(WalkNode{ ArrayValue: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ TokenMultiowned: COPY v.token });
+  &out.append(WalkNode{ StringValue: COPY v.name });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8114,7 +8420,9 @@ END
 FN rtocChildrenOfWalkNodeTakeWhileOp(v: TakeWhileOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8177,7 +8485,9 @@ END
 FN rtocChildrenOfWalkNodeTakeWhileOpMultiowned(v: TakeWhileOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8240,7 +8550,9 @@ END
 FN rtocChildrenOfWalkNodeTapOp(v: TapOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.body });
+  FOR rtoc_walk_item IN v.body DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8304,7 +8616,7 @@ FN rtocChildrenOfWalkNodeTenseNavigation(v: TenseNavigation) RETURNS []WalkNode 
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castLocatableToWalkNode(COPY v.target));
-  &out.append(WalkNode{ ArrayValue: COPY v.markers });
+  &out.append(WalkNode{ StringValue: COPY v.markers });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8367,8 +8679,12 @@ END
 FN rtocChildrenOfWalkNodeTestBlock(v: TestBlock) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
-  &out.append(WalkNode{ ArrayValue: COPY v.setup });
+  &out.append(WalkNode{ StringValue: COPY v.name });
+  IF v.setup EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_item IN rtoc_opt_child DO
+      &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+    END
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.whens });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -8427,18 +8743,44 @@ FN rtocChildrenOfWalkNodeTestBlock(v: TestBlock) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.before_each });
-  &out.append(WalkNode{ ArrayValue: COPY v.after_each });
-  &out.append(WalkNode{ ArrayValue: COPY v.before_all });
-  &out.append(WalkNode{ ArrayValue: COPY v.after_all });
+  IF v.before_each EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_group IN rtoc_opt_child DO
+      FOR rtoc_walk_item IN UNWRAP (rtoc_walk_group) DO
+        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+      END
+    END
+  END
+  IF v.after_each EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_group IN rtoc_opt_child DO
+      FOR rtoc_walk_item IN UNWRAP (rtoc_walk_group) DO
+        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+      END
+    END
+  END
+  IF v.before_all EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_group IN rtoc_opt_child DO
+      FOR rtoc_walk_item IN UNWRAP (rtoc_walk_group) DO
+        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+      END
+    END
+  END
+  IF v.after_all EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_group IN rtoc_opt_child DO
+      FOR rtoc_walk_item IN UNWRAP (rtoc_walk_group) DO
+        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+      END
+    END
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.lets });
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeTestThat(v: TestThat) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.description });
-  &out.append(WalkNode{ ArrayValue: COPY v.body });
+  &out.append(WalkNode{ StringValue: COPY v.description });
+  FOR rtoc_walk_item IN v.body DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8497,7 +8839,9 @@ FN rtocChildrenOfWalkNodeTestThat(v: TestThat) RETURNS []WalkNode ->
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
   &out.append(WalkNode{ ArrayValue: COPY v.synthetic_fn });
-  &out.append(WalkNode{ ArrayValue: COPY v.pending });
+  IF v.pending EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeThenChain(v: ThenChain) RETURNS []WalkNode ->
@@ -8566,7 +8910,9 @@ END
 FN rtocChildrenOfWalkNodeThrowNode(v: ThrowNode) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
+  IF v.value EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8651,7 +8997,9 @@ END
 FN rtocChildrenOfWalkNodeTupleLit(v: TupleLit) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.storage });
+  IF v.storage EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8714,8 +9062,8 @@ END
 FN rtocChildrenOfWalkNodeUnionDef(v: UnionDef) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
-  &out.append(WalkNode{ ArrayValue: COPY v.visibility });
+  &out.append(WalkNode{ StringValue: COPY v.name });
+  &out.append(WalkNode{ SymbolValue: COPY v.visibility });
   FOR rtoc_arr_child IN v.type_params DO
     &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
@@ -8781,10 +9129,14 @@ END
 FN rtocChildrenOfWalkNodeUnionVariantLit(v: UnionVariantLit) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.union_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.variant_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.fields });
-  &out.append(WalkNode{ ArrayValue: COPY v.storage });
+  &out.append(WalkNode{ StringValue: COPY v.union_name });
+  &out.append(WalkNode{ StringValue: COPY v.variant_name });
+  FOR rtoc_walk_item IN v.fields DO
+    &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+  END
+  IF v.storage EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8847,7 +9199,9 @@ END
 FN rtocChildrenOfWalkNodeUnnestOp(v: UnnestOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8910,7 +9264,9 @@ END
 FN rtocChildrenOfWalkNodeUnnestOpMultiowned(v: UnnestOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8973,12 +9329,12 @@ END
 FN rtocChildrenOfWalkNodeVarDecl(v: VarDecl) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ StringValue: COPY v.name });
   IF v.type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
-  &out.append(WalkNode{ ArrayValue: COPY v.mutable });
+  &out.append(castLocatableToWalkNode(v.value));
+  &out.append(WalkNode{ BoolValue: COPY v.mutable });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9036,7 +9392,7 @@ FN rtocChildrenOfWalkNodeVarDecl(v: VarDecl) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.mir_binding_entry });
+  # mir_binding_entry: ?CleanupEntry@multiowned holds no Locatable -- Ruby's walk stops at its leaves.
   &out.append(WalkNode{ ArrayValue: COPY v.ownership_transport_plan });
   IF v.const_visibility EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
@@ -9049,8 +9405,12 @@ END
 FN rtocChildrenOfWalkNodeWhenBlock(v: WhenBlock) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.description });
-  &out.append(WalkNode{ ArrayValue: COPY v.setup });
+  &out.append(WalkNode{ StringValue: COPY v.description });
+  IF v.setup EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_item IN rtoc_opt_child DO
+      &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+    END
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.tests });
   &out.append(WalkNode{ ArrayValue: COPY v.benchmarks });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
@@ -9110,18 +9470,42 @@ FN rtocChildrenOfWalkNodeWhenBlock(v: WhenBlock) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.before_each });
-  &out.append(WalkNode{ ArrayValue: COPY v.after_each });
-  &out.append(WalkNode{ ArrayValue: COPY v.before_all });
-  &out.append(WalkNode{ ArrayValue: COPY v.after_all });
+  IF v.before_each EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_group IN rtoc_opt_child DO
+      FOR rtoc_walk_item IN UNWRAP (rtoc_walk_group) DO
+        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+      END
+    END
+  END
+  IF v.after_each EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_group IN rtoc_opt_child DO
+      FOR rtoc_walk_item IN UNWRAP (rtoc_walk_group) DO
+        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+      END
+    END
+  END
+  IF v.before_all EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_group IN rtoc_opt_child DO
+      FOR rtoc_walk_item IN UNWRAP (rtoc_walk_group) DO
+        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+      END
+    END
+  END
+  IF v.after_all EXISTS AS rtoc_opt_child THEN
+    FOR rtoc_walk_group IN rtoc_opt_child DO
+      FOR rtoc_walk_item IN UNWRAP (rtoc_walk_group) DO
+        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+      END
+    END
+  END
   &out.append(WalkNode{ ArrayValue: COPY v.lets });
-  &out.append(WalkNode{ ArrayValue: COPY v.tags });
+  # tags: ?[]String holds no Locatable -- Ruby's walk stops at its leaves.
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeWhereOp(v: WhereOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  &out.append(castLocatableToWalkNode(v.expression));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9184,7 +9568,7 @@ END
 FN rtocChildrenOfWalkNodeWhereOpMultiowned(v: WhereOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  &out.append(castLocatableToWalkNode(v.expression));
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9248,12 +9632,12 @@ FN rtocChildrenOfWalkNodeWhileBindLoop(v: WhileBindLoop) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castLocatableToWalkNode(COPY v.condition));
-  &out.append(WalkNode{ ArrayValue: COPY v.binding_name });
-  &out.append(WalkNode{ ArrayValue: COPY v.binding_token });
+  &out.append(WalkNode{ StringValue: COPY v.binding_name });
+  &out.append(WalkNode{ TokenMultiowned: COPY v.binding_token });
   FOR rtoc_arr_child IN v.do_branch DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.deferred_drops });
+  # deferred_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9311,7 +9695,9 @@ FN rtocChildrenOfWalkNodeWhileBindLoop(v: WhileBindLoop) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.mark_per_iter });
+  IF v.mark_per_iter EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   &out.append(WalkNode{ BoolValue: COPY v.tight });
   RETURN out;
 END
@@ -9322,7 +9708,7 @@ FN rtocChildrenOfWalkNodeWhileLoop(v: WhileLoop) RETURNS []WalkNode ->
   FOR rtoc_arr_child IN v.do_branch DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.deferred_drops });
+  # deferred_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
   &out.append(WalkNode{ BoolValue: COPY v.tight });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -9381,14 +9767,20 @@ FN rtocChildrenOfWalkNodeWhileLoop(v: WhileLoop) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.mark_per_iter });
+  IF v.mark_per_iter EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeWindowOp(v: WindowOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.size });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.size EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9451,8 +9843,12 @@ END
 FN rtocChildrenOfWalkNodeWindowOpMultiowned(v: WindowOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.size });
-  &out.append(WalkNode{ ArrayValue: COPY v.expression });
+  IF v.size EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
+  IF v.expression EXISTS AS rtoc_opt_child THEN
+    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+  END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9518,7 +9914,7 @@ FN rtocChildrenOfWalkNodeWithBlock(v: WithBlock) RETURNS []WalkNode ->
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.deferred_drops });
+  # deferred_drops: ?[]DeferredDrop holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9577,11 +9973,19 @@ FN rtocChildrenOfWalkNodeWithBlock(v: WithBlock) RETURNS []WalkNode ->
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
   &out.append(WalkNode{ ArrayValue: COPY v.lock_error_clause });
-  &out.append(WalkNode{ ArrayValue: COPY v.deadlock_escape });
-  &out.append(WalkNode{ ArrayValue: COPY v.view_kind });
-  &out.append(WalkNode{ ArrayValue: COPY v.snapshot_mode });
-  &out.append(WalkNode{ ArrayValue: COPY v.polymorphic });
-  &out.append(WalkNode{ ArrayValue: COPY v.universal_poly });
+  # deadlock_escape: ?DeadlockEscape holds no Locatable -- Ruby's walk stops at its leaves.
+  IF v.view_kind EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  IF v.snapshot_mode EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+  END
+  IF v.polymorphic EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
+  IF v.universal_poly EXISTS AS rtoc_opt_child THEN
+    &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
+  END
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeYieldExpr(v: YieldExpr) RETURNS []WalkNode ->

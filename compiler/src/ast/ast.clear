@@ -7343,6 +7343,9 @@ PUB STRUCT UnionMethodRequirement {
 # affinity (:local / :shared). The union keeps all three.
 PUB UNION PinMode { SymbolValue: String@symbol, BoolValue: Bool }
 PUB FN pinMode__pinned?(value: ?PinMode) RETURNS Bool ->
+  IF value == NIL THEN
+    RETURN FALSE;
+  END
   PARTIAL MATCH value START
     PinMode.BoolValue AS rtoc_pin_bool -> RETURN rtoc_pin_bool;,
     PinMode.SymbolValue AS rtoc_pin_sym -> RETURN TRUE;,
