@@ -1046,7 +1046,7 @@ PUB FN escapeAnalysis__mark_expr_identifiers_heap_mut(expr: ?Locatable) RETURNS 
     END
     MUTABLE unwrapped_node: Locatable = COPY rtoc_loc;
     IF unwrapped_node IS_A Identifier AS identifier THEN
-      IF escapeAnalysis__mark_node_symbol_heap_mut(identifier) THEN
+      IF escapeAnalysis__mark_node_symbol_heap_mut(Locatable{ Identifier: COPY identifier }) THEN
         changed = TRUE;
       END
       CONTINUE;
@@ -1066,7 +1066,7 @@ PUB FN escapeAnalysis__mark_expr_identifiers_heap_mut(expr: ?Locatable) RETURNS 
     END
     MUTABLE root: ?Identifier = aST__root_identifier(unwrapped_node);
     IF root EXISTS AS root_value THEN
-      IF escapeAnalysis__mark_node_symbol_heap_mut(root_value) THEN
+      IF escapeAnalysis__mark_node_symbol_heap_mut(Locatable{ Identifier: COPY root_value }) THEN
         changed = TRUE;
       END
       CONTINUE;
@@ -1235,7 +1235,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
 END
 PUB FN escapeAnalysis__loop_body_declared_names(body: []Node) RETURNS ![Set]String ->
   MUTABLE names: [Set]String = Set[];
-  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(MUTABLE names, MUTABLE ti, MUTABLE stack, MUTABLE value) -> {
+  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(MUTABLE names) -> {
   MUTABLE name: ?String = localBindingAnalysis__binding_decl_name(node);
   IF name EXISTS AS name_value THEN
     RETURN &names.insert(name_value);

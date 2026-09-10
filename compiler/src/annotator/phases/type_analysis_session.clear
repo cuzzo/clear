@@ -13229,7 +13229,7 @@ PRIVATE FN typeAnalysisSession__resolve_runtime_is_a_variant_mut(MUTABLE self: T
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_isa_right_node: Node = UNWRAP (castIsARightToNode(node.right));
-    MUTABLE target_names = TRY (typeAnalysisSession__runtime_is_a_target_names(rtoc_self_view, &rtoc_isa_right_node));
+    MUTABLE target_names = TRY (typeAnalysisSession__runtime_is_a_target_names(rtoc_self_view, castNodeToNodeOrType(rtoc_isa_right_node)));
     MUTABLE variant_key: ?TypeAnalysisSessionReturnValue = (target_names |> SELECT:? typeAnalysisSession__runtime_union_variant_key(&rtoc_self_view, schema, _) |> WHERE _ != NIL).first();
     IF variant_key THEN
       RETURN COPY CAST(variant_key AS String);
@@ -13241,9 +13241,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (payload_matches.length() == 1) THEN
       RETURN COPY CAST(payload_matches.first() AS String);
     ELSE_IF (payload_matches.length() > 1) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IsA: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_AMBIGUOUS_PAYLOAD }, [], CAST({:target: TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, UNWRAP (castIsARightToNode(node.right)))), :union: union_type, :variants: ((payload_matches |> SELECT _.toString()) |> ORDER_BY _).join(", ")} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IsA: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_AMBIGUOUS_PAYLOAD }, [], CAST({:target: TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, castNodeToNodeOrType(UNWRAP (castIsARightToNode(node.right))))), :union: union_type, :variants: ((payload_matches |> SELECT _.toString()) |> ORDER_BY _).join(", ")} AS {String@symbol}Any)));
     END
-    TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IsA: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_UNKNOWN_VARIANT }, [], CAST({:target: TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, &rtoc_isa_right_node)), :union: union_type} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ IsA: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :IS_A_RUNTIME_UNKNOWN_VARIANT }, [], CAST({:target: TRY (typeAnalysisSession__runtime_is_a_target_label(&rtoc_self_view, castNodeToNodeOrType(rtoc_isa_right_node))), :union: union_type} AS {String@symbol}Any)));
     RETURN COPY "";
 }
 END
