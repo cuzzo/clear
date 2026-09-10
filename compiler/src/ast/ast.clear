@@ -13889,15 +13889,9 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A LambdaLit AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
-    MUTABLE rtoc_new_deferred_drops: ?[]DeferredDrop = NIL;
-    IF item.deferred_drops EXISTS AS rtoc_list THEN
-      MUTABLE rtoc_deferred_drops: []Locatable = List[];
-      FOR rtoc_child IN rtoc_list DO
-        &rtoc_deferred_drops.append(blk(COPY rtoc_child));
-      END
-      rtoc_new_deferred_drops = rtoc_deferred_drops;
-    END
-    item.deferred_drops = rtoc_new_deferred_drops;
+    # Ruby maps a list member's elements only where the element IS a Locatable
+    # and copies the rest through; a DeferredDrop is name/type/resource, so the
+    # block never applies to one.
     RETURN Locatable{ LambdaLit: COPY item };
   END
   IF value IS_A IfStatement AS rtoc_variant THEN
@@ -14497,15 +14491,9 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
       &rtoc_body.append(blk(COPY rtoc_child));
     END
     item.body = rtoc_body;
-    MUTABLE rtoc_new_deferred_drops: ?[]DeferredDrop = NIL;
-    IF item.deferred_drops EXISTS AS rtoc_list THEN
-      MUTABLE rtoc_deferred_drops: []Locatable = List[];
-      FOR rtoc_child IN rtoc_list DO
-        &rtoc_deferred_drops.append(blk(COPY rtoc_child));
-      END
-      rtoc_new_deferred_drops = rtoc_deferred_drops;
-    END
-    item.deferred_drops = rtoc_new_deferred_drops;
+    # Ruby maps a list member's elements only where the element IS a Locatable
+    # and copies the rest through; a DeferredDrop is name/type/resource, so the
+    # block never applies to one.
     item.end_expr = blk(COPY item.end_expr);
     item.start_expr = blk(COPY item.start_expr);
     RETURN Locatable{ ForRange: COPY item };
@@ -14518,15 +14506,9 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
     END
     item.body = rtoc_body;
     item.collection = blk(COPY item.collection);
-    MUTABLE rtoc_new_deferred_drops: ?[]DeferredDrop = NIL;
-    IF item.deferred_drops EXISTS AS rtoc_list THEN
-      MUTABLE rtoc_deferred_drops: []Locatable = List[];
-      FOR rtoc_child IN rtoc_list DO
-        &rtoc_deferred_drops.append(blk(COPY rtoc_child));
-      END
-      rtoc_new_deferred_drops = rtoc_deferred_drops;
-    END
-    item.deferred_drops = rtoc_new_deferred_drops;
+    # Ruby maps a list member's elements only where the element IS a Locatable
+    # and copies the rest through; a DeferredDrop is name/type/resource, so the
+    # block never applies to one.
     RETURN Locatable{ ForEach: COPY item };
   END
   IF value IS_A TestBlock AS rtoc_variant THEN
@@ -18807,134 +18789,11 @@ PUB FN node__set_can_fail_mut(MUTABLE value: Node, new_value: ?Bool) RETURNS Voi
 END
 PUB FN node__set_error_union_type_mut(MUTABLE value: Node, new_value: ?Type) RETURNS Void ->
   PARTIAL MATCH value START
-    Node.Program AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.RequireNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ProtocolRequirement AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ProtocolDef AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.FunctionDef AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ImplementationDef AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ConformanceDef AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.StructDef AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.VarDecl AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Assignment AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.DestructureTarget AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.DestructuringAssignment AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.BindExpr AS MUTABLE item -> item.error_union_type = COPY new_value;,
     Node.BinaryOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.IsA AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.UnaryOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.CallSiteOverride AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Identifier AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Literal AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ListLit AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.TupleLit AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.DefaultArrayLit AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.HashLit AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.DefaultLit AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.StructLit AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.LambdaLit AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.IfStatement AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.IfBind AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.WhileLoop AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.WhileBindLoop AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.BreakNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ContinueNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
     Node.FuncCall AS MUTABLE item -> item.error_union_type = COPY new_value;,
     Node.MethodCall AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.GetField AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.GetIndex AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Cast AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ReturnNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Assert AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Raise AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ThrowNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.DieNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Slice AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Require AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.DeferStmt AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.WithBlock AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.SyncPolicyDecl AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.SelectOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.WhereOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.IndexOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ReduceOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.OrderByOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.LimitOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.UnnestOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.DistinctOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.EachOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.TapOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.SkipOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.CollectOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.TakeWhileOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.WindowOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.BatchWindowOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.JoinOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.FindOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.AnyOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.AllOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.CountOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.SumOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.AverageOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.MinOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.MaxOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ShardOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ConcurrentOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Placeholder AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Copy AS MUTABLE item -> item.error_union_type = COPY new_value;,
     Node.OptionalUnwrap AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.TenseNavigation AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.MutableBorrow AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.OrElseRaise AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.OrElseExit AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.OrElsePass AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.OrElsePrune AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.OrElseBreak AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.CatchBlock AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.RecoverOp AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.BlockExpr AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.StringConcat AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.CapabilityWrap AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.MoveNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.CopyNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.KeepNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ShareNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.LinkNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ResolveNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.FreezeNode AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.PassStmt AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.StructPattern AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.RangeLit AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ExternFnDecl AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ExternStructDecl AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.EnumDef AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.UnionDef AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.UnionVariantLit AS MUTABLE item -> item.error_union_type = COPY new_value;,
     Node.StaticCall AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.DoBlock AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.BgBlock AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ThenChain AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.BgStreamBlock AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.YieldExpr AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.CloseStream AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.NextExpr AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.MatchStatement AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ForRange AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ForEach AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.TestBlock AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.WhenBlock AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.LetBinding AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.TestThat AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.AssertRaises AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.BenchmarkStmt AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.SmashStmt AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ProfileStmt AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.StubDecl AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Drop AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.SuppressCleanup AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.Return AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.ReassignCleanup AS MUTABLE item -> item.error_union_type = COPY new_value;,
-    Node.FieldCleanup AS MUTABLE item -> item.error_union_type = COPY new_value;,
     DEFAULT -> NIL;
   END
   NIL;

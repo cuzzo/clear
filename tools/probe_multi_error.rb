@@ -17,6 +17,7 @@
 # class to finish defining itself instead.
 module ProbeMultiError
   RECORDED = []
+  UNITS = []
 
   def visit_stmts(stmts)
     stmts.each_with_index do |stmt, index|
@@ -24,8 +25,14 @@ module ProbeMultiError
         visit(stmt)
       rescue StandardError => e
         raise unless e.class.name.to_s.end_with?('CompilerError')
+        # A whole-closure run compiles many units; the token carries a line
+        # but no file, so the unit being compiled is what makes it locatable.
         RECORDED << e
-        raise if RECORDED.length > 40
+        UNITS << $CLEAR_PROBE_UNIT
+        # A whole-closure run has thousands of statements and wants the whole
+        # list; a single-function probe wants to stop before cascade noise
+        # buries the real one.
+        raise if RECORDED.length > Integer(ENV.fetch('CLEAR_PROBE_ERROR_CAP', '40'))
         next
       end
       refinements = guard_exit_refinements(stmt)
