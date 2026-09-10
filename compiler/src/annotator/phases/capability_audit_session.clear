@@ -2291,7 +2291,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     resolved[_] = COPY effs;
     };
     FOR rtoc_each_6 IN fn_nodes.keys() DO
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_6] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[rtoc_each_6]);
     IF fn_node.tight_reentrance THEN
       CONTINUE;
     END
@@ -2335,7 +2335,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             END
     END
     FOR rtoc_each_8 IN fn_nodes.keys() DO
-    MUTABLE fn_node2: FunctionDef@multiowned = (fn_nodes[rtoc_each_8] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node2: FunctionDef@multiowned = UNWRAP (fn_nodes[rtoc_each_8]);
     MUTABLE rtoc_effs2: [Set]String@symbol = CAST(Set[] AS [Set]String@symbol);
     IF resolved[rtoc_each_8] EXISTS AS rtoc_have THEN
       rtoc_effs2 = COPY rtoc_have;
@@ -2534,7 +2534,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE error_fallible: {String}Bool = {};
     FOR rtoc_fn_key IN fn_nodes.keys() DO
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_fn_key] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[rtoc_fn_key]);
     MUTABLE declared_fallible = FALSE;
     IF fn_node.return_type EXISTS AS rtoc_rt THEN
       declared_fallible = type__error_union?(rtoc_rt);
@@ -2592,7 +2592,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE alloc_fault: {String}Bool = {};
     fn_nodes.keys() |> EACH {
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[_]);
     MUTABLE direct_alloc = ((fn_node.uses_alloc == TRUE));
     MUTABLE decl_alloc = ({
       MUTABLE rtoc_value_block_marker = 0;
@@ -2652,7 +2652,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             END
     END
     fn_nodes.keys() |> EACH {
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[_]);
     MUTABLE ef = ((error_fallible[_] == TRUE));
     MUTABLE af = ((alloc_fault[_] == TRUE));
     fn_node.error_fallible = ef;
@@ -2671,7 +2671,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     FOR rtoc_each_14 IN fn_nodes.keys() DO
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_14] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[rtoc_each_14]);
     IF !(fn_node.error_fallible) THEN
       CONTINUE;
     END
@@ -2835,7 +2835,7 @@ PRIVATE FN capabilityAuditSession__compute_fsm_eligibility_mut(MUTABLE self: Cap
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     fn_nodes.keys() |> EACH {
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[_] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[_]);
     MUTABLE effs = (fn_node.effects OR_ELSE Set[]);
     MUTABLE reason = NIL;
     IF (effs.contains?(:REENTRANT) OR (fn_node.reentrance_kind == :reentrant)) THEN
@@ -2858,7 +2858,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     MUTABLE summaries = TRY (capabilityAuditSession__function_body_summaries(rtoc_self_view));
     FOR rtoc_each_15 IN fn_nodes.keys() DO
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_15] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[rtoc_each_15]);
     IF !(fn_node.fsm_eligible) THEN
       CONTINUE;
     END
@@ -3365,7 +3365,7 @@ PRIVATE FN capabilityAuditSession__validate_not_logical_recursion_mut(MUTABLE se
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     FOR rtoc_each_18 IN fn_nodes.keys() DO
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_18] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[rtoc_each_18]);
     IF !((fn_node.reentrance_kind == :reentrant_not_logical)) THEN
       CONTINUE;
     END
@@ -3390,7 +3390,7 @@ PRIVATE FN capabilityAuditSession__validate_max_depth_mutual_cycle_mut(MUTABLE s
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     FOR rtoc_each_19 IN fn_nodes.keys() DO
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_19] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[rtoc_each_19]);
     IF !((fn_node.reentrance_kind == :reentrant_max_depth)) THEN
       CONTINUE;
     END
@@ -3420,7 +3420,7 @@ PRIVATE FN capabilityAuditSession__validate_thunk_recursion_mut(MUTABLE self: Ca
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(rtoc_self_view));
     FOR rtoc_each_20 IN fn_nodes.keys() DO
-    MUTABLE fn_node: FunctionDef@multiowned = (fn_nodes[rtoc_each_20] OR_ELSE panic("missing hash key"));
+    MUTABLE fn_node: FunctionDef@multiowned = UNWRAP (fn_nodes[rtoc_each_20]);
     IF !((fn_node.reentrance_kind == :reentrant_thunk)) THEN
       CONTINUE;
     END
