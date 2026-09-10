@@ -20601,7 +20601,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN CAST(( { MUTABLE rtoc_empty_list_514: []TypeAnalysisSessionReturnValueItem = List[]; rtoc_empty_list_514 } ) AS []TypeAnalysisSessionReturnValueItem);
     END
     IF ((IF rl IS_A String@symbol AS rl_payload THEN (rl_payload == :wildcard) ELSE FALSE END)) THEN
-      RETURN (CAST([TypeAnalysisSessionReturnValueItem{ SymbolValue: :wildcard }] AS []TypeAnalysisSessionReturnValueItem) |> SELECT TypeAnalysisSessionReturnValueItem{ StringValue: COPY UNWRAP (_) });
+      RETURN (CAST([TypeAnalysisSessionReturnValueItem{ SymbolValue: :wildcard }] AS []TypeAnalysisSessionReturnValueItem) |> SELECT TypeAnalysisSessionReturnValueItem{ StringValue: COPY _ });
     END
     MUTABLE sources: []Any = List[];
     IF rl IS_A ArrayValue AS rl_items THEN

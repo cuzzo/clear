@@ -298,7 +298,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF keptIdentityContract__rc?( UNWRAP (contract)) THEN
+      IF keptIdentityContract__rc?( contract) THEN
           entry.storage = :multiowned;
       END
       by_index[rtoc_idx] = UNWRAP (contract);
@@ -996,7 +996,7 @@ PUB FN escapeAnalysis__mark_expr_identifiers_heap_mut(expr: ?Locatable) RETURNS 
     IF !((node != NIL)) THEN
       CONTINUE;
     END
-    IF node? IS_A Identifier AS identifier THEN
+    IF node IS_A Identifier AS identifier THEN
       IF escapeAnalysis__mark_node_symbol_heap_mut(identifier) THEN
         changed = TRUE;
       END
@@ -1128,7 +1128,7 @@ PUB FN escapeAnalysis__mark_receiver_for_owned_sink_mut(receiver: Locatable, arg
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    IF !((TRY (escapeAnalysis__ownership_bearing_transfer_expr?(&arg, schema_lookup)) OR TRY (escapeAnalysis__call_result_is_heap?( UNWRAP (arg), fn_nodes, schema_lookup, facts_by_name)))) THEN
+    IF !((TRY (escapeAnalysis__ownership_bearing_transfer_expr?(&arg, schema_lookup)) OR TRY (escapeAnalysis__call_result_is_heap?( arg, fn_nodes, schema_lookup, facts_by_name)))) THEN
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -1322,7 +1322,7 @@ PUB FN escapeAnalysis__propagate_assignment_ownership_mut(facts: FunctionFacts, 
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[UNWRAP (target)];
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY facts.symbols[target];
     IF !(sym) THEN
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -1709,7 +1709,7 @@ PUB FN escapeAnalysis__owning_return_needs_heap_placement?(fn_value: FunctionDef
   IF !(ti) THEN
     RETURN FALSE;
   END
-  MUTABLE top_heap_ptr = TRY (type__heap_ptr?( UNWRAP (ti)));
+  MUTABLE top_heap_ptr = TRY (type__heap_ptr?( ti));
   ti = TRY (type__value_payload_type( UNWRAP (ti)));
   IF !(ti) THEN
     RETURN FALSE;
@@ -1785,7 +1785,7 @@ PUB FN escapeAnalysis__mark_decl_symbols_heap_by_name_mut(facts: FunctionFacts, 
   CONTINUE;
     END
     MUTABLE changed = escapeAnalysis__mark_symbol_heap_mut(sym);
-    MUTABLE decl: ?SymbolEntryRegInput = COPY UNWRAP (sym).reg;
+    MUTABLE decl: ?SymbolEntryRegInput = COPY sym.reg;
     IF (changed AND (aST__node__container_borrow(decl) EXISTS)) THEN
         decl.container_borrow = FALSE;
     END
@@ -2014,7 +2014,7 @@ PUB FN escapeAnalysis__mark_symbol_heap_mut(sym: ?SymbolEntry, MUTABLE names: ?[
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF ( symbolEntry__heap_storage?( UNWRAP (sym_entry)) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
+  IF ( symbolEntry__heap_storage?( sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :heap;
@@ -2044,7 +2044,7 @@ PUB FN escapeAnalysis__mark_symbol_borrow_mut(sym: ?SymbolEntry) RETURNS Bool ->
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF ( symbolEntry__heap_storage?( UNWRAP (sym_entry)) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
+  IF ( symbolEntry__heap_storage?( sym_entry) OR symbolEntry__borrow_provenance?( UNWRAP (sym_entry))) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :borrow;
@@ -2055,7 +2055,7 @@ PUB FN escapeAnalysis__mark_reassigned_symbol_heap_mut(sym: ?SymbolEntry) RETURN
   IF !(sym_entry) THEN
     RETURN FALSE;
   END
-  IF symbolEntry__heap_storage?( UNWRAP (sym_entry)) THEN
+  IF symbolEntry__heap_storage?( sym_entry) THEN
     RETURN FALSE;
   END
   sym_entry.storage = :heap;
@@ -2363,7 +2363,7 @@ FN castOptionalDynamicValueToLocatable(value: ?DynamicValue) RETURNS Locatable -
   IF value == NIL THEN
     panic("Invalid cast to Locatable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     DynamicValue.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
     DynamicValue.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     DynamicValue.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2496,7 +2496,7 @@ FN castOptionalDynamicValueToOptionalLocatable(value: ?DynamicValue) RETURNS ?Lo
   IF value == NIL THEN
     panic("Invalid cast to ?Locatable");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     DynamicValue.MIRProgram AS cast_payload -> RETURN Locatable{ MIRProgram: COPY cast_payload };,
     DynamicValue.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     DynamicValue.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
@@ -2629,7 +2629,7 @@ FN castOptionalLocatableToOptionalDynamicValue(value: ?Locatable) RETURNS ?Dynam
   IF value == NIL THEN
     panic("Invalid cast to ?DynamicValue");
   END
-  PARTIAL MATCH value? START
+  PARTIAL MATCH value START
     Locatable.RequireNode AS cast_payload -> RETURN DynamicValue{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN DynamicValue{ ProtocolRequirement: COPY cast_payload };,
     Locatable.ProtocolDef AS cast_payload -> RETURN DynamicValue{ ProtocolDef: COPY cast_payload };,
