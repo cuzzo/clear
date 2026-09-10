@@ -1173,7 +1173,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN typeAnalysisSession__visit(MUTABLE self: TypeAnalysisSession, node: ?Locatable) RETURNS !Any@multiowned
+PRIVATE FN typeAnalysisSession__visit(MUTABLE self: TypeAnalysisSession, node: ?Locatable) RETURNS !?Any@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -1223,7 +1223,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (typeAnalysisSession__record_ownership_transport_fact_mut(&rtoc_self_view, node_value_mutable));
       RETURN result;
     ELSE
-      RETURN;
+      RETURN NIL;
     END
 }
 END
