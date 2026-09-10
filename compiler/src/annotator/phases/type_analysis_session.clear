@@ -842,6 +842,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN out;
 }
 END
+PRIVATE FN typeAnalysisSession__kept_identity_sink_for(fn_nodes: {String}FunctionDef, callee_name: String) RETURNS ?String ->
+  IF fn_nodes[callee_name] EXISTS AS rtoc_callee THEN
+    FOR rtoc_param IN rtoc_callee.params DO
+      IF aST__node__symbol(rtoc_param) EXISTS AS rtoc_param_sym THEN
+        IF symbolEntry__kept_identity(rtoc_param_sym) EXISTS AS rtoc_kept THEN
+          RETURN COPY rtoc_kept.sink;
+        END
+      END
+    END
+  END
+  RETURN NIL;
+END
 PUB FN typeAnalysisSession__apply_keep_analysis_mut(MUTABLE self: TypeAnalysisSession, resolution: ResolutionFacts) RETURNS !Void
   REQUIRES self: LOCAL
 ->
@@ -849,90 +861,27 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE fn_nodes = COPY resolution.function_registry.nodes;
     MUTABLE body_summaries = COPY resolution.function_registry.body_summaries;
     keepAnalysis__propagate_kept_identity_mut(fn_nodes, body_summaries);
-    TRY (escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes, body_summaries, %(entry, arg, callee_name) USE(body_summaries, fn_nodes, MUTABLE rtoc_self_view) -> {
-    MUTABLE sink = (((symbolEntry__kept_identity(entry)?.sink OR_ELSE ((IF (IF fn_nodes[callee_name] != NIL THEN
-        ((fn_nodes[callee_name]).params) |> FIND (IF aST__node__symbol(_) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (aST__node__symbol(_));
-    symbolEntry__kept_identity(rtoc_local_receiver_8) }
-      ELSE
-        NIL
-      END)
-      ELSE
-        NIL
-      END) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = ((IF fn_nodes[callee_name] != NIL THEN
-        ((fn_nodes[callee_name]).params) |> FIND (IF aST__node__symbol(_) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_8 = (aST__node__symbol(_));
-    symbolEntry__kept_identity(rtoc_local_receiver_8) }
-      ELSE
-        NIL
-      END)
-      ELSE
-        NIL
-      END)).symbol;
-    symbolEntry__kept_identity(rtoc_local_receiver_9) }
-      ELSE
-        NIL
-      END)?.sink))) OR "an @multiowned destination");
-    MUTABLE anchor = (typeAnalysisSession__kept_identity_declaration_anchor(&rtoc_self_view, body_summaries, entry) OR_ELSE arg);
-    TRY (typeAnalysisSession__error_mut(&rtoc_self_view, anchor, TypeAnalysisCodeOrMessage{ SymbolValue: :KEPT_IDENTITY_NEEDS_MODEL }, [], CAST({:name: locatable__name(arg), :keeper: callee_name, :sink: sink} AS {String@symbol}Any)))
-    }, %(arg: Locatable, source_family: ?String@symbol, dest_family: ?String@symbol, callee_name: String) USE(fn_nodes, rtoc_self_view) -> {
+    TRY (escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes, body_summaries, %(entry: SymbolEntry, arg: Identifier, callee_name: String) USE(body_summaries, fn_nodes, MUTABLE rtoc_self_view) -> {
+    MUTABLE sink: String = "an @multiowned destination";
+    IF symbolEntry__kept_identity(entry) EXISTS AS rtoc_entry_kept THEN
+      sink = COPY rtoc_entry_kept.sink;
+    ELSE_IF typeAnalysisSession__kept_identity_sink_for(fn_nodes, callee_name) EXISTS AS rtoc_callee_sink THEN
+      sink = COPY rtoc_callee_sink;
+    END
+    MUTABLE anchor: Locatable = Locatable{ Identifier: COPY arg };
+    IF typeAnalysisSession__kept_identity_declaration_anchor(&rtoc_self_view, body_summaries, entry) EXISTS AS rtoc_decl_anchor THEN
+      anchor = COPY rtoc_decl_anchor;
+    END
+    TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY anchor }, TypeAnalysisCodeOrMessage{ SymbolValue: :KEPT_IDENTITY_NEEDS_MODEL }, [], CAST({:name: arg.name, :keeper: callee_name, :sink: sink} AS {String@symbol}Any)))
+    }, %(arg: Locatable, source_family: String@symbol, dest_family: String@symbol, callee_name: String) USE(fn_nodes, MUTABLE rtoc_self_view) -> {
     MUTABLE sink: String = "an @${dest_family} destination";
-    IF (IF (IF fn_nodes[callee_name] != NIL THEN
-        ((fn_nodes[callee_name]).params) |> FIND (IF aST__node__symbol(_) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_10 = (aST__node__symbol(_));
-    symbolEntry__kept_identity(rtoc_local_receiver_10) }
-      ELSE
-        NIL
-      END)
-      ELSE
-        NIL
-      END) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_11 = ((IF fn_nodes[callee_name] != NIL THEN
-        ((fn_nodes[callee_name]).params) |> FIND (IF aST__node__symbol(_) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_10 = (aST__node__symbol(_));
-    symbolEntry__kept_identity(rtoc_local_receiver_10) }
-      ELSE
-        NIL
-      END)
-      ELSE
-        NIL
-      END)).symbol;
-    symbolEntry__kept_identity(rtoc_local_receiver_11) }
-      ELSE
-        NIL
-      END) != NIL THEN
-        sink = (((IF (IF fn_nodes[callee_name] != NIL THEN
-        ((fn_nodes[callee_name]).params) |> FIND (IF aST__node__symbol(_) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_10 = (aST__node__symbol(_));
-    symbolEntry__kept_identity(rtoc_local_receiver_10) }
-      ELSE
-        NIL
-      END)
-      ELSE
-        NIL
-      END) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_11 = ((IF fn_nodes[callee_name] != NIL THEN
-        ((fn_nodes[callee_name]).params) |> FIND (IF aST__node__symbol(_) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_10 = (aST__node__symbol(_));
-    symbolEntry__kept_identity(rtoc_local_receiver_10) }
-      ELSE
-        NIL
-      END)
-      ELSE
-        NIL
-      END)).symbol;
-    symbolEntry__kept_identity(rtoc_local_receiver_11) }
-      ELSE
-        NIL
-      END))?).sink;
-      END
-    MUTABLE name: String = "";
-      IF arg IS_A Identifier THEN
-        name = locatable__name(arg);
-      ELSE
-        name = "the argument";
-      END
+    IF typeAnalysisSession__kept_identity_sink_for(fn_nodes, callee_name) EXISTS AS rtoc_callee_sink THEN
+      sink = COPY rtoc_callee_sink;
+    END
+    MUTABLE name: String = "the argument";
+    IF arg IS_A Identifier THEN
+      name = COPY (locatable__name(arg) OR_ELSE "the argument");
+    END
     TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY arg }, TypeAnalysisCodeOrMessage{ SymbolValue: :KEPT_IDENTITY_FAMILY_MISMATCH }, [], CAST({:name: name, :keeper: callee_name, :sink: sink, :source_family: source_family, :dest_family: dest_family} AS {String@symbol}Any)))
     }, TRY (typeAnalysisSession__imported_kept_params(&rtoc_self_view, fn_nodes))));
     TRY (typeAnalysisSession__reject_kept_function_values_mut(&rtoc_self_view, resolution, fn_nodes));
