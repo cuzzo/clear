@@ -4344,26 +4344,31 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR _ IN fn_nodes.values() DO
     TRY (capabilityPlan__refresh_function_plans_mut(_, UNWRAP (body_summaries[_.name]?.with_blocks)));
     END
-    TRY (bgCaptureClassifier__classify_all_mut(fn_nodes, %(type: String) USE(rtoc_self_view) -> (TRY (capabilityAuditSession__lookup_type_schema(rtoc_self_view, symbol(type))))));
+    TRY (bgCaptureClassifier__classify_all_mut(fn_nodes, %(type: String@symbol) USE(rtoc_self_view) -> {
+      MUTABLE rtoc_found: ?SchemaValue = TRY (capabilityAuditSession__lookup_type_schema(rtoc_self_view, type));
+      (IF rtoc_found EXISTS AS rtoc_found_value THEN castSchemaValueToTypeSchemaLookupResult(rtoc_found_value) ELSE NIL END)
+    }));
     TRY (effectInference__analyze_mut(fn_nodes));
     MUTABLE error_handler = %(node: Locatable, message: String) USE(MUTABLE rtoc_self_view) -> TRY (capabilityAuditSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY node }, CapabilityAuditCodeOrMessage{ SymbolValue: :EFFECT_INFERENCE_VIOLATION }, [], CAST({:detail: message} AS {String@symbol}Any)));
     MUTABLE warning_handler = %(node: Locatable, message: String) USE(MUTABLE rtoc_self_view) -> capabilityAuditSession__note_mut(&rtoc_self_view, UNWRAP (castDiagnosticAnchorToLocatable(DiagnosticAnchor{ Locatable: COPY node })), message);
     MUTABLE root_scope = capabilityAuditSession__whole_program_root_scope(rtoc_self_view);
-    MUTABLE signature_lookup = %(name) USE(root_scope) -> (IF scope__resolve_entry(root_scope, name) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_47: ?SymbolEntry@multiowned = (scope__resolve_entry(root_scope, name));
-    symbolEntry__type(UNWRAP (rtoc_local_receiver_47)) }
-    ELSE
-      NIL
-    END);
+    MUTABLE signature_lookup = %(name: String) USE(root_scope) -> {
+      MUTABLE rtoc_entry: ?SymbolEntry@multiowned = scope__resolve_entry(root_scope, name);
+      (IF rtoc_entry EXISTS AS rtoc_entry_value THEN COPY symbolEntry__type(rtoc_entry_value) ELSE NIL END)
+    };
+    MUTABLE signature_lookup_sig = %(name: String) USE(root_scope) -> {
+      MUTABLE rtoc_entry2: ?SymbolEntry@multiowned = scope__resolve_entry(root_scope, name);
+      (IF rtoc_entry2 EXISTS AS rtoc_entry2_value THEN SigLookupReturn{ Type: COPY symbolEntry__type(rtoc_entry2_value) } ELSE NIL END)
+    };
     MUTABLE policy_handlers: []ErrorClause = UNWRAP (COPY capabilityAuditSession__whole_program_node(rtoc_self_view)?.sync_policy);
     FOR MUTABLE rtoc_mutable_block_param_48 IN fn_nodes.values() DO
-    TRY (withMatchCheck__check_function_mut(&rtoc_mutable_block_param_48, UNWRAP (body_summaries[rtoc_mutable_block_param_48.name]?.with_blocks), error_handler, warning_handler, rtoc_mutable_block_param_48));
+    TRY (withMatchCheck__check_function_mut(&rtoc_mutable_block_param_48, UNWRAP (body_summaries[rtoc_mutable_block_param_48.name]?.with_blocks), error_handler, warning_handler, policy_handlers));
     END
     TRY (capabilityAuditSession__restamp_requires_on_signatures_mut(&rtoc_self_view));
     FOR _ IN fn_nodes.values() DO
     TRY (withMatchCheck__check_call_sites_mut(UNWRAP (body_summaries[_.name]?.call_site_facts), signature_lookup, error_handler));
     END
-    TRY (concurrencyChecks__check_all_mut(fn_nodes, signature_lookup, error_handler, body_summaries, TRY (capabilityAuditSession__whole_program_lock_type_ranks(rtoc_self_view))));
+    TRY (concurrencyChecks__check_all_mut(fn_nodes, signature_lookup_sig, error_handler, body_summaries, TRY (capabilityAuditSession__whole_program_lock_type_ranks(rtoc_self_view))));
 }
 END
 PRIVATE FN capabilityAuditSession__restamp_requires_on_signatures_mut(MUTABLE self: CapabilityAuditSession) RETURNS !Void
