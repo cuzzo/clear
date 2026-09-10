@@ -17375,7 +17375,7 @@ PRIVATE FN typeAnalysisSession__validate_snapshot_match_arms_mut(MUTABLE self: T
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR _ IN ((node.arms OR_ELSE List[])) DO
+    FOR MUTABLE _ IN ((node.arms OR_ELSE List[])) DO
     MUTABLE clauses = _.lock_error_clauses;
     IF (_.family == :VERSIONED) THEN
         IF clauses.empty?() THEN
@@ -18795,34 +18795,49 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY castTypeToOptionalTypeAnalysisSessionReturnValue(UNWRAP (result.type));
 }
 END
-PRIVATE FN typeAnalysisSession__short_circuit_non_nil_refinements(MUTABLE self: TypeAnalysisSession, node: Locatable, MUTABLE truthy: Bool) RETURNS !{Int64}Type
+PRIVATE FN typeAnalysisSession__short_circuit_non_nil_refinements(MUTABLE self: TypeAnalysisSession, node: Locatable, truthy: Bool) RETURNS !{Int64}Type
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A UnaryOp THEN
       IF (locatable__symbol_op(node) == :NOT) THEN
-        RETURN typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, UNWRAP (aST__node_right(node)), !(truthy));
+        RETURN TRY (typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, UNWRAP (aST__node_right(node)), !(truthy)));
       END
       IF ((locatable__symbol_op(node) == :EXISTS) AND truthy) THEN
         RETURN TRY (typeAnalysisSession__identifier_non_nil_refinement(&rtoc_self_view, UNWRAP (aST__node_right(node))));
       END
       RETURN {};
     END
+    IF (truthy AND (node IS_A Identifier)) THEN
+      RETURN TRY (typeAnalysisSession__identifier_non_nil_refinement(&rtoc_self_view, node));
+    END
     IF node IS_A BinaryOp AS binary_op THEN
       IF ((((binary_op.op == symbol("AND")) AND truthy)) OR (((binary_op.op == symbol("OR")) AND !(truthy)))) THEN
-        RETURN (TRY (typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.right, &truthy))).keys() |> REDUCE(COPY typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.left, &truthy)) { acc[_] = COPY (typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.right, &truthy)[_] OR_ELSE CAST(panic("missing hash key") AS Type@multiowned)); acc };
+        MUTABLE rtoc_merged: {Int64}Type = TRY (typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.left, truthy));
+        MUTABLE rtoc_right: {Int64}Type = TRY (typeAnalysisSession__short_circuit_non_nil_refinements(&rtoc_self_view, binary_op.right, truthy));
+        MUTABLE rtoc_right_keys: []Int64 = rtoc_right.keys();
+        MUTABLE rtoc_key_i = 0;
+        WHILE rtoc_key_i < rtoc_right_keys.length() DO
+          MUTABLE rtoc_key: Int64 = UNWRAP (rtoc_right_keys[rtoc_key_i]);
+          IF rtoc_right[rtoc_key] EXISTS AS rtoc_refined THEN
+            rtoc_merged[rtoc_key] = COPY rtoc_refined;
+          END
+          rtoc_key_i = rtoc_key_i + 1;
+        END
+        RETURN rtoc_merged;
       END
       IF !(((binary_op.op == :EQ) OR (binary_op.op == :NEQ))) THEN
         RETURN {};
       END
       MUTABLE identifier: ?Identifier = typeAnalysisSession__nil_comparison_identifier(&rtoc_self_view, binary_op);
       MUTABLE proves_non_nil = ((((binary_op.op == :EQ) AND !(truthy))) OR (((binary_op.op == :NEQ) AND truthy)));
-      IF ((identifier != NIL) AND proves_non_nil) THEN
-        RETURN TRY (typeAnalysisSession__identifier_non_nil_refinement(&rtoc_self_view, Locatable{ Identifier: COPY identifier }));
-      ELSE
-        RETURN {};
+      IF identifier EXISTS AS rtoc_nil_identifier THEN
+        IF proves_non_nil THEN
+          RETURN TRY (typeAnalysisSession__identifier_non_nil_refinement(&rtoc_self_view, Locatable{ Identifier: COPY rtoc_nil_identifier }));
+        END
       END
+      RETURN {};
     ELSE
       RETURN {};
     END
