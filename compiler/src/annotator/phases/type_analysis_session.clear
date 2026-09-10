@@ -10736,47 +10736,53 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(TRY (type__linear_collection?(receiver_type))) THEN
       RETURN;
     END
-    signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(COPY node.matched_stdlib_def));
+    signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(KEEP node.matched_stdlib_def));
     signature = (signature OR_ELSE functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__type_analysis_session(node__matched_signature(Node{ MethodCall: COPY node }))));
     IF signature EXISTS AS signature_value THEN
       MUTABLE signature_params: []Param = TRY (functionSignature__params(signature_value));
       MUTABLE takes_count = 0;
-      FOR signature_param IN signature_params DO
-        IF (signature_param.takes OR_ELSE FALSE) THEN
+      MUTABLE first_takes_index = -1;
+      MUTABLE rtoc_sp_i = 0;
+      WHILE rtoc_sp_i < signature_params.length() DO
+        IF (UNWRAP (signature_params[rtoc_sp_i]).takes OR_ELSE FALSE) THEN
           takes_count = takes_count + 1;
+          IF (first_takes_index < 0) THEN
+            first_takes_index = rtoc_sp_i;
+          END
         END
+        rtoc_sp_i = rtoc_sp_i + 1;
       END
       IF !((takes_count == 1)) THEN
         RETURN;
       END
-      MUTABLE signature_param = (signature_param.first() - 1);
-      IF signature_param.negative?() THEN
+      MUTABLE value_index = (first_takes_index - 1);
+      IF (value_index < 0) THEN
         RETURN;
       END
-      MUTABLE signature_param: ?Locatable = COPY node.args[signature_param];
-      IF signature_param EXISTS AS value_arg_value THEN
+      MUTABLE value_arg: ?Locatable = COPY node.args[value_index];
+      IF value_arg EXISTS AS value_arg_value THEN
         MUTABLE value_arg_value_mutable = COPY value_arg_value;
         MUTABLE element_type: ?Type = TRY (type__element_type(receiver_type));
         IF !(element_type) THEN
           RETURN;
         END
         MUTABLE actual_type = TRY (aST__full_type_mut(value_arg_value_mutable));
-        IF !((type__resolved(UNWRAP (element_type)) == actual_type.resolved())) THEN
+        IF !((type__resolved(element_type) == type__resolved(actual_type))) THEN
           RETURN;
         END
-        IF (type__indirect?(UNWRAP (element_type)) AND !(actual_type.indirect?())) THEN
+        IF (type__indirect?(element_type) AND !(type__indirect?(actual_type))) THEN
           IF ((TRY (type__any_rc?(actual_type)) OR TRY (type__node_reference?(actual_type))) OR type__link?(actual_type)) THEN
-            TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY value_arg_value_mutable }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], CAST({:type: type__resolved(UNWRAP (element_type)), :actual: TRY (typeAnalysisSession__indirect_identity_display(&rtoc_self_view, actual_type))} AS {String@symbol}Any)));
+            TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY value_arg_value_mutable }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], CAST({:type: type__resolved(element_type), :actual: TRY (typeAnalysisSession__indirect_identity_display(&rtoc_self_view, actual_type))} AS {String@symbol}Any)));
           ELSE_IF (typeAnalysisSession__language_mode(&rtoc_self_view) != :easy) THEN
-            TRY (typeAnalysisSession__emit_indirect_element_explicit_error_mut(&rtoc_self_view, value_arg_value_mutable, UNWRAP (element_type)));
+            TRY (typeAnalysisSession__emit_indirect_element_explicit_error_mut(&rtoc_self_view, value_arg_value_mutable, element_type));
           ELSE
             node.implicit_layout_cost = TRUE;
-            value_arg_value_mutable.layout_transport = :box;
+            locatable__set_layout_transport_mut(&value_arg_value_mutable, :box);
           END
-        ELSE_IF (!(type__indirect?(UNWRAP (element_type))) AND actual_type.indirect?()) THEN
-          value_arg_value_mutable.layout_transport = :unbox;
-        ELSE_IF ((type__indirect?(UNWRAP (element_type)) != actual_type.indirect?()) AND (((TRY (type__any_rc?(actual_type)) OR TRY (type__node_reference?(actual_type))) OR type__link?(actual_type)))) THEN
-          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY value_arg_value_mutable }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], CAST({:type: type__resolved(UNWRAP (element_type)), :actual: TRY (typeAnalysisSession__indirect_identity_display(&rtoc_self_view, actual_type))} AS {String@symbol}Any)));
+        ELSE_IF (!(type__indirect?(element_type)) AND type__indirect?(actual_type)) THEN
+          locatable__set_layout_transport_mut(&value_arg_value_mutable, :unbox);
+        ELSE_IF ((type__indirect?(element_type) != type__indirect?(actual_type)) AND (((TRY (type__any_rc?(actual_type)) OR TRY (type__node_reference?(actual_type))) OR type__link?(actual_type)))) THEN
+          TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY value_arg_value_mutable }, TypeAnalysisCodeOrMessage{ SymbolValue: :INDIRECT_ELEMENT_IDENTITY }, [], CAST({:type: type__resolved(element_type), :actual: TRY (typeAnalysisSession__indirect_identity_display(&rtoc_self_view, actual_type))} AS {String@symbol}Any)));
         END
       ELSE
         RETURN;
