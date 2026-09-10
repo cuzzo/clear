@@ -2832,6 +2832,11 @@ class Type
   sig { returns(T::Boolean) }
   # ruby-to-clear: fallible
   def string?
+    # A function type's `resolved` is its RETURN type, so `FN() -> !String`
+    # answered yes here and every String rule downstream applied to the
+    # function value itself -- the hoist duped a lambda as if it were bytes.
+    return false if fn_type?
+
     resolved == :String || (array? && base_type == :Byte)
   end
 

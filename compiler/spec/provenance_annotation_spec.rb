@@ -24,6 +24,32 @@ RSpec.describe "Provenance annotation" do
     fn.body.find { |s| (s.is_a?(AST::BindExpr) || s.is_a?(AST::VarDecl)) && s.name == var_name }
   end
 
+  describe "a function type" do
+    # `resolved` on a function type is its RETURN type, so `FN() -> !String`
+    # answered `string?` yes and every String rule downstream applied to the
+    # function value itself.
+    it "is not a string because it returns one" do
+      src = <<~CLEAR
+        FN run(blk: FN() -> !String) RETURNS !String ->
+          RETURN TRY (blk());
+        END
+        FN build() RETURNS !String ->
+          RETURN "lit";
+        END
+        FN main() RETURNS !Void ->
+          MUTABLE t: String = TRY (run(%() -> TRY (build())));
+          RETURN;
+        END
+      CLEAR
+      ast, _ = annotate(src)
+      lambda_lit = nil
+      AST.each_locatable(ast, descend_functions: true) { |n| lambda_lit = n if n.is_a?(AST::LambdaLit) }
+      expect(lambda_lit).not_to be_nil
+      expect(lambda_lit.type_object.fn_type?).to be true
+      expect(lambda_lit.type_object.string?).to be false
+    end
+  end
+
   describe "a lambda's result" do
     # The body result LEAVES the lambda: whoever calls it receives the value,
     # so an owned one placed in the lambda's frame escapes the way a function's
