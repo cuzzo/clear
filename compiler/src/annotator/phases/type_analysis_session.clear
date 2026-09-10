@@ -10519,9 +10519,9 @@ PRIVATE FN typeAnalysisSession__resolve_collection_method(MUTABLE self: TypeAnal
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE obj_type = TRY (aST__full_type_mut(node.object));
-    MUTABLE implicit_safe_nav = ((type__optional?(obj_type) AND (locatable__safe_nav_chain(UNWRAP (locatable__object(Locatable{ MethodCall: COPY UNWRAP (castLocatableToMethodCall(Locatable{ MethodCall: COPY node }))}))) != NIL)) AND (locatable__safe_nav_chain( Locatable{ MethodCall: COPY node.object }) == TRUE));
+    MUTABLE implicit_safe_nav: Bool = (type__optional?(obj_type) AND (locatable__safe_nav_chain(node.object) == TRUE));
     IF implicit_safe_nav THEN
-      obj_type = TRY (type__wrapped_type( UNWRAP (obj_type)));
+      obj_type = UNWRAP (TRY (type__wrapped_type(obj_type)));
     END
     MUTABLE config: ?CollectionMethodConfig = collectionMethodConfig__for(UNWRAP (TRY (type__dispatch_key( obj_type))));
     IF config EXISTS AS config_value THEN
@@ -10530,7 +10530,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ((handled != NIL) AND navigation) THEN
         MUTABLE result = TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node }));
         IF !(type__optional?(result)) THEN
-          TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, TRY (type__optional_of(TypeTypeInput{ Type: COPY result }))));
+          MUTABLE rtoc_coll_node_loc = Locatable{ MethodCall: COPY node };
+          TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &rtoc_coll_node_loc, TRY (type__optional_of(TypeTypeInput{ Type: COPY result }))));
           node.safe_nav_chain = TRUE;
         END
       END
@@ -12966,7 +12967,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN FALSE;
       END
       MUTABLE receiver_type = TRY (aST__full_type_mut(node.object));
-      MUTABLE implicit_safe_nav = ((type__optional?(receiver_type) AND (locatable__safe_nav_chain(UNWRAP (locatable__object(Locatable{ MethodCall: COPY UNWRAP (castLocatableToMethodCall(Locatable{ MethodCall: COPY node }))}))) != NIL)) AND (locatable__safe_nav_chain( Locatable{ MethodCall: COPY node.object }) == TRUE));
+      MUTABLE implicit_safe_nav: Bool = (type__optional?(receiver_type) AND (locatable__safe_nav_chain(node.object) == TRUE));
       MUTABLE resolution_receiver = COPY node.object;
       IF implicit_safe_nav THEN
         resolution_receiver = COPY node.object;
@@ -12976,25 +12977,26 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE matched_def: ?FunctionSignature@multiowned = TRY (typeAnalysisSession__find_matching_intrinsic(&rtoc_self_view, method_overloads, ufcs_args));
       IF !(matched_def) THEN
         MUTABLE sigs = ( { MUTABLE rtoc_map_results = CAST([] AS []String); method_overloads |> EACH { &rtoc_map_results.append(COPY TRY (functionSignature__intrinsic_args_label(_))); }; rtoc_map_results } ).join(" or ");
-        MUTABLE arg_types = (ufcs_args |> SELECT locatable__resolved_type(_)).join(", ");
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_NO_OVERLOAD }, arg_types, CAST({:name: node.name, :candidates: sigs} AS {String@symbol}Any)));
+        MUTABLE arg_types = (ufcs_args |> SELECT:? locatable__resolved_type(_) |> WHERE _ != NIL |> SELECT COPY CAST(UNWRAP (_) AS String)).join(", ");
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ MethodCall: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INTRINSIC_NO_OVERLOAD }, [], CAST({:name: node.name, :candidates: sigs} AS {String@symbol}Any)));
       END
       TRY (typeAnalysisSession__visit_IntrinsicFunc(&rtoc_self_view, Node{ MethodCall: COPY node }, ufcs_args, matched_def));
       MUTABLE navigation = ((IF node.object IS_A OptionalUnwrap AS rtoc_nav THEN optionalUnwrap__safe_navigation?(rtoc_nav) ELSE FALSE END) OR implicit_safe_nav);
       IF navigation THEN
         MUTABLE result = TRY (aST__full_type_mut(Locatable{ MethodCall: COPY node }));
         IF !(type__optional?(result)) THEN
-          TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, TRY (type__optional_of(TypeTypeInput{ Type: COPY result }))));
+          MUTABLE rtoc_intr_node_loc = Locatable{ MethodCall: COPY node };
+          TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &rtoc_intr_node_loc, TRY (type__optional_of(TypeTypeInput{ Type: COPY result }))));
           node.safe_nav_chain = TRUE;
         END
       END
-      MUTABLE resolved_receiver_type = IF implicit_safe_nav THEN
+      MUTABLE resolved_receiver_type: ?Type = IF implicit_safe_nav THEN
         TRY (type__wrapped_type(receiver_type))
       ELSE
         receiver_type
       END;
-      MUTABLE element_type: ?Type = TRY (type__element_type(resolved_receiver_type));
-      IF ((((element_type != NIL) AND TRY (type__node_reference?(UNWRAP (element_type)))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
+      MUTABLE element_type: ?Type = TRY (type__element_type(UNWRAP (resolved_receiver_type)));
+      IF ((((element_type != NIL) AND TRY (type__node_reference?(element_type))) AND (["append", "push", "insert"]).contains?(node.name)) AND node.args.any?()) THEN
         MUTABLE value_arg = COPY UNWRAP (node.args.last());
         MUTABLE actual_type = TRY (aST__full_type_mut(value_arg));
         IF (!(TRY (type__node_reference?(actual_type))) AND TRY (type__accepts?(element_type, actual_type))) THEN
