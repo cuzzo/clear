@@ -12913,10 +12913,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       resolved
     END;
     MUTABLE type_schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, base));
-    IF !((((schemas__struct?(type_schema) OR schemas__resource?(type_schema))) AND ((schemaValue__methods(UNWRAP (type_schema)) != NIL) AND ((schemaValue__methods(UNWRAP (type_schema)))?).contains?(node.name)))) THEN
+    IF !((((schemas__struct?(type_schema) OR schemas__resource?(type_schema))) AND ((schemaValue__methods(UNWRAP (type_schema)) OR_ELSE {}).contains?(node.name)))) THEN
       RETURN FALSE;
     END
-    MUTABLE method_sig: ?{String@symbol}FunctionSignature@multiowned = schemaValue__methods(UNWRAP (type_schema))[node.name];
+      MUTABLE rtoc_extern_methods = (schemaValue__methods(UNWRAP (type_schema)) OR_ELSE {});
+      MUTABLE rtoc_method_sig_opt: ?FunctionSignature@multiowned = COPY rtoc_extern_methods[node.name];
+      IF rtoc_method_sig_opt == NIL THEN
+        RETURN FALSE;
+      END
+      MUTABLE method_sig: FunctionSignature@multiowned = KEEP rtoc_method_sig_opt;
     IF !(functionSignature__extern(method_sig)) THEN
       RETURN FALSE;
     END
@@ -12925,7 +12930,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       node.extern_effects = TRY (functionSignature__extern_effects(method_sig));
     END
     node.extern_source = functionSignature__extern_source(method_sig);
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &node, functionSignature__return_type(method_sig)));
+      MUTABLE rtoc_extern_node_loc = Locatable{ MethodCall: COPY node };
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &rtoc_extern_node_loc, functionSignature__return_type(method_sig)));
     TRY (typeAnalysisSession__record_effect(&rtoc_self_view, symbol("EXTERN")));
     TRY (typeAnalysisSession__record_extern_method_alloc_mut(&rtoc_self_view, method_sig));
     TRY (typeAnalysisSession__record_predicate_call_site_mut(&rtoc_self_view, Node{ MethodCall: COPY node }));
