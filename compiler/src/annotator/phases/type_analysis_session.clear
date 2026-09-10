@@ -5737,60 +5737,57 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__require_array_input_mut(&rtoc_self_view, node, "JOIN"));
     MUTABLE left_type = type__resolved(UNWRAP (TRY (type__element_type((TRY (aST__full_type_mut(node.left)))))));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, locatable__right_source(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node })))));
-    MUTABLE rhs_type_info: !Type = aST__full_type_mut(UNWRAP (locatable__right_source(node.right)));
-    IF !(((aST__metatype(UNWRAP (locatable__right_source(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))))) == :array) OR (IF rhs_type_info != NIL THEN
-      type__collection?(rhs_type_info)
-    ELSE
-      NIL
-    END))) THEN
-      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, node.right.right_source, TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_RIGHT_NEEDS_LIST }, [], CAST({:got: node.right.right_source.resolved_type} AS {String@symbol}Any)));
+    MUTABLE rhs_type_info: Type = TRY (aST__full_type_mut(UNWRAP (locatable__right_source(node.right))));
+    IF !(((aST__metatype(UNWRAP (locatable__right_source(UNWRAP (locatable__right(Locatable{ BinaryOp: COPY node }))))) == :array) OR type__collection?(rhs_type_info))) THEN
+      TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (locatable__right_source(node.right)) }, TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_RIGHT_NEEDS_LIST }, [], CAST({:got: locatable__resolved_type(UNWRAP (locatable__right_source(node.right)))} AS {String@symbol}Any)));
     END
-    MUTABLE right_type: ?Type = (TRY (type__element_type(rhs_type_info))).resolved();
-    MUTABLE key_expr: ?Locatable@boxed = locatable__key_expr(node.right);
-    IF key_expr IS_A LambdaLit THEN
-      MUTABLE params = key_expr.params();
+    MUTABLE right_type = type__resolved(UNWRAP (TRY (type__element_type(rhs_type_info))));
+    MUTABLE key_expr: Locatable = UNWRAP (locatable__key_expr(node.right));
+    IF key_expr IS_A LambdaLit AS rtoc_join_lambda THEN
+      MUTABLE params: []Param = COPY UNWRAP (rtoc_join_lambda.params);
       IF !((params.length() == 2)) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, key_expr, TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_LAMBDA_ARITY }));
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY key_expr }, TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_LAMBDA_ARITY }));
       END
-      MUTABLE left_name = params[0].name();
-      MUTABLE right_name = params[1].name();
+      MUTABLE left_name = COPY UNWRAP (params[0]).name;
+      MUTABLE right_name = COPY UNWRAP (params[1]).name;
       typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(key_expr, left_name, left_type, right_name, right_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_122 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_122, left_name, NIL, left_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+    TRY (scope__declare(&rtoc_mutable_receiver_122, left_name, NIL, SymbolEntryTypeInput{ SymbolValue: COPY left_type }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     MUTABLE rtoc_mutable_receiver_123 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_123, right_name, NIL, SymbolEntryTypeInput{ Type: COPY right_type }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
-    FOR _ IN (TRY (aST__lambda_body_nodes(locatable__body(UNWRAP (key_expr))))) DO
-    TRY (typeAnalysisSession__visit(&rtoc_self_view, castNodeToOptionalLocatable__type_analysis_session(_)));
+    TRY (scope__declare(&rtoc_mutable_receiver_123, right_name, NIL, SymbolEntryTypeInput{ SymbolValue: COPY right_type }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+    FOR rtoc_join_stmt IN (TRY (aST__lambda_body_nodes(LambdaBody{ ArrayValue2: COPY UNWRAP (locatable__body(key_expr)) }))) DO
+    TRY (typeAnalysisSession__visit(&rtoc_self_view, rtoc_join_stmt));
     END
     NIL
       });
-      MUTABLE key_result: ?Node = COPY (TRY (aST__lambda_body_nodes(locatable__body(UNWRAP (key_expr))))).last();
-      IF !(((key_result != NIL) AND (key_result.resolved_type == :Bool))) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, key_expr, TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_LAMBDA_NEEDS_BOOL }, [], CAST({:got: (IF key_result != NIL THEN
-          key_result.resolved_type
-        ELSE
-          NIL
-        END)} AS {String@symbol}Any)));
+      MUTABLE key_result: ?Locatable = COPY (TRY (aST__lambda_body_nodes(LambdaBody{ ArrayValue2: COPY UNWRAP (locatable__body(key_expr)) }))).last();
+      MUTABLE key_result_type: ?String@symbol = NIL;
+      IF key_result EXISTS AS key_result_value THEN
+        key_result_type = locatable__resolved_type(key_result_value);
+      END
+      IF !((key_result_type == :Bool)) THEN
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY key_expr }, TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_LAMBDA_NEEDS_BOOL }, [], CAST({:got: key_result_type} AS {String@symbol}Any)));
       END
       TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, &key_expr, TRY (typeAnalysisSession__build_lambda_signature(&rtoc_self_view, params, :Bool))));
     ELSE
       typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(key_expr, left_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_124 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_124, "_", NIL, left_type, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+    TRY (scope__declare(&rtoc_mutable_receiver_124, "_", NIL, SymbolEntryTypeInput{ SymbolValue: COPY left_type }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, key_expr))
       });
-      typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(key_expr, right_type, MUTABLE rtoc_self_view, MUTABLE _) -> {
+      typeAnalysisSession__with_new_scope(&rtoc_self_view, NIL, %() USE(key_expr, right_type, MUTABLE rtoc_self_view) -> {
     MUTABLE rtoc_mutable_receiver_125 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    TRY (scope__declare(&rtoc_mutable_receiver_125, "_", NIL, SymbolEntryTypeInput{ Type: COPY right_type }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
+    TRY (scope__declare(&rtoc_mutable_receiver_125, "_", NIL, SymbolEntryTypeInput{ SymbolValue: COPY right_type }, ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
     TRY (typeAnalysisSession__visit(&rtoc_self_view, key_expr))
       });
     END
-    MUTABLE join_type_name = symbol("JoinResult_${left_type}_${_}");
+    MUTABLE join_type_name = symbol("JoinResult_${left_type}_${right_type}");
     IF !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_126 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
-    TRY (scope__resolve_type_definition(rtoc_local_receiver_126, _)) }) THEN
-      (TRY (typeAnalysisSession__current_scope(&rtoc_self_view))).declare_type(join_type_name, TRY (structSchema__new(CAST({symbol("left"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: left_type, default: NIL, borrowed: FALSE } }, symbol("right"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: symbol("?${right_type}"), default: NIL, borrowed: FALSE } }} AS {String@symbol}SchemasStructSchemaFieldInput), ( { MUTABLE rtoc_empty_list_127: []String@symbol = List[]; rtoc_empty_list_127 } ), ( { MUTABLE rtoc_empty_list_128: []GenericParamDecl = List[]; rtoc_empty_list_128 } ), {}, {})));
+    TRY (scope__resolve_type_definition(rtoc_local_receiver_126, join_type_name)) }) THEN
+      MUTABLE rtoc_join_scope = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
+      scope__declare_type(&rtoc_join_scope, join_type_name, SchemaValue{ StructSchemaMultiowned: TRY (structSchema__new(CAST({symbol("left"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: COPY left_type })), default: NIL, borrowed: FALSE } }, symbol("right"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("?${right_type}") })), default: NIL, borrowed: FALSE } }} AS {String@symbol}SchemasStructSchemaFieldInput), ( { MUTABLE rtoc_empty_list_127: []String@symbol = List[]; rtoc_empty_list_127 } ), ( { MUTABLE rtoc_empty_list_128: []GenericParamDecl = List[]; rtoc_empty_list_128 } ), {}, {})) });
     END
-    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${_}[]") }))));
+    TRY (typeAnalysisSession__stamp_type_mut(&rtoc_self_view, Locatable{ BinaryOp: COPY node }, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${join_type_name}[]") }))));
     node.storage_override = :frame;
     IF typeAnalysisSession__current_fn_ctx(&rtoc_self_view) != NIL THEN
         MUTABLE rtoc_held_5773: ?FunctionContext@multiowned = (typeAnalysisSession__current_fn_ctx(&rtoc_self_view));
