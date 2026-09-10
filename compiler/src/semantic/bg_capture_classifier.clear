@@ -17,11 +17,15 @@ PUB FN bgCaptureClassifier__classify_all_mut(fn_nodes: {String}FunctionDef, sche
     CONTINUE;
   END
   MUTABLE live_param_syms = TRY (scope__live_param_syms(fn_value));
-  TRY (aST__each_capture_analysis(fn_value.body, %(MUTABLE a: CaptureAnalysis) USE(MUTABLE analyses, live_param_syms, schema_lookup, fn_value) -> {
+  # Ruby keys each analysis by `object_id`; CLEAR has no object identity for a
+  # struct, so the walk order supplies the same per-function unique key.
+  MUTABLE rtoc_site_ordinal: Int64 = 0;
+  aST__each_capture_analysis(fn_value.body, %(MUTABLE a: CaptureAnalysis) USE(MUTABLE analyses, live_param_syms, schema_lookup, fn_value, MUTABLE rtoc_site_ordinal) -> {
     TRY (bgCaptureClassifier__classify_one_mut(&a, live_param_syms, schema_lookup));
-    analyses["${fn_value.name}:${aST__node_identity(a)}"] = a;
+    analyses["${fn_value.name}:${rtoc_site_ordinal.toString()}"] = COPY a;
+    rtoc_site_ordinal = rtoc_site_ordinal + 1;
     rubyToClearVoid__bg_capture_classifier()
-  }));
+  });
   END
   RETURN analyses;
 END
@@ -45,23 +49,24 @@ PUB FN bgCaptureClassifier__classify_one_mut(MUTABLE a: CaptureAnalysis, live_pa
   strategies[rtoc_inner_key] = TRY (captureStrategy__classify(rtoc_inner_key, CAST(t AS Type), site_info, a.resource_captures.contains?(rtoc_inner_key), schema_lookup));
   END
   a.strategies = strategies;
-  a.move_mark_names = strategies.each_with_object(Set[], %(tuple_param_0: Tuple<String,Strategy>, set) -> {
-  MUTABLE n = tuple_param_0._0;
-  MUTABLE s = tuple_param_0._1;
-  IF s IS_A MoveInto THEN
-    RETURN &set.append(COPY n);
+  MUTABLE rtoc_move_marks: [Set]String = Set[];
+  FOR rtoc_strategy_key IN strategies.keys() DO
+    IF strategies[rtoc_strategy_key] EXISTS AS rtoc_strategy THEN
+      IF rtoc_strategy IS_A MoveInto THEN
+        &rtoc_move_marks.insert(COPY rtoc_strategy_key);
+      END
+    END
   END
-  NIL
-  });
-  a.alloc_mark_entries = strategies.each_with_object({}, %(tuple_param_0: Tuple<String,Strategy>, h) -> {
-  MUTABLE n = tuple_param_0._0;
-  MUTABLE s = tuple_param_0._1;
-  IF s IS_A FreshHeapCopy THEN
-    h[n] = s.alloc_sym;
-    RETURN NIL;
+  a.move_mark_names = COPY rtoc_move_marks;
+  MUTABLE rtoc_alloc_marks: {String}String@symbol = {};
+  FOR rtoc_alloc_key IN strategies.keys() DO
+    IF strategies[rtoc_alloc_key] EXISTS AS rtoc_alloc_strategy THEN
+      IF rtoc_alloc_strategy IS_A FreshHeapCopy AS rtoc_fresh THEN
+        rtoc_alloc_marks[rtoc_alloc_key] = COPY rtoc_fresh.alloc_sym;
+      END
+    END
   END
-  NIL
-  });
+  a.alloc_mark_entries = COPY rtoc_alloc_marks;
   RETURN strategies;
 END
 PUB FN bgCaptureClassifier__resolve_capture_type(type_obj: ?Type, sym: ?SymbolEntry) RETURNS !?Type ->
