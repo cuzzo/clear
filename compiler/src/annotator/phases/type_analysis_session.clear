@@ -11092,8 +11092,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         CONTINUE;
           END
           IF escape THEN
-              MUTABLE msg = "Lock rank violation: acquiring ':${(capabilityTransition__lock_identity(lock_capabilities[rtoc_idx_n4]?) OR_ELSE "")}' at rank ${cap_rank} while ':${castTypeToString(held_lock_types[rtoc_idx_n4]?.type)}' (rank ${held_rank}) is held. Ranks must be strictly ascending along the acquire path to prove LockCycle freedom by construction.";
-              typeAnalysisSession__note_mut(&rtoc_self_view, lock_capabilities[rtoc_idx_n4]?.var_node, (msg $+ " (POSSIBLE_${(CAST(escape[:kind] AS String)).upcase()} accepted.)"));
+              MUTABLE msg = "Lock rank violation: acquiring ':${(capabilityTransition__lock_identity(lock_capabilities[rtoc_idx_n4]?) OR_ELSE "")}' at rank ${cap_rank.toString()} while ':${CAST(UNWRAP (held_lock_types[rtoc_idx_n4]?.type) AS String)}' (rank ${held_rank.toString()}) is held. Ranks must be strictly ascending along the acquire path to prove LockCycle freedom by construction.";
+              typeAnalysisSession__note_mut(&rtoc_self_view, UNWRAP (lock_capabilities[rtoc_idx_n4]).var_node, (msg $+ " (POSSIBLE_${(CAST(escape.kind AS String)).upcase()} accepted.)"));
           ELSE
               TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: COPY UNWRAP (lock_capabilities[rtoc_idx_n4]?.var_node) }, TypeAnalysisCodeOrMessage{ SymbolValue: :LOCK_RANK_VIOLATION }, [], CAST({:cap: capabilityTransition__lock_identity(lock_capabilities[rtoc_idx_n4]?), :cap_rank: cap_rank, :held: held_lock_types[rtoc_idx_n4]?.type, :held_rank: held_rank} AS {String@symbol}Any)));
           END
@@ -11112,11 +11112,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF t EXISTS AS t_value THEN
       MUTABLE state = COPY typeAnalysisSession__phase_audit_inputs(&rtoc_self_view).lock_analysis;
       IF state.direct_acquires[fn_name] EXISTS AS rtoc_map_slot_250 THEN
-        &rtoc_map_slot_250.insert(t_value);
+        &rtoc_map_slot_250.insert(COPY t_value);
       ELSE
         panic("T.must: map slot is NIL");
       END
-      MUTABLE site_tok = cap.aST__node__token(node);
+      MUTABLE site_tok = aST__node__token(cap.var_node);
       MUTABLE acquirer_opt = !((escape == NIL));
       FOR _ IN held_stack DO
       IF state.direct_edges[fn_name] EXISTS AS rtoc_map_slot_251 THEN
