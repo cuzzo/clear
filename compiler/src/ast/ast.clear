@@ -1301,7 +1301,7 @@ PUB STRUCT FuncCall {
   token: Token,
   name: CallName@boxed,
   args: []Locatable,
-  arg_families: ?PassStateValue,
+  arg_families: ?[][Set]String@symbol,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
   collapsed_errors: ?[Set]String@symbol,

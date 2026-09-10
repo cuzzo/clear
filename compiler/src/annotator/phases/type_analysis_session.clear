@@ -12380,16 +12380,17 @@ PRIVATE FN typeAnalysisSession__normalize_explicit_mutable_arguments_mut(MUTABLE
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE rtoc_each_items_288: ?[]Locatable = node__args(node);
+    MUTABLE rtoc_each_items_288: []Locatable = (node__args(node) OR_ELSE List[]);
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < UNWRAP (rtoc_each_items_288).length() DO
-      IF !(UNWRAP ((rtoc_each_items_288 OR_ELSE List[])[rtoc_idx]) IS_A MutableBorrow) THEN
+    WHILE rtoc_idx < rtoc_each_items_288.length() DO
+      IF !(UNWRAP (rtoc_each_items_288[rtoc_idx]) IS_A MutableBorrow) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      locatable__mark_explicit_mutable_argument_mut(&UNWRAP (castNodeToLocatable(node)), rtoc_idx, locatable__token(UNWRAP ((rtoc_each_items_288 OR_ELSE List[])[rtoc_idx])));
-      MUTABLE rtoc_index_receiver_289: ?[]Locatable = node__args(node);
-      rtoc_index_receiver_289[rtoc_idx] = UNWRAP (rtoc_each_items_288[rtoc_idx]).target;
+      MUTABLE rtoc_norm_node = UNWRAP (castNodeToLocatable(node));
+      locatable__mark_explicit_mutable_argument_mut(&rtoc_norm_node, rtoc_idx, locatable__token(UNWRAP (rtoc_each_items_288[rtoc_idx])));
+      MUTABLE rtoc_index_receiver_289: []Locatable = (node__args(node) OR_ELSE List[]);
+      rtoc_index_receiver_289[rtoc_idx] = UNWRAP (locatable__target(UNWRAP (rtoc_each_items_288[rtoc_idx])));
     rtoc_idx = rtoc_idx + 1;
     END
 }
@@ -12870,7 +12871,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       NIL
     END)));
-    IF (((sig != NIL) AND TRY (functionSignature__requires(sig))) AND !(((TRY (functionSignature__requires(sig))).count == 0))) THEN
+    IF ((sig != NIL) AND ((TRY (functionSignature__requires(sig))).length() > 0)) THEN
       node.collapsed_errors = TRY (typeAnalysisSession__collapse_errors_for_call(&rtoc_self_view, sig, node.args));
     END
 }
