@@ -6700,7 +6700,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (typeAnalysisSession__validate_concurrent_options_mut(&rtoc_self_view, node, castLocatableToConcurrentOp__type_analysis_session(conc), options));
     TRY (typeAnalysisSession__stamp_concurrent_option_values_mut(&rtoc_self_view, options));
     MUTABLE lhs_type = TRY (aST__full_type_mut(node.left));
-    MUTABLE shard_node: ?ShardOp = typeAnalysisSession__prepare_concurrent_shard_context_mut(&rtoc_self_view, node, castLocatableToConcurrentOp__type_analysis_session(conc));
+    MUTABLE shard_node: ?ShardOp = TRY (typeAnalysisSession__prepare_concurrent_shard_context_mut(&rtoc_self_view, node, castLocatableToConcurrentOp__type_analysis_session(conc)));
     MUTABLE proxy = BinaryOp{ token: COPY UNWRAP (locatable__token(Locatable{ BinaryOp: COPY node })), left: COPY UNWRAP (locatable__left(Locatable{ BinaryOp: COPY node })), op: :SMOOTH, right: COPY conc.op, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
     IF (conc.op() IS_A SelectOp) OR (conc.op() IS_A WhereOp) THEN
       IF TRY (typeAnalysisSession__bounded_stream_source?(&rtoc_self_view, &node.left)) THEN
@@ -6898,7 +6898,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN typeAnalysisSession__prepare_concurrent_shard_context_mut(MUTABLE self: TypeAnalysisSession, node: BinaryOp, MUTABLE conc: ConcurrentOp) RETURNS ?ShardOp
+PRIVATE FN typeAnalysisSession__prepare_concurrent_shard_context_mut(MUTABLE self: TypeAnalysisSession, node: BinaryOp, MUTABLE conc: ConcurrentOp) RETURNS !?ShardOp
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -9742,7 +9742,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       node.universal_poly = TRUE;
     END
-    cap.old_scope = TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, capabilityPlan__var_name_for(var_node)));
+    IF TRY (typeAnalysisSession__lookup_scope_for(&rtoc_self_view, capabilityPlan__var_name_for(var_node))) EXISTS AS rtoc_old_scope THEN
+      cap.old_scope = PassStateValue{ Scope: KEEP rtoc_old_scope };
+    END
     IF (capability__capability(cap) == :infer) THEN
       MUTABLE storage: ?String@symbol = TRY (typeAnalysisSession__cap_var_storage(&rtoc_self_view, &var_node));
       MUTABLE syn: ?String@symbol = TRY (typeAnalysisSession__cap_var_sync(rtoc_self_view, &var_node));
@@ -9758,11 +9760,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE root: ?Identifier = aST__root_identifier(var_node);
-    MUTABLE is_mut = ((capability__alias_mutable(cap) OR (IF aST__node__symbol(Locatable{ WithBlock: COPY node }) != NIL THEN
-        (aST__node__symbol(Locatable{ WithBlock: COPY node })).mutable()
-      ELSE
-        NIL
-      END)) OR root?.symbol?.mutable);
+    MUTABLE is_mut: Bool = capability__alias_mutable(cap);
+    IF aST__node__symbol(Locatable{ WithBlock: COPY node }) EXISTS AS rtoc_with_sym THEN
+      is_mut = (is_mut OR rtoc_with_sym.mutable);
+    END
+    IF root EXISTS AS rtoc_root_v THEN
+      IF rtoc_root_v.symbol EXISTS AS rtoc_root_sym THEN
+        is_mut = (is_mut OR rtoc_root_sym.mutable);
+      END
+    END
     (IF is_mut THEN
         {
     MUTABLE rtoc_value_block_marker = 0;
@@ -9807,14 +9813,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&rtoc_self_view, target_type));
       MUTABLE fields = schemaValue__fields(UNWRAP (schema));
       FOR rtoc_each_key IN fields.keys() DO
-    MUTABLE ignored_1 = COPY UNWRAP (fields[rtoc_each_key]);
-    (TRY (typeAnalysisSession__visit(&rtoc_self_view, Locatable{ GetField: COPY rtoc_each_key })));
-    MUTABLE expanded_cap = Capability{ capability: COPY capability__capability(cap), var_node: Locatable{ GetField: COPY rtoc_each_key }, old_scope: COPY capability__old_scope(cap), resolved_type: CAST(COPY TRY (aST__full_type_mut(rtoc_each_key)) AS Type), alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
-    withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(&rtoc_self_view, rtoc_each_key)));
+    MUTABLE field_node = GetField{ token: COPY UNWRAP (locatable__token(var_node)), target: COPY UNWRAP (locatable__target(var_node)), field: COPY rtoc_each_key };
+    (TRY (typeAnalysisSession__visit(&rtoc_self_view, Locatable{ GetField: COPY field_node })));
+    MUTABLE expanded_cap = Capability{ capability: COPY capability__capability(cap), var_node: Locatable{ GetField: COPY field_node }, old_scope: COPY capability__old_scope(cap), resolved_type: TRY (aST__full_type_mut(Locatable{ GetField: COPY field_node })) };
+    withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(&rtoc_self_view, expanded_cap)));
       END
-      MUTABLE base_t = aST__full_type_mut(UNWRAP (locatable__target(var_node)));
-      MUTABLE rtoc_each_key = Capability{ capability: COPY capability__capability(cap), var_node: COPY UNWRAP (locatable__target(var_node)), old_scope: COPY capability__old_scope(cap), resolved_type: COPY rtoc_each_key, alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
-      withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(&rtoc_self_view, rtoc_each_key)));
+      MUTABLE base_t: Type = TRY (aST__full_type_mut(UNWRAP (locatable__target(var_node))));
+      MUTABLE rtoc_base_cap = Capability{ capability: COPY capability__capability(cap), var_node: COPY UNWRAP (locatable__target(var_node)), old_scope: COPY capability__old_scope(cap), resolved_type: COPY base_t, alias_value: NIL, alias_mutable: FALSE, guard_expr: NIL, snapshot_token: NIL, view_token: NIL, view_length: NIL, as_token: NIL };
+      withCapabilityPlan__add( &expanded, TRY (typeAnalysisSession__with_capability_fact(&rtoc_self_view, rtoc_base_cap)));
     ELSE
       withCapabilityPlan__add( &expanded, fact);
     END
