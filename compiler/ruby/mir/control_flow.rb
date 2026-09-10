@@ -955,7 +955,7 @@ class OwnershipDataflow
 
   sig { params(ti: Type, heap_storage: T::Boolean).returns(T::Boolean) }
   def ownership_tracked_type?(ti, heap_storage:)
-    return true if ti.string? && heap_storage
+    return true if ti.string? && !ti.symbol? && heap_storage
 
     is_atomic_ptr = ti.atomic_ptr?
     !(ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr))
@@ -1274,7 +1274,9 @@ class OwnershipDataflow
     # treated as Copy — those don't own heap memory. Symbol#storage is
     # the canonical provenance (SIMP-13f) that EscapeAnalysis makes
     # definitive; read it, not the VarDecl node's annotation-time value.
-    if ti.string? && ident.symbol&.heap_storage?
+    # An interned symbol has no backing buffer to own, whatever storage the
+    # binding was given, so reading one is never a move.
+    if ti.string? && !ti.symbol? && ident.symbol&.heap_storage?
       return false
     end
     is_atomic_ptr = ti.atomic_ptr?

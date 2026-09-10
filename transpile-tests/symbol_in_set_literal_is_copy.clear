@@ -1,0 +1,13 @@
+# Test: a symbol placed in a Set literal stays readable afterwards. An interned
+# symbol has no backing buffer to own, but a heap-storage stamp on the binding
+# made the ownership dataflow treat the set literal as consuming it, and the
+# next read aborted the compiler with USE_AFTER_MOVE.
+
+FN use(e: String@symbol) RETURNS Bool -> RETURN e == :A; END
+
+FN main() RETURNS Void ->
+    effect = :A;
+    s = Set[effect];
+    ASSERT s.contains?(:A), "the symbol reached the set";
+    ASSERT use(effect), "the symbol is still readable after the set literal";
+END
