@@ -314,7 +314,7 @@ PUB FN escapeAnalysis__apply_kept_identity_placement_mut(fn_nodes: {String}Funct
   MUTABLE local_entries = _.binding_nodes.each_with_object({}, %(node: BindingNode, map: {String}SymbolEntry@multiowned) -> {
     MUTABLE sym = aST__node__symbol(castBindingNodeToLocatable(node));
     IF sym IS_A SymbolEntry THEN
-      map[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
+      map[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
       RETURN;
     END
     NIL
@@ -1606,7 +1606,7 @@ END
 PUB FN escapeAnalysis__record_symbol_fact_mut(node: BindingNode, MUTABLE symbols: {String}SymbolEntry) RETURNS Void ->
   MUTABLE sym: ?SymbolEntry@multiowned = escapeAnalysis__symbol_for_binding_node(node);
   IF sym THEN
-    symbols[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
+    symbols[(MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END)] = sym;
   END
 END
 PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbols: {String}SymbolEntry, binding_values: {String}[]Locatable) RETURNS Void ->
@@ -1618,7 +1618,7 @@ PUB FN escapeAnalysis__record_binding_fact_mut(node: BindingNode, MUTABLE symbol
   IF !((value != NIL)) THEN
     RETURN;
   END
-  MUTABLE binding_key: String = (MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END);
+  MUTABLE binding_key: String = (MATCH node START BindingNode.VarDecl AS item -> CAST(item.name AS String), BindingNode.BindExpr AS item -> CAST(item.name AS String), BindingNode.DestructureTarget AS item -> CAST(item.name AS String) END);
   MUTABLE binding_entry = COPY (binding_values[binding_key] OR_ELSE List[]);
   &binding_entry.append(value);
   binding_values[binding_key] = COPY binding_entry;
@@ -2123,19 +2123,14 @@ PUB FN escapeAnalysis__mark_symbol_heap_mut(sym: ?SymbolEntry, MUTABLE names: ?[
   END
   RETURN TRUE;
 END
-PUB FN escapeAnalysis__mark_node_symbol_heap_mut(node: Any) RETURNS Bool ->
+PUB FN escapeAnalysis__mark_node_symbol_heap_mut(node: Locatable) RETURNS Bool ->
   MUTABLE changed = escapeAnalysis__mark_symbol_heap_mut(aST__node__symbol(node));
-  MUTABLE decl = IF (aST__node__symbol(node) EXISTS) THEN
-    (IF node.symbol != NIL THEN
-    (node.symbol).reg
-  ELSE
-    NIL
-  END)
-  ELSE
-    NIL
-  END;
-  IF (changed AND (aST__node__container_borrow(decl) EXISTS)) THEN
-    decl.container_borrow = FALSE;
+  IF changed THEN
+    IF aST__node__symbol(node) EXISTS AS rtoc_node_symbol THEN
+      IF rtoc_node_symbol.reg EXISTS AS MUTABLE rtoc_decl THEN
+        symbolEntryRegInput__set_container_borrow_mut(&rtoc_decl, FALSE);
+      END
+    END
   END
   RETURN changed;
 END
@@ -2170,7 +2165,12 @@ PUB FN escapeAnalysis__canonical_symbol(sym: ?SymbolEntry) RETURNS ?SymbolEntry@
       decl_branch_value = NIL;
     END
     MUTABLE decl: ?SymbolEntryRegInput = decl_branch_value;
-    RETURN (((((decl != NIL) AND (aST__node__symbol( castSymbolEntryRegInputToLocatable(decl)) EXISTS)) AND symbolEntryRegInput__symbol(decl))) OR sym_value);
+    IF decl EXISTS AS rtoc_decl_value THEN
+      IF symbolEntryRegInput__symbol(rtoc_decl_value) EXISTS AS rtoc_decl_symbol THEN
+        RETURN COPY rtoc_decl_symbol;
+      END
+    END
+    RETURN COPY sym_value;
   ELSE
     RETURN NIL;
   END
