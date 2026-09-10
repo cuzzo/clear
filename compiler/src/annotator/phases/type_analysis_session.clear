@@ -13497,7 +13497,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (scope__declare(&rtoc_mutable_receiver_323, rtoc_mutable_block_param_327.name, NIL, SymbolEntryTypeInput{ TypeMultiowned: COPY unwrapped }, ScopeMutabilityInput{ BoolValue: mutable_list_alias }, FALSE, NIL, :stack));
       MUTABLE rtoc_local_receiver_324 = TRY (typeAnalysisSession__current_scope(&rtoc_self_view));
       MUTABLE entry = scope__local_entry_mut(&rtoc_local_receiver_324, rtoc_mutable_block_param_327.name);
-      rtoc_mutable_block_param_327.symbol = entry;
+      rtoc_mutable_block_param_327.symbol = KEEP entry;
       IF TRY (aST__capture_expr_owns_result?(rtoc_mutable_block_param_327.expr)) THEN
           symbolEntry__mark_owned_optional_capture_mut(&entry);
       END

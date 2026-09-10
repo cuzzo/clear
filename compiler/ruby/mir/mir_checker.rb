@@ -412,6 +412,7 @@ class MIRChecker
     @errors = []
     nodes = T.let(MIR.nodes(fn_def.body), T::Array[MIR::Node])
     @line_by_name = T.let(source_lines_by_binding(nodes), T.nilable(T::Hash[String, Integer]))
+    @current_clr_line = T.let(nil, T.nilable(Integer))
 
     allocs = T.let({}, AllocMarksByName)
     cleanups = T.let({}, CleanupMarksByName)
@@ -3022,7 +3023,7 @@ class MIRChecker
     # Ownership errors name a binding, never a place. The `CLR:` markers the
     # lowering already emits say where each binding was introduced, so the
     # reader gets a line instead of a whole function to search.
-    line = @line_by_name&.[](name.to_s)
+    line = @line_by_name&.[](name.to_s) || @current_clr_line
     suffix = line ? " @@PL=#{line}@@PC=1" : ""
     "[#{kind}] #{@fn_name}::#{name} -- #{msg}#{suffix}"
   end
@@ -3075,7 +3076,15 @@ class MIRChecker
 
   sig { params(stmts: T::Array[MIR::Node]).void }
   def check_stmts_for_unhoisted(stmts)
-    stmts.each { |s| check_stmt_for_unhoisted(s) }
+    stmts.each do |s|
+      # Keep the walk's position current so an error raised against a whole
+      # function still names the statement it came from.
+      if s.is_a?(MIR::Comment) && s.text.to_s.start_with?("CLR:")
+        digits = s.text.to_s.delete_prefix("CLR:")
+        @current_clr_line = digits.to_i if digits.to_i.to_s == digits
+      end
+      check_stmt_for_unhoisted(s)
+    end
   end
 
   sig { params(node: T.nilable(MIR::Node)).void }
