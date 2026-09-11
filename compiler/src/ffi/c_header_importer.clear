@@ -507,9 +507,10 @@ PRIVATE FN translator__clear_type_name(MUTABLE self: Translator, c_name: String)
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE first = (rtoc_each_items_20[rtoc_idx]?.substr(0, 1)).upcase();
-      MUTABLE rest = (rtoc_each_items_20[rtoc_idx]?.substr(1, (rtoc_each_items_20[rtoc_idx]?.length() - 1))).downcase();
-      &words.append(((first + rest)));
+      MUTABLE rtoc_word: String = COPY UNWRAP (rtoc_each_items_20[rtoc_idx]);
+      MUTABLE first = (rtoc_word.substr(0, 1)).upcase();
+      MUTABLE rest = (rtoc_word.substr(1, (rtoc_word.length() - 1))).downcase();
+      &words.append(((first $+ rest)));
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE clear_name = words.join("");

@@ -20310,12 +20310,11 @@ PUB FN aST__coerce_mut(MUTABLE node: Locatable, declared_type: ?Type) RETURNS !C
     IF rtoc_base.type EXISTS AS rtoc_res THEN
       MUTABLE rtoc_elem: ?Type = TRY (type__element_type(rtoc_res));
       IF rtoc_elem EXISTS AS rtoc_elem_value THEN
-        MATCH node START
+        PARTIAL MATCH node START
           Locatable.ListLit AS MUTABLE rtoc_lit ->
             FOR MUTABLE rtoc_item IN rtoc_lit.items DO
               TRY (aST__coerce_mut(&rtoc_item, COPY rtoc_elem_value));
             END,
-          DEFAULT -> NIL;
         END
       END
     END
@@ -20332,7 +20331,7 @@ PRIVATE FN aST__coerce_tuple_mut(MUTABLE node: Locatable, target: Type) RETURNS 
     RETURN CoerceOutcome{ type: NIL, error: COPY "Tuple arity mismatch: expected ${rtoc_args.length().toString()}, got ${rtoc_items.length().toString()}" };
   END
   MUTABLE rtoc_error: ?String = NIL;
-  MATCH node START
+  PARTIAL MATCH node START
     Locatable.TupleLit AS MUTABLE rtoc_lit ->
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_lit.items.length() DO
@@ -20344,7 +20343,6 @@ PRIVATE FN aST__coerce_tuple_mut(MUTABLE node: Locatable, target: Type) RETURNS 
         END
         rtoc_idx = rtoc_idx + 1;
       END,
-    DEFAULT -> NIL;
   END
   IF rtoc_error EXISTS AS rtoc_error_value THEN
     RETURN CoerceOutcome{ type: NIL, error: COPY rtoc_error_value };
