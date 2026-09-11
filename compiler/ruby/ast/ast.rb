@@ -2453,6 +2453,9 @@ module AST
     attr_accessor :runtime_variant_name
     attr_accessor :runtime_payload_type
     attr_accessor :runtime_indirect_payload_as
+    # `?U IS_A Variant` is legal and answers FALSE for NIL, the way Ruby's
+    # `nil.is_a?(T)` does. Lowering needs the null guard and the `.?`.
+    attr_accessor :runtime_subject_optional
 
     sig { returns(Type) }
     def full_type; Type.new(:Bool); end

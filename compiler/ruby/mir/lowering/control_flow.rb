@@ -170,8 +170,10 @@ module MIRLoweringControlFlow
 
     subject, subject_pending = lower_head { lower_control_condition(condition.left) }
     variant = T.must(condition.runtime_variant_name)
-    cond = union_tag_condition(T.cast(subject, MIR::Emittable), variant)
-    payload_bindings = runtime_is_a_payload_bindings(condition, T.cast(subject, MIR::Emittable), variant)
+    optional_subject = condition.runtime_subject_optional == true
+    cond = union_tag_condition(T.cast(subject, MIR::Emittable), variant, optional_subject: optional_subject)
+    payload_subject = optional_subject ? MIR::OptionalUnwrap.new(T.cast(subject, MIR::Emittable)) : T.cast(subject, MIR::Emittable)
+    payload_bindings = runtime_is_a_payload_bindings(condition, payload_subject, variant)
 
     if node.expr_mode
       label = "__if_#{lowering_counters.next_block_expr_id}"
@@ -1012,10 +1014,16 @@ module MIRLoweringControlFlow
     end
   end
 
-  sig { params(subject: MIR::Emittable, variant: String).returns(MIR::BinOp) }
-  def union_tag_condition(subject, variant)
+  sig { params(subject: MIR::Emittable, variant: String, optional_subject: T::Boolean).returns(MIR::BinOp) }
+  def union_tag_condition(subject, variant, optional_subject: false)
     T.bind(self, MIRLowering) rescue nil
-    MIR::BinOp.new("==", active_tag_call(subject), MIR::EnumTag.new(variant: variant))
+    # An optional subject has no tag when it is absent, so the null check has
+    # to short-circuit before activeTag ever sees it.
+    tagged = optional_subject ? MIR::OptionalUnwrap.new(subject) : subject
+    test = MIR::BinOp.new("==", active_tag_call(tagged), MIR::EnumTag.new(variant: variant))
+    return test unless optional_subject
+
+    MIR::BinOp.new("and", MIR::BinOp.new("!=", subject, MIR::Lit.new("null")), test)
   end
 
   sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, subject: MIR::Emittable, body: MatchBody).returns(T::Array[MIR::IfChainBranch]) }

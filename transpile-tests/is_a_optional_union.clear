@@ -1,0 +1,27 @@
+# `?U IS_A Variant` is a tag question: NIL answers FALSE, it does not fault.
+STRUCT A { x: Int64 }
+STRUCT B { y: String }
+UNION U { A: A, B: B }
+
+FN describe(u: ?U) RETURNS String ->
+  IF u IS_A A AS a THEN
+    RETURN "a=${a.x.toString()}";
+  END
+  IF u IS_A B AS b THEN
+    RETURN "b=${b.y}";
+  END
+  RETURN "none";
+END
+
+FN both?(u: ?U) RETURNS Bool ->
+  RETURN (u IS_A A);
+END
+
+FN main() RETURNS Void ->
+  ua: ?U = U{ A: A{ x: 5 } };
+  ub: ?U = U{ B: B{ y: "zz" } };
+  un: ?U = NIL;
+  print("${describe(ua)} ${describe(ub)} ${describe(un)}");
+  IF both?(ua) THEN print("ua-is-a"); END
+  IF !(both?(un)) THEN print("un-not-a"); END
+END

@@ -242,7 +242,12 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         visit(node.left)
-        subject_type = node.left.full_type!(context: "runtime IS_A subject")
+        declared_type = node.left.full_type!(context: "runtime IS_A subject")
+        # An OPTIONAL union is still a tag question: `nil IS_A Variant` is
+        # FALSE, the way Ruby's `nil.is_a?(T)` is. Ask the payload's schema and
+        # let lowering add the null guard.
+        node.runtime_subject_optional = declared_type.optional?
+        subject_type = declared_type.optional? ? declared_type.non_optional_type : declared_type
         type_name = T.cast(subject_type.generic_instance? ? subject_type.generic_base : subject_type.resolved, Symbol)
         schema = T.cast(lookup_type_schema(type_name), T.nilable(MatchSchema))
         unless Schemas.union?(schema)
@@ -251,8 +256,9 @@ module Annotator
           # `h.is_a?(Hash)` is. Only a union needs a runtime tag test.
           static = static_is_a_answer(subject_type, node.right)
           if static.nil?
-            error!(node.left, :IS_A_RUNTIME_NEEDS_UNION, got: subject_type.to_s)
+            error!(node.left, :IS_A_RUNTIME_NEEDS_UNION, got: declared_type.to_s)
           end
+          node.runtime_subject_optional = nil
           node.static_is_a_result = static
           # The tested shape is still a type operand and has to carry a type,
           # even though nothing reads it at runtime.

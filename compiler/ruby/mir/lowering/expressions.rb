@@ -468,7 +468,8 @@ module MIRLoweringExpressions
 
     if node.runtime_variant_name
       subject = T.cast(lower(node.left), MIR::Emittable)
-      return MIR::BinOp.new("==", active_tag_call(subject), MIR::EnumTag.new(variant: T.must(node.runtime_variant_name)))
+      return union_tag_condition(subject, T.must(node.runtime_variant_name),
+        optional_subject: node.runtime_subject_optional == true)
     end
 
     MIR::TypeEq.new(lower_type_value_expr(node.left), lower_type_value_expr(node.right))

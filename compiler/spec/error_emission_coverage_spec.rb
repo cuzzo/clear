@@ -3927,6 +3927,19 @@ RSpec.describe "error emission coverage" do
       }.to raise_error(CompilerError, /Union variant 'Ok' expects Int64/)
     end
 
+    it "names the payload's capability so a Symbol mismatch is not two Strings" do
+      expect {
+        run(<<~CLEAR)
+          UNION Tag { SymbolValue: String@symbol, StringValue: String }
+          FN main() RETURNS Void ->
+              name = "plain";
+              t = Tag{SymbolValue: name};
+              _ = t;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Union variant 'SymbolValue' expects String @symbol, got String\./)
+    end
+
     it "compiles when the payload value matches the declared type" do
       run(<<~CLEAR)
         UNION Result { Ok: Int64, Err: String }

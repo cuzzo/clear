@@ -497,7 +497,11 @@ module Annotator
           end
           actual = val_node.full_type!(context: "union payload")
           unless expected_type.accepts?(actual)
-            error!(node, :UNION_PAYLOAD_MISMATCH, variant: variant_name, expected: expected_type.resolved, got: actual&.resolved)
+            # type_display, not `.resolved`: a String@symbol payload handed a
+            # plain String otherwise reads as "expects String, got String".
+            error!(node, :UNION_PAYLOAD_MISMATCH, variant: variant_name,
+              expected: type_display(expected_type),
+              got: actual ? type_display(actual) : nil)
           end
           move_if_not_copyable!(val_node)
           stamp_type!(node, literal_instance_type(node))
