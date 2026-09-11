@@ -11482,12 +11482,9 @@ PRIVATE FN mIRLowering__sync_wrap_constructor(self: MIRLowering, sync_value: ?St
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF sync_value EXISTS AS sync_value THEN
-      RETURN COPY (CAST({:locked: "lockedCreate", :write_locked: "rwLockedCreate", :always_mutable: "refCellCreate", :versioned: "versionedCreate", :atomic: "atomicCreate", :atomic_ptr: "atomicPtrCreate", :local: NIL} AS {String@symbol}?String))[IF atomic_ptr THEN
-        :atomic_ptr
-      ELSE
-        sync_value
-      END];
+    IF sync_value EXISTS AS sync_kind THEN
+      MUTABLE sync_key: String@symbol = (IF atomic_ptr THEN :atomic_ptr ELSE COPY sync_kind END);
+      RETURN COPY (CAST({:locked: "lockedCreate", :write_locked: "rwLockedCreate", :always_mutable: "refCellCreate", :versioned: "versionedCreate", :atomic: "atomicCreate", :atomic_ptr: "atomicPtrCreate", :local: NIL} AS {String@symbol}?String))[sync_key];
     ELSE
       RETURN NIL;
     END
@@ -11497,12 +11494,9 @@ PRIVATE FN mIRLowering__sync_wrap_type(self: MIRLowering, sync_value: ?String@sy
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF sync_value EXISTS AS sync_value THEN
-      MUTABLE wrapper: ?String = COPY (CAST({:locked: "CheatLib.Locked", :write_locked: "CheatLib.RwLocked", :always_mutable: "CheatLib.RefCell", :versioned: "CheatLib.Versioned", :atomic: "CheatLib.Atomic", :atomic_ptr: "CheatLib.AtomicPtr", :local: NIL} AS {String@symbol}?String))[IF atomic_ptr THEN
-        :atomic_ptr
-      ELSE
-        sync_value
-      END];
+    IF sync_value EXISTS AS sync_kind THEN
+      MUTABLE sync_key: String@symbol = (IF atomic_ptr THEN :atomic_ptr ELSE COPY sync_kind END);
+      MUTABLE wrapper: ?String = COPY (CAST({:locked: "CheatLib.Locked", :write_locked: "CheatLib.RwLocked", :always_mutable: "CheatLib.RefCell", :versioned: "CheatLib.Versioned", :atomic: "CheatLib.Atomic", :atomic_ptr: "CheatLib.AtomicPtr", :local: NIL} AS {String@symbol}?String))[sync_key];
       IF wrapper EXISTS AS wrapper_value THEN
         RETURN "${wrapper_value}(${bare_zig_t})";
       ELSE
@@ -11557,11 +11551,12 @@ PRIVATE FN mIRLowering__build_field_path_zig(MUTABLE self: MIRLowering, node: Fi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node IS_A Identifier AS identifier THEN
-      RETURN ((IF mIRLowering__capture_state(&rtoc_self_view).do_capture_map != NIL THEN
-        (mIRLowering__capture_state(&rtoc_self_view).do_capture_map)[identifier__name(identifier)]
-      ELSE
-        NIL
-      END) OR_ELSE identifier__name(identifier));
+      IF mIRLowering__capture_state(&rtoc_self_view).do_capture_map EXISTS AS capture_map THEN
+        IF capture_map[identifier__name(identifier)] EXISTS AS captured_name THEN
+          RETURN COPY captured_name;
+        END
+      END
+      RETURN COPY identifier__name(identifier);
     ELSE_IF node IS_A GetField AS get_field THEN
       RETURN COPY "${mIRLowering__build_field_path_zig(&rtoc_self_view, castLocatableToFieldPathNode(get_field.target))}.${get_field.field}";
     ELSE
@@ -11619,7 +11614,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE var_node: CapabilityVarNode = COPY castLocatableToCapabilityVarNode(cap.var_node);
     MUTABLE var_name = COPY cap.target_label;
     MUTABLE alias_name = COPY cap.alias_name;
-    RETURN WithCapabilityBindingContext{ node: node, cap: COPY cap, var_node: COPY var_node, var_name: COPY var_name, alias_name: COPY alias_name, resolved_type: COPY cap.resolved_type, var_sync: COPY cap.sync, var_storage: COPY cap.storage, zig_var: COPY TRY (mIRLowering__with_cap_zig_target(&rtoc_self_view, var_node, var_name)), clause: COPY clause, with_label: COPY with_label, needs_sort: needs_sort, rt_name: COPY rt_name };
+    RETURN WithCapabilityBindingContext{ node: COPY node, cap: COPY cap, var_node: COPY var_node, var_name: COPY var_name, alias_name: COPY alias_name, resolved_type: COPY cap.resolved_type, var_sync: COPY cap.sync, var_storage: COPY cap.storage, zig_var: COPY TRY (mIRLowering__with_cap_zig_target(&rtoc_self_view, var_node, var_name)), clause: COPY clause, with_label: COPY with_label, needs_sort: needs_sort, rt_name: COPY rt_name };
 }
 END
 PRIVATE FN mIRLowering__materialize_with_capability_binding(MUTABLE self: MIRLowering, MUTABLE materialization: WithBindingMaterialization, context: WithCapabilityBindingContext) RETURNS !Void
@@ -11756,11 +11751,10 @@ PRIVATE FN mIRLowering__exclusive_lock_expr(self: MIRLowering, context: WithCapa
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE is_arc = (symbolEntry__rc_storage?(context.var_storage) OR (IF context.resolved_type != NIL THEN
-      TRY (type__any_rc?( UNWRAP (context.resolved_type)))
-    ELSE
-      NIL
-    END));
+    MUTABLE is_arc: Bool = symbolEntry__rc_storage?(context.var_storage);
+    IF context.resolved_type EXISTS AS context_resolved_type THEN
+      is_arc = (is_arc OR TRY (type__any_rc?(context_resolved_type)));
+    END
     MUTABLE is_param = mIRLowering__with_cap_is_param?(rtoc_self_view, context.var_node);
     MUTABLE source = TRY (mIRLowering__with_capability_source_mir(rtoc_self_view, context.var_node));
     IF (is_param AND !(is_arc)) THEN
@@ -11774,7 +11768,7 @@ PRIVATE FN mIRLowering__exclusive_lock_sync(self: MIRLowering, context: WithCapa
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE is_param = mIRLowering__with_cap_is_param?(rtoc_self_view, context.var_node);
-    IF ((COPY context.node).polymorphic AND is_param) THEN
+    IF (((COPY context.node).polymorphic OR_ELSE FALSE) AND is_param) THEN
       RETURN NIL;
     ELSE
       RETURN context.var_sync;
@@ -11799,18 +11793,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF context.needs_sort THEN
       RETURN CAST(List[] AS []Emittable);
     END
-    MUTABLE is_arc = (symbolEntry__rc_storage?(context.var_storage) OR (IF context.resolved_type != NIL THEN
-      TRY (type__any_rc?( UNWRAP (context.resolved_type)))
-    ELSE
-      NIL
-    END));
+    MUTABLE is_arc: Bool = symbolEntry__rc_storage?(context.var_storage);
+    IF context.resolved_type EXISTS AS context_resolved_type THEN
+      is_arc = (is_arc OR TRY (type__any_rc?(context_resolved_type)));
+    END
     MUTABLE lock_expr = CapabilityLockTarget{ source: COPY TRY (mIRLowering__with_capability_source_mir(rtoc_self_view, context.var_node)), arc_wrapped: is_arc, comptime_arc_unwrap: FALSE, lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE plan = mIRLowering__lock_binding_plan(&rtoc_self_view, context, Emittable{ CapabilityLockTarget: COPY lock_expr }, NIL);
-    RETURN mIRLowering__render_lock_binding(&rtoc_self_view, plan, Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ CapabilityLockTarget: COPY lock_expr }, method: IF plan.clause != NIL THEN
+    RETURN TRY (mIRLowering__render_lock_binding(&rtoc_self_view, plan, Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ CapabilityLockTarget: COPY lock_expr }, method: IF plan.clause != NIL THEN
       "readOrErr"
     ELSE
       "read"
-    END, args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } });
+    END, args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }));
 }
 END
 PRIVATE FN mIRLowering__borrowed_capability_binding(self: MIRLowering, context: WithCapabilityBindingContext) RETURNS ![]Emittable
