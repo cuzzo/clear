@@ -219,7 +219,7 @@ PUB FN pipelineConcurrentLowerer__lower_sharded_each(self: PipelineConcurrentLow
   MUTABLE item_t = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY type__resolved(UNWRAP ((TRY (type__element_type(lhs_type))))) }));
   MUTABLE shard_count: ?Int64 = type__shard_count(lhs_type);
   MUTABLE conc = ConcurrentOp{ token: COPY each_op.token, op: CAST(COPY each_op AS ?ClearParserConcurrentPipelineOp), options: {}, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, shard_context: NIL, capture_analysis: NIL };
-  TRY (aST__stamp_synthetic_type_mut(Locatable{ ConcurrentOp: COPY conc }, SyntheticTypeInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ EachOp: COPY each_op })) }, "synthetic AST type"));
+  TRY (aST__stamp_synthetic_type_mut(Locatable{ ConcurrentOp: COPY conc }, CAST(SyntheticTypeInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ EachOp: COPY each_op })) } AS Type), "synthetic AST type"));
   MUTABLE cb = TRY (pipelineConcurrentLowerer__build_bounded_concurrent_callback_pointer(self, conc, item_t));
   MUTABLE invoke = TRY (pipelineConcurrentLowerer__bounded_invocation(self, conc, cb));
   MUTABLE source_mir = pipelineConcurrentLowerer__visit_mir_call(self, list_node);
@@ -235,7 +235,7 @@ PUB FN pipelineConcurrentLowerer__lower_sharded_each(self: PipelineConcurrentLow
     :concurrentShardedListEachInPlace
   END;
   MUTABLE call = pipelineConcurrentLowerer__emit_builtin_call(self, helper, ([Emittable{ Ident: COPY Ident{ name: COPY TRY (type__zig_type(item_t)), lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Lit: COPY Lit{ value: COPY CAST(shard_count AS String), lowered_node_id: NIL, ownership_consumption: NIL } }] + TRY (pipelineConcurrentInvocation__sharded_each_args(invoke, Emittable{ Ident: COPY Ident{ name: "__sh_each_src", lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }))));
-  RETURN ScopeBlock{ body: TRY (pipelineConcurrentInvocation__scoped_body(invoke, List[], (setup + CAST([Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY call, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+  RETURN ScopeBlock{ body: TRY (pipelineConcurrentInvocation__scoped_body(invoke, List[], CAST((setup + CAST([Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY call, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)) AS []Emittable))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each(self: PipelineConcurrentLowerer, lhs: Locatable, conc_op: ConcurrentOp, smooth_node: BinaryOp) RETURNS !PipelineConcurrentResult ->
   MUTABLE ctx = UNWRAP (pipelineConcurrentLowerer__shard_context(self, conc_op));

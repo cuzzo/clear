@@ -104,7 +104,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PUB FN functionCFG__build(fn_node: FunctionDef, can_fail_fns: ?[Set]String = NIL) RETURNS !FunctionCFG@multiowned ->
   MUTABLE cfg = functionCFG__new(fn_node.name, can_fail_fns);
-  MUTABLE last_block: ?BasicBlock = TRY (functionCFG__build_body( CAST(fn_node.body AS []Node), KEEP cfg.entry, KEEP cfg.exit_block, &cfg));
+  MUTABLE last_block: ?BasicBlock = TRY (functionCFG__build_body( CAST(fn_node.body AS []Node), UNWRAP (KEEP cfg.entry), KEEP cfg.exit_block, &cfg));
   IF last_block EXISTS AS last_block_value THEN
     MUTABLE last_block_value_mutable = COPY last_block_value;
     basicBlock__add_successor(&last_block_value_mutable, KEEP cfg.exit_block);
@@ -608,7 +608,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       IF !(df_entry.needs_cleanup) THEN
-          IF ownershipDataflow__preserve_guard_after_full_move?(&rtoc_self_view, var, entry, decision_facts, ambiguous_names) THEN
+          IF ownershipDataflow__preserve_guard_after_full_move?(&rtoc_self_view, UNWRAP (var), entry, decision_facts, ambiguous_names) THEN
             cleanupEntry__mark_moved_guard_mut(&entry);
           ELSE
             cleanupEntry__suppress_cleanup_mut(&entry);
@@ -889,7 +889,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE name = COPY (rtoc_self_view.fn_node.params[rtoc_idx]?.name);
+      MUTABLE name:? = COPY (rtoc_self_view.fn_node.params[rtoc_idx]?.name);
       MUTABLE ti = COPY rtoc_self_view.fn_node.params[rtoc_idx]?.type;
       IF !(TRY (ownershipDataflow__ownership_tracked_type?(rtoc_self_view, UNWRAP (ti), TRUE))) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -1869,10 +1869,10 @@ PUB FN loopFrameAnalysis__expression_allocates_frame_value?(node: Locatable, fn_
     RETURN TRUE;
   END
   MUTABLE type_info = TRY (aST__full_type_mut(node));
-  IF type_info.frame?() THEN
+  IF type__frame?(type_info) THEN
     RETURN TRUE;
   END
-  RETURN (type_info.needs_cleanup?() AND (TRY (type__cleanup_allocator(type_info)) == :frame));
+  RETURN (type__needs_cleanup?(type_info) AND (TRY (type__cleanup_allocator(type_info)) == :frame));
 END
 PUB FN loopFrameAnalysis__outer_mutating_receiver_call?(node: Locatable, local_names: [Set]String) RETURNS !Bool ->
   IF !((node IS_A MethodCall OR node IS_A FuncCall)) THEN
@@ -1918,7 +1918,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   IF !(sig) THEN
       RETURN;
   END
-  IF !((TRY (functionSignature__emits_allocating?(sig)) AND TRY (functionSignature__mutates_receiver?(sig)))) THEN
+  IF !((TRY (functionSignature__emits_allocating?( UNWRAP (sig))) AND TRY (functionSignature__mutates_receiver?(sig)))) THEN
       RETURN;
   END
   MUTABLE root: ?Identifier = aST__root_identifier(node.object);

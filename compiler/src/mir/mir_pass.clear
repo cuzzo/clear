@@ -154,7 +154,7 @@ PRIVATE FN mIRPass__pre_mark_bg_resource_captures_mut(MUTABLE self: MIRPass, fn_
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     aST__each_bg_block(COPY fn_value.body, %(bg_value: BgNode) USE(facts) -> {
     MUTABLE resource_captures = (IF selectOp__capture_analysis( CAST(bg_value AS SelectOp)) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = (selectOp__capture_analysis(bg_value));
+        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = (selectOp__capture_analysis( CAST(bg_value AS SelectOp)));
     COPY rtoc_local_receiver_1.resource_captures }
       ELSE
         NIL
@@ -262,7 +262,7 @@ PRIVATE FN mIRPass__recurse_expr_body_mut(MUTABLE self: MIRPass, MUTABLE val: ?L
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (((val != NIL) AND (val IS_A BgBlock)) AND locatable__body(val)) THEN
-      val.body = TRY (mIRPass__transform_body(&rtoc_self_view, locatable__body(val), walkCtx__with(ctx, CAST({:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castOptionalLocatableToBgNode(val), ctx.cleanup_facts)} AS FrozenCleanupFacts))));
+      val.body = TRY (mIRPass__transform_body(&rtoc_self_view, UNWRAP (locatable__body(val)), walkCtx__with(ctx, CAST({:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castOptionalLocatableToBgNode(val), ctx.cleanup_facts)} AS FrozenCleanupFacts))));
     ELSE_IF ((val != NIL) AND (val IS_A BlockExpr)) THEN
       val.body = TRY (mIRPass__transform_body(&rtoc_self_view, UNWRAP (locatable__body(val)), ctx));
     END

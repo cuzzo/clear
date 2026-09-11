@@ -204,7 +204,7 @@ PRIVATE FN programMIRFinalizer__ast_node_lowers_through_runtime?(node: Locatable
     Locatable.BinaryOp AS binary_op -> (IF binaryOp__smooth?(binary_op) THEN
         {
       MUTABLE rtoc_value_block_marker = 0;
-      MUTABLE result_ti = TRY (type__from_node_mut( CAST(binary_op AS ?Locatable), "smooth pipeline needs-runtime"));
+      MUTABLE result_ti:? = TRY (type__from_node_mut( CAST(binary_op AS ?Locatable), "smooth pipeline needs-runtime"));
       MUTABLE next_needs = !(TRY (type__inf_stream?( UNWRAP (result_ti))));
       (next_needs OR TRY (programMIRFinalizer__owned_or_else_lowers_through_runtime?(binary_op, schema_lookup)))
     }

@@ -24,7 +24,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
     rubyToClearVoid__ownership_scanner()
   });
   MUTABLE rtoc_each_items_2 = (((IF selectOp__capture_analysis( CAST(bg_value AS SelectOp)) != NIL THEN
-      (selectOp__capture_analysis(bg_value)).move_mark_names()
+      (selectOp__capture_analysis( CAST(bg_value AS SelectOp))).move_mark_names()
     ELSE
       NIL
     END) OR_ELSE Set[]));
