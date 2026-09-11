@@ -600,12 +600,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE block_entry: ?CleanupDecision = COPY block_summaries[rtoc_each_items_11[rtoc_idx]?.place];
+      MUTABLE block_entry: ?CleanupDecision = COPY block_summaries[UNWRAP (rtoc_each_items_11[rtoc_idx]).place];
       MUTABLE df_entry_branch_value: ?CleanupDecision = NIL;
         IF ((block_entry != NIL) AND !(block_entry.needs_cleanup)) THEN
           df_entry_branch_value = COPY block_entry;
         ELSE
-          df_entry_branch_value = (IF summary[rtoc_each_items_11[rtoc_idx]?.place] != NIL THEN summary[rtoc_each_items_11[rtoc_idx]?.place] ELSE block_entry END);
+          df_entry_branch_value = (summary[UNWRAP (rtoc_each_items_11[rtoc_idx]).place] OR_ELSE block_entry);
         END
       MUTABLE df_entry: ?CleanupDecision = df_entry_branch_value;
       IF !(df_entry) THEN
@@ -699,9 +699,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < stmts.length() DO
       IF ownershipDataflow__declares_name?(rtoc_self_view, stmts[rtoc_idx]?, var) THEN
-          RETURN (stmts.substr(((rtoc_idx + 1)), (stmts.length() - ((rtoc_idx + 1))))).to_a() |> ANY TRY (ownershipDataflow__stmt_moves_name?(rtoc_self_view, _, var));
+          MUTABLE rest_idx = (rtoc_idx + 1);
+    WHILE (rest_idx < stmts.length()) DO
+      IF TRY (ownershipDataflow__stmt_moves_name?(rtoc_self_view, UNWRAP (stmts[rest_idx]), var)) THEN
+        RETURN TRUE;
       END
-      MUTABLE nested = (aST__child_bodies(stmts[rtoc_idx]?)).flatten();
+      rest_idx = (rest_idx + 1);
+    END
+    RETURN FALSE;
+      END
+      MUTABLE nested = aST__child_bodies(UNWRAP (stmts[rtoc_idx])) |> UNNEST _;
       IF (!(nested.empty?()) AND TRY (ownershipDataflow__linear_scope_decl_always_moves?(rtoc_self_view, nested, var))) THEN
           RETURN TRUE;
       END
@@ -751,16 +758,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(_) THEN
       CONTINUE;
     END
-    FOR rtoc_each_1 IN _.keys() DO
-      MUTABLE entry: Any = (rtoc_each_1[rtoc_each_1] OR_ELSE panic("missing hash key"));
-      IF !(entry IS_A OwnerEntry) THEN
-        CONTINUE;
-      END
+    MUTABLE rtoc_state = COPY _;
+    FOR rtoc_each_1 IN rtoc_state.keys() DO
+      MUTABLE entry = (rtoc_state[rtoc_each_1] OR_ELSE panic("missing hash key"));
       saw[rtoc_each_1] = (saw[rtoc_each_1] OR_ELSE {:any_moved: FALSE, :any_maybe: FALSE, :any_not_moved: FALSE});
       MUTABLE rec = UNWRAP (saw[rtoc_each_1]);
-      IF (entry.state() == :moved) THEN
+      IF (entry.state == :moved) THEN
           rec[:any_moved] = TRUE;
-      ELSE_IF (entry.state() == :maybe_moved) THEN
+      ELSE_IF (entry.state == :maybe_moved) THEN
           rec[:any_maybe] = TRUE;
       ELSE
           rec[:any_not_moved] = TRUE;
@@ -800,12 +805,13 @@ PRIVATE FN ownershipDataflow__state_to_names(self: OwnershipDataflow, state: {Pl
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN state.each_with_object({}, %(tuple_param_0: Tuple<PlaceId,OwnerEntry>, out) -> {
-    MUTABLE place = tuple_param_0._0;
-    MUTABLE entry = tuple_param_0._1;
-    out[place.path] = entry;
-    NIL
-    });
+    MUTABLE out: {String}OwnerEntry = {};
+    FOR rtoc_place IN state.keys() DO
+      IF state[rtoc_place] EXISTS AS rtoc_entry THEN
+        out[COPY rtoc_place.path] = COPY rtoc_entry;
+      END
+    END
+    RETURN out;
 }
 END
 PRIVATE FN ownershipDataflow__state_entry(self: OwnershipDataflow, state: {PlaceId}OwnerEntry, place: Place) RETURNS ?OwnerEntry
@@ -911,7 +917,7 @@ PRIVATE FN ownershipDataflow__join_predecessors(self: OwnershipDataflow, block: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE preds: []BasicBlock@multiowned = block.predecessors |> WHERE rtoc_self_view.block_out[_.id];
+    MUTABLE preds: []BasicBlock@multiowned = block.predecessors |> WHERE (rtoc_self_view.block_out[_.id] != NIL);
     IF (preds.length() == 0) THEN
       RETURN TRY (ownershipDataflow__empty_ownership_state(rtoc_self_view));
     END
