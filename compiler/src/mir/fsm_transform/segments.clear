@@ -115,8 +115,8 @@ PUB FN condBranch__kind(self: CondBranch) RETURNS String@symbol ->
 END
 PUB STRUCT Segment {
   index: Int64,
-  stmts: Any@multiowned,
-  tail: Any@multiowned
+  stmts: []Emittable,
+  tail: SegmentTail
 }
 PUB UNION SegmentTail { Done: Done, IoSuspend: IoSuspend, NextSuspend: NextSuspend, LockSuspend: LockSuspend, LoopBack: LoopBack, Goto: Goto, CondBranch: CondBranch }
 PUB UNION SuspendTail { IoSuspend: IoSuspend, NextSuspend: NextSuspend, LockSuspend: LockSuspend }

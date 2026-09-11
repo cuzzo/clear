@@ -818,11 +818,11 @@ PRIVATE FN emit__fsm_owned_result_guards(segments: []Segment, lowering: MIRLower
   CONTINUE;
     END
     MUTABLE result_type = tail.result_type();
-    IF !(SuspendResolvers.ownership_bearing_result_type?(result_type, lowering)) THEN
+    IF !(suspendResolvers__ownership_bearing_result_type?(result_type, lowering)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    guards[CAST(result_var AS String)] = SuspendResolvers.fsm_owned_guard_name(CAST(result_var AS String));
+    guards[CAST(result_var AS String)] = suspendResolvers__fsm_owned_guard_name(CAST(result_var AS String));
   rtoc_idx = rtoc_idx + 1;
   END
   RETURN guards;
@@ -841,7 +841,7 @@ PRIVATE FN emit__register_owned_suspend_result_cleanups_mut(segment_specs: []Fsm
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE guard = SuspendResolvers.fsm_owned_guard_name(name);
+    MUTABLE guard = suspendResolvers__fsm_owned_guard_name(name);
     &ctx.destroy_actions.append(FsmDestroyAction{ FsmDestroyCleanup: COPY FsmDestroyCleanup{ source_kind: :owned_result, name: COPY name, target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, name) }, cleanup_entry: cleanupEntry__build(:uniform, :heap, FALSE), guard: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, guard) }, allocator: NIL } });
   rtoc_idx = rtoc_idx + 1;
   END

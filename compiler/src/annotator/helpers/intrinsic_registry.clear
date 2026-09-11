@@ -43,7 +43,7 @@ PUB FN intrinsicRegistry__overloads(registry: String@symbol, name: String) RETUR
   RETURN empty;
 END
 
-# Ruby: `FunctionSignature.unwrap(lookup(...))`. `unwrap` answers nil for an
+# Ruby: `functionSignature__unwrap(lookup(...))`. `unwrap` answers nil for an
 # ARRAY of overloads, so a name with more than one signature has no single
 # definition -- callers that want them all ask for overloads.
 PUB FN intrinsicRegistry__lookup_single(registry: String@symbol, name: String) RETURNS !?FunctionSignature@multiowned ->
