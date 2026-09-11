@@ -197,7 +197,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_suspend_with_pre(susp_tail: SuspendTail, p
   IF !(segments__suspend_tail?(castSuspendTailToOptionalSegmentTail(susp_tail))) THEN
     panic("Unhandled suspend kind {}");
   END
-  MUTABLE tail = susp_tail.with_next_index(after_idx);
+  MUTABLE tail = suspendTail__with_next_index(susp_tail, after_idx);
   builder__fill(&builder, idx, pre_value, tail);
   RETURN idx;
 END
@@ -240,17 +240,38 @@ END
 PRIVATE FN fsmRecursiveSplitter__with_lock_suspend?(with_node: WithBlock) RETURNS !Bool ->
   RETURN ((TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_node)))))).length() > 0);
 END
-PRIVATE FN fsmRecursiveSplitter__contains_unsupported?(body: ?Body) RETURNS !Bool EFFECTS REENTRANT ->
-  RETURN body |> ANY PARTIAL MATCH _ START
-    AST.WithBlock -> TRY (fsmRecursiveSplitter__with_unsupported?(_)),
-    AST.CatchBlock -> TRUE,
-    AST.WhileLoop -> TRY (fsmRecursiveSplitter__contains_unsupported?(_.do_branch)),
-    AST.WhileBindLoop -> TRY (fsmRecursiveSplitter__contains_unsupported?(_.do_branch)),
-    AST.ForRange -> TRY (fsmRecursiveSplitter__contains_unsupported?(_.body())),
-    AST.ForEach -> TRY (fsmRecursiveSplitter__contains_unsupported?(_.body())),
-    AST.IfStatement -> (TRY (fsmRecursiveSplitter__contains_unsupported?(_.then_branch)) OR TRY (fsmRecursiveSplitter__contains_unsupported?((_.else_branch OR_ELSE List[])))),
-    DEFAULT -> TRY (fsmRecursiveSplitter__stmt_unsupported_suspend?(_))
-  END;
+PRIVATE FN fsmRecursiveSplitter__contains_unsupported?(body: ?[]Locatable) RETURNS !Bool EFFECTS REENTRANT ->
+  FOR rtoc_stmt IN (body OR_ELSE List[]) DO
+    IF rtoc_stmt IS_A WithBlock AS rtoc_with THEN
+      IF TRY (fsmRecursiveSplitter__with_unsupported?(rtoc_with)) THEN
+        RETURN TRUE;
+      END
+    ELSE_IF rtoc_stmt IS_A CatchBlock THEN
+      RETURN TRUE;
+    ELSE_IF rtoc_stmt IS_A WhileLoop AS rtoc_while THEN
+      IF TRY (fsmRecursiveSplitter__contains_unsupported?(COPY rtoc_while.do_branch)) THEN
+        RETURN TRUE;
+      END
+    ELSE_IF rtoc_stmt IS_A WhileBindLoop AS rtoc_while_bind THEN
+      IF TRY (fsmRecursiveSplitter__contains_unsupported?(COPY rtoc_while_bind.do_branch)) THEN
+        RETURN TRUE;
+      END
+    ELSE_IF rtoc_stmt IS_A IfStatement AS rtoc_if THEN
+      IF (TRY (fsmRecursiveSplitter__contains_unsupported?(COPY rtoc_if.then_branch)) OR TRY (fsmRecursiveSplitter__contains_unsupported?(COPY rtoc_if.else_branch))) THEN
+        RETURN TRUE;
+      END
+    ELSE
+      IF TRY (fsmRecursiveSplitter__stmt_unsupported_suspend?(castLocatableToOptionalSegmentStmt(rtoc_stmt))) THEN
+        RETURN TRUE;
+      END
+      FOR rtoc_child IN aST__child_bodies(rtoc_stmt) DO
+        IF TRY (fsmRecursiveSplitter__contains_unsupported?(COPY rtoc_child)) THEN
+          RETURN TRUE;
+        END
+      END
+    END
+  END
+  RETURN FALSE;
 END
 PRIVATE FN fsmRecursiveSplitter__with_unsupported?(with_node: WithBlock) RETURNS !Bool ->
   IF TRY (fsmRecursiveSplitter__with_lock_suspend?(with_node)) THEN
@@ -259,18 +280,19 @@ PRIVATE FN fsmRecursiveSplitter__with_unsupported?(with_node: WithBlock) RETURNS
       RETURN TRUE;
     END
   END
-  RETURN TRY (fsmRecursiveSplitter__contains_unsupported?( CAST(COPY with_node.body AS ?Body)));
+  RETURN TRY (fsmRecursiveSplitter__contains_unsupported?(COPY with_node.body));
 END
 PRIVATE FN fsmRecursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) RETURNS !Bool ->
-  MUTABLE sus = IF ((stmt != NIL) AND (stmt IS_A Locatable)) THEN
-    segments__classify_suspend(castOptionalSegmentStmtToLocatable(stmt))
-  ELSE
-    NIL
-  END;
-  IF !(sus IS_A NextSuspend) THEN
+  MUTABLE sus: ?SegmentTail = NIL;
+  IF stmt EXISTS THEN
+    sus = TRY (segments__classify_suspend(castOptionalSegmentStmtToLocatable(stmt)));
+  END
+  IF !(IF sus EXISTS AS rtoc_sus THEN rtoc_sus IS_A NextSuspend ELSE FALSE END) THEN
     RETURN FALSE;
   END
-  MUTABLE pt = TRY (type__from_node_mut(sus.promise_ast, "FSM suspend promise"));
+  MUTABLE rtoc_promise_ast: ?Locatable = NIL;
+  PARTIAL MATCH UNWRAP (COPY sus) START SegmentTail.NextSuspend AS rtoc_next_suspend -> rtoc_promise_ast = COPY rtoc_next_suspend.promise_ast;, END
+  MUTABLE pt: ?Type = TRY (type__from_node_mut(UNWRAP (rtoc_promise_ast), "FSM suspend promise"));
   IF !(type__future?( UNWRAP (pt))) THEN
     RETURN TRUE;
   END
@@ -283,11 +305,7 @@ PRIVATE FN fsmRecursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) R
   RETURN FALSE;
 END
 PRIVATE FN fsmRecursiveSplitter__emit_pivot(stmt: SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, MUTABLE lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
-  MUTABLE sus = IF stmt IS_A Locatable THEN
-    segments__classify_suspend(castSegmentStmtToLocatable(stmt))
-  ELSE
-    NIL
-  END;
+  MUTABLE sus: ?SegmentTail = TRY (segments__classify_suspend(castSegmentStmtToLocatable(stmt)));
   IF sus THEN
     RETURN TRY (fsmRecursiveSplitter__emit_suspend(CAST(sus AS SuspendTail), after_idx, &builder));
   END
@@ -306,7 +324,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_suspend(susp_tail: SuspendTail, after_idx:
   IF !(segments__suspend_tail?(castSuspendTailToOptionalSegmentTail(susp_tail))) THEN
     panic("Unhandled suspend kind {}");
   END
-  MUTABLE tail = susp_tail.with_next_index(after_idx);
+  MUTABLE tail = suspendTail__with_next_index(susp_tail, after_idx);
   builder__fill(&builder, idx, List[], tail);
   RETURN idx;
 END
@@ -335,14 +353,14 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
   IF ctx_id_raw? IS_A Int64 AS int64 THEN
     MUTABLE int64_mutable = COPY int64;
     MUTABLE ctx_id: Int64 = CAST(int64_mutable AS Int64);
-    MUTABLE captured: {String}Type@multiowned = castTransformValueToHashMapStringTypeMultiowned((ctx[:captured] OR_ELSE {}));
+    MUTABLE captured: {String}Type@multiowned = castTransformValueToHashMapStringTypeMultiowned(ctx[:captured]);
     MUTABLE bg_rt_raw: ?TransformValue = COPY ctx[:bg_rt];
     IF bg_rt_raw? IS_A String AS string THEN
       MUTABLE string_mutable = COPY string;
       MUTABLE bg_rt: String = CAST(string_mutable AS String);
       MUTABLE caps_meta: []{String@symbol}FsmCapMetadataValue = List[];
       FOR _ IN caps DO
-  MUTABLE m = TRY (mIRLowering__fsm_cap_metadata(lowering, _, with_stmt, ctx_id, captured));
+    MUTABLE m: ?{String@symbol}FsmCapMetadataValue = TRY (mIRLowering__fsm_cap_metadata(lowering, _, with_stmt, ctx_id, captured));
   IF (m == NIL) THEN
           panic("fsm_cap_metadata failed");
   END
@@ -355,16 +373,16 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
       IF with_stmt.body IS_A []Any THEN
         rtoc_ternary_value_8 = with_stmt.body;
       ELSE
-        rtoc_ternary_value_8 = [with_stmt.body];
+        rtoc_ternary_value_8 = COPY with_stmt.body;
       END
       rtoc_ternary_value_8? };
       MUTABLE alias_overrides: {String}String = {};
       FOR _ IN caps_meta DO
       alias_overrides[CAST(_[:alias_name]? AS String)] = COPY CAST(_[:alias_data_ref]? AS String);
       END
-      MUTABLE cs_entry: Int64 = CAST(builder__with_alias_overrides(&builder, alias_overrides, %() USE(alias_overrides, bg_rt, body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
-  rtoc_lambda_result_14 = mIRLowering__with_fiber_capture_map(&lowering, alias_overrides, {:rt_override: bg_rt}, "__rt", %() USE(body_stmts, MUTABLE builder, ctx, lowering, release_idx) -> {
-  rtoc_lambda_result_13 = TRY (fsmRecursiveSplitter__emit_stmts(body_stmts, release_idx, &builder, &lowering, ctx));
+      MUTABLE cs_entry: Int64 = CAST(builder__with_alias_overrides(&builder, alias_overrides, %() USE(alias_overrides, bg_rt, body_stmts, MUTABLE builder, ctx, MUTABLE lowering, release_idx) -> {
+  rtoc_lambda_result_14 = mIRLowering__with_fiber_capture_map(&lowering, alias_overrides, {:rt_override: bg_rt}, "__rt", %() USE(body_stmts, MUTABLE builder, ctx, MUTABLE lowering, release_idx) -> {
+  rtoc_lambda_result_13 = TRY (fsmRecursiveSplitter__emit_stmts(CAST(body_stmts AS []SegmentStmt), release_idx, &builder, &lowering, ctx));
   rtoc_lambda_result_13
       });
   rtoc_lambda_result_14
@@ -1118,9 +1136,11 @@ FN castSuspendTailToOptionalSegmentTail(value: SuspendTail) RETURNS ?SegmentTail
   END
   panic("Invalid cast to ?SegmentTail");
 END
-FN castTransformValueToHashMapStringTypeMultiowned(value: TransformValue) RETURNS {String}Type@multiowned ->
-  IF value IS_A {String}Type@multiowned AS cast_payload THEN
-    RETURN cast_payload;
+FN castTransformValueToHashMapStringTypeMultiowned(value: ?TransformValue) RETURNS {String}Type@multiowned ->
+  IF value EXISTS AS value_present THEN
+    PARTIAL MATCH value_present START
+      TransformValue.HashMapValue AS cast_payload -> RETURN COPY cast_payload;,
+    END
   END
   RETURN {};
 END

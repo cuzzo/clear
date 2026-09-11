@@ -120,6 +120,17 @@ PUB STRUCT Segment {
 }
 PUB UNION SegmentTail { Done: Done, IoSuspend: IoSuspend, NextSuspend: NextSuspend, LockSuspend: LockSuspend, LoopBack: LoopBack, Goto: Goto, CondBranch: CondBranch }
 PUB UNION SuspendTail { IoSuspend: IoSuspend, NextSuspend: NextSuspend, LockSuspend: LockSuspend }
+PUB FN lockSuspend__with_next_index(self: LockSuspend, index_value: ?Int64) RETURNS LockSuspend ->
+  RETURN LockSuspend{ with_node: KEEP self.with_node, cap: COPY self.cap, prior_caps: COPY self.prior_caps, post_acquire_idx: COPY self.post_acquire_idx, next_index: COPY index_value, lock_index: COPY self.lock_index, prior_lock_indices: COPY self.prior_lock_indices };
+END
+PUB FN suspendTail__with_next_index(self: SuspendTail, index_value: ?Int64) RETURNS SegmentTail ->
+  PARTIAL MATCH self START
+    SuspendTail.IoSuspend AS item -> RETURN SegmentTail{ IoSuspend: COPY ioSuspend__with_next_index(item, index_value) };,
+    SuspendTail.NextSuspend AS item -> RETURN SegmentTail{ NextSuspend: COPY nextSuspend__with_next_index(item, index_value) };,
+    SuspendTail.LockSuspend AS item -> RETURN SegmentTail{ LockSuspend: COPY lockSuspend__with_next_index(item, index_value) };,
+  END
+  panic("suspend tail has no next index");
+END
 PUB STRUCT SplitResult {
   segments: []Segment
 }
