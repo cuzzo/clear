@@ -212,10 +212,10 @@ PUB FN pipelineRangeLowerer__unwrap_range_chain(self: PipelineRangeLowerer, MUTA
     MUTABLE stages: []Locatable = List[];
     MUTABLE cursor: Locatable = COPY node;
     WHILE (IF cursor IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) DO
-      MUTABLE rhs:? = aST__node_right(cursor);
+      MUTABLE rhs: ?Locatable = aST__node_right(cursor);
       IF aST__pipeline_fusible_stage?( UNWRAP (rhs)) THEN
-        stages = ([rhs] + stages);
-        cursor = locatable__left(cursor);
+        stages = ([UNWRAP (rhs)] + stages);
+        cursor = UNWRAP (locatable__left(cursor));
       ELSE
         RETURN NIL;
       END
@@ -515,7 +515,7 @@ END
 PUB FN pipelineRangeLowerer__sum_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: SumOp, smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan ->
     MUTABLE acc_zig = runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))) });
     MUTABLE expr_mir = TRY (pipelineRangeLowerer__numeric_fold_expr_typed(self, UNWRAP (fold_op.expression), prefix.item_var, acc_zig));
-    RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.acc, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new( TypeConstructionInput{ StringValue: acc_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, right: COPY expr_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], post_loop_stmts: List[], result_expr: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } } };
+    RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.acc, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new( TypeConstructionInput{ StringValue: COPY acc_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, right: COPY expr_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], post_loop_stmts: List[], result_expr: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } } };
 END
 PUB FN pipelineRangeLowerer__average_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: AverageOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan ->
     MUTABLE expr_f64 = TRY (pipelineRangeLowerer__numeric_fold_expr_typed(self, UNWRAP (fold_op.expression), prefix.item_var, "f64"));
@@ -720,14 +720,22 @@ PUB FN pipelineRangeLowerer__lower_range_fold_observable_distinct(self: Pipeline
       submit_contract_branch_value = TRY (callableContract__no_ownership(1));
     END
     MUTABLE submit_contract: CallableContract = submit_contract_branch_value?;
-    MUTABLE submit_expr = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__obs_acc", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "submit", args: [CAST(key_expr_mir AS Any)], try_wrap: FALSE, callable_contract: COPY submit_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+    MUTABLE submit_expr: Emittable = Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__obs_acc", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "submit", args: [CAST(key_expr_mir AS Any)], try_wrap: FALSE, callable_contract: COPY submit_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL  } };
     IF !(is_bounded) THEN
-      submit_expr = TryCatch{ expr: Emittable{ MIRMethodCall: COPY submit_expr }, catch_body: Emittable{ Lit: COPY Lit{ value: "unreachable", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+      MUTABLE rtoc_inner_submit: Emittable = COPY submit_expr;
+      submit_expr = Emittable{ TryCatch: COPY TryCatch{ expr: rtoc_inner_submit, catch_body: Emittable{ Lit: COPY Lit{ value: "unreachable", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL  } };
     END
-    MUTABLE publish = [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY submit_expr }, discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
+    MUTABLE publish = [Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY submit_expr, discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
     MUTABLE inner_ctor_branch_value: ?TryCatch = NIL;
     IF is_bounded THEN
-      inner_ctor_branch_value = pipelineRangeLowerer__observable_catch_unreachable(self, Emittable{ Call: COPY Call{ callee: "CheatLib.obs.StreamSetBounded(${elem_zig}, ${cap}).init", args: [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
+    MUTABLE rtoc_cap_text: String = "0";
+    IF cap EXISTS AS rtoc_cap THEN
+      MATCH rtoc_cap START
+        TypeArrayCapacity.Int64Value AS n -> rtoc_cap_text = n.toString();,
+        TypeArrayCapacity.SymbolValue AS sym -> rtoc_cap_text = COPY CAST(sym AS String);
+      END
+    END
+      inner_ctor_branch_value = pipelineRangeLowerer__observable_catch_unreachable(self, Emittable{ Call: COPY Call{ callee: "CheatLib.obs.StreamSetBounded(${elem_zig}, ${rtoc_cap_text}).init", args: [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
     ELSE
       inner_ctor_branch_value = pipelineRangeLowerer__observable_catch_unreachable(self, Emittable{ Call: COPY Call{ callee: "CheatLib.obs.StreamSet(${elem_zig}).init", args: [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
     END
