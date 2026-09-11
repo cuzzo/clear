@@ -10305,8 +10305,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END;
     MUTABLE receiver = COPY UNWRAP (ast_args[receiver_index]);
     MUTABLE type_arg = Ident{ name: TRY (mIRLowering__user_protocol_receiver_type_arg(&rtoc_self_view, receiver, receiver_type)), lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE all_args = ([type_arg, Ident{ name: mIRLowering__runtime_binding_name(&rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL }] + mir_args);
-    MUTABLE fn_zig = "__clearProtocol_${(MATCH node START CallNode.FuncCall AS item -> item.protocol_name, CallNode.MethodCall AS item -> item.protocol_name END)}_${mIRLowering__zig_safe_name(rtoc_self_view, CAST(symbol(UNWRAP ((MATCH node START CallNode.FuncCall AS item -> item.protocol_operation, CallNode.MethodCall AS item -> item.protocol_operation END))) AS String))}";
+    MUTABLE all_args: []Emittable = ([Emittable{ Ident: COPY type_arg }, Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(&rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } }] + mir_args);
+    MUTABLE protocol_name: String = "";
+    MATCH node START
+      CallNode.FuncCall AS item ->
+        protocol_name = COPY (item.protocol_name OR_ELSE "");,
+      CallNode.MethodCall AS item ->
+        protocol_name = COPY (item.protocol_name OR_ELSE "");,
+    END
+    MUTABLE protocol_operation: String@symbol = :none;
+    MATCH node START
+      CallNode.FuncCall AS item ->
+        protocol_operation = COPY (item.protocol_operation OR_ELSE :none);,
+      CallNode.MethodCall AS item ->
+        protocol_operation = COPY (item.protocol_operation OR_ELSE :none);,
+    END
+    MUTABLE fn_zig = "__clearProtocol_${protocol_name}_${mIRLowering__zig_safe_name(rtoc_self_view, CAST(protocol_operation AS String))}";
     MUTABLE can_fail = type__error_union?(functionSignature__return_type(signature));
     RETURN TRY (mIRLowering__finalize_call_result(&rtoc_self_view, &node, fn_zig, all_args, can_fail, TRY (mIRLowering__call_owned_return?(&rtoc_self_view, castCallNodeToNode(node))), TRY (mIRLowering__callable_contract_for_lowered_args(&rtoc_self_view, signature, ast_args, &mir_args)), ast_args, mir_args));
 }
