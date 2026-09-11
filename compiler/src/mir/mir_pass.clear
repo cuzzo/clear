@@ -360,7 +360,7 @@ PRIVATE FN mIRPass__consume_call_args(self: MIRPass, node: Node, MUTABLE names: 
     IF (aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
       sig_obj = functionSignature__unwrap( CAST(node__matched_signature(node) AS ?X));
     END
-    MUTABLE params: []Any = List[];
+    MUTABLE params: []Param = List[];
     IF sig_obj != NIL THEN
       params = COPY TRY (functionSignature__params(sig_obj));
     END
@@ -369,15 +369,20 @@ PRIVATE FN mIRPass__consume_call_args(self: MIRPass, node: Node, MUTABLE names: 
     ELSE
       0
     END;
-    MUTABLE rtoc_each_items_7:? = node__args(node);
+    MUTABLE rtoc_args: []Locatable = (node__args(node) OR_ELSE List[]);
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_7.length() DO
-      MUTABLE param: ?Any = COPY params[(rtoc_idx + param_offset)];
-      MUTABLE consumes = ((param != NIL) AND (param.takes() == TRUE));
-      IF (UNWRAP (rtoc_each_items_7[rtoc_idx]) IS_A Identifier AND ((UNWRAP (rtoc_each_items_7[rtoc_idx]).was_moved OR consumes))) THEN
-          TRY (mIRPass__add_if_consumed(self, rtoc_each_items_7[rtoc_idx], &names, facts, (aST__moved?(UNWRAP (rtoc_each_items_7[rtoc_idx])) OR consumes)));
+    WHILE rtoc_idx < rtoc_args.length() DO
+      MUTABLE rtoc_arg: Locatable = COPY UNWRAP (rtoc_args[rtoc_idx]);
+      MUTABLE param: ?Param = COPY params[(rtoc_idx + param_offset)];
+      MUTABLE consumes = ((param != NIL) AND ((param.takes OR_ELSE FALSE) == TRUE));
+      IF rtoc_arg IS_A Identifier AS rtoc_arg_ident THEN
+        IF ((rtoc_arg_ident.was_moved OR_ELSE FALSE) OR consumes) THEN
+          TRY (mIRPass__add_if_consumed(self, rtoc_arg_ident, &names, facts, (aST__moved?(rtoc_arg) OR consumes)));
+        ELSE
+          TRY (mIRPass__walk_consumed(self, rtoc_arg, &names, facts));
+        END
       ELSE
-          TRY (mIRPass__walk_consumed(self, UNWRAP (rtoc_each_items_7[rtoc_idx]), &names, facts));
+          TRY (mIRPass__walk_consumed(self, rtoc_arg, &names, facts));
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -438,11 +443,11 @@ PRIVATE FN mIRPass__stamp_reassign_cleanup_mut(MUTABLE self: MIRPass, stmt: Loca
           IF !((cleanupEntry__needs_cleanup?(entry) OR cleanupEntry__heap?(entry))) THEN
             RETURN;
           END
-          MUTABLE ti = TRY (aST__full_type_mut( Locatable{ BindExpr: bind_expr_mutable }));
+          MUTABLE ti = TRY (aST__full_type_mut( Locatable{ BindExpr: COPY bind_expr_mutable }));
           IF type__symbol?((TRY (type__new(TypeConstructionInput{ Type: COPY ti })))) THEN
             RETURN;
           END
-          MUTABLE zig_type = ((TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY type__resolved(ti) }))))) OR_ELSE CAST(type__resolved(ti) AS String)));
+    MUTABLE zig_type = TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY type__resolved(ti) })))));
           bind_expr_mutable.reassign_cleanup = ReassignPlan{ alloc: cleanupEntry__alloc(entry), zig_type: COPY zig_type, lifecycle_plan: lifecycle_value };
         ELSE
           panic("missing planned lifecycle for reassignment '{}'");
@@ -456,7 +461,10 @@ PRIVATE FN mIRPass__stamp_reassign_cleanup_mut(MUTABLE self: MIRPass, stmt: Loca
 END
 PRIVATE FN mIRPass__cleanup_entry_for_binding_node(self: MIRPass, node: Locatable, facts: FrozenCleanupFacts) RETURNS CleanupEntry@multiowned ->
     MUTABLE symbol:? = aST__node__symbol(node);
-    MUTABLE decl = symbol.reg;
+    MUTABLE decl: ?Locatable = NIL;
+    IF symbol?.reg EXISTS AS rtoc_reg THEN
+      decl = castSymbolEntryRegInputToLocatable(rtoc_reg);
+    END
     MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(decl);
     IF entry EXISTS AS entry_value THEN
       RETURN KEEP entry_value;
@@ -580,7 +588,7 @@ PRIVATE FN mIRPass__stamp_moved_guard_info_mut(MUTABLE self: MIRPass, MUTABLE fn
       info[rtoc_key] = TRUE;
     END
     END
-    IF !((info.count == 0)) THEN
+    IF !((info.length() == 0)) THEN
       fn_value.moved_guard_info = info;
     END
 END
@@ -611,7 +619,7 @@ PRIVATE FN mIRPass__mark_returned_cleanup_bindings_mut(MUTABLE self: MIRPass, fn
     END
 END
 PRIVATE FN mIRPass__insert_return_mut(MUTABLE self: MIRPass, result: []Locatable, ret_node: ReturnNode, facts: FrozenCleanupFacts, fn_node: ?FunctionDef = NIL) RETURNS Void ->
-    MUTABLE _: Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef> = CAST(Tuple{result, ret_node, facts, COPY fn_node} AS Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef>);
+    MUTABLE _: Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef> = CAST(Tuple{COPY result, COPY ret_node, COPY facts, COPY fn_node} AS Tuple<[]Locatable, ReturnNode, FrozenCleanupFacts, ?FunctionDef>);
     NIL;
 END
 PRIVATE FN mIRPass__collect_return_escapes(self: MIRPass, ret_node: ReturnNode, facts: FrozenCleanupFacts, fn_node: ?FunctionDef = NIL) RETURNS ![]String ->
