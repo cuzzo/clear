@@ -418,14 +418,11 @@ END
 PUB FN pipelineRangeLowerer__bc_for_iter_range(self: PipelineRangeLowerer, range_lit: RangeLit, capture_name: ?String) RETURNS Tuple<IterRange, ?String> ->
     MUTABLE start_mir = runtimeHost__range_visit_mir(self.host, range_lit.start);
     MUTABLE end_mir = runtimeHost__range_visit_mir(self.host, range_lit.finish);
-    MUTABLE end_expr_branch_value: ?MIRBinOp = NIL;
+    MUTABLE end_expr: Emittable = COPY end_mir;
     IF range_lit.inclusive THEN
-      end_expr_branch_value = MIRBinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
-    ELSE
-      end_expr_branch_value = end_mir;
+      end_expr = Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    MUTABLE end_expr: MIRBinOp = end_expr_branch_value?;
-    RETURN CAST(Tuple{IterRange{ start: start_mir, end_val: end_expr, capture_type: :i64, lowered_node_id: NIL, ownership_consumption: NIL }, capture_name} AS Tuple<IterRange, ?String>);
+    RETURN CAST(Tuple{IterRange{ start: start_mir, end_val: end_expr, capture_type: :i64, lowered_node_id: NIL, ownership_consumption: NIL }, COPY capture_name} AS Tuple<IterRange, ?String>);
 END
 PUB FN pipelineRangeLowerer__numeric_fold_expr_typed(self: PipelineRangeLowerer, expr_ast: Locatable, item_var: String, acc_zig: String) RETURNS !Emittable ->
     MUTABLE expr_mir = runtimeHost__range_visit_mir_with_context(self.host, expr_ast, item_var);
