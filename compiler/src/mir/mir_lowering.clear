@@ -293,7 +293,7 @@ FN mIRLowering__ast_void_type?(self: MIRLowering, type_info: ?TypeTypeInput) RET
       IF ruby_union_scalar_equal_TypeTypeInput_String_symbol__mir_lowering(type_info_value, :Void) THEN
         RETURN TRUE;
       ELSE
-        MUTABLE ti: ?Type = TRY (type__from_node(castTypeTypeInputToType(type_info_value)));
+        MUTABLE ti: ?Type = TRY (type__from_node(castTypeTypeInputToType__mir_lowering(type_info_value)));
         IF ti EXISTS AS ti_value THEN
           RETURN type__void?(ti_value);
         ELSE
@@ -539,7 +539,7 @@ FN mIRLowering__place_value_for_destination(MUTABLE self: MIRLowering, MUTABLE m
     END
     rtoc_ternary_value_10 };
     IF !((IF dst != NIL THEN
-      TRY (type__byte_string?( UNWRAP (castTypeTypeInputToType(dst))))
+      TRY (type__byte_string?( UNWRAP (castTypeTypeInputToType__mir_lowering(dst))))
     ELSE
       NIL
     END)) THEN
@@ -3528,45 +3528,45 @@ PRIVATE FN mIRLowering__mir_cast(self: MIRLowering, mir_node: Emittable, from_ty
       rtoc_ternary_value_120 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__mir_lowering(to_type)));
     END
     rtoc_ternary_value_120? };
-    IF (type__semantic_type_key( castTypeTypeInputToType( TypeTypeInput{ Type: TypeTypeInput{ Type: UNWRAP (castTypeTypeInputToType( TypeTypeInput{ Type: UNWRAP (castTypeTypeInputToType( TypeTypeInput{ Type: from_t })) })) } })) == type__semantic_type_key(to_t)) THEN
+    IF (type__semantic_type_key( castTypeTypeInputToType__mir_lowering( TypeTypeInput{ Type: TypeTypeInput{ Type: UNWRAP (castTypeTypeInputToType__mir_lowering( TypeTypeInput{ Type: UNWRAP (castTypeTypeInputToType__mir_lowering( TypeTypeInput{ Type: from_t })) })) } })) == type__semantic_type_key(to_t)) THEN
       RETURN NIL;
     END
     IF ((typeTypeInput__indirect?(to_t) AND !(type__indirect?(from_t))) AND (type__resolved(from_t) == to_t.resolved())) THEN
       RETURN NIL;
     END
-    IF (TRY (type__zig_type(castTypeTypeInputToType( TypeTypeInput{ Type: from_t }))) == TRY (type__zig_type(to_t))) THEN
+    IF (TRY (type__zig_type(castTypeTypeInputToType__mir_lowering( TypeTypeInput{ Type: from_t }))) == TRY (type__zig_type(to_t))) THEN
       RETURN NIL;
     END
     MUTABLE zig_to = TRY (mIRLowering__transpile_type(self, castTypeTypeInputToZigTypeMapperType(to_t)));
     IF (type__fn_type?(from_t) OR to_t.fn_type?()) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__integer?(from_t) AND type__float?( castTypeTypeInputToType(to_t))) THEN
+    IF (type__integer?(from_t) AND type__float?( castTypeTypeInputToType__mir_lowering(to_t))) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: NIL, method: :floatFromInt, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__float?(from_t) AND type__integer?( castTypeTypeInputToType(to_t))) THEN
+    IF (type__float?(from_t) AND type__integer?( castTypeTypeInputToType__mir_lowering(to_t))) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: NIL, method: :intFromFloat, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__integer?( castTypeTypeInputToType(from_t)) AND type__integer?(to_t)) THEN
+    IF (type__integer?( castTypeTypeInputToType__mir_lowering(from_t)) AND type__integer?(to_t)) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: NIL, method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__float?( castTypeTypeInputToType(from_t)) AND type__float?(to_t)) THEN
+    IF (type__float?( castTypeTypeInputToType__mir_lowering(from_t)) AND type__float?(to_t)) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: NIL, method: :floatCast, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__dynamic?( castTypeTypeInputToType(from_t)) AND type__dynamic?(to_t)) THEN
+    IF (type__dynamic?( castTypeTypeInputToType__mir_lowering(from_t)) AND type__dynamic?(to_t)) THEN
       RETURN NIL;
     END
-    IF (type__fixed?(from_t) AND type__empty_list?( castTypeTypeInputToType(to_t))) THEN
+    IF (type__fixed?(from_t) AND type__empty_list?( castTypeTypeInputToType__mir_lowering(to_t))) THEN
       RETURN NIL;
     END
-    IF (type__fixed?(from_t) AND type__dynamic?( castTypeTypeInputToType(to_t))) THEN
+    IF (type__fixed?(from_t) AND type__dynamic?( castTypeTypeInputToType__mir_lowering(to_t))) THEN
       MUTABLE from_elem: ?Type = TRY (type__element_type(from_t));
       MUTABLE to_elem: ?Type = TRY (type__element_type(to_t));
       IF (((from_elem != NIL) AND to_elem) AND (TRY (type__surface_name(TypeTypeInput{ Type: COPY UNWRAP (from_elem) })) == TRY (type__surface_name(TypeTypeInput{ Type: COPY to_elem })))) THEN
         RETURN NIL;
       END
     END
-    IF (type__map?( castTypeTypeInputToType(from_t)) AND type__map?(to_t)) THEN
+    IF (type__map?( castTypeTypeInputToType__mir_lowering(from_t)) AND type__map?(to_t)) THEN
       RETURN NIL;
     END
     IF to_t.error_union?() THEN
@@ -8057,7 +8057,7 @@ PRIVATE FN mIRLowering__empty_stdlib_call_facts(self: MIRLowering) RETURNS Stdli
     RETURN StdlibCallFacts{ args: List[], ownership: COPY CallOwnershipFacts{ takes_indices: COPY Set[], consumed_names: List[], consumed_operands: List[] } };
 END
 PRIVATE FN mIRLowering__stdlib_coerce_type(self: MIRLowering, type_info: TypeTypeInput) RETURNS !?String@symbol ->
-    MUTABLE ti: ?Type = TRY (type__from_node(castTypeTypeInputToType(type_info)));
+    MUTABLE ti: ?Type = TRY (type__from_node(castTypeTypeInputToType__mir_lowering(type_info)));
     IF ti EXISTS AS ti_value THEN
       MUTABLE resolved = type__resolved(ti_value);
       IF TRUE THEN
@@ -14184,7 +14184,7 @@ PRIVATE FN mIRLowering__rc_payload_zig_type(self: MIRLowering, ti: Type) RETURNS
 END
 PRIVATE FN mIRLowering__generic_type_arg_zig(self: MIRLowering, type: TypeTypeInput) RETURNS !String ->
     IF (IF type IS_A Type AS type_as_type THEN type__generic_payload_type_arg?(type_as_type) ELSE FALSE END) THEN
-      RETURN TRY (mIRLowering__rc_payload_zig_type(self, UNWRAP (castTypeTypeInputToType(type))));
+      RETURN TRY (mIRLowering__rc_payload_zig_type(self, UNWRAP (castTypeTypeInputToType__mir_lowering(type))));
     END
     RETURN TRY (type__zig_type((TRY (type__new(castTypeTypeInputToTypeConstructionInput__mir_lowering(type))))));
 END
@@ -19257,7 +19257,7 @@ FN castTypeExpressionDimensionToInt64(value: TypeExpressionDimension) RETURNS In
   END
   RETURN 0_i64;
 END
-FN castTypeTypeInputToType(value: TypeTypeInput) RETURNS Type ->
+FN castTypeTypeInputToType__mir_lowering(value: TypeTypeInput) RETURNS Type ->
   IF value IS_A Type AS cast_payload THEN
     RETURN cast_payload;
   END

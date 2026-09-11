@@ -12063,9 +12063,9 @@ PRIVATE FN typeAnalysisSession__promote_pipe_to_observable_dest_mut(MUTABLE self
 END
 PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode, mutable_flag: Bool) RETURNS !Void ->
     MUTABLE value = UNWRAP (declarationNode__value(node));
-    TRY (typeAnalysisSession__verify_unrestricted_mut(&self, UNWRAP (castDeclarationNodeToNode(node))));
-    TRY (typeAnalysisSession__handle_assign_move(&self, UNWRAP (castDeclarationNodeToNode(node))));
-    TRY (typeAnalysisSession__handle_assign_borrow(&self, UNWRAP (castDeclarationNodeToNode(node))));
+    TRY (typeAnalysisSession__verify_unrestricted_mut(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
+    TRY (typeAnalysisSession__handle_assign_move(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
+    TRY (typeAnalysisSession__handle_assign_borrow(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
     MUTABLE declared_type: ?Type = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
@@ -12113,7 +12113,7 @@ PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysi
     MUTABLE storage = TRY (typeAnalysisSession__finalize_decl_storage_mut(&self, castDeclarationNodeToAllocDeclarationNode(node), castTypeToFinalType(COPY rtoc_final)));
     TRY (typeAnalysisSession__propagate_collection_metadata_mut(&self, &node, castTypeToAnnotationTypeShape(COPY rtoc_final)));
     typeAnalysisSession__propagate_call_flags_mut(&self, castDeclarationNodeToAnnotationNode(node));
-    TRY (typeAnalysisSession__set_cleanup_alloc_mut(&self, UNWRAP (castDeclarationNodeToNode(node))));
+    TRY (typeAnalysisSession__set_cleanup_alloc_mut(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
     MUTABLE resource_result = TRY (typeAnalysisSession__resolve_resource_close(&self, UNWRAP (castDeclarationNodeToLocatable(node))));
     MATCH node START
       DeclarationNode.VarDecl AS item ->
@@ -12612,7 +12612,7 @@ PRIVATE FN typeAnalysisSession__finalize_ownership_transport_facts_mut(MUTABLE s
       MUTABLE node: DeclarationNode = COPY rtoc_decision.alias_fact.declaration;
       declarationNode__set_ownership_transport_plan_mut(&node, COPY rtoc_decision.plan);
       IF (rtoc_decision.plan.action == :move) THEN
-          TRY (typeAnalysisSession__handle_assign_move(&self, UNWRAP (castDeclarationNodeToNode(node))));
+          TRY (typeAnalysisSession__handle_assign_move(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -12763,7 +12763,7 @@ PRIVATE FN typeAnalysisSession__promote_declaration_value_mut(MUTABLE self: Type
       TRY (typeAnalysisSession__promote_to_expr_if_mut(&self, UNWRAP (castDeclarationNodeToLocatable(node)), UNWRAP (castLocatableToIfStatement(UNWRAP (declarationNode__value(node))))));
     END
     IF (MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A MatchStatement, DeclarationNode.BindExpr AS item -> item.value IS_A MatchStatement END) THEN
-      TRY (typeAnalysisSession__promote_to_expr_match_mut(&self, UNWRAP (castDeclarationNodeToLocatable(node)), castLocatableToMatchStatement(UNWRAP (declarationNode__value(node)))));
+      TRY (typeAnalysisSession__promote_to_expr_match_mut(&self, UNWRAP (castDeclarationNodeToLocatable(node)), castLocatableToMatchStatement__type_analysis_session(UNWRAP (declarationNode__value(node)))));
     END
 END
 PRIVATE FN typeAnalysisSession__bind_declares_new_symbol?(MUTABLE self: TypeAnalysisSession, node: BindExpr, MUTABLE scope: Scope) RETURNS Bool ->
@@ -13090,7 +13090,7 @@ PRIVATE FN typeAnalysisSession__visit_Assignment(MUTABLE self: TypeAnalysisSessi
       TRY (typeAnalysisSession__promote_to_expr_if_mut(&self, Locatable{ Assignment: COPY node }, &rtoc_if_value));
     END
     IF node.value IS_A MatchStatement THEN
-      MUTABLE rtoc_match_value = castLocatableToMatchStatement(node.value);
+      MUTABLE rtoc_match_value = castLocatableToMatchStatement__type_analysis_session(node.value);
       TRY (typeAnalysisSession__promote_to_expr_match_mut(&self, Locatable{ Assignment: COPY node }, &rtoc_match_value));
     END
     TRY (typeAnalysisSession__verify_unrestricted_mut(&self, Node{ Assignment: COPY node }));
@@ -15746,13 +15746,13 @@ PRIVATE FN typeAnalysisSession__visit_BinaryOp(MUTABLE self: TypeAnalysisSession
       TRY (typeAnalysisSession__promote_to_expr_if_mut(&self, Locatable{ BinaryOp: COPY node }, castLocatableToIfStatement__type_analysis_session(node.left)));
     END
     IF node.left IS_A MatchStatement THEN
-      TRY (typeAnalysisSession__promote_to_expr_match_mut(&self, Locatable{ BinaryOp: COPY node }, castLocatableToMatchStatement(node.left)));
+      TRY (typeAnalysisSession__promote_to_expr_match_mut(&self, Locatable{ BinaryOp: COPY node }, castLocatableToMatchStatement__type_analysis_session(node.left)));
     END
     IF node.right IS_A IfStatement THEN
       TRY (typeAnalysisSession__promote_to_expr_if_mut(&self, Locatable{ BinaryOp: COPY node }, castLocatableToIfStatement__type_analysis_session(node.right)));
     END
     IF node.right IS_A MatchStatement THEN
-      TRY (typeAnalysisSession__promote_to_expr_match_mut(&self, Locatable{ BinaryOp: COPY node }, castLocatableToMatchStatement(node.right)));
+      TRY (typeAnalysisSession__promote_to_expr_match_mut(&self, Locatable{ BinaryOp: COPY node }, castLocatableToMatchStatement__type_analysis_session(node.right)));
     END
     MUTABLE left_type = TRY (aST__full_type_mut(node.left));
     MUTABLE right_type = TRY (aST__full_type_mut(node.right));
@@ -18099,7 +18099,7 @@ FN castDeclarationNodeToLocatable(value: DeclarationNode) RETURNS Locatable ->
   END
   panic("Invalid cast to Locatable");
 END
-FN castDeclarationNodeToNode(value: DeclarationNode) RETURNS Node ->
+FN castDeclarationNodeToNode__type_analysis_session(value: DeclarationNode) RETURNS Node ->
   PARTIAL MATCH value START
     DeclarationNode.VarDecl AS cast_payload -> RETURN Node{ VarDecl: COPY cast_payload };,
     DeclarationNode.BindExpr AS cast_payload -> RETURN Node{ BindExpr: COPY cast_payload };,
@@ -18477,7 +18477,7 @@ FN castLocatableToLocatable__type_analysis_session(value: Locatable) RETURNS Loc
   END
   panic("Invalid cast to Locatable");
 END
-FN castLocatableToMatchStatement(value: Locatable) RETURNS MatchStatement ->
+FN castLocatableToMatchStatement__type_analysis_session(value: Locatable) RETURNS MatchStatement ->
   IF value IS_A MatchStatement AS cast_payload THEN
     RETURN cast_payload;
   END
