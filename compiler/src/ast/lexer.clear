@@ -549,19 +549,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN lexer__current_offset(rtoc_self_view);
 }
 END
-PRIVATE FN lexer__current_offset(self: Lexer) RETURNS Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.base_offset + rtoc_self_view.s.pos());
-}
+PRIVATE FN lexer__current_offset(self: Lexer) RETURNS Int64 ->
+    RETURN (self.base_offset + self.s.pos());
 END
-PRIVATE FN lexer__source_token(self: Lexer, type: String@symbol, value: ?TokenValue, line: Int64, column: Int64, start_offset: Int64, end_line: Int64, end_column: Int64, end_offset: Int64) RETURNS Token
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN Token{ type: COPY type, value: COPY value, line: COPY line, column: COPY column, file: COPY rtoc_self_view.file, start_offset: COPY start_offset, end_offset: COPY end_offset, end_line: COPY end_line, end_column: COPY end_column };
-}
+PRIVATE FN lexer__source_token(self: Lexer, type: String@symbol, value: ?TokenValue, line: Int64, column: Int64, start_offset: Int64, end_line: Int64, end_column: Int64, end_offset: Int64) RETURNS Token ->
+    RETURN Token{ type: COPY type, value: COPY value, line: COPY line, column: COPY column, file: COPY self.file, start_offset: COPY start_offset, end_offset: COPY end_offset, end_line: COPY end_line, end_column: COPY end_column };
 END
 PRIVATE FN lexer__advance_pos(MUTABLE self: Lexer, str: String) RETURNS Int64
   REQUIRES self: LOCAL
@@ -580,13 +572,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN lexer__strip_digit_separators(self: Lexer, matched: String, suffix: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN lexer__strip_digit_separators(self: Lexer, matched: String, suffix: String) RETURNS String ->
     MUTABLE body = regexReplaceFirst__lexer(matched, "_${escapeRegex__lexer(suffix)}\\z", "");
     RETURN body.replace("_", "");
-}
 END
 PRIVATE FN lexer__add_prefixed_int(MUTABLE self: Lexer, val: Int64, suffix: String, start_col: Int64) RETURNS !?Int64
   REQUIRES self: LOCAL
@@ -623,24 +611,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN lexer__numeric_suffix?(self: Lexer, suffix: String) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((lexer__integer_suffix?(rtoc_self_view, suffix) OR (suffix == "f32")) OR (suffix == "f64"));
-}
+PRIVATE FN lexer__numeric_suffix?(self: Lexer, suffix: String) RETURNS Bool ->
+    RETURN ((lexer__integer_suffix?(self, suffix) OR (suffix == "f32")) OR (suffix == "f64"));
 END
-PRIVATE FN lexer__integer_suffix?(self: Lexer, suffix: String) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN lexer__integer_suffix?(self: Lexer, suffix: String) RETURNS Bool ->
     RETURN (["u8", "i8", "i16", "u16", "i32", "u32", "i64", "u64"]).contains?(suffix);
-}
 END
-PRIVATE FN lexer__integer_suffix_contains?(self: Lexer, suffix: String, value: Int64) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN lexer__integer_suffix_contains?(self: Lexer, suffix: String, value: Int64) RETURNS Bool ->
     RETURN PARTIAL MATCH suffix START
       "u8" -> (value <= 255),
       "i8" -> (value <= 127),
@@ -652,22 +629,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       "u64" -> (((((value >> 63)) >> 1)) == 0),
       DEFAULT -> FALSE
     END;
-}
 END
-PRIVATE FN lexer__check_based_literal(self: Lexer, value: Int64) RETURNS !Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN lexer__check_based_literal(self: Lexer, value: Int64) RETURNS !Int64 ->
     IF (((((value >> 63)) >> 1)) != 0) THEN
       RAISE Input, Error, "Lexer Error: Literal {} overflows u64 (range {})";
     END
     RETURN COPY value;
-}
 END
-PRIVATE FN lexer__integer_suffix_range_text(self: Lexer, suffix: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN lexer__integer_suffix_range_text(self: Lexer, suffix: String) RETURNS String ->
     IF (suffix == "u8") THEN
       RETURN "0..255";
     ELSE_IF (suffix == "i8") THEN
@@ -687,7 +656,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN "";
     END
-}
 END
 PUB FN lexer__new(source: String, interpolation_depth: Int64 = 0, file: ?String = NIL, start_line: Int64 = 1, start_column: Int64 = 1, start_offset: Int64 = 0, budget: ?FrontendResourceBudget = NIL) RETURNS !Lexer@multiowned ->
   MUTABLE self = Lexer{ base_offset: start_offset, budget: (budget OR_ELSE frontendResourceBudget__new()), column: start_column, file: COPY file, interpolation_depth: interpolation_depth, line: start_line, s: Scanner{ inner: compilerRegexScanner(COPY source) }, tokens: List[] };

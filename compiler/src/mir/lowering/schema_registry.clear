@@ -16,28 +16,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.lookup_proc = %(name) USE(rtoc_self_view) -> mIRLoweringSchemas__lookup(rtoc_self_view, name);
 }
 END
-PUB FN mIRLoweringSchemas__lookup_proc(self: MIRLoweringSchemas) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.lookup_proc;
-}
+PUB FN mIRLoweringSchemas__lookup_proc(self: MIRLoweringSchemas) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult ->
+    RETURN COPY self.lookup_proc;
 END
-PUB FN mIRLoweringSchemas__lookup(self: MIRLoweringSchemas, name: String@symbol) RETURNS ?TypeSchemaLookupResult
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE key = mIRLoweringSchemas__schema_key(rtoc_self_view, name);
-    MUTABLE struct_schema: ?StructSchema@multiowned = COPY rtoc_self_view.struct_schemas[key];
+PUB FN mIRLoweringSchemas__lookup(self: MIRLoweringSchemas, name: String@symbol) RETURNS ?TypeSchemaLookupResult ->
+    MUTABLE key = mIRLoweringSchemas__schema_key(self, name);
+    MUTABLE struct_schema: ?StructSchema@multiowned = COPY self.struct_schemas[key];
     IF struct_schema EXISTS AS struct_schema_value THEN
       RETURN TypeSchemaLookupResult{ StructSchemaMultiowned: COPY struct_schema_value };
     END
-    MUTABLE union_schema: ?UnionSchema@multiowned = COPY rtoc_self_view.union_schemas[key];
+    MUTABLE union_schema: ?UnionSchema@multiowned = COPY self.union_schemas[key];
     IF union_schema EXISTS AS union_schema_value THEN
       RETURN TypeSchemaLookupResult{ UnionSchemaMultiowned: COPY union_schema_value };
     END
-    RETURN COPY rtoc_self_view.enum_schemas[key];
-}
+    RETURN COPY self.enum_schemas[key];
 END
 PUB FN mIRLoweringSchemas__replace_lookup_proc_mut(MUTABLE self: MIRLoweringSchemas, lookup_proc: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Void
   REQUIRES self: LOCAL
@@ -85,12 +77,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLoweringSchemas__schema_key(self: MIRLoweringSchemas, name: String@symbol) RETURNS String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRLoweringSchemas__schema_key(self: MIRLoweringSchemas, name: String@symbol) RETURNS String@symbol ->
     RETURN COPY name;
-}
 END
 PUB FN mIRLoweringSchemas__new(struct_schemas: {String@symbol}StructSchema, enum_schemas: {String@symbol}[]TypeEnumVariantsItem, union_schemas: {String@symbol}UnionSchema) RETURNS MIRLoweringSchemas@multiowned ->
   MUTABLE self = MIRLoweringSchemas{ enum_schemas: COPY enum_schemas, lookup_proc: %(arg0: String@symbol) -> CAST(NIL AS ?TypeSchemaLookupResult), struct_schemas: COPY struct_schemas, union_schemas: COPY union_schemas };

@@ -102,12 +102,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN mIRLoweringCounters__next_one_based(&rtoc_self_view, MIRLoweringCounterKind.ForLoop);
 }
 END
-PUB FN mIRLoweringCounters__snapshot(self: MIRLoweringCounters) RETURNS MIRLoweringCounterSnapshot
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN MIRLoweringCounterSnapshot{ values: COPY rtoc_self_view.values };
-}
+PUB FN mIRLoweringCounters__snapshot(self: MIRLoweringCounters) RETURNS MIRLoweringCounterSnapshot ->
+    RETURN MIRLoweringCounterSnapshot{ values: COPY self.values };
 END
 PUB FN mIRLoweringCounters__restore_mut(MUTABLE self: MIRLoweringCounters, snapshot_value: MIRLoweringCounterSnapshot) RETURNS Void
   REQUIRES self: LOCAL
@@ -140,10 +136,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN MIRLoweringGeneratedId{ kind: COPY kind, value: (value + offset) };
 }
 END
-PRIVATE FN mIRLoweringCounters__counter_key(self: MIRLoweringCounters, kind: MIRLoweringCounterKind) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRLoweringCounters__counter_key(self: MIRLoweringCounters, kind: MIRLoweringCounterKind) RETURNS String ->
     IF (kind == MIRLoweringCounterKind.Tmp) THEN
       RETURN "tmp";
     END
@@ -175,7 +168,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN "loop_mark";
     END
     RETURN "for_loop";
-}
 END
 PUB FN mIRLoweringCounters__new() RETURNS MIRLoweringCounters@multiowned ->
   MUTABLE self = MIRLoweringCounters{ values: {} };

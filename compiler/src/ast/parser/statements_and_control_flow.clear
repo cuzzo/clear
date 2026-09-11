@@ -225,20 +225,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN clearParser__stamp_source_range_mut(&rtoc_self_view, &stamped, start_token, clearParser__previous(rtoc_self_view));
 }
 END
-PUB FN clearParser__destructuring_assignment?(self: ClearParser) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF TRY (clearParser__match_at?(rtoc_self_view, 1, :CHAR, ",")) THEN
+PUB FN clearParser__destructuring_assignment?(self: ClearParser) RETURNS !Bool ->
+    IF TRY (clearParser__match_at?(self, 1, :CHAR, ",")) THEN
       RETURN TRUE;
     END
-    IF !(TRY (clearParser__match_at?(rtoc_self_view, 1, :CHAR, ":"))) THEN
+    IF !(TRY (clearParser__match_at?(self, 1, :CHAR, ":"))) THEN
       RETURN FALSE;
     END
     MUTABLE offset = 2;
     MUTABLE delimiters: []String = List[];
     WHILE TRUE DO
-      MUTABLE token_slot: ?Token = clearParser__peek_at(rtoc_self_view, offset);
+      MUTABLE token_slot: ?Token = clearParser__peek_at(self, offset);
       IF token_slot == NIL THEN
         RETURN FALSE;
       END
@@ -267,7 +264,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       offset = (offset + 1);
     END
     RETURN FALSE;
-}
 END
 PUB FN clearParser__parse_destructuring_assign(MUTABLE self: ClearParser, default_mutable: Bool = FALSE) RETURNS !DestructuringAssignment
   REQUIRES self: LOCAL
@@ -627,14 +623,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN FALSE;
 }
 END
-PRIVATE FN clearParser__top_level_assignment_before_brace_delimiter?(self: ClearParser, start_offset: Int64) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__top_level_assignment_before_brace_delimiter?(self: ClearParser, start_offset: Int64) RETURNS !Bool ->
     MUTABLE depth = 1;
     MUTABLE offset = start_offset;
     WHILE TRUE DO
-      MUTABLE token: ?Token = clearParser__peek_at(rtoc_self_view, offset);
+      MUTABLE token: ?Token = clearParser__peek_at(self, offset);
       IF token EXISTS AS token_value THEN
         MUTABLE token_value_mutable = COPY token_value;
         IF ((token_value_mutable.type == :COMPOUND_ASSIGN) AND (depth == 1)) THEN
@@ -642,9 +635,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         ELSE_IF (token_value_mutable.type == :CHAR) THEN
           MUTABLE token_text = TRY (token__text_mut(token_value_mutable));
           IF (token_text == "{") OR (token_text == "(") OR (token_text == "[") THEN
-            MUTABLE closing_index: ?Int64 = rtoc_self_view.delimiter_closings[(rtoc_self_view.pos + offset)];
+            MUTABLE closing_index: ?Int64 = self.delimiter_closings[(self.pos + offset)];
             IF closing_index EXISTS AS closing_index_value THEN
-              offset = ((closing_index_value - rtoc_self_view.pos) + 1);
+              offset = ((closing_index_value - self.pos) + 1);
               CONTINUE;
             END
             depth = (depth + 1);
@@ -669,7 +662,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN FALSE;
-}
 END
 PUB FN clearParser__parse_match_expr(MUTABLE self: ClearParser, partial_value: Bool = FALSE) RETURNS !MatchStatement
   REQUIRES self: LOCAL
@@ -789,12 +781,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ParsedMatchArm{ kind: :eq, value: COPY first_pattern, extra_values: COPY extra_patterns, binding: COPY binding, destructure: COPY destructure };
 }
 END
-PRIVATE FN clearParser__build_match_case(self: ClearParser, arm: ParsedMatchArm, body: []Locatable) RETURNS MatchCase
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__build_match_case(self: ClearParser, arm: ParsedMatchArm, body: []Locatable) RETURNS MatchCase ->
     RETURN MatchCase{ kind: COPY arm.kind, value: COPY arm.value, body: COPY body, binding: COPY arm.binding, destructure: COPY arm.destructure, extra_values: COPY arm.extra_values, indirect_payload_as: FALSE };
-}
 END
 PRIVATE FN clearParser__parse_struct_pattern(MUTABLE self: ClearParser) RETURNS !StructPattern
   REQUIRES self: LOCAL

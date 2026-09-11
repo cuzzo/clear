@@ -188,21 +188,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN ownershipTransportFacts__decisions(self: OwnershipTransportFacts) RETURNS ![]Decision
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.aliases |> SELECT {
-    MUTABLE source_reads = TRY (ownershipTransportFacts__source_reads_after(rtoc_self_view, _));
-    MUTABLE destination_reads = TRY (ownershipTransportFacts__destination_reads_after(rtoc_self_view, _));
-    MUTABLE mutations = TRY (ownershipTransportFacts__mutations_after(rtoc_self_view, _));
-    MUTABLE conflict: ?Event = ownershipTransportFacts__conflict_for(rtoc_self_view, _, source_reads, destination_reads, mutations);
+PUB FN ownershipTransportFacts__decisions(self: OwnershipTransportFacts) RETURNS ![]Decision ->
+    RETURN self.aliases |> SELECT {
+    MUTABLE source_reads = TRY (ownershipTransportFacts__source_reads_after(self, _));
+    MUTABLE destination_reads = TRY (ownershipTransportFacts__destination_reads_after(self, _));
+    MUTABLE mutations = TRY (ownershipTransportFacts__mutations_after(self, _));
+    MUTABLE conflict: ?Event = ownershipTransportFacts__conflict_for(self, _, source_reads, destination_reads, mutations);
     MUTABLE last_alias: ?Locatable = NIL;
     IF destination_reads.last() != NIL THEN
         last_alias = COPY ((destination_reads.last())?).node;
       END
     MUTABLE escapes = destination_reads |> ANY _.escape;
-    MUTABLE action =   IF (((_.whole_binding AND (source_reads.length() == 0)) AND !(rtoc_self_view.parameter_ids.contains?(_.source_id))) AND !(rtoc_self_view.alias_roots.contains?(_.source_id))) THEN
+    MUTABLE action =   IF (((_.whole_binding AND (source_reads.length() == 0)) AND !(self.parameter_ids.contains?(_.source_id))) AND !(self.alias_roots.contains?(_.source_id))) THEN
         :move
       ELSE_IF escapes THEN
         :materialize
@@ -221,28 +218,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         NIL
       END } }
     };
-}
 END
-PUB FN ownershipTransportFacts__source_reads_after(self: OwnershipTransportFacts, fact: Alias) RETURNS ![]Event
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.reads |> WHERE ((_.ordinal > fact.ordinal) AND (((_.binding_id == fact.source_id) OR (_.binding_id == fact.root_id))));
-}
+PUB FN ownershipTransportFacts__source_reads_after(self: OwnershipTransportFacts, fact: Alias) RETURNS ![]Event ->
+    RETURN self.reads |> WHERE ((_.ordinal > fact.ordinal) AND (((_.binding_id == fact.source_id) OR (_.binding_id == fact.root_id))));
 END
-PUB FN ownershipTransportFacts__destination_reads_after(self: OwnershipTransportFacts, fact: Alias) RETURNS ![]Event
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.reads |> WHERE ((_.ordinal > fact.ordinal) AND (_.binding_id == fact.destination_id));
-}
+PUB FN ownershipTransportFacts__destination_reads_after(self: OwnershipTransportFacts, fact: Alias) RETURNS ![]Event ->
+    RETURN self.reads |> WHERE ((_.ordinal > fact.ordinal) AND (_.binding_id == fact.destination_id));
 END
-PUB FN ownershipTransportFacts__mutations_after(self: OwnershipTransportFacts, fact: Alias) RETURNS ![]Event
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.mutations |> WHERE ((_.ordinal > fact.ordinal) AND ([fact.source_id, fact.root_id, fact.destination_id]).contains?(_.binding_id));
-}
+PUB FN ownershipTransportFacts__mutations_after(self: OwnershipTransportFacts, fact: Alias) RETURNS ![]Event ->
+    RETURN self.mutations |> WHERE ((_.ordinal > fact.ordinal) AND ([fact.source_id, fact.root_id, fact.destination_id]).contains?(_.binding_id));
 END
 PUB FN ownershipTransportFacts__conflict_for(self: OwnershipTransportFacts, fact: Alias, source_reads: []Event, destination_reads: []Event, mutations: []Event) RETURNS ?Event
   REQUIRES self: LOCAL
@@ -251,86 +235,51 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN mutations |> FIND ownershipTransportFacts__mutation_conflicts?(rtoc_self_view, fact, source_reads, destination_reads, _);
 }
 END
-PUB FN ownershipTransportFacts__mutation_conflicts?(self: OwnershipTransportFacts, fact: Alias, source_reads: []Event, destination_reads: []Event, mutation: Event) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN ownershipTransportFacts__mutation_conflicts?(self: OwnershipTransportFacts, fact: Alias, source_reads: []Event, destination_reads: []Event, mutation: Event) RETURNS Bool ->
     MUTABLE counterpart_reads: []Event = List[];
     IF (mutation.binding_id == fact.destination_id) THEN
       counterpart_reads = COPY source_reads;
     ELSE
       counterpart_reads = COPY destination_reads;
     END
-    RETURN counterpart_reads |> ANY ownershipTransportFacts__conflicting_use?(rtoc_self_view, fact, mutation, _);
-}
+    RETURN counterpart_reads |> ANY ownershipTransportFacts__conflicting_use?(self, fact, mutation, _);
 END
-PUB FN ownershipTransportFacts__conflicting_use?(self: OwnershipTransportFacts, fact: Alias, mutation: Event, use_value: Event) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((((use_value.ordinal > mutation.ordinal)) OR ownershipTransportFacts__loop_backedge_reaches?(rtoc_self_view, fact, mutation, use_value))) AND !(ownershipTransportFacts__mutually_exclusive?(rtoc_self_view, mutation, use_value)));
-}
+PUB FN ownershipTransportFacts__conflicting_use?(self: OwnershipTransportFacts, fact: Alias, mutation: Event, use_value: Event) RETURNS Bool ->
+    RETURN (((((use_value.ordinal > mutation.ordinal)) OR ownershipTransportFacts__loop_backedge_reaches?(self, fact, mutation, use_value))) AND !(ownershipTransportFacts__mutually_exclusive?(self, mutation, use_value)));
 END
-PUB FN ownershipTransportFacts__transfer_decisions(self: OwnershipTransportFacts) RETURNS ![]TransferDecision
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.transfers |> SELECT {
-    MUTABLE later_read = ownershipTransportFacts__later_read_after_transfer?(rtoc_self_view, _);
-    MUTABLE borrowed_parameter = ownershipTransportFacts__borrowed_parameter_transfer?(rtoc_self_view, _);
+PUB FN ownershipTransportFacts__transfer_decisions(self: OwnershipTransportFacts) RETURNS ![]TransferDecision ->
+    RETURN self.transfers |> SELECT {
+    MUTABLE later_read = ownershipTransportFacts__later_read_after_transfer?(self, _);
+    MUTABLE borrowed_parameter = ownershipTransportFacts__borrowed_parameter_transfer?(self, _);
     TransferDecision{ transfer: COPY _, materialize: (later_read OR borrowed_parameter) }
     };
-}
 END
-PUB FN ownershipTransportFacts__later_read_after_transfer?(self: OwnershipTransportFacts, transfer: Transfer) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.reads |> ANY ((_.ordinal > transfer.ordinal) AND (_.binding_id == transfer.source_id));
-}
+PUB FN ownershipTransportFacts__later_read_after_transfer?(self: OwnershipTransportFacts, transfer: Transfer) RETURNS Bool ->
+    RETURN self.reads |> ANY ((_.ordinal > transfer.ordinal) AND (_.binding_id == transfer.source_id));
 END
-PUB FN ownershipTransportFacts__borrowed_parameter_transfer?(self: OwnershipTransportFacts, transfer: Transfer) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.parameter_ids.contains?(transfer.source_id) AND ((transfer.source.symbol == NIL) OR ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = ((transfer.source.symbol)?);
+PUB FN ownershipTransportFacts__borrowed_parameter_transfer?(self: OwnershipTransportFacts, transfer: Transfer) RETURNS Bool ->
+    RETURN (self.parameter_ids.contains?(transfer.source_id) AND ((transfer.source.symbol == NIL) OR ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = ((transfer.source.symbol)?);
     symbolEntry__takes(rtoc_local_receiver_2) } != TRUE)));
-}
 END
-PRIVATE FN ownershipTransportFacts__binding_id(self: OwnershipTransportFacts, node: Identifier) RETURNS ?Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN ownershipTransportFacts__binding_id(self: OwnershipTransportFacts, node: Identifier) RETURNS ?Int64 ->
     IF node.symbol != NIL THEN
     RETURN ((node.symbol)?).ownership_binding_id;
     ELSE
     RETURN NIL;
     END
-}
 END
-PRIVATE FN ownershipTransportFacts__source_root_identifier(self: OwnershipTransportFacts, node: Locatable) RETURNS ?Identifier
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN ownershipTransportFacts__source_root_identifier(self: OwnershipTransportFacts, node: Locatable) RETURNS ?Identifier ->
     MUTABLE root: ?Identifier = aST__root_identifier(node);
     IF (root != NIL) THEN
       RETURN root;
     ELSE
       RETURN NIL;
     END
-}
 END
-PRIVATE FN ownershipTransportFacts__escape_ancestor?(self: OwnershipTransportFacts, node: Locatable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN ownershipTransportFacts__escape_ancestor?(self: OwnershipTransportFacts, node: Locatable) RETURNS Bool ->
     RETURN (((node IS_A ReturnNode OR node IS_A BgBlock) OR node IS_A BgStreamBlock) OR node IS_A LambdaLit);
-}
 END
-PRIVATE FN ownershipTransportFacts__mutually_exclusive?(self: OwnershipTransportFacts, left: Event, right: Event) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN ownershipTransportFacts__mutually_exclusive?(self: OwnershipTransportFacts, left: Event, right: Event) RETURNS Bool ->
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < left.ancestors.length() DO
       IF !(left.ancestors[rtoc_idx]? IS_A IfStatement) THEN
@@ -338,21 +287,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     CONTINUE;
       END
       MUTABLE conditional = COPY left.ancestors[rtoc_idx]?;
-      MUTABLE left_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, left, castLocatableToIfStatement__ownership_transport(conditional));
-      MUTABLE right_side: ?String@symbol = ownershipTransportFacts__conditional_side(rtoc_self_view, right, castLocatableToIfStatement__ownership_transport(conditional));
+      MUTABLE left_side: ?String@symbol = ownershipTransportFacts__conditional_side(self, left, castLocatableToIfStatement__ownership_transport(conditional));
+      MUTABLE right_side: ?String@symbol = ownershipTransportFacts__conditional_side(self, right, castLocatableToIfStatement__ownership_transport(conditional));
       IF (((left_side != NIL) AND (right_side != NIL)) AND (left_side != right_side)) THEN
           RETURN TRUE;
       END
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN FALSE;
-}
 END
-PRIVATE FN ownershipTransportFacts__conditional_side(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE index: ?Int64 = ownershipTransportFacts__conditional_index(rtoc_self_view, event, conditional);
+PRIVATE FN ownershipTransportFacts__conditional_side(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS ?String@symbol ->
+    MUTABLE index: ?Int64 = ownershipTransportFacts__conditional_index(self, event, conditional);
     IF index EXISTS AS index_value THEN
       MUTABLE child: Locatable = COPY event.node;
       MUTABLE child_index = (index_value + 1);
@@ -372,12 +317,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
-PRIVATE FN ownershipTransportFacts__conditional_index(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS ?Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN ownershipTransportFacts__conditional_index(self: OwnershipTransportFacts, event: Event, conditional: IfStatement) RETURNS ?Int64 ->
     MUTABLE index: Int64 = 0;
     WHILE (index < event.ancestors.length()) DO
       MUTABLE candidate = COPY UNWRAP (event.ancestors[index]);
@@ -390,17 +331,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       index = (index + 1);
     END
     RETURN NIL;
-}
 END
-PRIVATE FN ownershipTransportFacts__loop_backedge_reaches?(self: OwnershipTransportFacts, declaration: Alias, mutation: Event, use_value: Event) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN ownershipTransportFacts__loop_backedge_reaches?(self: OwnershipTransportFacts, declaration: Alias, mutation: Event, use_value: Event) RETURNS Bool ->
     RETURN mutation.ancestors |> ANY {
     MUTABLE loop_node = (((_ IS_A WhileLoop OR _ IS_A WhileBindLoop) OR _ IS_A ForRange) OR _ IS_A ForEach);
     ((loop_node AND use_value.ancestors.contains?(_)) AND !(declaration.ancestors.contains?(_)))
     };
-}
 END
 PUB FN ownershipTransportFacts__new(parameter_ids: [Set]Int64 = Set[]) RETURNS OwnershipTransportFacts@multiowned ->
   MUTABLE self = OwnershipTransportFacts{ alias_roots: {}, aliases: List[], mutations: List[], ordinal: 0, parameter_ids: COPY parameter_ids, reads: List[], transfers: List[] };

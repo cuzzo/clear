@@ -63,36 +63,25 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (annotationBoundary__verify_mut(program, rtoc_self_view.annotation_products));
 }
 END
-PUB FN semanticAnnotator__semantic_root_scope(self: SemanticAnnotator) RETURNS !Scope@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE index: ?SemanticIndex = COPY rtoc_self_view.semantic_index;
+PUB FN semanticAnnotator__semantic_root_scope(self: SemanticAnnotator) RETURNS !Scope@multiowned ->
+    MUTABLE index: ?SemanticIndex = COPY self.semantic_index;
     IF index EXISTS AS index_value THEN
       RETURN KEEP index_value.root_scope;
     END
-    MUTABLE resolution: ?ResolutionFacts = COPY rtoc_self_view.annotation_products.resolution;
+    MUTABLE resolution: ?ResolutionFacts = COPY self.annotation_products.resolution;
     IF resolution EXISTS AS resolution_value THEN
       RETURN KEEP resolution_value.root_scope;
     ELSE
       panic("semantic root scope is unavailable before resolution");
     END
-}
 END
-PUB FN semanticAnnotator__lookup_type_schema(self: SemanticAnnotator, name: String@symbol) RETURNS !?SchemaValue
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN semanticAnnotator__lookup_type_schema(self: SemanticAnnotator, name: String@symbol) RETURNS !?SchemaValue ->
     MUTABLE base_name = symbol((compilerRegexReplaceFirst((CAST(name AS String)), compilerRegexCompile("<.*>$"), "")));
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_3 = (TRY (semanticAnnotator__semantic_root_scope(rtoc_self_view)));
+    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_3 = (TRY (semanticAnnotator__semantic_root_scope(self)));
     TRY (scope__resolve_type_definition(rtoc_local_receiver_3, base_name)) };
-}
 END
-PRIVATE FN semanticAnnotator__semantic_id_index(self: SemanticAnnotator) RETURNS SemanticIdIndex
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE typed_program = COPY UNWRAP (rtoc_self_view.annotation_products.typed_program);
+PRIVATE FN semanticAnnotator__semantic_id_index(self: SemanticAnnotator) RETURNS SemanticIdIndex ->
+    MUTABLE typed_program = COPY UNWRAP (self.annotation_products.typed_program);
     MUTABLE summaries = COPY typed_program.body_summaries;
     MUTABLE definitions: {String}DefId = {};
     MUTABLE bodies: {String}BodyId = {};
@@ -103,7 +92,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN SemanticIdIndex{ definitions: COPY definitions, bodies: COPY bodies };
-}
 END
 PUB FN semanticAnnotator__new(importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !SemanticAnnotator@multiowned ->
   MUTABLE rtoc_source_dir: String = TRY (rtocResolveSourceDir(source_dir));

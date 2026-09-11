@@ -88,12 +88,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN typedProgramFacts__program(self: TypedProgramFacts) RETURNS Program
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY (KEEP rtoc_self_view.resolution).program;
-}
+  EFFECTS REENTRANT ->
+    RETURN COPY (KEEP self.resolution).program;
 END
 PUB FN typedProgramFacts__new(resolution: ResolutionFacts, body_summaries: {String}FunctionBodySummary, typed_node_count: Int64, unresolved_node_count: Int64, ownership_graph: OwnershipGraph, lifecycle_registry: LifecycleRegistry = lifecycleRegistry__empty(), linear_resource_facts: LinearResourceFacts = linearResourceFacts__empty(), local_function_facts: ?{String}LocalFunctionFacts = NIL) RETURNS !TypedProgramFacts@multiowned ->
   MUTABLE self = TypedProgramFacts{ body_summaries: {}, lifecycle_registry: COPY lifecycle_registry, linear_resource_facts: COPY linear_resource_facts, local_function_facts: {}, ownership_graph: COPY ownership_graph, resolution: COPY resolution, typed_node_count: typed_node_count, unresolved_node_count: unresolved_node_count };
@@ -121,12 +117,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.violation_count = COPY violation_count;
 }
 END
-PUB FN capabilityAuditReport__success?(self: CapabilityAuditReport) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.violation_count.zero?();
-}
+PUB FN capabilityAuditReport__success?(self: CapabilityAuditReport) RETURNS Bool ->
+    RETURN self.violation_count.zero?();
 END
 PUB FN capabilityAuditReport__new(typed_program: TypedProgramFacts, derived_program: DerivedProgramFacts, checked_functions: []String, checked_call_sites: Int64, checked_with_sites: Int64, violation_count: Int64) RETURNS CapabilityAuditReport@multiowned ->
   MUTABLE self = CapabilityAuditReport{ checked_call_sites: checked_call_sites, checked_functions: List[], checked_with_sites: checked_with_sites, derived_program: COPY derived_program, typed_program: COPY typed_program, violation_count: violation_count };
@@ -148,58 +140,42 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.capability_audit = COPY capability_audit;
 }
 END
-PUB FN annotationProducts__publish_resolution(self: AnnotationProducts, facts: ResolutionFacts) RETURNS !AnnotationProducts@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF rtoc_self_view.resolution EXISTS AS resolution_value THEN
+PUB FN annotationProducts__publish_resolution(self: AnnotationProducts, facts: ResolutionFacts) RETURNS !AnnotationProducts@multiowned ->
+    IF self.resolution EXISTS AS resolution_value THEN
       panic("resolution facts already published");
     END
     RETURN annotationProducts__new(facts);
-}
 END
-PUB FN annotationProducts__publish_typed_program(self: AnnotationProducts, facts: TypedProgramFacts) RETURNS !AnnotationProducts@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE resolution: ?ResolutionFacts@multiowned = COPY rtoc_self_view.resolution;
+PUB FN annotationProducts__publish_typed_program(self: AnnotationProducts, facts: TypedProgramFacts) RETURNS !AnnotationProducts@multiowned ->
+    MUTABLE resolution: ?ResolutionFacts@multiowned = COPY self.resolution;
     IF resolution EXISTS AS resolution_value THEN
       IF (aST__node_identity(Locatable{ Program: COPY facts.resolution.program }) != aST__node_identity(Locatable{ Program: COPY resolution_value.program })) THEN
         panic("type analysis used different resolution facts");
       END
-      IF rtoc_self_view.typed_program EXISTS AS typed_program_value THEN
+      IF self.typed_program EXISTS AS typed_program_value THEN
         panic("typed program facts already published");
       END
       RETURN annotationProducts__new(resolution_value, facts);
     ELSE
       panic("type analysis requires resolution facts");
     END
-}
 END
-PUB FN annotationProducts__publish_capability_audit(self: AnnotationProducts, report: CapabilityAuditReport) RETURNS !AnnotationProducts@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE typed_program: ?TypedProgramFacts@multiowned = COPY rtoc_self_view.typed_program;
+PUB FN annotationProducts__publish_capability_audit(self: AnnotationProducts, report: CapabilityAuditReport) RETURNS !AnnotationProducts@multiowned ->
+    MUTABLE typed_program: ?TypedProgramFacts@multiowned = COPY self.typed_program;
     IF typed_program EXISTS AS typed_program_value THEN
       IF (aST__node_identity(Locatable{ Program: COPY report.typed_program.resolution.program }) != aST__node_identity(Locatable{ Program: COPY typed_program_value.resolution.program })) THEN
         panic("capability audit used different typed program facts");
       END
-      IF rtoc_self_view.capability_audit EXISTS AS capability_audit_value THEN
+      IF self.capability_audit EXISTS AS capability_audit_value THEN
         panic("capability audit report already published");
       END
-      RETURN annotationProducts__new(UNWRAP (rtoc_self_view.resolution), typed_program_value, report);
+      RETURN annotationProducts__new(UNWRAP (self.resolution), typed_program_value, report);
     ELSE
       panic("capability audit requires typed program facts");
     END
-}
 END
-PUB FN annotationProducts__complete?(self: AnnotationProducts) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((!((rtoc_self_view.resolution == NIL)) AND !((rtoc_self_view.typed_program == NIL))) AND !((rtoc_self_view.capability_audit == NIL)));
-}
+PUB FN annotationProducts__complete?(self: AnnotationProducts) RETURNS Bool ->
+    RETURN ((!((self.resolution == NIL)) AND !((self.typed_program == NIL))) AND !((self.capability_audit == NIL)));
 END
 PUB FN annotationProducts__new(resolution: ?ResolutionFacts = NIL, typed_program: ?TypedProgramFacts = NIL, capability_audit: ?CapabilityAuditReport = NIL) RETURNS AnnotationProducts@multiowned ->
   MUTABLE self = AnnotationProducts{ capability_audit: COPY capability_audit, resolution: COPY resolution, typed_program: COPY typed_program };

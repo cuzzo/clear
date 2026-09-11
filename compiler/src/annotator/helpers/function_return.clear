@@ -22,12 +22,8 @@ END
 PUB FN functionReturn__infer(m: String@symbol) RETURNS FunctionReturn@multiowned ->
   RETURN functionReturn__new(Kind.Infer, NIL, m);
 END
-PUB FN functionReturn__fixed?(self: FunctionReturn) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.kind == Kind.Fixed);
-}
+PUB FN functionReturn__fixed?(self: FunctionReturn) RETURNS Bool ->
+    RETURN (self.kind == Kind.Fixed);
 END
 PUB FN functionReturn__variant(kind_name: String@symbol) RETURNS !FunctionReturn@multiowned ->
   RETURN functionReturn__new(TRY (functionReturn__variant_kind(kind_name)));
@@ -53,26 +49,19 @@ FN functionReturn__variant_kind(kind_name: String@symbol) RETURNS !Kind ->
     panic("unknown FunctionReturn variant: {}");
   END
 END
-PUB FN functionReturn__copy(self: FunctionReturn) RETURNS !FunctionReturn@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (rtoc_self_view.kind == Kind.Fixed) THEN
-      RETURN functionReturn__fixed(TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (rtoc_self_view.fixed) })));
+PUB FN functionReturn__copy(self: FunctionReturn) RETURNS !FunctionReturn@multiowned ->
+    IF (self.kind == Kind.Fixed) THEN
+      RETURN functionReturn__fixed(TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (self.fixed) })));
     END
-    IF (rtoc_self_view.kind == Kind.Infer) THEN
-      RETURN functionReturn__infer(symbol(UNWRAP (rtoc_self_view.infer)));
+    IF (self.kind == Kind.Infer) THEN
+      RETURN functionReturn__infer(symbol(UNWRAP (self.infer)));
     END
-    RETURN functionReturn__new(rtoc_self_view.kind);
-}
+    RETURN functionReturn__new(self.kind);
 END
-PUB FN functionReturn__resolve(self: FunctionReturn, receiver: ?Type, args: []Locatable) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (rtoc_self_view.kind == Kind.Fixed) THEN
-      RETURN COPY UNWRAP (rtoc_self_view.fixed);
-    ELSE_IF (rtoc_self_view.kind == Kind.ElementOf) THEN
+PUB FN functionReturn__resolve(self: FunctionReturn, receiver: ?Type, args: []Locatable) RETURNS !Type ->
+    IF (self.kind == Kind.Fixed) THEN
+      RETURN COPY UNWRAP (self.fixed);
+    ELSE_IF (self.kind == Kind.ElementOf) THEN
       IF receiver EXISTS AS receiver_value THEN
         MUTABLE el: ?Type = TRY (type__element_type(receiver_value));
         IF el != NIL THEN
@@ -83,29 +72,25 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
       END
-    ELSE_IF (rtoc_self_view.kind == Kind.OptionalOfElement) THEN
+    ELSE_IF (self.kind == Kind.OptionalOfElement) THEN
       RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY UNWRAP (TRY (type__element_type(UNWRAP (receiver)))) }));
-    ELSE_IF (rtoc_self_view.kind == Kind.IdOfElement) THEN
+    ELSE_IF (self.kind == Kind.IdOfElement) THEN
       RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("Id<${type__resolved(UNWRAP (TRY (type__element_type(UNWRAP (receiver)))))}>") }));
-    ELSE_IF (rtoc_self_view.kind == Kind.OptionalOfValue) THEN
+    ELSE_IF (self.kind == Kind.OptionalOfValue) THEN
       RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY TRY (type__value_type(UNWRAP (receiver))) }));
-    ELSE_IF (rtoc_self_view.kind == Kind.ValueList) THEN
+    ELSE_IF (self.kind == Kind.ValueList) THEN
       MUTABLE value = TRY (type__value_type(UNWRAP (receiver)));
-      RETURN CAST(TRY (functionReturn__element_list(rtoc_self_view, value)) AS Type);
-    ELSE_IF (rtoc_self_view.kind == Kind.KeyList) THEN
+      RETURN CAST(TRY (functionReturn__element_list(self, value)) AS Type);
+    ELSE_IF (self.kind == Kind.KeyList) THEN
       MUTABLE key = TRY (type__key_type(UNWRAP (receiver)));
-      RETURN CAST(TRY (functionReturn__element_list(rtoc_self_view, key)) AS Type);
-    ELSE_IF (rtoc_self_view.kind == Kind.Infer) THEN
-      RETURN CAST(TRY (functionReturn__resolve_infer(rtoc_self_view, args)) AS Type);
+      RETURN CAST(TRY (functionReturn__element_list(self, key)) AS Type);
+    ELSE_IF (self.kind == Kind.Infer) THEN
+      RETURN CAST(TRY (functionReturn__resolve_infer(self, args)) AS Type);
     ELSE
       panic("unknown FunctionReturn kind: {}");
     END
-}
 END
-FN functionReturn__element_list(self: FunctionReturn, element: Type) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN functionReturn__element_list(self: FunctionReturn, element: Type) RETURNS !Type ->
     MUTABLE list = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("${type__resolved(element)}[]") }, NIL, NIL, NIL, NIL, :list));
     IF !(((type__ownership(element) == NIL) OR ((type__ownership(element))? == :affine))) THEN
       TRY (type__set_elem_ownership(&list, type__ownership(element)));
@@ -114,20 +99,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (type__set_elem_sync(&list, type__sync(element)));
     END
     RETURN list;
-}
 END
-FN functionReturn__resolve_infer(self: FunctionReturn, args: []Locatable) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN functionReturn__resolve_infer(self: FunctionReturn, args: []Locatable) RETURNS !Type ->
     MUTABLE r_branch_value: ?Type@multiowned = NIL;
-    PARTIAL MATCH symbol(UNWRAP (rtoc_self_view.infer)) START
+    PARTIAL MATCH symbol(UNWRAP (self.infer)) START
       :infer_element_type ->
-      r_branch_value = TRY (functionReturn__infer_element_type(rtoc_self_view, args));,
+      r_branch_value = TRY (functionReturn__infer_element_type(self, args));,
       :infer_optional_element_type ->
-      r_branch_value = TRY (functionReturn__infer_optional_element_type(rtoc_self_view, args));,
+      r_branch_value = TRY (functionReturn__infer_optional_element_type(self, args));,
       :infer_to_list ->
-      r_branch_value = TRY (functionReturn__infer_to_list(rtoc_self_view, args));,
+      r_branch_value = TRY (functionReturn__infer_to_list(self, args));,
       DEFAULT ->
       panic("unknown FunctionReturn infer method: {}");
     END
@@ -137,12 +118,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN TRY (type__new(TypeConstructionInput{ Type: COPY r }));
     END
-}
 END
-FN functionReturn__infer_element_type(self: FunctionReturn, args: []Locatable) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN functionReturn__infer_element_type(self: FunctionReturn, args: []Locatable) RETURNS !Type ->
     MUTABLE receiver: ?Locatable = COPY args.first();
     IF receiver EXISTS AS receiver_value THEN
       MUTABLE type: ?Type = NIL;
@@ -416,19 +393,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
     END
-}
 END
-FN functionReturn__infer_optional_element_type(self: FunctionReturn, args: []Locatable) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY TRY (functionReturn__infer_element_type(rtoc_self_view, args)) }));
-}
+FN functionReturn__infer_optional_element_type(self: FunctionReturn, args: []Locatable) RETURNS !Type ->
+    RETURN TRY (type__optional_of(TypeTypeInput{ Type: COPY TRY (functionReturn__infer_element_type(self, args)) }));
 END
-FN functionReturn__infer_to_list(self: FunctionReturn, args: []Locatable) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN functionReturn__infer_to_list(self: FunctionReturn, args: []Locatable) RETURNS !Type ->
     MUTABLE receiver = COPY UNWRAP (args.first());
     MUTABLE receiver_type: ?Type = NIL;
     MATCH receiver START
@@ -716,7 +685,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       panic("toList receiver: unresolved type info");
     END
-}
 END
 FN functionReturn__new(kind: Kind, fixed: ?Type = NIL, infer: ?String@symbol = NIL) RETURNS FunctionReturn@multiowned ->
   MUTABLE self = FunctionReturn{ fixed: COPY fixed, infer: COPY infer, kind: COPY kind };

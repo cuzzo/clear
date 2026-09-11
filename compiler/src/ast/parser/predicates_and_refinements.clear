@@ -111,14 +111,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN clearParser__build_refined_if_tree(&rtoc_self_view, if_token, steps, then_branch, else_branch, is_comptime);
 }
 END
-PRIVATE FN clearParser__conditional_capture_ahead?(self: ClearParser) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__conditional_capture_ahead?(self: ClearParser) RETURNS !Bool ->
     MUTABLE offset: Int64 = 0;
     MUTABLE depth: Int64 = 0;
     WHILE TRUE DO
-      MUTABLE token: ?Token = clearParser__peek_at(rtoc_self_view, offset);
+      MUTABLE token: ?Token = clearParser__peek_at(self, offset);
       IF token EXISTS AS token_value THEN
         MUTABLE token_value_mutable = COPY token_value;
         IF (token_value_mutable.type == :CHAR) THEN
@@ -133,7 +130,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN FALSE;
         END
         IF ((token_value_mutable.type == :KEYWORD) AND (["EXISTS", "IS_OK"]).contains?(token__display_value(token_value_mutable))) THEN
-          MUTABLE following: ?Token = clearParser__peek_at(rtoc_self_view, (offset + 1));
+          MUTABLE following: ?Token = clearParser__peek_at(self, (offset + 1));
           IF (((following != NIL) AND (following.type == :KEYWORD)) AND (token__text_is?(following, "AS"))) THEN
             RETURN TRUE;
           END
@@ -144,7 +141,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN FALSE;
-}
 END
 PRIVATE FN clearParser__refinement_steps(MUTABLE self: ClearParser, node: Locatable, if_token: Token) RETURNS ![]StepsItem
   REQUIRES self: LOCAL
@@ -174,19 +170,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN clearParser__contains_refinement_binding?(self: ClearParser, node: Locatable) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node IS_A BinaryOp AS binary_op THEN
       IF (binary_op.op == :BIND_VAR) THEN
         RETURN TRUE;
       END
-      RETURN (clearParser__contains_refinement_binding?(rtoc_self_view, binary_op.left) OR clearParser__contains_refinement_binding?(rtoc_self_view, binary_op.right));
+      RETURN (clearParser__contains_refinement_binding?(self, binary_op.left) OR clearParser__contains_refinement_binding?(self, binary_op.right));
     ELSE
       RETURN FALSE;
     END
-}
 END
 PRIVATE FN clearParser__build_refined_if_tree(MUTABLE self: ClearParser, if_token: Token, steps: []StepsItem, then_branch: []Locatable, else_branch: []Locatable, is_comptime: Bool) RETURNS ClearParserReturnValue
   REQUIRES self: LOCAL

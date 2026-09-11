@@ -51,21 +51,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.current_transform_fn = NIL;
 }
 END
-PUB FN mIRPass__live_cleanup_entry(self: MIRPass, facts: FrozenCleanupFacts, name: Name) RETURNS CleanupEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRPass__live_cleanup_entry(self: MIRPass, facts: FrozenCleanupFacts, name: Name) RETURNS CleanupEntry@multiowned ->
     RETURN frozenCleanupFacts__live_entry_for(facts, name);
-}
 END
-PUB FN mIRPass__alloc_marker(self: MIRPass, name: String, alloc: String@symbol, type_info: Type) RETURNS AllocMark
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRPass__alloc_marker(self: MIRPass, name: String, alloc: String@symbol, type_info: Type) RETURNS AllocMark ->
     MUTABLE marker = AllocMark{ name: COPY name, alloc: COPY alloc, type_info: COPY type_info, scope: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     marker.scope = placement__alloc_scope(alloc);
     RETURN marker;
-}
 END
 PUB FN mIRPass__transform_mut(MUTABLE self: MIRPass, MUTABLE ast: Program) RETURNS !Void
   REQUIRES self: LOCAL
@@ -268,10 +260,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRPass__bg_inner_facts(self: MIRPass, bg_node: BgNode, facts: FrozenCleanupFacts) RETURNS FrozenCleanupFacts
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRPass__bg_inner_facts(self: MIRPass, bg_node: BgNode, facts: FrozenCleanupFacts) RETURNS FrozenCleanupFacts ->
     MUTABLE captures = (IF bgNode__capture_analysis(bg_node) != NIL THEN
       (bgNode__capture_analysis(bg_node)).captures()
     ELSE
@@ -285,7 +274,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY facts;
     END
     RETURN frozenCleanupFacts__without_names(facts, captures.keys() |> SELECT _.toString());
-}
 END
 PRIVATE FN mIRPass__mark_consumed_cleanup_guards_mut(MUTABLE self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !?[Set]String
   REQUIRES self: LOCAL
@@ -297,10 +285,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIRPass__collect_consumed_names(rtoc_self_view, stmt, facts));
 }
 END
-PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS ![Set]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS ![Set]String ->
     MUTABLE names = Set[];
     MUTABLE rhs = NIL;
     PARTIAL MATCH stmt START
@@ -317,12 +302,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rhs
       END;
       IF ident IS_A Identifier THEN
-        TRY (mIRPass__add_if_consumed(rtoc_self_view, ident, &names, facts, aST__moved?(ident)));
+        TRY (mIRPass__add_if_consumed(self, ident, &names, facts, aST__moved?(ident)));
       END
     END
     IF stmt IS_A MoveNode AS move_node THEN
     IF move_node.value IS_A Identifier THEN
-      TRY (mIRPass__add_if_consumed(rtoc_self_view, castLocatableToIdentifier__type_analysis_session(move_node.value), &names, facts, aST__moved?(move_node.value)));
+      TRY (mIRPass__add_if_consumed(self, castLocatableToIdentifier__type_analysis_session(move_node.value), &names, facts, aST__moved?(move_node.value)));
     END
     END
     MUTABLE value_expr = NIL;
@@ -336,37 +321,33 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF value_expr IS_A MoveNode THEN
       value_expr = value_expr.value();
     END
-    TRY (mIRPass__walk_consumed(rtoc_self_view, value_expr, &names, facts));
+    TRY (mIRPass__walk_consumed(self, value_expr, &names, facts));
     RETURN names;
-}
 END
 PRIVATE FN mIRPass__walk_consumed(self: MIRPass, node: ?Locatable, MUTABLE names: [Set]String, facts: FrozenCleanupFacts) RETURNS !Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node EXISTS AS node_value THEN
       MUTABLE node_value_mutable = COPY node_value;
       IF node_value_mutable IS_A CapabilityWrap AS capability_wrap THEN
         MUTABLE capability_wrap_mutable = COPY capability_wrap;
-        TRY (mIRPass__walk_consumed(rtoc_self_view, capability_wrap_mutable.value, &names, facts));
+        TRY (mIRPass__walk_consumed(self, capability_wrap_mutable.value, &names, facts));
       ELSE_IF node_value_mutable IS_A StructLit AS struct_lit THEN
         MUTABLE struct_lit_mutable = COPY struct_lit;
         FOR MUTABLE rtoc_mutable_block_param_6 IN struct_lit_mutable.fields.values() DO
         IF rtoc_mutable_block_param_6 IS_A Identifier THEN
-          TRY (mIRPass__add_if_consumed(rtoc_self_view, UNWRAP (castLocatableToIdentifier(rtoc_mutable_block_param_6)), &names, facts, FALSE));
+          TRY (mIRPass__add_if_consumed(self, UNWRAP (castLocatableToIdentifier(rtoc_mutable_block_param_6)), &names, facts, FALSE));
         ELSE
-          TRY (mIRPass__walk_consumed(rtoc_self_view, rtoc_mutable_block_param_6, &names, facts));
+          TRY (mIRPass__walk_consumed(self, rtoc_mutable_block_param_6, &names, facts));
         END
         END
       ELSE_IF node_value_mutable IS_A ListLit AS list_lit THEN
         MUTABLE list_lit_mutable = COPY list_lit;
         FOR MUTABLE rtoc_for_elem_363 IN list_lit_mutable.items DO
-        TRY (mIRPass__walk_consumed(rtoc_self_view, rtoc_for_elem_363, &names, facts));
+        TRY (mIRPass__walk_consumed(self, rtoc_for_elem_363, &names, facts));
         END
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
         MUTABLE get_field_mutable = COPY get_field;
-        IF TRY (mIRPass__owning_field_move?(rtoc_self_view, Locatable{ GetField: COPY get_field_mutable })) THEN
+        IF TRY (mIRPass__owning_field_move?(self, Locatable{ GetField: COPY get_field_mutable })) THEN
           MUTABLE root: ?Identifier = aST__root_identifier(Locatable{ GetField: COPY get_field_mutable });
           IF root EXISTS AS root_value THEN
             MUTABLE root_value_mutable = COPY root_value;
@@ -377,28 +358,28 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             });
           END
         ELSE
-          TRY (mIRPass__walk_consumed(rtoc_self_view, get_field_mutable.target, &names, facts));
+          TRY (mIRPass__walk_consumed(self, get_field_mutable.target, &names, facts));
         END
       ELSE_IF node_value_mutable IS_A MoveNode AS move_node THEN
         MUTABLE move_node_mutable = COPY move_node;
         IF move_node_mutable.value IS_A Identifier THEN
-          TRY (mIRPass__add_if_consumed(rtoc_self_view, move_node_mutable.value, &names, facts, aST__moved?(move_node_mutable.value)));
+          TRY (mIRPass__add_if_consumed(self, move_node_mutable.value, &names, facts, aST__moved?(move_node_mutable.value)));
         ELSE
-          TRY (mIRPass__walk_consumed(rtoc_self_view, move_node_mutable.value, &names, facts));
+          TRY (mIRPass__walk_consumed(self, move_node_mutable.value, &names, facts));
         END
       ELSE_IF (node_value_mutable IS_A FuncCall) OR (node_value_mutable IS_A MethodCall) THEN
-        TRY (mIRPass__consume_call_args(rtoc_self_view, castLocatableToNode__mir_pass(node_value_mutable), &names, facts));
+        TRY (mIRPass__consume_call_args(self, castLocatableToNode__mir_pass(node_value_mutable), &names, facts));
         IF node_value_mutable IS_A MethodCall THEN
-          TRY (mIRPass__walk_consumed(rtoc_self_view, node_value_mutable.object, &names, facts));
+          TRY (mIRPass__walk_consumed(self, node_value_mutable.object, &names, facts));
         END
       ELSE_IF node_value_mutable IS_A BinaryOp AS binary_op THEN
         MUTABLE binary_op_mutable = COPY binary_op;
-        TRY (mIRPass__walk_consumed(rtoc_self_view, binary_op_mutable.left, &names, facts));
-        TRY (mIRPass__walk_consumed(rtoc_self_view, binary_op_mutable.right, &names, facts));
+        TRY (mIRPass__walk_consumed(self, binary_op_mutable.left, &names, facts));
+        TRY (mIRPass__walk_consumed(self, binary_op_mutable.right, &names, facts));
       ELSE_IF node_value_mutable IS_A Assert AS assert THEN
         MUTABLE assert_mutable = COPY assert;
         MUTABLE expr = assert_mutable.condition;
-        TRY (mIRPass__walk_consumed(rtoc_self_view, expr, &names, facts));
+        TRY (mIRPass__walk_consumed(self, expr, &names, facts));
       ELSE_IF node_value_mutable IS_A ReturnNode AS return_node THEN
         MUTABLE return_node_mutable = COPY return_node;
         MUTABLE expr = IF return_node_mutable IS_A Assert THEN
@@ -406,18 +387,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         ELSE
           return_node_mutable.value
         END;
-        TRY (mIRPass__walk_consumed(rtoc_self_view, expr, &names, facts));
+        TRY (mIRPass__walk_consumed(self, expr, &names, facts));
       END
     ELSE
       RETURN;
     END
-}
 END
 PRIVATE FN mIRPass__consume_call_args(self: MIRPass, node: Node, MUTABLE names: [Set]String, facts: FrozenCleanupFacts) RETURNS !Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE sig_obj: ?FunctionSignature@multiowned = NIL;
     IF (aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
       sig_obj = functionSignature__unwrap( CAST(node__matched_signature(node) AS ?X));
@@ -437,25 +414,21 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE param: ?Any = COPY params[(rtoc_idx + param_offset)];
       MUTABLE consumes = ((param != NIL) AND (param.takes() == TRUE));
       IF (UNWRAP (rtoc_each_items_7[rtoc_idx]) IS_A Identifier AND ((UNWRAP (rtoc_each_items_7[rtoc_idx]).was_moved OR consumes))) THEN
-          TRY (mIRPass__add_if_consumed(rtoc_self_view, rtoc_each_items_7[rtoc_idx], &names, facts, (aST__moved?(UNWRAP (rtoc_each_items_7[rtoc_idx])) OR consumes)));
+          TRY (mIRPass__add_if_consumed(self, rtoc_each_items_7[rtoc_idx], &names, facts, (aST__moved?(UNWRAP (rtoc_each_items_7[rtoc_idx])) OR consumes)));
       ELSE
-          TRY (mIRPass__walk_consumed(rtoc_self_view, UNWRAP (rtoc_each_items_7[rtoc_idx]), &names, facts));
+          TRY (mIRPass__walk_consumed(self, UNWRAP (rtoc_each_items_7[rtoc_idx]), &names, facts));
       END
     rtoc_idx = rtoc_idx + 1;
     END
-}
 END
-PRIVATE FN mIRPass__add_if_consumed(self: MIRPass, ident: Identifier, MUTABLE names: [Set]String, facts: FrozenCleanupFacts, is_move: Bool) RETURNS !?[Set]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRPass__add_if_consumed(self: MIRPass, ident: Identifier, MUTABLE names: [Set]String, facts: FrozenCleanupFacts, is_move: Bool) RETURNS !?[Set]String ->
     MUTABLE name = COPY ident.name;
     MUTABLE entry = frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY name }, Locatable{ Identifier: COPY ident });
     IF !(cleanupEntry__present?(entry)) THEN
       RETURN NIL;
     END
     MUTABLE ti = TRY (aST__full_type_mut(Locatable{ Identifier: COPY ident }));
-    MUTABLE owns_transferable_value = (TRUE AND TRY (type__needs_cleanup?(ti, rtoc_self_view.schema_lookup)));
+    MUTABLE owns_transferable_value = (TRUE AND TRY (type__needs_cleanup?(ti, self.schema_lookup)));
     IF !((cleanupEntry__needs_cleanup?(entry) OR owns_transferable_value)) THEN
       RETURN NIL;
     END
@@ -472,7 +445,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     RETURN &names.insert(name);
-}
 END
 PRIVATE FN mIRPass__owning_field_move?(self: MIRPass, node: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
@@ -525,10 +497,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRPass__cleanup_entry_for_binding_node(self: MIRPass, node: Locatable, facts: FrozenCleanupFacts) RETURNS CleanupEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRPass__cleanup_entry_for_binding_node(self: MIRPass, node: Locatable, facts: FrozenCleanupFacts) RETURNS CleanupEntry@multiowned ->
     MUTABLE symbol:? = aST__node__symbol(node);
     MUTABLE decl = symbol.reg;
     MUTABLE entry: ?CleanupEntry@multiowned = localBindingAnalysis__binding_entry(decl);
@@ -539,7 +508,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY CAST(locatable__name(node) AS String) }, node);
     END
     RETURN cleanupEntry__none();
-}
 END
 PRIVATE FN mIRPass__stamp_match_as_cleanup_mut(MUTABLE self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !Void
   REQUIRES self: LOCAL
@@ -713,14 +681,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN mIRPass__collect_return_escapes(self: MIRPass, ret_node: ReturnNode, facts: FrozenCleanupFacts, fn_node: ?FunctionDef = NIL) RETURNS ![]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRPass__collect_return_escapes(self: MIRPass, ret_node: ReturnNode, facts: FrozenCleanupFacts, fn_node: ?FunctionDef = NIL) RETURNS ![]String ->
     IF !(ret_node.value) THEN
       RETURN CAST(List[] AS []String);
     END
-    MUTABLE ids = TRY (mIRPass__collect_escaping_ids(rtoc_self_view, ret_node.value));
+    MUTABLE ids = TRY (mIRPass__collect_escaping_ids(self, ret_node.value));
     RETURN CAST(((((ids |> WHERE {
     MUTABLE n = COPY _.name;
     MUTABLE decl: ?SymbolEntryRegInput = NIL;
@@ -731,32 +696,27 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE cleanup_entry = (entry OR_ELSE frozenCleanupFacts__entry_for_node(facts, Name{ StringValue: COPY n }, Locatable{ Identifier: COPY _ }));
     (((cleanupEntry__has_moved_guard?(cleanup_entry) AND cleanupEntry__needs_cleanup?(cleanup_entry))) OR (((n.startsWith?("__hoist_") AND aST__moved?(Locatable{ Identifier: COPY _ })) AND cleanupEntry__needs_cleanup?(cleanup_entry))))
     })) |> SELECT identifier__name(_)) |> DISTINCT _) AS []String);
-}
 END
 PRIVATE FN mIRPass__collect_escaping_ids(self: MIRPass, node: ?Locatable) RETURNS ![]Identifier
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node EXISTS AS node_value THEN
       IF node_value IS_A Identifier AS identifier THEN
         RETURN CAST([identifier] AS []Identifier);
       ELSE_IF node_value IS_A MoveNode AS move_node THEN
-        RETURN TRY (mIRPass__collect_escaping_ids(rtoc_self_view, move_node.value));
+        RETURN TRY (mIRPass__collect_escaping_ids(self, move_node.value));
       ELSE_IF node_value IS_A StructLit AS struct_lit THEN
-        RETURN (TRY (inlineAllocMetadata__values( CAST(struct_lit.fields AS InlineAllocMetadata)))) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
+        RETURN (TRY (inlineAllocMetadata__values( CAST(struct_lit.fields AS InlineAllocMetadata)))) |> UNNEST TRY (mIRPass__collect_escaping_ids(self, _));
       ELSE_IF node_value IS_A UnionVariantLit AS union_variant_lit THEN
         RETURN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = CAST(union_variant_lit.fields AS InlineAllocMetadata);
-        TRY (inlineAllocMetadata__values(rtoc_local_receiver_9)) }) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
+        TRY (inlineAllocMetadata__values(rtoc_local_receiver_9)) }) |> UNNEST TRY (mIRPass__collect_escaping_ids(self, _));
       ELSE_IF (node_value IS_A FuncCall) OR (node_value IS_A MethodCall) THEN
-        RETURN (locatable__args(node_value) |> WHERE _.was_moved) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
+        RETURN (locatable__args(node_value) |> WHERE _.was_moved) |> UNNEST TRY (mIRPass__collect_escaping_ids(self, _));
       ELSE
         RETURN CAST(List[] AS []Identifier);
       END
     ELSE
       RETURN CAST(List[] AS []Identifier);
     END
-}
 END
 PUB FN mIRPass__new(fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL, body_summaries: {String}FunctionBodySummary, hoist_bindings: ?{String}[]VarDecl = NIL) RETURNS MIRPass@multiowned ->
   MUTABLE self = MIRPass{ body_summaries: COPY body_summaries, current_transform_fn: NIL, escape_placement_facts: EscapePlacementFacts{ placements: List[] }, fn_nodes: COPY fn_nodes, hoist_bindings: (COPY hoist_bindings OR_ELSE {}), lifecycle_registry: COPY lifecycle_registry, program_facts: CAST(NIL AS ProgramMIRFacts), schema_lookup: COPY schema_lookup };

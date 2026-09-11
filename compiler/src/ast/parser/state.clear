@@ -25,17 +25,10 @@ PUB STRUCT ClearParser {
 }
 
 syntax_tokens_at_statement_end: [4]String = [";", "THEN", "DO", "->"];
-PUB FN clearParser__parser_error_host?(self: ClearParser) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN clearParser__parser_error_host?(self: ClearParser) RETURNS Bool ->
     RETURN TRUE;
-}
 END
-PUB FN clearParser__index_delimiter_closings(self: ClearParser, tokens: []Token) RETURNS ![]?Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN clearParser__index_delimiter_closings(self: ClearParser, tokens: []Token) RETURNS ![]?Int64 ->
     MUTABLE opening_chars: []String = List[];
     MUTABLE opening_indices: []Int64 = List[];
     MUTABLE closings: []?Int64 = List[];
@@ -64,39 +57,22 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN closings;
-}
 END
-PUB FN clearParser__peek(self: ClearParser) RETURNS Token
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE token: ?Token = COPY rtoc_self_view.tokens[(rtoc_self_view.pos + 1)];
+PUB FN clearParser__peek(self: ClearParser) RETURNS Token ->
+    MUTABLE token: ?Token = COPY self.tokens[(self.pos + 1)];
     IF token EXISTS AS token_value THEN
       RETURN COPY token_value;
     END
-    RETURN Token{ type: :EOF, value: TokenValue{ StringValue: COPY "" }, line: clearParser__current(rtoc_self_view).line, column: clearParser__current(rtoc_self_view).column, file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
-}
+    RETURN Token{ type: :EOF, value: TokenValue{ StringValue: COPY "" }, line: clearParser__current(self).line, column: clearParser__current(self).column, file: NIL, start_offset: NIL, end_offset: NIL, end_line: NIL, end_column: NIL };
 END
-PUB FN clearParser__peek_at(self: ClearParser, n: Int64) RETURNS ?Token
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.tokens[(rtoc_self_view.pos + n)];
-}
+PUB FN clearParser__peek_at(self: ClearParser, n: Int64) RETURNS ?Token ->
+    RETURN COPY self.tokens[(self.pos + n)];
 END
-PUB FN clearParser__current(self: ClearParser) RETURNS Token
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY UNWRAP (rtoc_self_view.tokens[rtoc_self_view.pos]);
-}
+PUB FN clearParser__current(self: ClearParser) RETURNS Token ->
+    RETURN COPY UNWRAP (self.tokens[self.pos]);
 END
-PUB FN clearParser__previous(self: ClearParser) RETURNS Token
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY UNWRAP (rtoc_self_view.tokens[(rtoc_self_view.pos - 1)]);
-}
+PUB FN clearParser__previous(self: ClearParser) RETURNS Token ->
+    RETURN COPY UNWRAP (self.tokens[(self.pos - 1)]);
 END
 PUB FN clearParser__consume_number(MUTABLE self: ClearParser) RETURNS !Token
   REQUIRES self: LOCAL
@@ -242,11 +218,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN first;
 }
 END
-PUB FN clearParser__match_at?(self: ClearParser, n: Int64, type: String@symbol, val: ?String = NIL) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE tok: ?Token = clearParser__peek_at(rtoc_self_view, n);
+PUB FN clearParser__match_at?(self: ClearParser, n: Int64, type: String@symbol, val: ?String = NIL) RETURNS !Bool ->
+    MUTABLE tok: ?Token = clearParser__peek_at(self, n);
     IF tok EXISTS AS tok_value THEN
       MUTABLE tok_value_mutable = COPY tok_value;
       IF !((tok_value_mutable.type == type)) THEN
@@ -261,13 +234,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN FALSE;
     END
-}
 END
-PUB FN clearParser__multi_pattern_continues?(self: ClearParser) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE nxt: ?Token = clearParser__peek_at(rtoc_self_view, 1);
+PUB FN clearParser__multi_pattern_continues?(self: ClearParser) RETURNS !Bool ->
+    MUTABLE nxt: ?Token = clearParser__peek_at(self, 1);
     IF nxt EXISTS AS nxt_value THEN
       MUTABLE nxt_value_mutable = COPY nxt_value;
       IF ((nxt_value_mutable.type == :ARROW) OR (nxt_value_mutable.type == :EOF)) THEN
@@ -283,7 +252,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN FALSE;
     END
-}
 END
 PUB FN clearParser__match_mut(MUTABLE self: ClearParser, type: String@symbol, value: ?String = NIL) RETURNS !ClearParserReturnValue
   REQUIRES self: LOCAL
@@ -820,10 +788,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY node;
 }
 END
-PUB FN clearParser__source_range_from_node(self: ClearParser, first: Locatable, last: Token) RETURNS !SourceRange
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN clearParser__source_range_from_node(self: ClearParser, first: Locatable, last: Token) RETURNS !SourceRange ->
     MUTABLE source_range: ?SourceRange = NIL;
     MATCH first START
       Locatable.Program AS item ->
@@ -1093,14 +1058,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN SourceRange{ file: COPY range_file, start_offset: range.start_offset, end_offset: end_offset, start_line: range.start_line, start_column: range.start_column, end_line: (last.end_line OR_ELSE last.line), end_column: (last.end_column OR_ELSE ((last.column + (token__display_value(last)).codepointCount()))) };
     END
     panic("Internal: source range missing from postfix receiver");
-}
 END
-FN clearParser__source_code(self: ClearParser) RETURNS ?String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN clearParser__source_code(self: ClearParser) RETURNS ?String ->
 
-}
 END
 PUB FN clearParser__error_mut(MUTABLE self: ClearParser, node_or_token: ?Token, code_or_message: CodeOrMessage, args: Any[] = [], kwargs: {String@symbol}String = {}) RETURNS !Void
   REQUIRES self: LOCAL
@@ -1121,39 +1081,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (clearParser__raise_source_error_mut(&rtoc_self_view, source_token, message, diagnostic_code));
 }
 END
-FN clearParser__format_diagnostic_template(self: ClearParser, template: String, args: Any[], kwargs: {String@symbol}String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN clearParser__format_diagnostic_template(self: ClearParser, template: String, args: Any[], kwargs: {String@symbol}String) RETURNS String ->
     RETURN diagnosticRegistry__format_template(template, args, kwargs);
-}
 END
-PUB FN clearParser__diagnostic_message(self: ClearParser, code: String@symbol, args: Any[] = [], kwargs: {String@symbol}String = {}) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN clearParser__diagnostic_message(self: ClearParser, code: String@symbol, args: Any[] = [], kwargs: {String@symbol}String = {}) RETURNS !String ->
     MUTABLE message: ?String = TRY (diagnosticRegistry__format_from_hash(code, args, kwargs));
     IF message EXISTS AS message_value THEN
       RETURN COPY message_value;
     ELSE
       panic("Internal Compiler Error: Unknown error code :{}");
     END
-}
 END
-PUB FN clearParser__fix_description(self: ClearParser, code: String@symbol, kwargs: {String@symbol}String = {}) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN clearParser__fix_description(self: ClearParser, code: String@symbol, kwargs: {String@symbol}String = {}) RETURNS !String ->
     RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
-}
 END
 PUB FN clearParser__fix_description_from_hash(self: ClearParser, code: String@symbol, kwargs: {String@symbol}String) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN TRY (diagnosticRegistry__fix_description_from_hash(code, kwargs));
-}
 END
 PUB FN clearParser__note_mut(MUTABLE self: ClearParser, node_or_token: ?Token, message: String) RETURNS Void
   REQUIRES self: LOCAL
@@ -1221,12 +1165,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN clearParser__diagnostic_source_code(self: ClearParser) RETURNS ?String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.source_code;
-}
+FN clearParser__diagnostic_source_code(self: ClearParser) RETURNS ?String ->
+    RETURN COPY self.source_code;
 END
 PUB FN clearParser__raise_source_error_mut(MUTABLE self: ClearParser, token: ?Token, message: String, code: ?String@symbol = NIL) RETURNS !Void
   REQUIRES self: LOCAL

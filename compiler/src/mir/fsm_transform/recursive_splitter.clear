@@ -117,13 +117,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN idx;
 }
 END
-PUB FN builder__finalize(self: Builder) RETURNS !Finalized
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN builder__finalize(self: Builder) RETURNS !Finalized ->
     MUTABLE unfilled = {
     MUTABLE rtoc_value_block_marker = 0;
-    MUTABLE rtoc_indexed_items_1: []SegmentSlot = rtoc_self_view.segments;
+    MUTABLE rtoc_indexed_items_1: []SegmentSlot = self.segments;
     MUTABLE rtoc_indexed_output_3 = [];
     MUTABLE rtoc_indexed_i_2 = 0;
     WHILE rtoc_indexed_i_2 < rtoc_indexed_items_1.length() DO
@@ -137,8 +134,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (unfilled).any?() THEN
       panic("RecursiveSplitter: unfilled segments at indices {}");
     END
-    RETURN Finalized{ segments: COPY CAST(rtoc_self_view.segments AS []Segment), alias_overrides_by_index: COPY rtoc_self_view.alias_overrides_for };
-}
+    RETURN Finalized{ segments: COPY CAST(self.segments AS []Segment), alias_overrides_by_index: COPY self.alias_overrides_for };
 END
 PUB FN builder__new() RETURNS Builder@multiowned ->
   MUTABLE self = Builder{ alias_overrides_for: {}, current_alias_overrides: NIL, next_lock_index: 0, segments: List[], synthetic_fields: List[] };

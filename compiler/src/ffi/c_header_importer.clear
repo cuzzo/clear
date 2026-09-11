@@ -297,10 +297,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN output;
 }
 END
-PRIVATE FN translator__parse_function_line(self: Translator, line: String) RETURNS ?Tuple<String, String, String>
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN translator__parse_function_line(self: Translator, line: String) RETURNS ?Tuple<String, String, String> ->
     MUTABLE prefix = "pub extern fn ";
     IF !(line.startsWith?(prefix)) THEN
       RETURN NIL;
@@ -341,7 +338,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
 PRIVATE FN translator__map_param(MUTABLE self: Translator, name: String, raw_type: String) RETURNS !?CHeaderImporterParam
   REQUIRES self: LOCAL
@@ -470,12 +466,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN NIL;
 }
 END
-PRIVATE FN translator__opaque_alias?(self: Translator, raw: String) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (translator__alias_chain(rtoc_self_view, raw))) |> ANY _.startsWith?("opaque {");
-}
+PRIVATE FN translator__opaque_alias?(self: Translator, raw: String) RETURNS !Bool ->
+    RETURN (TRY (translator__alias_chain(self, raw))) |> ANY _.startsWith?("opaque {");
 END
 PRIVATE FN translator__map_callback(MUTABLE self: Translator, raw: String) RETURNS !?String
   REQUIRES self: LOCAL
@@ -507,48 +499,32 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN translator__resolve_alias(self: Translator, raw: String) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF (TRY (translator__alias_chain(rtoc_self_view, raw))).last() != NIL THEN
-    RETURN COPY ((TRY (translator__alias_chain(rtoc_self_view, raw))).last())?;
+PRIVATE FN translator__resolve_alias(self: Translator, raw: String) RETURNS !String ->
+    IF (TRY (translator__alias_chain(self, raw))).last() != NIL THEN
+    RETURN COPY ((TRY (translator__alias_chain(self, raw))).last())?;
     ELSE
     RETURN COPY raw;
     END
-}
 END
-PRIVATE FN translator__alias_chain(self: Translator, raw: String) RETURNS ![]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN translator__alias_chain(self: Translator, raw: String) RETURNS ![]String ->
     MUTABLE seen: {String}Bool = {};
     MUTABLE current = COPY raw;
     MUTABLE chain: []String = List[];
-    WHILE (rtoc_self_view.aliases.contains?(current) AND !(seen[current])) DO
+    WHILE (self.aliases.contains?(current) AND !(seen[current])) DO
       seen[current] = TRUE;
-      current = COPY UNWRAP (rtoc_self_view.aliases[current]);
+      current = COPY UNWRAP (self.aliases[current]);
       &chain.append(current);
     END
     RETURN chain;
-}
 END
-PRIVATE FN translator__c_callback_type?(self: Translator, raw: String) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN translator__c_callback_type?(self: Translator, raw: String) RETURNS Bool ->
     RETURN (raw.contains?("callconv(.c)") AND raw.contains?("fn ("));
-}
 END
-PRIVATE FN translator__c_named_type?(self: Translator, raw: String) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF rtoc_self_view.type_names.contains?(raw) THEN
+PRIVATE FN translator__c_named_type?(self: Translator, raw: String) RETURNS Bool ->
+    IF self.type_names.contains?(raw) THEN
       RETURN TRUE;
     END
-    RETURN ((rtoc_self_view.aliases.contains?(raw) OR raw.startsWith?("struct_")) OR compilerRegexMatch(raw, compilerRegexCompile("\\A[A-Za-z_]\\w*\\z")));
-}
+    RETURN ((self.aliases.contains?(raw) OR raw.startsWith?("struct_")) OR compilerRegexMatch(raw, compilerRegexCompile("\\A[A-Za-z_]\\w*\\z")));
 END
 PRIVATE FN translator__clear_type_name(MUTABLE self: Translator, c_name: String) RETURNS String
   REQUIRES self: LOCAL
@@ -576,10 +552,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN clear_name;
 }
 END
-PRIVATE FN translator__split_top_level(self: Translator, text: String) RETURNS ![]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN translator__split_top_level(self: Translator, text: String) RETURNS ![]String ->
     IF ((text.trim().length() == 0) OR (text.trim() == "void")) THEN
       RETURN CAST(List[] AS []String);
     END
@@ -604,7 +577,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     &parts.append((text.substr(start, (text.length() - start))).trim());
     RETURN parts;
-}
 END
 PUB FN translator__new(zig_source: String, header: String, library: String, allowed_names: [Set]String) RETURNS Translator@multiowned ->
   MUTABLE self = Translator{ aliases: {}, allowed_names: COPY allowed_names, header: COPY header, library: COPY library, type_names: {}, zig_source: COPY zig_source };

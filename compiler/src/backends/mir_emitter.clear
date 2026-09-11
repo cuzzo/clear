@@ -75,12 +75,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.uses_c_callback = ((state?.uses_c_callback != NIL) OR FALSE);
 }
 END
-FN mIREmitter__emission_state(self: MIREmitter) RETURNS EmissionState
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN EmissionState{ symbol_literals: COPY rtoc_self_view.symbol_literals, uses_c_callback: rtoc_self_view.uses_c_callback, if_bind_counter: rtoc_self_view.if_bind_counter, discard_counter: rtoc_self_view.discard_counter, deep_copy_counter: rtoc_self_view.deep_copy_counter, items_block_counter: rtoc_self_view.items_block_counter, owned_slice_counter: rtoc_self_view.owned_slice_counter };
-}
+FN mIREmitter__emission_state(self: MIREmitter) RETURNS EmissionState ->
+    RETURN EmissionState{ symbol_literals: COPY self.symbol_literals, uses_c_callback: self.uses_c_callback, if_bind_counter: self.if_bind_counter, discard_counter: self.discard_counter, deep_copy_counter: self.deep_copy_counter, items_block_counter: self.items_block_counter, owned_slice_counter: self.owned_slice_counter };
 END
 PUB FN mIREmitter__emit(MUTABLE self: MIREmitter, node: ?Emittable) RETURNS !String
   REQUIRES self: LOCAL
@@ -468,16 +464,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 FN mIREmitter__emit_direct_tense_layers(self: MIREmitter, layers: []String, bindings: []String, source: String, mapped: String, label: String) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF (layers.length() == 0) THEN
       RETURN COPY mapped;
     END
     MUTABLE layer = COPY UNWRAP (layers.first());
     MUTABLE binding = COPY UNWRAP (bindings.first());
-    MUTABLE tail = TRY (mIREmitter__emit_direct_tense_layers(rtoc_self_view, layers |> SKIP 1, bindings |> SKIP 1, binding, mapped, label));
+    MUTABLE tail = TRY (mIREmitter__emit_direct_tense_layers(self, layers |> SKIP 1, bindings |> SKIP 1, binding, mapped, label));
     IF (layer == "!") THEN
       RETURN "${label}: {\n    const ${binding} = ${source} catch |__tense_err| break :${label} __tense_err;\n    break :${label} ${tail};\n}\n".trim();
     ELSE_IF (layer == "?") THEN
@@ -485,7 +478,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       panic("unsupported immediate tense-map layer {}");
     END
-}
 END
 FN mIREmitter__emit_future_map_plan(MUTABLE self: MIREmitter, plan: FutureMapPlan) RETURNS !String
   REQUIRES self: LOCAL
@@ -535,17 +527,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ("${plan.blk_label}: {\n    ${profile_comment}\n    const ${plan.ctx_type} = struct {\n        inner: *${plan.promise_zig}.Inner,\n        alloc: std.mem.Allocator,\n        ${capture_fields}\n        fn run(__raw_rt_${plan.id.toString()}: *anyopaque, __raw_args_${plan.id.toString()}: ?*anyopaque) anyerror!void {\n            const ${plan.bg_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_${plan.id.toString()})));\n            ${suppress_line}\n            ${arena_init}\n            const __ctx_${plan.id.toString()} = @as(*@This(), @ptrCast(@alignCast(__raw_args_${plan.id.toString()}.?)));\n            defer __ctx_${plan.id.toString()}.alloc.destroy(__ctx_${plan.id.toString()});\n            defer __ctx_${plan.id.toString()}.inner.wg.done();\n            errdefer |fiber_err| __ctx_${plan.id.toString()}.inner.result = fiber_err;\n            ${capture_frees}\n            ${run_body_code}\n            ${void_result_line}\n        }\n    };\n    const ${plan.alloc_var} = ${alloc_expr};\n    const ${plan.promise_var} = try ${plan.promise_zig}.spawn(${plan.alloc_var}, ${plan.rt_name}.getSched());\n    ${promoted_decls}\n    const ${plan.ctx_var} = try ${plan.alloc_var}.create(${plan.ctx_type});\n    errdefer ${plan.alloc_var}.destroy(${plan.ctx_var});\n    ${plan.ctx_var}.* = .{ ${capture_inits} };\n    ${spawn_call}\n    break :${plan.blk_label} ${plan.promise_var};\n}\n").trim();
 }
 END
-FN mIREmitter__bg_stackful_runtime_suppress_line(self: MIREmitter, plan: BgStackfulPlan, run_body_code: String, capture_frees: String, arena_init: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN mIREmitter__bg_stackful_runtime_suppress_line(self: MIREmitter, plan: BgStackfulPlan, run_body_code: String, capture_frees: String, arena_init: String) RETURNS String ->
     MUTABLE text = ((run_body_code $+ capture_frees) $+ arena_init);
     IF text.contains?(plan.bg_rt) THEN
       RETURN "";
     ELSE
       RETURN "_ = &${plan.bg_rt};";
     END
-}
 END
 FN mIREmitter__fsm_bg_body_plan?<T>(self: MIREmitter, plan: T) RETURNS Bool
   REQUIRES self: LOCAL
@@ -555,12 +543,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 FN mIREmitter__emit_fsm_bg_body(self: MIREmitter, plan: MIREmitterPlan) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN TRY (fsmWrapperEmitter__render(castPlanToFsmBody(plan)));
-}
 END
 FN mIREmitter__emit_bg_stream_plan(MUTABLE self: MIREmitter, plan: BgStreamPlan) RETURNS !String
   REQUIRES self: LOCAL
@@ -658,18 +642,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN mIREmitter__emit_profile_task_site(self: MIREmitter, site: ProfileTaskSite) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN "// CLEAR_PROFILE_TASK_SITE id=${site.site_id.toString()} kind=BG line=${site.line.toString()} column=${site.column.toString()} dispatch=${site.dispatch} form=${site.form}";
-}
 END
 FN mIREmitter__emit_task_config_plan(self: MIREmitter, plan: TaskConfigPlan) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE fields = [".stack_size = .${plan.stack_variant}"];
     IF plan.profile_site_id EXISTS AS profile_site_id_value THEN
       &fields.append(".profile_site_id = ${profile_site_id_value.toString()}");
@@ -678,13 +655,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &fields.append(".profile_dispatch = ${profile_dispatch_id_value.toString()}");
     END
     RETURN ".{ ${fields.join(", ")} }";
-}
 END
 FN mIREmitter__emit_fiber_spawn_call(self: MIREmitter, call: FiberSpawnCall) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE callee: String = "";
     IF (call.target == :runtime_submit) THEN
       MUTABLE runtime_name = (call.runtime_name OR_ELSE CAST(panic("FiberSpawnCall runtime_name required") AS String));
@@ -699,7 +672,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       panic("unknown FiberSpawnCall target {}");
     END
-    MUTABLE task_cfg = mIREmitter__emit_task_config_plan(rtoc_self_view, call.task_config);
+    MUTABLE task_cfg = mIREmitter__emit_task_config_plan(self, call.task_config);
     MUTABLE ctx_arg: String = "";
     IF call.pass_ctx_by_address THEN
       ctx_arg = "&${call.ctx_var}";
@@ -707,7 +680,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ctx_arg = COPY call.ctx_var;
     END
     RETURN "${callee}(\n    @intFromPtr(&Runtime.entryWrapper),\n    @as(CheatHeader.TaskFn, @ptrCast(&${call.ctx_type}.run)),\n    ${ctx_arg},\n    ${task_cfg}\n);\n".trim();
-}
 END
 FN mIREmitter__emit_inline_bc_as_zig(MUTABLE self: MIREmitter, node: InlineBc) RETURNS !String
   REQUIRES self: LOCAL
@@ -827,10 +799,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (([facts] + operations)).join("\n\n");
 }
 END
-FN mIREmitter__protocol_conformance_branch(self: MIREmitter, conformance: ProtocolConformanceCase, block: FN(String) -> String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN mIREmitter__protocol_conformance_branch(self: MIREmitter, conformance: ProtocolConformanceCase, block: FN(String) -> String) RETURNS String ->
     IF conformance.owner_type EXISTS AS owner_type_value THEN
       RETURN "if (T == ${owner_type_value}) { ${block("")} }";
     END
@@ -845,23 +814,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE bindings: String = binding_parts.join("");
     RETURN "if (comptime @typeInfo(T) == .@\"struct\" and @hasDecl(T, \"${marker}\")) { ${block(bindings)} }";
-}
 END
-FN mIREmitter__protocol_zig_name(self: MIREmitter, name: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN mIREmitter__protocol_zig_name(self: MIREmitter, name: String) RETURNS String ->
     IF (name.endsWith?("!") OR name.endsWith?("?")) THEN
       RETURN COPY name.substr(0, ((name.length() - 1) - 0));
     ELSE
       RETURN COPY name;
     END
-}
 END
-FN mIREmitter__sharded_map_template(self: MIREmitter, node: MIREmitterShardedMapNode) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN mIREmitter__sharded_map_template(self: MIREmitter, node: MIREmitterShardedMapNode) RETURNS !String ->
     MUTABLE op: ?FunctionSignature@multiowned = KEEP mIREmitter__sharded_map_stdlib_def(node);
     MUTABLE kind = mIREmitter__sharded_map_template_kind(node);
     MUTABLE op_value: FunctionSignature = COPY UNWRAP (op);
@@ -872,7 +833,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     panic("ShardedMap: op has no :{} template (contract={})");
-}
 END
 FN mIREmitter__sharded_map_substitute_common(MUTABLE self: MIREmitter, pattern_input: String, node: MIREmitterShardedMapNode) RETURNS !String
   REQUIRES self: LOCAL
@@ -933,18 +893,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN code.replace("&{target}", "&${target}").replace("{target}", target).replace("{index}", index).replace("{value}", value);
 }
 END
-PRIVATE FN mIREmitter__registry_template(self: MIREmitter, entry: FunctionSignature, template_kind: IntrinsicTemplateKind) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__registry_template(self: MIREmitter, entry: FunctionSignature, template_kind: IntrinsicTemplateKind) RETURNS !String ->
     RETURN TRY (functionSignature__required_intrinsic_template(entry, template_kind));
-}
 END
-PRIVATE FN mIREmitter__substitute_registry_common(self: MIREmitter, code: String, entry: FunctionSignature, allocs: ?InlineAllocMetadata, key_type: ?Type, value_type: ?Type) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE out = code.replace("{rt}", rtoc_self_view.rt_name);
+PRIVATE FN mIREmitter__substitute_registry_common(self: MIREmitter, code: String, entry: FunctionSignature, allocs: ?InlineAllocMetadata, key_type: ?Type, value_type: ?Type) RETURNS !String ->
+    MUTABLE out = code.replace("{rt}", self.rt_name);
     IF key_type EXISTS AS key_type_value THEN
       out = out.replace("{key_zig}", TRY (type__zig_type(key_type_value)));
     END
@@ -952,18 +905,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       out = out.replace("{val_zig}", TRY (type__zig_type(value_type_value)));
     END
     IF allocs != NIL THEN
-        inlineAllocMetadata__each(allocs, %(key: String@symbol, sym: String@symbol) USE(MUTABLE out, rtoc_self_view) -> {
-        out = out.replace("{${key}}", TRY (mIREmitter__alloc_zig(rtoc_self_view, sym)));
+        inlineAllocMetadata__each(allocs, %(key: String@symbol, sym: String@symbol) USE(MUTABLE out, self) -> {
+        out = out.replace("{${key}}", TRY (mIREmitter__alloc_zig(self, sym)));
         rubyToClearVoid__mir_emitter()
         });
     END
     RETURN out;
-}
 END
-PRIVATE FN mIREmitter__coerce_registry_arg(self: MIREmitter, rendered_arg: String, coerce_type: ?String@symbol) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__coerce_registry_arg(self: MIREmitter, rendered_arg: String, coerce_type: ?String@symbol) RETURNS !String ->
     IF coerce_type EXISTS AS coerce_type_value THEN
       MUTABLE coercible = [:Int64, :Float64, :Int32, :Int16, :Int8, :UInt64, :UInt32, :UInt16, :UInt8, :Bool];
       IF !(coercible.contains?(coerce_type_value)) THEN
@@ -973,7 +922,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN COPY rendered_arg;
     END
-}
 END
 PRIVATE FN mIREmitter__emit_extern_trampoline(MUTABLE self: MIREmitter, node: ExternTrampoline) RETURNS !String
   REQUIRES self: LOCAL
@@ -1150,10 +1098,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "&struct { fn run(${params.join(", ")}) callconv(.c) ${TRY (type__zig_type(return_type))} { ${body} } }.run";
 }
 END
-PRIVATE FN mIREmitter__extern_trampoline_call(self: MIREmitter, node: ExternTrampoline, comptime_codes: []String, runtime_arg_count: Int64) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__extern_trampoline_call(self: MIREmitter, node: ExternTrampoline, comptime_codes: []String, runtime_arg_count: Int64) RETURNS String ->
     IF node.method_name EXISTS AS method_name_value THEN
       MUTABLE args = List[];
       IF node.alloc_kind EXISTS AS alloc_kind_value THEN
@@ -1178,7 +1123,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &parts.append("f.a${rtoc_counter_p.toString()}");
     END
     RETURN "${mod_prefix}${node.callee_name}(${parts.join(", ")})";
-}
 END
 PRIVATE FN mIREmitter__emit_observable_consumer_spawn(MUTABLE self: MIREmitter, node: ObservableConsumerSpawn) RETURNS !String
   REQUIRES self: LOCAL
@@ -1300,28 +1244,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_shard_cleanup_buffered(self: MIREmitter, id: Int64, string_key: Bool) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE key_cleanup: String = "";
     IF string_key THEN
       key_cleanup = "for (__work.keys) |__k| __rt.heapAlloc().free(__k);\n__rt.heapAlloc().free(__work.keys);";
     ELSE
       key_cleanup = "__rt.heapAlloc().free(__work.keys);";
     END
-    RETURN "fn cleanupBuffered(chan: *CheatLib.BoundedChannel(__ShWork${id.toString()}), __rt: *Runtime) void {\n    const inner = chan.inner;\n    inner.mutex.lock();\n    while (inner.tail != inner.head) {\n        const __work = inner.buf[inner.tail & inner.mask];\n        inner.tail += 1;\n${mIREmitter__indent_block(rtoc_self_view, key_cleanup, 12)}\n    }\n    inner.mutex.unlock();\n}\n".trim();
-}
+    RETURN "fn cleanupBuffered(chan: *CheatLib.BoundedChannel(__ShWork${id.toString()}), __rt: *Runtime) void {\n    const inner = chan.inner;\n    inner.mutex.lock();\n    while (inner.tail != inner.head) {\n        const __work = inner.buf[inner.tail & inner.mask];\n        inner.tail += 1;\n${mIREmitter__indent_block(self, key_cleanup, 12)}\n    }\n    inner.mutex.unlock();\n}\n".trim();
 END
-PRIVATE FN mIREmitter__shard_key_free_work(self: MIREmitter, id: Int64, string_key: Bool) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__shard_key_free_work(self: MIREmitter, id: Int64, string_key: Bool) RETURNS String ->
     IF !(string_key) THEN
       RETURN "__rt.heapAlloc().free(__work.keys);";
     END
     RETURN "for (__work.keys) |__k| __rt.heapAlloc().free(__k);\n__rt.heapAlloc().free(__work.keys);";
-}
 END
 PRIVATE FN mIREmitter__emit_body_with_runtime(MUTABLE self: MIREmitter, stmts: []Emittable, runtime_name: String) RETURNS !String
   REQUIRES self: LOCAL
@@ -1356,10 +1292,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN TRY (mIREmitter__emit_capture_cleanup_actions(&rtoc_self_view, actions));
 }
 END
-PRIVATE FN mIREmitter__replace_emit_identifier(self: MIREmitter, source: String, needle: String, replacement: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__replace_emit_identifier(self: MIREmitter, source: String, needle: String, replacement: String) RETURNS String ->
     IF (needle.length() == 0) THEN
       RETURN COPY source;
     END
@@ -1367,7 +1300,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE needle_len = needle.bytes();
     MUTABLE result = "";
     WHILE (idx < source.bytes()) DO
-      IF (((source.substr(idx, needle_len) == needle) AND mIREmitter__emit_identifier_boundary?(rtoc_self_view, source, (idx - 1))) AND mIREmitter__emit_identifier_boundary?(rtoc_self_view, source, (idx + needle_len))) THEN
+      IF (((source.substr(idx, needle_len) == needle) AND mIREmitter__emit_identifier_boundary?(self, source, (idx - 1))) AND mIREmitter__emit_identifier_boundary?(self, source, (idx + needle_len))) THEN
         &result.append(COPY replacement);
         idx = (idx + needle_len);
       ELSE
@@ -1376,18 +1309,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN result;
-}
 END
-PRIVATE FN mIREmitter__emit_identifier_boundary?(self: MIREmitter, source: String, index_value: Int64) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__emit_identifier_boundary?(self: MIREmitter, source: String, index_value: Int64) RETURNS Bool ->
     IF ((index_value < 0) OR (index_value >= source.bytes())) THEN
       RETURN TRUE;
     END
     MUTABLE byte = byteAt(source, index_value);
     RETURN !((((((((byte >= 48) AND (byte <= 57))) OR (((byte >= 65) AND (byte <= 90)))) OR (((byte >= 97) AND (byte <= 122)))) OR (byte == 95))));
-}
 END
 PRIVATE FN mIREmitter__emit_snapshot_read(MUTABLE self: MIREmitter, node: SnapshotRead) RETURNS !String
   REQUIRES self: LOCAL
@@ -1477,13 +1405,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIREmitter__comptime_arc_unwrap_expr(self: MIREmitter, source: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__comptime_arc_unwrap_expr(self: MIREmitter, source: String) RETURNS String ->
     MUTABLE base_t = "@TypeOf(${source})";
     RETURN "(if (comptime @typeInfo(${base_t}) == .pointer) (if (comptime @typeInfo(@typeInfo(${base_t}).pointer.child) == .@\"struct\") (if (comptime @hasDecl(@typeInfo(${base_t}).pointer.child, \"__clear_ref_carrier\")) ${source}.*.ctrl.data.* else ${source}.*) else ${source}.*) else (if (comptime @typeInfo(${base_t}) == .@\"struct\") (if (comptime @hasDecl(${base_t}, \"__clear_ref_carrier\")) ${source}.ctrl.data.* else ${source}) else ${source}))";
-}
 END
 PRIVATE FN mIREmitter__emit_polymorphic_mutate(MUTABLE self: MIREmitter, node: PolymorphicMutate) RETURNS !String
   REQUIRES self: LOCAL
@@ -1613,10 +1537,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN result;
 }
 END
-PRIVATE FN mIREmitter__polymorphic_read_captures(self: MIREmitter, body: []Emittable, excluded: []String) RETURNS ![]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__polymorphic_read_captures(self: MIREmitter, body: []Emittable, excluded: []String) RETURNS ![]String ->
     MUTABLE declared: [Set]String = excluded |> DISTINCT _;
     MUTABLE used: []String = List[];
     TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY body }, %(part: Emittable) USE(MUTABLE declared, MUTABLE used) -> {
@@ -1632,12 +1553,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rubyToClearVoid__mir_emitter()
     }));
     RETURN used |> WHERE !(declared.contains?(_));
-}
 END
-PRIVATE FN mIREmitter__polymorphic_capture_overrides(self: MIREmitter, captures_value: []String) RETURNS !{String}String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__polymorphic_capture_overrides(self: MIREmitter, captures_value: []String) RETURNS !{String}String ->
     RETURN {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE rtoc_indexed_items_25: []String = captures_value;
@@ -1650,12 +1567,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     rtoc_indexed_output_27
     };
-}
 END
-PRIVATE FN mIREmitter__polymorphic_move_guard_captures(self: MIREmitter, body: []Emittable, excluded: []String) RETURNS ![]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__polymorphic_move_guard_captures(self: MIREmitter, body: []Emittable, excluded: []String) RETURNS ![]String ->
     MUTABLE declared: [Set]String = excluded |> DISTINCT _;
     MUTABLE moved: []String = List[];
     TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY body }, %(part: Emittable) USE(MUTABLE declared, MUTABLE moved) -> {
@@ -1671,7 +1584,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rubyToClearVoid__mir_emitter()
     }));
     RETURN moved;
-}
 END
 PRIVATE FN mIREmitter__polymorphic_move_guard_overrides(MUTABLE self: MIREmitter, captures_value: []String, offset: Int64) RETURNS !{String}String
   REQUIRES self: LOCAL
@@ -1805,10 +1717,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__flow_body_terminates?(self: MIREmitter, stmts: []Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF stmts.empty?() THEN
       RETURN FALSE;
     END
@@ -1818,36 +1727,28 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF last IS_A PolymorphicFlowSignal AS polymorphic_flow_signal THEN
       RETURN TRUE;
     ELSE_IF last IS_A ScopeBlock AS scope_block THEN
-      RETURN mIREmitter__flow_body_terminates?(rtoc_self_view, TRY (scopeBlock__body(scope_block)));
+      RETURN mIREmitter__flow_body_terminates?(self, TRY (scopeBlock__body(scope_block)));
     ELSE_IF last IS_A IfStmt AS if_stmt THEN
-      IF !(mIREmitter__flow_body_terminates?(rtoc_self_view, if_stmt.then_body)) THEN
+      IF !(mIREmitter__flow_body_terminates?(self, if_stmt.then_body)) THEN
         RETURN FALSE;
       END
       MUTABLE else_body: []Emittable = COPY (if_stmt.else_body OR_ELSE List[]);
       IF else_body.empty?() THEN
         RETURN FALSE;
       END
-      RETURN mIREmitter__flow_body_terminates?(rtoc_self_view, else_body);
+      RETURN mIREmitter__flow_body_terminates?(self, else_body);
     ELSE
       RETURN FALSE;
     END
-}
 END
-PRIVATE FN mIREmitter__flow_always_exits?(self: MIREmitter, node: PolymorphicMutateFlow) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE body_exits = TRY (mIREmitter__flow_body_terminates?(rtoc_self_view, node.body));
+PRIVATE FN mIREmitter__flow_always_exits?(self: MIREmitter, node: PolymorphicMutateFlow) RETURNS !Bool ->
+    MUTABLE body_exits = TRY (mIREmitter__flow_body_terminates?(self, node.body));
     IF !(node.guard_cond) THEN
       RETURN body_exits;
     END
-    RETURN (body_exits AND TRY (mIREmitter__flow_body_terminates?(rtoc_self_view, (node.guard_fail_body OR_ELSE List[]))));
-}
+    RETURN (body_exits AND TRY (mIREmitter__flow_body_terminates?(self, (node.guard_fail_body OR_ELSE List[]))));
 END
-PRIVATE FN mIREmitter__indent_block(self: MIREmitter, code: String, spaces: Int64) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__indent_block(self: MIREmitter, code: String, spaces: Int64) RETURNS String ->
     MUTABLE pad = compilerRepeatString(" ", spaces);
     # An IF EXPRESSION may not produce a heap String, and Ruby's `lines` keeps
     # the newline that `split` drops -- joining with "" ran every line together.
@@ -1860,7 +1761,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN regexReplaceAll__mir_emitter(padded.join("\n"), "\\s+\\z", "");
-}
 END
 PRIVATE FN mIREmitter__emit_snapshot_transaction(MUTABLE self: MIREmitter, node: SnapshotTransaction) RETURNS !String
   REQUIRES self: LOCAL
@@ -1934,10 +1834,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_with_match_probe(self: MIREmitter, family: String@symbol, cell_zig: String, snapshot_mode: Bool) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE inner_t = "CheatLib.WithMatchInner(@TypeOf(${cell_zig}))";
     IF (family == :VERSIONED) THEN
       IF snapshot_mode THEN
@@ -1956,7 +1853,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       panic("WITH MATCH: no probe for family {}");
     END
-}
 END
 PRIVATE FN mIREmitter__emit_with_match_prelude(MUTABLE self: MIREmitter, arm: MIRWithMatchArm, cell_zig: String, alias_name: String, rt_name: String, snapshot_mode: Bool) RETURNS !String
   REQUIRES self: LOCAL
@@ -1980,10 +1876,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_with_match_guard_prelude(self: MIREmitter, unwrap: String, guard_var: String, alias_name: String, rt_name: String, mode: String@symbol) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE call: String = "";
     IF (mode == :read) THEN
       call = "read(${rt_name})";
@@ -1991,7 +1884,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       call = "acquire()";
     END
     RETURN (["var ${guard_var} = ${unwrap}.*.${call};", "defer ${guard_var}.release();", "const ${alias_name} = ${guard_var}.get;", "_ = &${alias_name};"]).join("\n");
-}
 END
 PRIVATE FN mIREmitter__wrap_conflict_handler(MUTABLE self: MIREmitter, core_call: String, conflict_action: ?FailureAction, retries: ?Int64, zig_error_name: String = "UpdateRetriesExhausted") RETURNS !String
   REQUIRES self: LOCAL
@@ -2039,17 +1931,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIREmitter__required_failure_label(self: MIREmitter, action: FailureAction) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__required_failure_label(self: MIREmitter, action: FailureAction) RETURNS !String ->
     MUTABLE label: ?String = COPY action.with_label;
     IF label EXISTS AS label_value THEN
       RETURN label_value;
     ELSE
       panic("failure action requires a WITH label");
     END
-}
 END
 # `[a, b].reject(&:empty?).join(sep)`. Written out because the machine
 # translation bound `.join` to the WHERE predicate rather than to the
@@ -2063,12 +1951,8 @@ PRIVATE FN mIREmitterJoinNonEmpty(parts: []String, separator: String) RETURNS St
   END
   RETURN kept.join(separator);
 END
-PRIVATE FN mIREmitter__zig_string_literal(self: MIREmitter, text: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__zig_string_literal(self: MIREmitter, text: String) RETURNS String ->
     RETURN compilerStringDump(text);
-}
 END
 PRIVATE FN mIREmitter__symbol_literal_name(MUTABLE self: MIREmitter, value: String) RETURNS String
   REQUIRES self: LOCAL
@@ -2083,12 +1967,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN name;
 }
 END
-PRIVATE FN mIREmitter__zig_byte_string_literal(self: MIREmitter, text: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__zig_byte_string_literal(self: MIREmitter, text: String) RETURNS String ->
     RETURN compilerByteStringLiteral(text);
-}
 END
 PRIVATE FN mIREmitter__emit_fallible_lock_binding(MUTABLE self: MIREmitter, node: FallibleLockBinding) RETURNS !String
   REQUIRES self: LOCAL
@@ -2288,24 +2168,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN out.join("");
 }
 END
-FN mIREmitter__symbol_pool_declarations(self: MIREmitter) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN mIREmitter__symbol_pool_declarations(self: MIREmitter) RETURNS String ->
     MUTABLE lines: []String = List[];
-    IF rtoc_self_view.uses_c_callback THEN
+    IF self.uses_c_callback THEN
       &lines.append("// Runtime bridge for synchronous C callbacks.");
       &lines.append("threadlocal var __clear_c_callback_rt: ?*Runtime = null;");
     END
-    IF !((rtoc_self_view.symbol_literals.count() == 0)) THEN
+    IF !((self.symbol_literals.count() == 0)) THEN
       &lines.append("// Static String@symbol literal pool.");
     END
-    FOR rtoc_key IN rtoc_self_view.symbol_literals.keys() DO
-    MUTABLE name: String = COPY UNWRAP (rtoc_self_view.symbol_literals[rtoc_key]);
-    &lines.append("const ${name}: CheatLib.Symbol = .{ .bytes = ${mIREmitter__zig_byte_string_literal(rtoc_self_view, rtoc_key)} };");
+    FOR rtoc_key IN self.symbol_literals.keys() DO
+    MUTABLE name: String = COPY UNWRAP (self.symbol_literals[rtoc_key]);
+    &lines.append("const ${name}: CheatLib.Symbol = .{ .bytes = ${mIREmitter__zig_byte_string_literal(self, rtoc_key)} };");
     END
     RETURN lines.join("\n");
-}
 END
 PRIVATE FN mIREmitter__emit_fn_def(MUTABLE self: MIREmitter, node: FnDef) RETURNS !String
   REQUIRES self: LOCAL
@@ -2403,10 +2279,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_enum_def(self: MIREmitter, node: MIREnumDef) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE vis: String = "";
     IF (node.visibility == :pub) THEN
       vis = "pub ";
@@ -2415,7 +2288,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE variants = node.variants.join(", ");
     RETURN "${vis}const ${node.name} = enum { ${variants} };";
-}
 END
 PRIVATE FN mIREmitter__emit_union_def(MUTABLE self: MIREmitter, node: UnionTypeDef) RETURNS !String
   REQUIRES self: LOCAL
@@ -2446,30 +2318,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_import(self: MIREmitter, node: Import) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE base = "@import(\"${node.module_path}\")";
     IF node.member THEN
       base = "${base}.${UNWRAP (node.member)}";
     END
     RETURN "const ${node.alias_name} = ${base};";
-}
 END
 PRIVATE FN mIREmitter__emit_type_alias(self: MIREmitter, node: TypeAlias) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN "pub const ${node.name} = ${node.target};\ncomptime { _ = @typeName(${node.name}); }";
-}
 END
 PRIVATE FN mIREmitter__emit_c_extern_fn_decl(self: MIREmitter, node: CExternFnDecl) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     # `param.zig_type` is the param's own field; `TRY (type__zig_type(_))` asked the
     # Type module to render the param itself.
     MUTABLE extern_param_parts: []String = List[];
@@ -2486,20 +2347,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       DEFAULT -> ".c"
     END;
     RETURN "extern \"${library}\" fn ${node.name}(${params}) callconv(${callconv}) ${node.return_type};";
-}
 END
 PRIVATE FN mIREmitter__emit_c_extern_struct_def(self: MIREmitter, node: CExternStructDef) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE extern_field_parts: []String = List[];
     FOR extern_field IN node.fields DO
       &extern_field_parts.append("${extern_field.name}: ${extern_field.zig_type}");
     END
     MUTABLE fields = extern_field_parts.join(", ");
     RETURN "const ${node.name} = extern struct { ${fields} };";
-}
 END
 PRIVATE FN mIREmitter__emit_module_namespace(MUTABLE self: MIREmitter, node: ModuleNamespace) RETURNS !String
   REQUIRES self: LOCAL
@@ -2639,10 +2495,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_destructure_target(self: MIREmitter, node: MIRDestructureTarget) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF (CAST(node.name AS String) == "_") THEN
       RETURN COPY "_";
     END
@@ -2657,26 +2510,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN COPY CAST(node.name AS String);
     END
-}
 END
-PRIVATE FN mIREmitter__zig_bare_name(self: MIREmitter, name: Name) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__zig_bare_name(self: MIREmitter, name: Name) RETURNS String ->
     MUTABLE text = COPY CAST(name AS String);
     IF (text.startsWith?("@\"") AND text.endsWith?("\"")) THEN
       RETURN COPY text.substr(2, (((text.length() - 2) - 2) + 1));
     ELSE
       RETURN text;
     END
-}
 END
-PRIVATE FN mIREmitter__move_guard_name(self: MIREmitter, name: Name) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN "${mIREmitter__zig_bare_name(rtoc_self_view, name)}_moved";
-}
+PRIVATE FN mIREmitter__move_guard_name(self: MIREmitter, name: Name) RETURNS String ->
+    RETURN "${mIREmitter__zig_bare_name(self, name)}_moved";
 END
 PRIVATE FN mIREmitter__emit_struct_init_field_value(MUTABLE self: MIREmitter, value: Emittable) RETURNS !String
   REQUIRES self: LOCAL
@@ -2699,10 +2543,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIREmitter__emit(&rtoc_self_view, value));
 }
 END
-PRIVATE FN mIREmitter__zig_field_name(self: MIREmitter, name: Name) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__zig_field_name(self: MIREmitter, name: Name) RETURNS String ->
     MUTABLE text = COPY CAST(name AS String);
     IF text.startsWith?("@\"") THEN
       RETURN text;
@@ -2712,7 +2553,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN text;
     END
-}
 END
 PRIVATE FN mIREmitter__emit_reassign_cleanup(MUTABLE self: MIREmitter, node: ReassignWithCleanup) RETURNS !String
   REQUIRES self: LOCAL
@@ -2737,10 +2577,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "{\nconst ${tmp} = ${val};\nCheatLib.cleanup(@TypeOf(${node.name}), ${alloc}, &${node.name});\n${node.name} = ${tmp};\n}";
 }
 END
-PRIVATE FN mIREmitter__reassign_success_only_expr(self: MIREmitter, node: ReassignWithCleanup) RETURNS ?Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__reassign_success_only_expr(self: MIREmitter, node: ReassignWithCleanup) RETURNS ?Emittable ->
     MUTABLE value = COPY node.value;
     IF value IS_A MIRCast AS mir_cast THEN
       MUTABLE mir_cast = cast__expr(mir_cast);
@@ -2761,7 +2598,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
 PRIVATE FN mIREmitter__emit_if_stmt(MUTABLE self: MIREmitter, node: IfStmt) RETURNS !String
   REQUIRES self: LOCAL
@@ -2921,10 +2757,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "for (${iter}) |${captures}| {\n${body}\n}";
 }
 END
-PRIVATE FN mIREmitter__i64_range_capture_cast_required?(self: MIREmitter, node: ForStmt) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__i64_range_capture_cast_required?(self: MIREmitter, node: ForStmt) RETURNS Bool ->
     MUTABLE iter = COPY node.iter;
     # Ruby's `node.capture.is_a?(String)` is a presence test on a nilable
     # field, not a union test -- CLEAR spells that EXISTS.
@@ -2936,7 +2769,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN FALSE;
-}
 END
 PRIVATE FN mIREmitter__emit_switch(MUTABLE self: MIREmitter, node: SwitchStmt) RETURNS !String
   REQUIRES self: LOCAL
@@ -3059,17 +2891,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_catch_snapshot_decl(self: MIREmitter, rt_name: String, snapshot_type: ?Type) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF snapshot_type EXISTS AS snapshot_type_value THEN
       MUTABLE snap_zig = TRY (type__zig_type(snapshot_type_value));
       RETURN (["const __snap_ptr = ${rt_name}.__error.snapshotAs(${snap_zig});", "const snapshot = if (__snap_ptr) |p| p.* else undefined;", "const __has_snapshot = __snap_ptr != null;", "_ = &snapshot; _ = &__has_snapshot;"]).join("\n");
     ELSE
       RETURN "";
     END
-}
 END
 PRIVATE FN mIREmitter__emit_catch_condition(MUTABLE self: MIREmitter, meta: CatchClauseMeta, rt_name: String) RETURNS !String
   REQUIRES self: LOCAL
@@ -3099,10 +2927,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_catch_condition_group(self: MIREmitter, checks: []String, default_value: String) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF (checks.length() == 0) THEN
       RETURN COPY default_value;
     END
@@ -3110,7 +2935,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY UNWRAP (checks.first());
     END
     RETURN "(${checks.join(" or ")})";
-}
 END
 PRIVATE FN mIREmitter__emit_union_match(MUTABLE self: MIREmitter, node: UnionMatchStmt) RETURNS !String
   REQUIRES self: LOCAL
@@ -3273,12 +3097,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_thunk_return_or_pop(self: MIREmitter) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN "if (current.parent) |p| {\n    p.child_result = result;\n    if (current != &initial) ${TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap))}.destroy(current);\n    current = p;\n    continue;\n}\nreturn result;\n".trim();
-}
+  EFFECTS REENTRANT ->
+    RETURN "if (current.parent) |p| {\n    p.child_result = result;\n    if (current != &initial) ${TRY (mIREmitter__alloc_zig(self, :heap))}.destroy(current);\n    current = p;\n    continue;\n}\nreturn result;\n".trim();
 END
 PRIVATE FN mIREmitter__emit_mutual_thunk_trampoline(MUTABLE self: MIREmitter, node: MutualThunkTrampoline) RETURNS !String
   REQUIRES self: LOCAL
@@ -3313,34 +3133,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_thunk_frame_field_decls(self: MIREmitter, fields: []ThunkFrameField, indent: String) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN (fields |> SELECT "${_.name}: ${TRY (type__zig_type(_.type_info))},").join("\n${indent}");
-}
 END
 PRIVATE FN mIREmitter__emit_thunk_yield_statement(self: MIREmitter, policy_value: String@symbol) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF (policy_value == :check) THEN
-      RETURN "${rtoc_self_view.rt_name}.checkYield();";
+      RETURN "${self.rt_name}.checkYield();";
     ELSE_IF (policy_value == :tight_skip) THEN
       RETURN "// (TIGHT: scheduler yield-check skipped)";
     ELSE
       panic("unknown thunk yield policy: {}");
     END
-}
 END
 PRIVATE FN mIREmitter__emit_thunk_combine_op(self: MIREmitter, op: String@symbol) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN COPY ((CAST({:ADD: "+", :SUB: "-", :MUL: "*", :DIV: "/"} AS {String@symbol}String))[op] OR_ELSE panic("unknown thunk combine op: {}"));
-}
 END
 PRIVATE FN mIREmitter__emit_batch_window_emit(MUTABLE self: MIREmitter, node: BatchWindowEmitNode, source: String) RETURNS !String
   REQUIRES self: LOCAL
@@ -3419,17 +3227,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_defer_like(self: MIREmitter, keyword: String, body_input: ?String) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE body: ?String = COPY body_input;
     MUTABLE body_value: String = body?;
     IF body_value.startsWith?("{") THEN
       RETURN "${keyword} ${body_value}";
     END
     RETURN "${keyword} ${body_value};";
-}
 END
 PRIVATE FN mIREmitter__emit_expr_stmt(MUTABLE self: MIREmitter, node: ExprStmt) RETURNS !String
   REQUIRES self: LOCAL
@@ -3510,25 +3314,22 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN mIREmitter__emit_direct_cleanup(self: MIREmitter, name: String, entry: CleanupEntry, alloc_override: ?String = NIL) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE alloc: String = (alloc_override OR_ELSE TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry)));
+  EFFECTS REENTRANT ->
+    MUTABLE alloc: String = (alloc_override OR_ELSE TRY (mIREmitter__alloc_from_entry(self, entry)));
     MUTABLE guarded = cleanupEntry__has_moved_guard?(entry);
     MUTABLE via_pointer = cleanupEntry__via_pointer?(entry);
     IF (cleanupEntry__kind(entry) == :resource) THEN
-      MUTABLE close = TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, UNWRAP (cleanupEntry__resource_close_plan(entry)), name));
-      RETURN mIREmitter__direct_cleanup_statement(rtoc_self_view, name, close, guarded);
+      MUTABLE close = TRY (mIREmitter__render_resource_close_plan(self, UNWRAP (cleanupEntry__resource_close_plan(entry)), name));
+      RETURN mIREmitter__direct_cleanup_statement(self, name, close, guarded);
     ELSE_IF (cleanupEntry__kind(entry) == :tuple) THEN
-      RETURN mIREmitter__direct_cleanup_statement(rtoc_self_view, name, TRY (mIREmitter__render_tuple_cleanup(rtoc_self_view, entry, name, alloc)), guarded);
+      RETURN mIREmitter__direct_cleanup_statement(self, name, TRY (mIREmitter__render_tuple_cleanup(self, entry, name, alloc)), guarded);
     ELSE
       MUTABLE rc_alloc: ?String@symbol = cleanupEntry__rc_alloc(entry);
       MUTABLE use_alloc: String = "";
       use_alloc = COPY alloc;
       IF ((cleanupEntry__kind(entry) == :rc) AND (alloc_override == NIL)) THEN
         IF rc_alloc EXISTS AS rc_alloc_value THEN
-          use_alloc = TRY (mIREmitter__alloc_from_sym(rtoc_self_view, rc_alloc_value));
+          use_alloc = TRY (mIREmitter__alloc_from_sym(self, rc_alloc_value));
         END
       END
       MUTABLE use_name: String = "";
@@ -3543,11 +3344,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         use_type = "@TypeOf(${use_name})";
       END
-      MUTABLE result = mIREmitter__direct_uniform_cleanup(rtoc_self_view, use_name, use_type, use_alloc, guarded, via_pointer);
+      MUTABLE result = mIREmitter__direct_uniform_cleanup(self, use_name, use_type, use_alloc, guarded, via_pointer);
       IF cleanupEntry__rc_release_fields_cleanup?(entry) THEN
         MUTABLE guard: String = "";
         IF guarded THEN
-          guard = "if (!${mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY name })}) ";
+          guard = "if (!${mIREmitter__move_guard_name(self, Name{ StringValue: COPY name })}) ";
         ELSE
           guard = "";
         END
@@ -3555,29 +3356,25 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN result;
     END
-}
 END
 PRIVATE FN mIREmitter__emit_cleanup(self: MIREmitter, name: String, entry: CleanupEntry, errdefer: Bool = FALSE) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE alloc: String = TRY (mIREmitter__alloc_from_entry(rtoc_self_view, entry));
+  EFFECTS REENTRANT ->
+    MUTABLE alloc: String = TRY (mIREmitter__alloc_from_entry(self, entry));
     MUTABLE g = cleanupEntry__has_moved_guard?(entry);
     MUTABLE vp = cleanupEntry__via_pointer?(entry);
     IF (cleanupEntry__kind(entry) == :resource) THEN
       MUTABLE close: String = "";
       IF cleanupEntry__resource_close_plan(entry) EXISTS AS close_plan THEN
-        close = TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, close_plan, name));
+        close = TRY (mIREmitter__render_resource_close_plan(self, close_plan, name));
       END
-      RETURN mIREmitter__guarded_defer(rtoc_self_view, name, close, g, errdefer);
+      RETURN mIREmitter__guarded_defer(self, name, close, g, errdefer);
     ELSE_IF (cleanupEntry__kind(entry) == :tuple) THEN
-      RETURN mIREmitter__guarded_defer(rtoc_self_view, name, TRY (mIREmitter__render_tuple_cleanup(rtoc_self_view, entry, name, alloc)), g, errdefer);
+      RETURN mIREmitter__guarded_defer(self, name, TRY (mIREmitter__render_tuple_cleanup(self, entry, name, alloc)), g, errdefer);
     ELSE
       MUTABLE use_alloc: String = COPY alloc;
       IF (cleanupEntry__kind(entry) == :rc) THEN
         IF cleanupEntry__rc_alloc(entry) EXISTS AS rc_alloc_value THEN
-          use_alloc = TRY (mIREmitter__alloc_from_sym(rtoc_self_view, rc_alloc_value));
+          use_alloc = TRY (mIREmitter__alloc_from_sym(self, rc_alloc_value));
         END
       END
       MUTABLE use_name: String = "";
@@ -3592,11 +3389,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         use_type = "@TypeOf(${use_name})";
       END
-      MUTABLE result = mIREmitter__guarded_cleanup(rtoc_self_view, use_name, use_type, use_alloc, g, errdefer, vp);
+      MUTABLE result = mIREmitter__guarded_cleanup(self, use_name, use_type, use_alloc, g, errdefer, vp);
       IF cleanupEntry__rc_release_fields_cleanup?(entry) THEN
         MUTABLE guard: String = "";
         IF g THEN
-          guard = "if (!${mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY name })}) ";
+          guard = "if (!${mIREmitter__move_guard_name(self, Name{ StringValue: COPY name })}) ";
         ELSE
           guard = "";
         END
@@ -3610,16 +3407,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN result;
     END
-}
 END
 PRIVATE FN mIREmitter__emit_move_mark(self: MIREmitter, node: MoveMark) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE guard = COPY (rtoc_self_view.move_guard_overrides[CAST(node.name AS String)] OR_ELSE mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY node.name }));
+  EFFECTS REENTRANT ->
+    MUTABLE guard = COPY (self.move_guard_overrides[CAST(node.name AS String)] OR_ELSE mIREmitter__move_guard_name(self, Name{ StringValue: COPY node.name }));
     RETURN "${guard} = true;";
-}
 END
 PRIVATE FN mIREmitter__emit_deep_copy(MUTABLE self: MIREmitter, node: DeepCopy) RETURNS !String
   REQUIRES self: LOCAL
@@ -3814,20 +3606,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_frame_save(self: MIREmitter, node: FrameSave) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN "const frame_mark = ${node.rt_expr}.saveFrameMark();";
-}
 END
 PRIVATE FN mIREmitter__emit_frame_restore(self: MIREmitter, node: FrameRestore) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN "defer ${node.rt_expr}.restoreFrameMark(frame_mark);";
-}
 END
 PRIVATE FN mIREmitter__emit_call(MUTABLE self: MIREmitter, node: Call) RETURNS !String
   REQUIRES self: LOCAL
@@ -3851,17 +3635,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (mIREmitter__emit_call(&rtoc_self_view, runtimeCallSpec__call(node.spec, node.args)));
 }
 END
-PRIVATE FN mIREmitter__runtime_scoped_callee(self: MIREmitter, callee: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__runtime_scoped_callee(self: MIREmitter, callee: String) RETURNS String ->
     MUTABLE text = COPY callee;
     IF text.startsWith?("rt.") THEN
-      RETURN "${rtoc_self_view.rt_name}.${text.deletePrefix("rt.")}";
+      RETURN "${self.rt_name}.${text.deletePrefix("rt.")}";
     ELSE
       RETURN text;
     END
-}
 END
 PRIVATE FN mIREmitter__emit_tail_call(MUTABLE self: MIREmitter, node: TailCall) RETURNS !String
   REQUIRES self: LOCAL
@@ -3948,12 +3728,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_test_preamble(self: MIREmitter) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN "var da = std.heap.DebugAllocator(.{}){};\n    defer _ = da.deinit();\n    const allocator = da.allocator;\n    var global_ctx = EbrContext{};\n    defer global_ctx.deinit(allocator);\n    var __rt_box = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);\n    defer __rt_box.deinit();\n    __rt_box.wireAllocator();\n    const rt: *Runtime = &__rt_box; _ = &rt;\n".trim();
-}
 END
 PRIVATE FN mIREmitter__emit_debug_only(MUTABLE self: MIREmitter, node: DebugOnly) RETURNS !String
   REQUIRES self: LOCAL
@@ -3964,16 +3740,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN regexReplaceAll__mir_emitter("if (@import(\"builtin\").mode == .Debug) {\n${mIREmitter__indent_block(rtoc_self_view, body, 4)}\n}\n", "\\s+\\z", "");
 }
 END
-PRIVATE FN mIREmitter__paren_if_try(self: MIREmitter, expr: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__paren_if_try(self: MIREmitter, expr: String) RETURNS String ->
     IF expr.startsWith?("try ") THEN
       RETURN COPY "(${expr})";
     ELSE
       RETURN COPY expr;
     END
-}
 END
 PRIVATE FN mIREmitter__emit_index_get(MUTABLE self: MIREmitter, node: IndexGet) RETURNS !String
   REQUIRES self: LOCAL
@@ -4255,10 +4027,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (["{", "var ${name} = ${TRY (mIREmitter__emit(&rtoc_self_view, node.expr))};", mIREmitter__indent_block(rtoc_self_view, TRY (mIREmitter__emit_cleanup(rtoc_self_view, name, node.cleanup_entry, FALSE)), 4), "}"]).join("\n");
 }
 END
-PRIVATE FN mIREmitter__discard_success_only?(self: MIREmitter, expr: Emittable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__discard_success_only?(self: MIREmitter, expr: Emittable) RETURNS Bool ->
     IF expr IS_A TryCatch AS try_catch THEN
     IF (try_catch.capture == NIL) THEN
         MUTABLE catch_body = try_catch.catch_body;
@@ -4269,7 +4038,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN FALSE;
     END
-}
 END
 PRIVATE FN mIREmitter__emit_conditional(MUTABLE self: MIREmitter, node: Conditional) RETURNS !String
   REQUIRES self: LOCAL
@@ -4294,18 +4062,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIREmitter__emit_allocator_ref(self: MIREmitter, node: AllocatorRef) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIREmitter__alloc_zig(rtoc_self_view, node.kind));
-}
+  EFFECTS REENTRANT ->
+    RETURN TRY (mIREmitter__alloc_zig(self, node.kind));
 END
 PRIVATE FN mIREmitter__emit_type_sentinel(self: MIREmitter, node: TypeSentinel) RETURNS ?String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE t = COPY CAST(node.zig_type AS String);
     IF (node.extreme == :max) THEN
       IF zigType__float_identifier?(t) THEN
@@ -4326,13 +4087,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
 PRIVATE FN mIREmitter__emit_default_value(self: MIREmitter, node: DefaultValue) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF (node.kind == :aggregate_empty) THEN
       RETURN ".{}";
     ELSE_IF (node.kind == :string_empty) THEN
@@ -4348,7 +4105,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       panic("unknown MIR::DefaultValue kind {}");
     END
-}
 END
 PRIVATE FN mIREmitter__emit_range_lit(MUTABLE self: MIREmitter, node: MIRRangeLit) RETURNS !String
   REQUIRES self: LOCAL
@@ -4421,59 +4177,36 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END) } END) } |> WHERE _ != NIL |> SELECT UNWRAP _).join("\n");
 }
 END
-PRIVATE FN mIREmitter__semicolon_required?(self: MIREmitter, stmt: Emittable, stripped: String) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__semicolon_required?(self: MIREmitter, stmt: Emittable, stripped: String) RETURNS Bool ->
     RETURN (((emittable__expr?(stmt) AND !(stripped.endsWith?(";"))) AND !(stripped.endsWith?("}"))) AND !(stripped.endsWith?("{")));
-}
 END
-PRIVATE FN mIREmitter__alloc_from_entry(self: MIREmitter, entry: CleanupEntry) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIREmitter__alloc_zig(rtoc_self_view, cleanupEntry__alloc(entry)));
-}
+PRIVATE FN mIREmitter__alloc_from_entry(self: MIREmitter, entry: CleanupEntry) RETURNS !String ->
+    RETURN TRY (mIREmitter__alloc_zig(self, cleanupEntry__alloc(entry)));
 END
-PRIVATE FN mIREmitter__alloc_from_sym(self: MIREmitter, sym: String@symbol) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIREmitter__alloc_zig(rtoc_self_view, sym));
-}
+PRIVATE FN mIREmitter__alloc_from_sym(self: MIREmitter, sym: String@symbol) RETURNS !String ->
+    RETURN TRY (mIREmitter__alloc_zig(self, sym));
 END
-PRIVATE FN mIREmitter__alloc_zig(self: MIREmitter, sym: String@symbol) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__alloc_zig(self: MIREmitter, sym: String@symbol) RETURNS !String ->
     IF !(((sym == :heap) OR (sym == :frame))) THEN
       panic("alloc_zig: unknown allocator symbol :{}");
     END
-    IF (((sym == :heap) AND (rtoc_self_view.heap_allocator_cache_name != NIL)) AND (rtoc_self_view.heap_allocator_cache_runtime_name == rtoc_self_view.rt_name)) THEN
-      RETURN COPY (rtoc_self_view.heap_allocator_cache_name)?;
+    IF (((sym == :heap) AND (self.heap_allocator_cache_name != NIL)) AND (self.heap_allocator_cache_runtime_name == self.rt_name)) THEN
+      RETURN COPY (self.heap_allocator_cache_name)?;
     END
-    RETURN placement__zig_allocator(sym, rtoc_self_view.rt_name);
-}
+    RETURN placement__zig_allocator(sym, self.rt_name);
 END
-PRIVATE FN mIREmitter__unique_heap_allocator_cache_name(self: MIREmitter) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__unique_heap_allocator_cache_name(self: MIREmitter) RETURNS String ->
     MUTABLE base = "__clear_heap_alloc";
-    IF !(rtoc_self_view.heap_allocator_cache_names.contains?(base)) THEN
+    IF !(self.heap_allocator_cache_names.contains?(base)) THEN
       RETURN base;
     END
     MUTABLE suffix = 1;
-    WHILE rtoc_self_view.heap_allocator_cache_names.contains?("${base}_${suffix.toString()}") DO
+    WHILE self.heap_allocator_cache_names.contains?("${base}_${suffix.toString()}") DO
       suffix = (suffix + 1);
     END
     RETURN "${base}_${suffix.toString()}";
-}
 END
-PRIVATE FN mIREmitter__guarded_defer(self: MIREmitter, name: String, body: String, guarded: Bool, errdefer: Bool = FALSE) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__guarded_defer(self: MIREmitter, name: String, body: String, guarded: Bool, errdefer: Bool = FALSE) RETURNS String ->
     MUTABLE kw: String = "";
     IF errdefer THEN
       kw = "errdefer";
@@ -4481,18 +4214,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       kw = "defer";
     END
     IF guarded THEN
-      RETURN "var ${mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY name })} = false; _ = &${mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY name })};\n${kw} if (!${mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY name })}) ${body};\n";
+      RETURN "var ${mIREmitter__move_guard_name(self, Name{ StringValue: COPY name })} = false; _ = &${mIREmitter__move_guard_name(self, Name{ StringValue: COPY name })};\n${kw} if (!${mIREmitter__move_guard_name(self, Name{ StringValue: COPY name })}) ${body};\n";
     ELSE_IF (body.startsWith?("{") AND body.endsWith?("}")) THEN
       RETURN "${kw} ${body}\n";
     ELSE
       RETURN "${kw} ${body};\n";
     END
-}
 END
-PRIVATE FN mIREmitter__guarded_cleanup(self: MIREmitter, name: String, zig_type_input: String, alloc: String, guarded: Bool, errdefer: Bool = FALSE, via_pointer: ?Bool = FALSE) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__guarded_cleanup(self: MIREmitter, name: String, zig_type_input: String, alloc: String, guarded: Bool, errdefer: Bool = FALSE, via_pointer: ?Bool = FALSE) RETURNS String ->
     MUTABLE zig_type = COPY zig_type_input;
     MUTABLE kw: String = "";
     IF errdefer THEN
@@ -4508,27 +4237,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     zig_type = zigType__cleanup_storage_type(zigType__new(zig_type));
     IF guarded THEN
-      RETURN mIREmitter__guarded_defer(rtoc_self_view, name, "CheatLib.cleanup(${zig_type}, ${alloc}, ${arg})", TRUE, errdefer);
+      RETURN mIREmitter__guarded_defer(self, name, "CheatLib.cleanup(${zig_type}, ${alloc}, ${arg})", TRUE, errdefer);
     ELSE
       RETURN "${kw} CheatLib.cleanup(${zig_type}, ${alloc}, ${arg});\n";
     END
-}
 END
-PRIVATE FN mIREmitter__render_resource_close_plan(self: MIREmitter, plan: ResourceClosePlan, root_name: String) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (plan.actions |> SELECT TRY (mIREmitter__render_resource_close_action(rtoc_self_view, _, root_name))).join("; ");
-}
+PRIVATE FN mIREmitter__render_resource_close_plan(self: MIREmitter, plan: ResourceClosePlan, root_name: String) RETURNS !String ->
+    RETURN (plan.actions |> SELECT TRY (mIREmitter__render_resource_close_action(self, _, root_name))).join("; ");
 END
-PRIVATE FN mIREmitter__render_resource_close_action(self: MIREmitter, action: ResourceCloseAction, root_name: String) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__render_resource_close_action(self: MIREmitter, action: ResourceCloseAction, root_name: String) RETURNS !String ->
     MUTABLE target = (([root_name] + action.field_path)).join(".");
     MUTABLE runtime_args: []String = List[];
     FOR rtoc_counter_h IN (0_i64 ..< action.runtime_heap_alloc_args) DO
-      &runtime_args.append(TRY (mIREmitter__alloc_zig(rtoc_self_view, :heap)));
+      &runtime_args.append(TRY (mIREmitter__alloc_zig(self, :heap)));
     END
     IF (action.call_kind == ResourceCloseCallKind.Method) THEN
       RETURN "${target}.${action.name}(${runtime_args.join(", ")})";
@@ -4540,23 +4261,18 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       panic("unknown resource close call kind: {}");
     END
-}
 END
-PRIVATE FN mIREmitter__render_tuple_cleanup(self: MIREmitter, entry: CleanupEntry, root_name: String, alloc: String) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__render_tuple_cleanup(self: MIREmitter, entry: CleanupEntry, root_name: String, alloc: String) RETURNS !String ->
     MUTABLE statements = (cleanupEntry__tuple_cleanup_fields(entry)) |> SELECT {
     MUTABLE target = "${root_name}.@\"${_.index.toString()}\"";
     MUTABLE close_plan: ?ResourceClosePlan = COPY _.close_plan;
     (  IF close_plan THEN
-        "${TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, close_plan, target))};"
+        "${TRY (mIREmitter__render_resource_close_plan(self, close_plan, target))};"
       ELSE
         "CheatLib.cleanup(@TypeOf(${target}), ${alloc}, &${target});"
       END)
     };
     RETURN "{ ${statements.join(" ")} }";
-}
 END
 PRIVATE FN mIREmitter__emit_resource_close(MUTABLE self: MIREmitter, node: ResourceClose) RETURNS !String
   REQUIRES self: LOCAL
@@ -4567,10 +4283,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN "${TRY (mIREmitter__render_resource_close_plan(rtoc_self_view, node.close_plan, target))};";
 }
 END
-PRIVATE FN mIREmitter__direct_cleanup_statement(self: MIREmitter, name: String, body: String, guarded: Bool) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__direct_cleanup_statement(self: MIREmitter, name: String, body: String, guarded: Bool) RETURNS String ->
     MUTABLE stripped = body.trim();
     MUTABLE statement: String = "";
     IF (stripped.endsWith?(";") OR stripped.endsWith?("}")) THEN
@@ -4579,16 +4292,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       statement = "${stripped};";
     END
     IF guarded THEN
-      RETURN "if (!${mIREmitter__move_guard_name(rtoc_self_view, Name{ StringValue: COPY name })}) ${statement}";
+      RETURN "if (!${mIREmitter__move_guard_name(self, Name{ StringValue: COPY name })}) ${statement}";
     ELSE
       RETURN statement;
     END
-}
 END
-PRIVATE FN mIREmitter__direct_uniform_cleanup(self: MIREmitter, name: String, zig_type: String, alloc: String, guarded: Bool, via_pointer: ?Bool = FALSE) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIREmitter__direct_uniform_cleanup(self: MIREmitter, name: String, zig_type: String, alloc: String, guarded: Bool, via_pointer: ?Bool = FALSE) RETURNS String ->
     MUTABLE arg: String = "";
     IF via_pointer EXISTS AS via_pointer_value THEN
       arg = COPY name;
@@ -4596,8 +4305,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       arg = "&${name}";
     END
     MUTABLE storage_type = zigType__cleanup_storage_type(zigType__new(zig_type));
-    RETURN mIREmitter__direct_cleanup_statement(rtoc_self_view, name, "CheatLib.cleanup(${storage_type}, ${alloc}, ${arg})", guarded);
-}
+    RETURN mIREmitter__direct_cleanup_statement(self, name, "CheatLib.cleanup(${storage_type}, ${alloc}, ${arg})", guarded);
 END
 PUB FN mIREmitter__new(state: ?EmissionState = NIL) RETURNS MIREmitter@multiowned ->
   MUTABLE self = MIREmitter{ deep_copy_counter: ((COPY state)?.deep_copy_counter OR_ELSE 0), discard_counter: ((COPY state)?.discard_counter OR_ELSE 0), flow_alias_name: NIL, heap_allocator_cache_name: NIL, heap_allocator_cache_names: List[], heap_allocator_cache_runtime_name: NIL, ident_overrides: {}, if_bind_counter: NIL, indent: 0, items_block_counter: ((COPY state)?.items_block_counter OR_ELSE 0), move_guard_overrides: {}, owned_slice_counter: ((COPY state)?.owned_slice_counter OR_ELSE 0), rt_name: "rt", symbol_literals: {}, uses_c_callback: (((COPY state)?.uses_c_callback != NIL) OR FALSE) };

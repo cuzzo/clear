@@ -4640,10 +4640,7 @@ FN resourceClosePlan__composite(actions: []ResourceCloseAction) RETURNS Resource
   RETURN ResourceClosePlan{ actions: COPY actions };
 END
 
-FN resourceSchema__normalize_resource_field(self: ResourceSchema, field: SchemasResourceSchemaFieldInput) RETURNS !StructField
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN resourceSchema__normalize_resource_field(self: ResourceSchema, field: SchemasResourceSchemaFieldInput) RETURNS !StructField ->
     IF field IS_A StructField AS struct_field THEN
       RETURN COPY struct_field;
     END
@@ -4681,7 +4678,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: COPY field_symbol })), default: NIL, borrowed: FALSE };
     END
     RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, borrowed: FALSE };
-}
 END
 
 PUB FN inlineStructDeinitEntry__indirect(field: String, zig_type: String) RETURNS InlineStructDeinitEntry ->
@@ -4696,10 +4692,7 @@ END
 
 
 
-FN structSchema__normalize_struct_field(self: StructSchema, field: SchemasStructSchemaFieldInput) RETURNS !StructField
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN structSchema__normalize_struct_field(self: StructSchema, field: SchemasStructSchemaFieldInput) RETURNS !StructField ->
     IF field IS_A StructField AS struct_field THEN
       RETURN COPY struct_field;
     END
@@ -4737,7 +4730,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: COPY field_symbol })), default: NIL, borrowed: FALSE };
     END
     RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, borrowed: FALSE };
-}
 END
 PUB FN schemas__struct?(s: ?SchemaValue) RETURNS Bool ->
   RETURN ((s != NIL) AND (s IS_A StructSchema));

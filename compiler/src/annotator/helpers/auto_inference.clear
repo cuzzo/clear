@@ -45,29 +45,21 @@ FN autoSlotId__map_value(decl_node: Locatable) RETURNS AutoSlotId@multiowned ->
   RETURN autoSlotId__new(:map_value, NIL, NIL, aST__node_identity(decl_node));
 END
 FN autoSlotId__hash(self: AutoSlotId) RETURNS Int64
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE combined: Int64 = (CAST(rtoc_self_view.kind AS String)).length();
-    IF rtoc_self_view.fn_name EXISTS AS fn_name_value THEN
+  EFFECTS REENTRANT ->
+    MUTABLE combined: Int64 = (CAST(self.kind AS String)).length();
+    IF self.fn_name EXISTS AS fn_name_value THEN
       combined = ((combined * 31) + fn_name_value.length());
     END
-    IF rtoc_self_view.index EXISTS AS index_value THEN
+    IF self.index EXISTS AS index_value THEN
       combined = ((combined * 31) + index_value);
     END
-    IF rtoc_self_view.decl_id EXISTS AS decl_id_value THEN
+    IF self.decl_id EXISTS AS decl_id_value THEN
       combined = ((combined * 31) + decl_id_value);
     END
     RETURN combined;
-}
 END
-FN autoSlotId__eql?(self: AutoSlotId, other: AutoSlotId) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((((rtoc_self_view.kind == other.kind) AND (rtoc_self_view.fn_name == other.fn_name)) AND (rtoc_self_view.index == other.index)) AND (rtoc_self_view.decl_id == other.decl_id));
-}
+FN autoSlotId__eql?(self: AutoSlotId, other: AutoSlotId) RETURNS Bool ->
+    RETURN ((((self.kind == other.kind) AND (self.fn_name == other.fn_name)) AND (self.index == other.index)) AND (self.decl_id == other.decl_id));
 END
 FN autoSlotId__equals?(self: AutoSlotId, other: AutoSlotId) RETURNS Bool ->
   autoSlotId__eql?(self, other);
@@ -156,15 +148,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN autoConstraintCollector__auto?(self: AutoConstraintCollector, t: ?Type) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF t EXISTS AS t_value THEN
       RETURN type__auto?(t_value);
     END
     RETURN FALSE;
-}
 END
 PRIVATE FN autoConstraintCollector__walk(MUTABLE self: AutoConstraintCollector, node: ?AutoInferenceWalkNode, current_fn: ?FunctionDef) RETURNS Void
   REQUIRES self: LOCAL
@@ -249,19 +237,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN autoConstraintCollector__record_call_site(self: AutoConstraintCollector, call_node: FuncCall) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN autoConstraintCollector__record_call_site(self: AutoConstraintCollector, call_node: FuncCall) RETURNS Void ->
     MUTABLE callee_name: String = "";
     IF call_node.name IS_A String AS call_name_text THEN
       callee_name = COPY call_name_text;
     END
-    MUTABLE callee: ?FunctionDef@multiowned = COPY rtoc_self_view.fn_nodes[callee_name];
+    MUTABLE callee: ?FunctionDef@multiowned = COPY self.fn_nodes[callee_name];
     IF callee EXISTS AS callee_value THEN
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < callee_value.params.length() DO
-      IF !(autoConstraintCollector__auto?(rtoc_self_view, callee_value.params[rtoc_idx]?.type)) THEN
+      IF !(autoConstraintCollector__auto?(self, callee_value.params[rtoc_idx]?.type)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -270,7 +255,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         arg = COPY call_node.args[rtoc_idx];
       END
       IF arg EXISTS AS arg_value THEN
-        MUTABLE slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__param(callee_value.name, rtoc_idx)];
+        MUTABLE slot: ?Slot@multiowned = COPY self.slots[autoSlotId__param(callee_value.name, rtoc_idx)];
         IF slot EXISTS AS slot_value THEN
           MUTABLE slot_mutable = COPY slot_value;
           &slot_mutable.sources.append(COPY arg_value);
@@ -281,24 +266,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN;
     END
-}
 END
-PRIVATE FN autoConstraintCollector__record_return(self: AutoConstraintCollector, return_node: ReturnNode, current_fn: FunctionDef) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((TRUE AND autoConstraintCollector__auto?(rtoc_self_view, current_fn.return_type))) THEN
+PRIVATE FN autoConstraintCollector__record_return(self: AutoConstraintCollector, return_node: ReturnNode, current_fn: FunctionDef) RETURNS Void ->
+    IF !((TRUE AND autoConstraintCollector__auto?(self, current_fn.return_type))) THEN
       RETURN;
     END
     IF !(return_node.value) THEN
       RETURN;
     END
-    MUTABLE slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__return(current_fn.name)];
+    MUTABLE slot: ?Slot@multiowned = COPY self.slots[autoSlotId__return(current_fn.name)];
     IF slot EXISTS AS slot_value THEN
       MUTABLE return_slot = COPY slot_value;
       &return_slot.sources.append(COPY return_node.value);
     END
-}
 END
 FN declNodeType(decl_node: AutoConstraintCollectorDeclarationNode) RETURNS ?Type ->
   PARTIAL MATCH decl_node START
@@ -360,15 +340,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN autoConstraintCollector__record_reassignment_sources(self: AutoConstraintCollector, entry: AutoConstraintCollectorLocalDeclEntry, rhs: ?Locatable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN autoConstraintCollector__record_reassignment_sources(self: AutoConstraintCollector, entry: AutoConstraintCollectorLocalDeclEntry, rhs: ?Locatable) RETURNS Void ->
     IF rhs EXISTS AS rhs_value THEN
       IF entry IS_A AutoMapShapeEntry AS auto_map_shape_entry THEN
         IF rhs_value IS_A HashLit AS hash_lit THEN
-          MUTABLE key_slot = COPY UNWRAP (rtoc_self_view.slots[COPY auto_map_shape_entry.key]);
-          MUTABLE val_slot = COPY UNWRAP (rtoc_self_view.slots[COPY auto_map_shape_entry.value]);
+          MUTABLE key_slot = COPY UNWRAP (self.slots[COPY auto_map_shape_entry.key]);
+          MUTABLE val_slot = COPY UNWRAP (self.slots[COPY auto_map_shape_entry.value]);
           hash_lit.pairs |> EACH {
     pair_key, pair_value = _;
     &key_slot.sources.append(COPY pair_key);
@@ -379,7 +356,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN;
         END
       END
-      MUTABLE slot = COPY UNWRAP (rtoc_self_view.slots[castAutoConstraintCollectorLocalDeclEntryToAutoSlotIdMultiowned(entry)]);
+      MUTABLE slot = COPY UNWRAP (self.slots[castAutoConstraintCollectorLocalDeclEntryToAutoSlotIdMultiowned(entry)]);
       IF (slot.shape == :list_element) THEN
         IF rhs_value IS_A ListLit AS list_lit THEN
           FOR rtoc_item IN list_lit.items DO
@@ -392,31 +369,22 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN;
     END
-}
 END
-PRIVATE FN autoConstraintCollector__empty_list_lit?(self: AutoConstraintCollector, node: ?Locatable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN autoConstraintCollector__empty_list_lit?(self: AutoConstraintCollector, node: ?Locatable) RETURNS Bool ->
     IF node EXISTS AS node_value THEN
       IF node_value IS_A ListLit AS list_lit THEN
         RETURN (list_lit.items.empty?() AND (list_lit.constructor_options == NIL));
       END
     END
     RETURN FALSE;
-}
 END
-PRIVATE FN autoConstraintCollector__empty_hash_lit?(self: AutoConstraintCollector, node: ?Locatable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN autoConstraintCollector__empty_hash_lit?(self: AutoConstraintCollector, node: ?Locatable) RETURNS Bool ->
     IF node EXISTS AS node_value THEN
       IF node_value IS_A HashLit AS hash_lit THEN
         RETURN (hash_lit.pairs.length() == 0);
       END
     END
     RETURN FALSE;
-}
 END
 PRIVATE FN autoConstraintCollector__register_list_shape_slot(MUTABLE self: AutoConstraintCollector, decl_node: AutoConstraintCollectorDeclarationNode) RETURNS Void
   REQUIRES self: LOCAL
@@ -554,22 +522,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN Result{ resolved: COPY resolved, ambiguous: COPY ambiguous, unresolved: COPY unresolved };
 }
 END
-PRIVATE FN autoUnifier__collect_observed_types(self: AutoUnifier, slot: Slot) RETURNS ![]AutoConstraintCollectorObservedType
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN autoUnifier__collect_observed_types(self: AutoUnifier, slot: Slot) RETURNS ![]AutoConstraintCollectorObservedType ->
     MUTABLE seen: []AutoConstraintCollectorObservedType = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < slot.sources.length() DO
-      MUTABLE type_of_fn = rtoc_self_view.type_of;
+      MUTABLE type_of_fn = self.type_of;
       MUTABLE t: ?AutoConstraintCollectorObservedType = type_of_fn(UNWRAP (slot.sources[rtoc_idx]));
       IF t EXISTS AS t_value THEN
         IF (IF t_value IS_A Type AS type THEN type__auto?(type) ELSE FALSE END) THEN
           rtoc_idx = rtoc_idx + 1;
           CONTINUE;
         END
-        MUTABLE widened = autoUnifier__widen_byte_array_to_string(rtoc_self_view, COPY t_value);
-        IF seen |> ANY autoUnifier__types_equal?(rtoc_self_view, _, COPY widened) THEN
+        MUTABLE widened = autoUnifier__widen_byte_array_to_string(self, COPY t_value);
+        IF seen |> ANY autoUnifier__types_equal?(self, _, COPY widened) THEN
           rtoc_idx = rtoc_idx + 1;
           CONTINUE;
         END
@@ -578,12 +543,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_idx = rtoc_idx + 1;
     END
     RETURN seen;
-}
 END
-PRIVATE FN autoUnifier__widen_byte_array_to_string(self: AutoUnifier, t: AutoConstraintCollectorObservedType) RETURNS AutoConstraintCollectorObservedType
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN autoUnifier__widen_byte_array_to_string(self: AutoUnifier, t: AutoConstraintCollectorObservedType) RETURNS AutoConstraintCollectorObservedType ->
     MUTABLE sym_branch_value: ?AutoConstraintCollectorObservedType = NIL;
     IF t IS_A Type AS type THEN
       sym_branch_value = AutoConstraintCollectorObservedType{ SymbolValue: COPY type__resolved(type) };
@@ -595,12 +556,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN AutoConstraintCollectorObservedType{ SymbolValue: :String };
     END
     RETURN COPY t;
-}
 END
-PRIVATE FN autoUnifier__types_equal?(self: AutoUnifier, a: AutoConstraintCollectorObservedType, b: AutoConstraintCollectorObservedType) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN autoUnifier__types_equal?(self: AutoUnifier, a: AutoConstraintCollectorObservedType, b: AutoConstraintCollectorObservedType) RETURNS Bool ->
     MUTABLE a_key: ?String@symbol = NIL;
     IF a IS_A Type AS a_type THEN
       a_key = COPY type__resolved(a_type);
@@ -619,7 +576,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN FALSE;
-}
 END
 PRIVATE FN autoUnifier__stamp_slot_mut(MUTABLE self: AutoUnifier, MUTABLE slot: Slot, type: AutoConstraintCollectorObservedType) RETURNS !Void
   REQUIRES self: LOCAL
@@ -742,26 +698,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY rtoc_self_view.slots;
 }
 END
-PRIVATE FN shapeEvidenceCollector__collect_in_function(self: ShapeEvidenceCollector, fn_value: FunctionDef) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE name_map = TRY (shapeEvidenceCollector__build_name_map(rtoc_self_view, fn_value));
+PRIVATE FN shapeEvidenceCollector__collect_in_function(self: ShapeEvidenceCollector, fn_value: FunctionDef) RETURNS !Void ->
+    MUTABLE name_map = TRY (shapeEvidenceCollector__build_name_map(self, fn_value));
     IF (name_map.count() == 0) THEN
       RETURN;
     END
-    TRY (shapeEvidenceCollector__walk(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode__auto_inference(_) }, name_map));
-}
+    TRY (shapeEvidenceCollector__walk(self, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode__auto_inference(_) }, name_map));
 END
-PRIVATE FN shapeEvidenceCollector__build_name_map(self: ShapeEvidenceCollector, fn_value: FunctionDef) RETURNS !{String}AutoShapeSlots@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN shapeEvidenceCollector__build_name_map(self: ShapeEvidenceCollector, fn_value: FunctionDef) RETURNS !{String}AutoShapeSlots@multiowned ->
     MUTABLE map: {String}AutoShapeSlots@multiowned = {};
-    shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode__auto_inference(_) }, %(decl: AutoInferenceDeclBlockParam1) USE(MUTABLE map, rtoc_self_view) -> {
-    MUTABLE list_slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__list_element(castAutoInferenceDeclBlockParam1ToLocatable(decl))];
-    MUTABLE key_slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__map_key(castAutoInferenceDeclBlockParam1ToLocatable(decl))];
-    MUTABLE val_slot: ?Slot@multiowned = COPY rtoc_self_view.slots[autoSlotId__map_value(castAutoInferenceDeclBlockParam1ToLocatable(decl))];
+    shapeEvidenceCollector__walk_for_shape_decls(self, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode__auto_inference(_) }, %(decl: AutoInferenceDeclBlockParam1) USE(MUTABLE map, self) -> {
+    MUTABLE list_slot: ?Slot@multiowned = COPY self.slots[autoSlotId__list_element(castAutoInferenceDeclBlockParam1ToLocatable(decl))];
+    MUTABLE key_slot: ?Slot@multiowned = COPY self.slots[autoSlotId__map_key(castAutoInferenceDeclBlockParam1ToLocatable(decl))];
+    MUTABLE val_slot: ?Slot@multiowned = COPY self.slots[autoSlotId__map_value(castAutoInferenceDeclBlockParam1ToLocatable(decl))];
     IF (((list_slot == NIL) AND (key_slot == NIL)) AND (val_slot == NIL)) THEN
         RETURN;
     END
@@ -770,79 +719,67 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rubyToClearVoid__auto_inference()
     });
     RETURN map;
-}
 END
 PRIVATE FN shapeEvidenceCollector__walk_for_shape_decls(self: ShapeEvidenceCollector, node: ?AutoInferenceWalkNode, block: FN(AutoInferenceDeclBlockParam1) -> Void) RETURNS Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node EXISTS AS node_value THEN
       IF node_value IS_A BindExpr AS bind_expr THEN
         IF typeAutoOptional?(bind_expr.type) THEN
           block(AutoInferenceDeclBlockParam1{ BindExpr: COPY bind_expr });
         END
-        shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY bind_expr.value)] }, block);
+        shapeEvidenceCollector__walk_for_shape_decls(self, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY bind_expr.value)] }, block);
       ELSE_IF node_value IS_A VarDecl AS var_decl THEN
         IF typeAutoOptional?(var_decl.type) THEN
           block(AutoInferenceDeclBlockParam1{ VarDecl: COPY var_decl });
         END
-        shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY var_decl.value)] }, block);
+        shapeEvidenceCollector__walk_for_shape_decls(self, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY var_decl.value)] }, block);
       ELSE_IF node_value IS_A FunctionDef@multiowned AS function_def_multiowned THEN
     
       ELSE_IF node_value IS_A Token@multiowned AS token_multiowned THEN
     
       ELSE_IF node_value IS_A []Node AS array THEN
         FOR _ IN array DO
-        shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, castNodeToOptionalAutoInferenceWalkNode(_), block);
+        shapeEvidenceCollector__walk_for_shape_decls(self, castNodeToOptionalAutoInferenceWalkNode(_), block);
         END
       ELSE
         FOR rtoc_walk_child_18 IN rtocChildrenAutoInferenceWalkNode(node_value) DO
-        shapeEvidenceCollector__walk_for_shape_decls(rtoc_self_view, rtoc_walk_child_18, block);
+        shapeEvidenceCollector__walk_for_shape_decls(self, rtoc_walk_child_18, block);
         END
       END
     ELSE
       RETURN;
     END
-}
 END
 PRIVATE FN shapeEvidenceCollector__walk(self: ShapeEvidenceCollector, node: ?AutoInferenceWalkNode, name_map: {String}AutoShapeSlots@multiowned) RETURNS !Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node EXISTS AS node_value THEN
       IF node_value IS_A MethodCall AS method_call THEN
-        TRY (shapeEvidenceCollector__record_method_call(rtoc_self_view, method_call, name_map));
-        TRY (shapeEvidenceCollector__walk(rtoc_self_view, castLocatableToOptionalAutoInferenceWalkNode(method_call.object), name_map));
+        TRY (shapeEvidenceCollector__record_method_call(self, method_call, name_map));
+        TRY (shapeEvidenceCollector__walk(self, castLocatableToOptionalAutoInferenceWalkNode(method_call.object), name_map));
         FOR rtoc_call_arg IN method_call.args DO
-        TRY (shapeEvidenceCollector__walk(rtoc_self_view, castLocatableToOptionalAutoInferenceWalkNode(rtoc_call_arg), name_map));
+        TRY (shapeEvidenceCollector__walk(self, castLocatableToOptionalAutoInferenceWalkNode(rtoc_call_arg), name_map));
         END
       ELSE_IF node_value IS_A Assignment AS assignment THEN
-        shapeEvidenceCollector__record_index_assign(rtoc_self_view, assignment, name_map);
-        TRY (shapeEvidenceCollector__walk(rtoc_self_view, castLocatableToOptionalAutoInferenceWalkNode(assignment.value), name_map));
+        shapeEvidenceCollector__record_index_assign(self, assignment, name_map);
+        TRY (shapeEvidenceCollector__walk(self, castLocatableToOptionalAutoInferenceWalkNode(assignment.value), name_map));
       ELSE_IF node_value IS_A FunctionDef@multiowned AS function_def_multiowned THEN
     
       ELSE_IF node_value IS_A Token@multiowned AS token_multiowned THEN
     
       ELSE_IF node_value IS_A []Node AS array THEN
         FOR _ IN array DO
-        TRY (shapeEvidenceCollector__walk(rtoc_self_view, castNodeToOptionalAutoInferenceWalkNode(_), name_map));
+        TRY (shapeEvidenceCollector__walk(self, castNodeToOptionalAutoInferenceWalkNode(_), name_map));
         END
       ELSE
         FOR rtoc_walk_child_19 IN rtocChildrenAutoInferenceWalkNode(node_value) DO
-        TRY (shapeEvidenceCollector__walk(rtoc_self_view, rtoc_walk_child_19, name_map));
+        TRY (shapeEvidenceCollector__walk(self, rtoc_walk_child_19, name_map));
         END
       END
     ELSE
       RETURN;
     END
-}
 END
-PRIVATE FN shapeEvidenceCollector__record_method_call(self: ShapeEvidenceCollector, call: MethodCall, name_map: {String}AutoShapeSlots@multiowned) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN shapeEvidenceCollector__record_method_call(self: ShapeEvidenceCollector, call: MethodCall, name_map: {String}AutoShapeSlots@multiowned) RETURNS !Void ->
     MUTABLE target = COPY call.object;
     IF target IS_A Identifier AS identifier THEN
       MUTABLE slots: ?AutoShapeSlots@multiowned = COPY name_map[identifier__name(identifier)];
@@ -855,7 +792,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
         END
         IF TRY (intrinsicRegistry__map_pair_evidence_method?(Name{ StringValue: COPY call.name }, args.length())) THEN
-          shapeEvidenceCollector__record_map_pair_evidence(rtoc_self_view, slots_value, args);
+          shapeEvidenceCollector__record_map_pair_evidence(self, slots_value, args);
         END
       ELSE
         RETURN;
@@ -863,23 +800,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN;
     END
-}
 END
-PRIVATE FN shapeEvidenceCollector__record_map_pair_evidence(self: ShapeEvidenceCollector, slots: AutoShapeSlots, args: []Locatable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN shapeEvidenceCollector__record_map_pair_evidence(self: ShapeEvidenceCollector, slots: AutoShapeSlots, args: []Locatable) RETURNS Void ->
     IF !(((slots.key != NIL) AND (slots.value != NIL))) THEN
       RETURN;
     END
     ((UNWRAP (slots.key)).sources).append(COPY UNWRAP (args[0]));
     ((UNWRAP (slots.value)).sources).append(COPY UNWRAP (args[1]));
-}
 END
-PRIVATE FN shapeEvidenceCollector__record_index_assign(self: ShapeEvidenceCollector, assign: Assignment, name_map: {String}AutoShapeSlots@multiowned) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN shapeEvidenceCollector__record_index_assign(self: ShapeEvidenceCollector, assign: Assignment, name_map: {String}AutoShapeSlots@multiowned) RETURNS Void ->
     MUTABLE target = COPY assign.name;
     IF target IS_A GetIndex AS get_index THEN
       MUTABLE base: Locatable = COPY get_index.target;
@@ -904,7 +833,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN;
     END
-}
 END
 PUB FN shapeEvidenceCollector__new(slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS ShapeEvidenceCollector@multiowned ->
   MUTABLE self = ShapeEvidenceCollector{ fn_nodes: COPY fn_nodes, slots: COPY slots };
@@ -936,97 +864,82 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY rtoc_self_view.evidence;
 }
 END
-PRIVATE FN operatorEvidenceCollector__collect_in_function(self: OperatorEvidenceCollector, fn_value: FunctionDef) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE name_to_slot = TRY (operatorEvidenceCollector__build_name_map(rtoc_self_view, fn_value));
-    operatorEvidenceCollector__walk_binops(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode__auto_inference(_) }, name_to_slot, fn_value);
-}
+PRIVATE FN operatorEvidenceCollector__collect_in_function(self: OperatorEvidenceCollector, fn_value: FunctionDef) RETURNS !Void ->
+    MUTABLE name_to_slot = TRY (operatorEvidenceCollector__build_name_map(self, fn_value));
+    operatorEvidenceCollector__walk_binops(self, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode__auto_inference(_) }, name_to_slot, fn_value);
 END
-PRIVATE FN operatorEvidenceCollector__build_name_map(self: OperatorEvidenceCollector, fn_value: FunctionDef) RETURNS !{String}AutoSlotId@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN operatorEvidenceCollector__build_name_map(self: OperatorEvidenceCollector, fn_value: FunctionDef) RETURNS !{String}AutoSlotId@multiowned ->
     MUTABLE map: {String}AutoSlotId@multiowned = {};
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < fn_value.params.length() DO
       MUTABLE slot_id = autoSlotId__param(fn_value.name, rtoc_idx);
-      IF rtoc_self_view.slots.contains?(slot_id) THEN
+      IF self.slots.contains?(slot_id) THEN
           MUTABLE param_key: String = COPY UNWRAP (fn_value.params[rtoc_idx]).name;
           map[param_key] = slot_id;
       END
     rtoc_idx = rtoc_idx + 1;
     END
-    operatorEvidenceCollector__walk_for_local_decls(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode__auto_inference(_) }, %(decl: AutoInferenceDeclBlockParam1) USE(MUTABLE map, rtoc_self_view) -> {
+    operatorEvidenceCollector__walk_for_local_decls(self, AutoInferenceWalkNode{ ArrayValue: fn_value.body |> SELECT castLocatableToNode__auto_inference(_) }, %(decl: AutoInferenceDeclBlockParam1) USE(MUTABLE map, self) -> {
     MUTABLE slot_id = autoSlotId__local(castAutoInferenceDeclBlockParam1ToLocatable(decl));
-    IF rtoc_self_view.slots.contains?(slot_id) THEN
+    IF self.slots.contains?(slot_id) THEN
         MUTABLE decl_name: String = declBlockParamName(decl);
     map[decl_name] = slot_id;
     END
     rubyToClearVoid__auto_inference()
     });
     RETURN map;
-}
 END
 PRIVATE FN operatorEvidenceCollector__walk_for_local_decls(self: OperatorEvidenceCollector, node: ?AutoInferenceWalkNode, block: FN(AutoInferenceDeclBlockParam1) -> Void) RETURNS Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node EXISTS AS node_value THEN
       IF node_value IS_A BindExpr AS bind_expr THEN
-        IF operatorEvidenceCollector__auto?(rtoc_self_view, bind_expr.type) THEN
+        IF operatorEvidenceCollector__auto?(self, bind_expr.type) THEN
           block(AutoInferenceDeclBlockParam1{ BindExpr: COPY bind_expr });
         END
-        operatorEvidenceCollector__walk_for_local_decls(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY bind_expr.value)] }, block);
+        operatorEvidenceCollector__walk_for_local_decls(self, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY bind_expr.value)] }, block);
       ELSE_IF node_value IS_A VarDecl AS var_decl THEN
-        IF operatorEvidenceCollector__auto?(rtoc_self_view, var_decl.type) THEN
+        IF operatorEvidenceCollector__auto?(self, var_decl.type) THEN
           block(AutoInferenceDeclBlockParam1{ VarDecl: COPY var_decl });
         END
-        operatorEvidenceCollector__walk_for_local_decls(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY var_decl.value)] }, block);
+        operatorEvidenceCollector__walk_for_local_decls(self, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY var_decl.value)] }, block);
       ELSE_IF node_value IS_A FunctionDef@multiowned AS function_def_multiowned THEN
     
       ELSE_IF node_value IS_A Token@multiowned AS token_multiowned THEN
     
       ELSE_IF node_value IS_A []Node AS array THEN
         FOR _ IN array DO
-        operatorEvidenceCollector__walk_for_local_decls(rtoc_self_view, castNodeToOptionalAutoInferenceWalkNode(_), block);
+        operatorEvidenceCollector__walk_for_local_decls(self, castNodeToOptionalAutoInferenceWalkNode(_), block);
         END
       ELSE
         FOR rtoc_walk_child_20 IN rtocChildrenAutoInferenceWalkNode(node_value) DO
-        operatorEvidenceCollector__walk_for_local_decls(rtoc_self_view, rtoc_walk_child_20, block);
+        operatorEvidenceCollector__walk_for_local_decls(self, rtoc_walk_child_20, block);
         END
       END
     ELSE
       RETURN;
     END
-}
 END
 PRIVATE FN operatorEvidenceCollector__walk_binops(self: OperatorEvidenceCollector, node: ?AutoInferenceWalkNode, name_to_slot: {String}AutoSlotId@multiowned, fn_value: FunctionDef) RETURNS Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node EXISTS AS node_value THEN
       IF node_value IS_A BinaryOp AS binary_op THEN
-        operatorEvidenceCollector__record_binop(rtoc_self_view, binary_op, name_to_slot);
-        operatorEvidenceCollector__walk_binops(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY binary_op.left)] }, name_to_slot, fn_value);
-        operatorEvidenceCollector__walk_binops(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY binary_op.right)] }, name_to_slot, fn_value);
+        operatorEvidenceCollector__record_binop(self, binary_op, name_to_slot);
+        operatorEvidenceCollector__walk_binops(self, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY binary_op.left)] }, name_to_slot, fn_value);
+        operatorEvidenceCollector__walk_binops(self, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY binary_op.right)] }, name_to_slot, fn_value);
       ELSE_IF node_value IS_A ReturnNode AS return_node THEN
         MUTABLE ret_slot = autoSlotId__return(fn_value.name);
-        IF rtoc_self_view.slots.contains?(ret_slot) THEN
+        IF self.slots.contains?(ret_slot) THEN
         MUTABLE ret_is_binop: Bool = FALSE;
         IF return_node.value EXISTS AS return_value THEN
           ret_is_binop = return_value IS_A BinaryOp;
         END
         IF ret_is_binop THEN
-          IF rtoc_self_view.evidence[ret_slot] == NIL THEN
-            rtoc_self_view.evidence[ret_slot] = Set[];
+          IF self.evidence[ret_slot] == NIL THEN
+            self.evidence[ret_slot] = Set[];
           END
           IF return_node.value EXISTS AS ret_value THEN
             IF ret_value IS_A BinaryOp AS ret_binop THEN
-              IF rtoc_self_view.evidence[ret_slot] EXISTS AS evidence_set THEN
+              IF self.evidence[ret_slot] EXISTS AS evidence_set THEN
                 MUTABLE evidence_mutable = COPY evidence_set;
                 &evidence_mutable.insert(COPY ret_binop.op);
               END
@@ -1035,7 +948,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         END
         END
         IF return_node.value EXISTS AS ret_walk_value THEN
-        operatorEvidenceCollector__walk_binops(rtoc_self_view, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY ret_walk_value)] }, name_to_slot, fn_value);
+        operatorEvidenceCollector__walk_binops(self, AutoInferenceWalkNode{ ArrayValue: [castLocatableToNode__auto_inference(COPY ret_walk_value)] }, name_to_slot, fn_value);
         END
       ELSE_IF node_value IS_A FunctionDef@multiowned AS function_def_multiowned THEN
     
@@ -1043,22 +956,18 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     
       ELSE_IF node_value IS_A []Node AS array THEN
         FOR _ IN array DO
-        operatorEvidenceCollector__walk_binops(rtoc_self_view, castNodeToOptionalAutoInferenceWalkNode(_), name_to_slot, fn_value);
+        operatorEvidenceCollector__walk_binops(self, castNodeToOptionalAutoInferenceWalkNode(_), name_to_slot, fn_value);
         END
       ELSE
         FOR rtoc_walk_child_21 IN rtocChildrenAutoInferenceWalkNode(node_value) DO
-        operatorEvidenceCollector__walk_binops(rtoc_self_view, rtoc_walk_child_21, name_to_slot, fn_value);
+        operatorEvidenceCollector__walk_binops(self, rtoc_walk_child_21, name_to_slot, fn_value);
         END
       END
     ELSE
       RETURN;
     END
-}
 END
-PRIVATE FN operatorEvidenceCollector__record_binop(self: OperatorEvidenceCollector, binop: BinaryOp, name_to_slot: {String}AutoSlotId@multiowned) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN operatorEvidenceCollector__record_binop(self: OperatorEvidenceCollector, binop: BinaryOp, name_to_slot: {String}AutoSlotId@multiowned) RETURNS Void ->
     MUTABLE rtoc_each_items_22 = ([binop.left, binop.right]);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_22.length() DO
@@ -1066,10 +975,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF operand IS_A Identifier AS operand_identifier THEN
         MUTABLE slot_id: ?AutoSlotId@multiowned = COPY name_to_slot[operand_identifier.name];
         IF slot_id EXISTS AS slot_id_value THEN
-          IF rtoc_self_view.evidence[slot_id_value] == NIL THEN
-            rtoc_self_view.evidence[slot_id_value] = Set[];
+          IF self.evidence[slot_id_value] == NIL THEN
+            self.evidence[slot_id_value] = Set[];
           END
-          IF rtoc_self_view.evidence[slot_id_value] EXISTS AS evidence_set THEN
+          IF self.evidence[slot_id_value] EXISTS AS evidence_set THEN
             MUTABLE evidence_mutable = COPY evidence_set;
             &evidence_mutable.insert(COPY binop.op);
           END
@@ -1077,18 +986,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     rtoc_idx = rtoc_idx + 1;
     END
-}
 END
 PRIVATE FN operatorEvidenceCollector__auto?(self: OperatorEvidenceCollector, t: ?Type) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF t EXISTS AS t_value THEN
       RETURN type__auto?(t_value);
     END
     RETURN FALSE;
-}
 END
 PUB FN operatorEvidenceCollector__new(slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS OperatorEvidenceCollector@multiowned ->
   MUTABLE self = OperatorEvidenceCollector{ evidence: {}, fn_nodes: COPY fn_nodes, slots: COPY slots };

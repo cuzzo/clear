@@ -49,47 +49,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.current_label = NIL;
 }
 END
-PUB FN pipelineMaterializerRuntimeHost__materializer_visit_mir(self: PipelineMaterializerRuntimeHost, node: Locatable) RETURNS Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__visit_mir_call(rtoc_self_view, node);
-}
+PUB FN pipelineMaterializerRuntimeHost__materializer_visit_mir(self: PipelineMaterializerRuntimeHost, node: Locatable) RETURNS Emittable ->
+    RETURN pipelineMaterializerRuntimeHost__visit_mir_call(self, node);
 END
-PUB FN pipelineMaterializerRuntimeHost__materializer_alloc_mark_fact(self: PipelineMaterializerRuntimeHost, value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE) RETURNS ?AllocationFact
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__alloc_mark_fact_call(rtoc_self_view, value, name, fallback_alloc, type_info, ast_node, context, known_allocating);
-}
+PUB FN pipelineMaterializerRuntimeHost__materializer_alloc_mark_fact(self: PipelineMaterializerRuntimeHost, value: Emittable, name: String, fallback_alloc: String@symbol, type_info: ?Type = NIL, ast_node: ?Locatable = NIL, context: String = "pipeline allocation", known_allocating: Bool = FALSE) RETURNS ?AllocationFact ->
+    RETURN pipelineMaterializerRuntimeHost__alloc_mark_fact_call(self, value, name, fallback_alloc, type_info, ast_node, context, known_allocating);
 END
-PUB FN pipelineMaterializerRuntimeHost__materializer_result_alloc(self: PipelineMaterializerRuntimeHost) RETURNS String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__result_alloc_call(rtoc_self_view);
-}
+PUB FN pipelineMaterializerRuntimeHost__materializer_result_alloc(self: PipelineMaterializerRuntimeHost) RETURNS String@symbol ->
+    RETURN pipelineMaterializerRuntimeHost__result_alloc_call(self);
 END
-PUB FN pipelineMaterializerRuntimeHost__materializer_bc_target?(self: PipelineMaterializerRuntimeHost) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__bc_target_call(rtoc_self_view);
-}
+PUB FN pipelineMaterializerRuntimeHost__materializer_bc_target?(self: PipelineMaterializerRuntimeHost) RETURNS Bool ->
+    RETURN pipelineMaterializerRuntimeHost__bc_target_call(self);
 END
-PUB FN pipelineMaterializerRuntimeHost__materializer_schema_lookup(self: PipelineMaterializerRuntimeHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__schema_lookup_call(rtoc_self_view);
-}
+PUB FN pipelineMaterializerRuntimeHost__materializer_schema_lookup(self: PipelineMaterializerRuntimeHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult ->
+    RETURN pipelineMaterializerRuntimeHost__schema_lookup_call(self);
 END
-PUB FN pipelineMaterializerRuntimeHost__materializer_next_label(self: PipelineMaterializerRuntimeHost) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__next_label_call(rtoc_self_view);
-}
+PUB FN pipelineMaterializerRuntimeHost__materializer_next_label(self: PipelineMaterializerRuntimeHost) RETURNS String ->
+    RETURN pipelineMaterializerRuntimeHost__next_label_call(self);
 END
 PUB FN pipelineMaterializerRuntimeHost__materializer_set_current_label(MUTABLE self: PipelineMaterializerRuntimeHost, label: String) RETURNS Void
   REQUIRES self: LOCAL
@@ -99,19 +75,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     pipelineMaterializerRuntimeHost__set_current_label_call(rtoc_self_view, label);
 }
 END
-PUB FN pipelineMaterializerRuntimeHost__materializer_current_label(self: PipelineMaterializerRuntimeHost) RETURNS ?String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.current_label;
-}
+PUB FN pipelineMaterializerRuntimeHost__materializer_current_label(self: PipelineMaterializerRuntimeHost) RETURNS ?String ->
+    RETURN COPY self.current_label;
 END
-PUB FN pipelineMaterializerRuntimeHost__materializer_next_item_temp_name(self: PipelineMaterializerRuntimeHost) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__next_item_temp_name_call(rtoc_self_view);
-}
+PUB FN pipelineMaterializerRuntimeHost__materializer_next_item_temp_name(self: PipelineMaterializerRuntimeHost) RETURNS String ->
+    RETURN pipelineMaterializerRuntimeHost__next_item_temp_name_call(self);
 END
 PUB FN pipelineMaterializerRuntimeHost__new(visit_mir: FN(Locatable) -> Emittable, alloc_mark_fact: FN(Emittable, String, String@symbol, ?Type, ?Locatable, String, Bool) -> ?AllocationFact, result_alloc: FN() -> String@symbol, bc_target: FN() -> Bool, schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult, next_label: FN() -> String, set_current_label: FN(String) -> Void, next_item_temp_name: FN() -> String) RETURNS PipelineMaterializerRuntimeHost@multiowned ->
   MUTABLE self = PipelineMaterializerRuntimeHost{ alloc_mark_fact: COPY alloc_mark_fact, bc_target: COPY bc_target, current_label: NIL, next_item_temp_name: COPY next_item_temp_name, next_label: COPY next_label, result_alloc: COPY result_alloc, schema_lookup: COPY schema_lookup, set_current_label: COPY set_current_label, visit_mir: COPY visit_mir };
@@ -125,49 +93,29 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.host = COPY host;
 }
 END
-PUB FN pipelineMaterializer__result_alloc(self: PipelineMaterializer) RETURNS String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__materializer_result_alloc(rtoc_self_view.host);
-}
+PUB FN pipelineMaterializer__result_alloc(self: PipelineMaterializer) RETURNS String@symbol ->
+    RETURN pipelineMaterializerRuntimeHost__materializer_result_alloc(self.host);
 END
-PUB FN pipelineMaterializer__schema_lookup(self: PipelineMaterializer) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__materializer_schema_lookup(rtoc_self_view.host);
-}
+PUB FN pipelineMaterializer__schema_lookup(self: PipelineMaterializer) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult ->
+    RETURN pipelineMaterializerRuntimeHost__materializer_schema_lookup(self.host);
 END
-PUB FN pipelineMaterializer__source_binding_name(self: PipelineMaterializer, label: ?String = NIL) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineMaterializer__source_binding_name(self: PipelineMaterializer, label: ?String = NIL) RETURNS String ->
     MUTABLE raw = COPY (label OR_ELSE "");
     WHILE raw.startsWith?("_") DO
       raw = raw.substr(1, (raw.length() - 1));
     END
     RETURN "pipe_src_list_${raw}";
-}
 END
-PUB FN pipelineMaterializer__items_binding_name(self: PipelineMaterializer) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE label = COPY CAST(((pipelineMaterializerRuntimeHost__materializer_current_label(rtoc_self_view.host) OR "items")) AS String);
+PUB FN pipelineMaterializer__items_binding_name(self: PipelineMaterializer) RETURNS String ->
+    MUTABLE label = COPY CAST(((pipelineMaterializerRuntimeHost__materializer_current_label(self.host) OR "items")) AS String);
     MUTABLE raw = label;
     WHILE raw.startsWith?("_") DO
       raw = raw.substr(1, (raw.length() - 1));
     END
     RETURN "pipe_items_${raw}";
-}
 END
-PUB FN pipelineMaterializer__source_ident(self: PipelineMaterializer) RETURNS Ident
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN Ident{ name: COPY pipelineMaterializer__source_binding_name(rtoc_self_view, pipelineMaterializerRuntimeHost__materializer_current_label(rtoc_self_view.host)), lowered_node_id: NIL, ownership_consumption: NIL };
-}
+PUB FN pipelineMaterializer__source_ident(self: PipelineMaterializer) RETURNS Ident ->
+    RETURN Ident{ name: COPY pipelineMaterializer__source_binding_name(self, pipelineMaterializerRuntimeHost__materializer_current_label(self.host)), lowered_node_id: NIL, ownership_consumption: NIL };
 END
 PUB FN pipelineMaterializer__pipeline_block(MUTABLE self: PipelineMaterializer, list_node: Locatable, blk: FN(String, String) -> ![]Emittable) RETURNS !MIRBlockExpr
   REQUIRES self: LOCAL
@@ -196,26 +144,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN MIRBlockExpr{ label: COPY label, body: COPY block_body, lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 }
 END
-PUB FN pipelineMaterializer__items_setup(self: PipelineMaterializer, lhs_type: Type, per_label: Bool = FALSE) RETURNS !ItemSetup
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE kind = pipelineMaterializer__item_kind(rtoc_self_view, lhs_type);
+PUB FN pipelineMaterializer__items_setup(self: PipelineMaterializer, lhs_type: Type, per_label: Bool = FALSE) RETURNS !ItemSetup ->
+    MUTABLE kind = pipelineMaterializer__item_kind(self, lhs_type);
     MUTABLE name: String = "";
     IF ((per_label AND (kind == ItemKind.Default))) THEN
-      name = pipelineMaterializer__items_binding_name(rtoc_self_view);
+      name = pipelineMaterializer__items_binding_name(self);
     ELSE
       name = "pipe_items";
     END
-    MUTABLE setup = TRY (pipelineMaterializer__item_setup_stmts(rtoc_self_view, kind, lhs_type, name));
+    MUTABLE setup = TRY (pipelineMaterializer__item_setup_stmts(self, kind, lhs_type, name));
     RETURN ItemSetup{ statements: COPY setup, items_ident: COPY name };
-}
 END
-PUB FN pipelineMaterializer__item_kind(self: PipelineMaterializer, lhs_type: Type) RETURNS ItemKind
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE bc = pipelineMaterializer__bc_target?(rtoc_self_view);
+PUB FN pipelineMaterializer__item_kind(self: PipelineMaterializer, lhs_type: Type) RETURNS ItemKind ->
+    MUTABLE bc = pipelineMaterializer__bc_target?(self);
     IF (type__pool?(lhs_type) AND type__sharded?(lhs_type)) THEN
       RETURN ItemKind.ShardedPool;
     END
@@ -235,52 +176,36 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN ItemKind.Set;
     END
     RETURN ItemKind.Default;
-}
 END
-PUB FN pipelineMaterializer__item_setup_stmts(self: PipelineMaterializer, kind: ItemKind, lhs_type: Type, items_name: String) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineMaterializer__item_setup_stmts(self: PipelineMaterializer, kind: ItemKind, lhs_type: Type, items_name: String) RETURNS ![]Emittable ->
     IF (kind == ItemKind.ShardedPool) THEN
-      RETURN TRY (pipelineMaterializer__build_sharded_pool(rtoc_self_view, lhs_type));
+      RETURN TRY (pipelineMaterializer__build_sharded_pool(self, lhs_type));
     ELSE_IF (kind == ItemKind.SoaPool) THEN
-      RETURN TRY (pipelineMaterializer__build_soa_pool(rtoc_self_view, lhs_type));
+      RETURN TRY (pipelineMaterializer__build_soa_pool(self, lhs_type));
     ELSE_IF (kind == ItemKind.Pool) THEN
-      RETURN TRY (pipelineMaterializer__build_pool(rtoc_self_view, lhs_type));
+      RETURN TRY (pipelineMaterializer__build_pool(self, lhs_type));
     ELSE_IF (kind == ItemKind.SoaList) THEN
-      RETURN TRY (pipelineMaterializer__build_soa_list(rtoc_self_view, lhs_type));
+      RETURN TRY (pipelineMaterializer__build_soa_list(self, lhs_type));
     ELSE_IF (kind == ItemKind.ShardedList) THEN
-      RETURN TRY (pipelineMaterializer__build_sharded_list(rtoc_self_view, lhs_type));
+      RETURN TRY (pipelineMaterializer__build_sharded_list(self, lhs_type));
     ELSE_IF (kind == ItemKind.Set) THEN
-      RETURN TRY (pipelineMaterializer__build_set(rtoc_self_view, lhs_type));
+      RETURN TRY (pipelineMaterializer__build_set(self, lhs_type));
     ELSE_IF (kind == ItemKind.Default) THEN
-      RETURN CAST([Emittable{ Let: COPY Let{ name: COPY items_name, init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
+      RETURN CAST([Emittable{ Let: COPY Let{ name: COPY items_name, init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
     ELSE
       panic("pipeline items setup: unsupported item kind");
     END
-}
 END
-PUB FN pipelineMaterializer__borrowed_pipeline_value(self: PipelineMaterializer, value: Emittable, type_info: Type, alloc: String@symbol) RETURNS !Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((TRY (type__recursive_cleanup_shape?(type_info, pipelineMaterializer__schema_lookup(rtoc_self_view))) OR TRY (type__heap_ptr?(type_info)))) THEN
+PUB FN pipelineMaterializer__borrowed_pipeline_value(self: PipelineMaterializer, value: Emittable, type_info: Type, alloc: String@symbol) RETURNS !Emittable ->
+    IF !((TRY (type__recursive_cleanup_shape?(type_info, pipelineMaterializer__schema_lookup(self))) OR TRY (type__heap_ptr?(type_info)))) THEN
       RETURN COPY value;
     END
     RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY value, zig_type: COPY TRY (type__zig_type(type_info)), elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(type_info))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
-}
 END
-PUB FN pipelineMaterializer__cleanup_bearing_type?(self: PipelineMaterializer, type_info: Type) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (type__recursive_cleanup_shape?(type_info, pipelineMaterializer__schema_lookup(rtoc_self_view)));
-}
+PUB FN pipelineMaterializer__cleanup_bearing_type?(self: PipelineMaterializer, type_info: Type) RETURNS !Bool ->
+    RETURN TRY (type__recursive_cleanup_shape?(type_info, pipelineMaterializer__schema_lookup(self)));
 END
-PUB FN pipelineMaterializer__owning_pipeline_temp_stmts(self: PipelineMaterializer, name: String, source: Emittable, type_info: Type, zig_type: String, alloc: String@symbol) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineMaterializer__owning_pipeline_temp_stmts(self: PipelineMaterializer, name: String, source: Emittable, type_info: Type, zig_type: String, alloc: String@symbol) RETURNS ![]Emittable ->
     MUTABLE mark = AllocMark{ name: COPY name, alloc: COPY alloc, type_info: COPY type_info, scope: IF placement__heap?(alloc) THEN
       :heap
     ELSE
@@ -288,15 +213,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     MUTABLE entry = cleanupEntry__build(:uniform, alloc, TRUE, NIL, zig_type);
     RETURN CAST([Emittable{ AllocMark: COPY mark }, Emittable{ Let: COPY Let{ name: COPY name, init: Emittable{ DeepCopy: COPY DeepCopy{ source: COPY source, zig_type: COPY zig_type, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY zig_type), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY zig_type })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
-}
 END
 PUB FN pipelineMaterializer__append_owned_value_stmt(self: PipelineMaterializer, receiver: String, alloc: String@symbol, value_expr: Emittable, known_owned: Bool = FALSE, owned_type: ?Type = NIL) RETURNS !Emittable
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE fact: ?AllocationFact = pipelineMaterializerRuntimeHost__materializer_alloc_mark_fact(rtoc_self_view.host, value_expr, pipelineMaterializerRuntimeHost__materializer_next_item_temp_name(rtoc_self_view.host), alloc, owned_type, NIL, "pipeline owned append item", known_owned);
-    MUTABLE owned_value_zig: String = pipelineMaterializer__zig_type_for(rtoc_self_view, value_expr);
+  EFFECTS REENTRANT ->
+    MUTABLE fact: ?AllocationFact = pipelineMaterializerRuntimeHost__materializer_alloc_mark_fact(self.host, value_expr, pipelineMaterializerRuntimeHost__materializer_next_item_temp_name(self.host), alloc, owned_type, NIL, "pipeline owned append item", known_owned);
+    MUTABLE owned_value_zig: String = pipelineMaterializer__zig_type_for(self, value_expr);
     IF owned_type EXISTS AS owned_type_value THEN
       owned_value_zig = COPY TRY (type__zig_type(owned_type_value));
     END
@@ -310,7 +231,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE src_name = COPY cross_mark.name;
       MUTABLE src_entry = cleanupEntry__build(:uniform, cross_fact.alloc, FALSE, NIL, owned_value_zig);
       MUTABLE copy = DeepCopy{ source: Emittable{ Ident: COPY Ident{ name: COPY src_name, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_type: COPY owned_value_zig, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: deepCopy__copy_shape_for_zig_type(NIL), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
-      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [Emittable{ AllocMark: COPY cross_mark }, Emittable{ Let: COPY Let{ name: COPY src_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Cleanup: COPY Cleanup{ name: COPY src_name, cleanup_entry: src_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, TRY (pipelineMaterializer__append_owned_value_stmt(rtoc_self_view, receiver, alloc, Emittable{ DeepCopy: COPY copy }, TRUE, owned_type))], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+      RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY [Emittable{ AllocMark: COPY cross_mark }, Emittable{ Let: COPY Let{ name: COPY src_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Cleanup: COPY Cleanup{ name: COPY src_name, cleanup_entry: src_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, TRY (pipelineMaterializer__append_owned_value_stmt(self, receiver, alloc, Emittable{ DeepCopy: COPY copy }, TRUE, owned_type))], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     IF fact EXISTS AS owned_fact THEN
       MUTABLE owned_mark = COPY owned_fact.mark;
@@ -324,7 +245,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY ([Emittable{ AllocMark: COPY owned_mark }, Emittable{ Let: COPY Let{ name: COPY temp_name, init: COPY value_expr, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ErrCleanup: COPY ErrCleanup{ name: COPY temp_name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(Ident{ name: COPY temp_name, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY temp_name, target: :owned_sink, target_alloc: COPY alloc, move_guarded: TRUE })))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "append", args: [CAST(AllocatorRef{ kind: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(value_expr AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
-}
 END
 PUB FN pipelineMaterializer__concurrent_source_setup(MUTABLE self: PipelineMaterializer, lhs: Locatable) RETURNS ![]Emittable
   REQUIRES self: LOCAL
@@ -354,10 +274,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN (setup_body + item_setup.statements);
 }
 END
-PRIVATE FN pipelineMaterializer__inline_source_alloc(self: PipelineMaterializer, source_mir: Emittable) RETURNS !?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__inline_source_alloc(self: PipelineMaterializer, source_mir: Emittable) RETURNS !?String@symbol ->
     MUTABLE effect = TRY (ownershipEffect__of(source_mir));
     IF (effect.produces_owned AND (effect.alloc != NIL)) THEN
       RETURN (effect.alloc)?;
@@ -375,19 +292,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN :frame;
     END
-}
 END
-PRIVATE FN pipelineMaterializer__bc_target?(self: PipelineMaterializer) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineMaterializerRuntimeHost__materializer_bc_target?(rtoc_self_view.host);
-}
+PRIVATE FN pipelineMaterializer__bc_target?(self: PipelineMaterializer) RETURNS Bool ->
+    RETURN pipelineMaterializerRuntimeHost__materializer_bc_target?(self.host);
 END
-PRIVATE FN pipelineMaterializer__zig_type_for(self: PipelineMaterializer, value_expr: Emittable) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__zig_type_for(self: PipelineMaterializer, value_expr: Emittable) RETURNS String ->
     MUTABLE zig_type: ?String = NIL;
     PARTIAL MATCH value_expr START
       Emittable.DeepCopy AS deep_copy -> zig_type = COPY deep_copy.zig_type;,
@@ -399,13 +308,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       Emittable.DiscardOwned AS discard_owned -> zig_type = COPY discard_owned.zig_type;,
       Emittable.UnionVariantGet AS union_variant_get -> zig_type = COPY union_variant_get.zig_type;,
     END
-    RETURN pipelineMaterializer__normalized_zig_type(rtoc_self_view, zig_type);
-}
+    RETURN pipelineMaterializer__normalized_zig_type(self, zig_type);
 END
-PRIVATE FN pipelineMaterializer__normalized_zig_type(self: PipelineMaterializer, zig_type: ?String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__normalized_zig_type(self: PipelineMaterializer, zig_type: ?String) RETURNS String ->
     IF zig_type EXISTS AS zig_type_value THEN
       IF (zig_type_value.length() == 0) THEN
         RETURN COPY "void";
@@ -415,114 +320,69 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN COPY "void";
     END
-}
 END
-PRIVATE FN pipelineMaterializer__var_and_defer(self: PipelineMaterializer, elem_zig: String) RETURNS !BufferSetup
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE var_decl = Let{ name: COPY "pipe_mat", init: Emittable{ ContainerInit: COPY ContainerInit{ zig_type: "std.ArrayListUnmanaged(${elem_zig})", strategy: :array_list_empty, alloc: COPY pipelineMaterializer__result_alloc(rtoc_self_view), capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
-    MUTABLE defer = MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "pipe_mat", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "deinit", args: [CAST(AllocatorRef{ kind: COPY pipelineMaterializer__result_alloc(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+PRIVATE FN pipelineMaterializer__var_and_defer(self: PipelineMaterializer, elem_zig: String) RETURNS !BufferSetup ->
+    MUTABLE var_decl = Let{ name: COPY "pipe_mat", init: Emittable{ ContainerInit: COPY ContainerInit{ zig_type: "std.ArrayListUnmanaged(${elem_zig})", strategy: :array_list_empty, alloc: COPY pipelineMaterializer__result_alloc(self), capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
+    MUTABLE defer = MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "pipe_mat", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "deinit", args: [CAST(AllocatorRef{ kind: COPY pipelineMaterializer__result_alloc(self), lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     RETURN BufferSetup{ var_decl: COPY var_decl, defer_stmt: COPY defer };
-}
 END
-PRIVATE FN pipelineMaterializer__items_let(self: PipelineMaterializer) RETURNS Let
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__items_let(self: PipelineMaterializer) RETURNS Let ->
     RETURN Let{ name: COPY "pipe_items", init: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "pipe_mat", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "items", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
-}
 END
-PRIVATE FN pipelineMaterializer__append(self: PipelineMaterializer, value_expr: Emittable) RETURNS !Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (pipelineMaterializer__append_owned_value_stmt(rtoc_self_view, "pipe_mat", pipelineMaterializer__result_alloc(rtoc_self_view), value_expr));
-}
+PRIVATE FN pipelineMaterializer__append(self: PipelineMaterializer, value_expr: Emittable) RETURNS !Emittable ->
+    RETURN TRY (pipelineMaterializer__append_owned_value_stmt(self, "pipe_mat", pipelineMaterializer__result_alloc(self), value_expr));
 END
-PRIVATE FN pipelineMaterializer__append_slice(self: PipelineMaterializer, slice_expr: FieldGet) RETURNS !ExprStmt
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "pipe_mat", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "appendSlice", args: [CAST(AllocatorRef{ kind: COPY pipelineMaterializer__result_alloc(rtoc_self_view), lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(slice_expr AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-}
+PRIVATE FN pipelineMaterializer__append_slice(self: PipelineMaterializer, slice_expr: FieldGet) RETURNS !ExprStmt ->
+    RETURN ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "pipe_mat", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "appendSlice", args: [CAST(AllocatorRef{ kind: COPY pipelineMaterializer__result_alloc(self), lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(slice_expr AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
-PRIVATE FN pipelineMaterializer__build_sharded_pool(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__build_sharded_pool(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable ->
     MUTABLE elem_zig = TRY (type__zig_type(UNWRAP (TRY (type__element_type(lhs_type)))));
-    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(rtoc_self_view, elem_zig));
-    MUTABLE shard_expr = IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, field: "shards", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE inner_loop = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ IndexGet: COPY shard_expr }, field: "capacity", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__pslot_idx", body: COPY [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ IndexGet: COPY shard_expr }, method: "isAliveIndex", args: [CAST(Ident{ name: "__pslot_idx", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, then_body: [TRY (pipelineMaterializer__append(rtoc_self_view, Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ IndexGet: COPY shard_expr }, field: "values", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__pslot_idx", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }))], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(self, elem_zig));
+    MUTABLE shard_expr = IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, field: "shards", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
+    MUTABLE inner_loop = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ IndexGet: COPY shard_expr }, field: "capacity", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__pslot_idx", body: COPY [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ IndexGet: COPY shard_expr }, method: "isAliveIndex", args: [CAST(Ident{ name: "__pslot_idx", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, then_body: [TRY (pipelineMaterializer__append(self, Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ IndexGet: COPY shard_expr }, field: "values", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__pslot_idx", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }))], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     MUTABLE outer_loop = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ Lit: COPY Lit{ value: COPY (type__shard_count(lhs_type) OR_ELSE 0).toString(), lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__psi", body: COPY [Emittable{ ForStmt: COPY inner_loop }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY outer_loop }, Emittable{ Let: COPY pipelineMaterializer__items_let(rtoc_self_view) }] AS []Emittable);
-}
+    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY outer_loop }, Emittable{ Let: COPY pipelineMaterializer__items_let(self) }] AS []Emittable);
 END
-PRIVATE FN pipelineMaterializer__build_soa_pool(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__build_soa_pool(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable ->
     MUTABLE elem_zig = TRY (type__zig_type(UNWRAP (TRY (type__element_type(lhs_type)))));
-    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(rtoc_self_view, elem_zig));
-    MUTABLE value_expr = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "get", args: [CAST(Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-    MUTABLE alive_check = IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, field: "alive", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE loop_node = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ ListLength: COPY ListLength{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__psi", body: COPY [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ IndexGet: COPY alive_check }, then_body: [TRY (pipelineMaterializer__append(rtoc_self_view, Emittable{ MIRMethodCall: COPY value_expr }))], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(rtoc_self_view) }] AS []Emittable);
-}
+    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(self, elem_zig));
+    MUTABLE value_expr = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "get", args: [CAST(Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+    MUTABLE alive_check = IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, field: "alive", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
+    MUTABLE loop_node = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ ListLength: COPY ListLength{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__psi", body: COPY [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ IndexGet: COPY alive_check }, then_body: [TRY (pipelineMaterializer__append(self, Emittable{ MIRMethodCall: COPY value_expr }))], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(self) }] AS []Emittable);
 END
-PRIVATE FN pipelineMaterializer__build_pool(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__build_pool(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable ->
     MUTABLE elem_zig = TRY (type__zig_type(UNWRAP (TRY (type__element_type(lhs_type)))));
-    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(rtoc_self_view, elem_zig));
-    MUTABLE loop_node = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, field: "capacity", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__pslot_idx", body: COPY [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, method: "isAliveIndex", args: [CAST(Ident{ name: "__pslot_idx", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, then_body: [TRY (pipelineMaterializer__append(rtoc_self_view, Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, field: "values", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__pslot_idx", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }))], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(rtoc_self_view) }] AS []Emittable);
-}
+    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(self, elem_zig));
+    MUTABLE loop_node = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, field: "capacity", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__pslot_idx", body: COPY [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, method: "isAliveIndex", args: [CAST(Ident{ name: "__pslot_idx", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, then_body: [TRY (pipelineMaterializer__append(self, Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, field: "values", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__pslot_idx", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }))], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(self) }] AS []Emittable);
 END
-PRIVATE FN pipelineMaterializer__build_set(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__build_set(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable ->
     MUTABLE elem_zig = TRY (type__zig_type(UNWRAP (TRY (type__element_type(lhs_type)))));
-    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(rtoc_self_view, elem_zig));
-    MUTABLE iter_let = Let{ name: COPY "__skit", init: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, method: "keyIterator", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
+    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(self, elem_zig));
+    MUTABLE iter_let = Let{ name: COPY "__skit", init: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, method: "keyIterator", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
     MUTABLE deref = FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__skptr", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "*", lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE loop_node = WhileStmt{ cond: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "__skit", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "next", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, body: [TRY (pipelineMaterializer__append(rtoc_self_view, Emittable{ FieldGet: COPY deref }))], capture: "__skptr", update: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ Let: COPY iter_let }, Emittable{ WhileStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(rtoc_self_view) }] AS []Emittable);
-}
+    MUTABLE loop_node = WhileStmt{ cond: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "__skit", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "next", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, body: [TRY (pipelineMaterializer__append(self, Emittable{ FieldGet: COPY deref }))], capture: "__skptr", update: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ Let: COPY iter_let }, Emittable{ WhileStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(self) }] AS []Emittable);
 END
-PRIVATE FN pipelineMaterializer__build_soa_list(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__build_soa_list(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable ->
     MUTABLE elem_zig = TRY (type__zig_type(UNWRAP (TRY (type__element_type(lhs_type)))));
-    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(rtoc_self_view, elem_zig));
-    MUTABLE value_expr = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "get", args: [CAST(Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-    MUTABLE loop_node = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ ListLength: COPY ListLength{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__psi", body: [TRY (pipelineMaterializer__append(rtoc_self_view, Emittable{ MIRMethodCall: COPY value_expr }))], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(rtoc_self_view) }] AS []Emittable);
-}
+    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(self, elem_zig));
+    MUTABLE value_expr = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "get", args: [CAST(Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+    MUTABLE loop_node = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ ListLength: COPY ListLength{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__psi", body: [TRY (pipelineMaterializer__append(self, Emittable{ MIRMethodCall: COPY value_expr }))], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(self) }] AS []Emittable);
 END
-PRIVATE FN pipelineMaterializer__build_sharded_list(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineMaterializer__build_sharded_list(self: PipelineMaterializer, lhs_type: Type) RETURNS ![]Emittable ->
     MUTABLE elem_zig = TRY (type__zig_type(UNWRAP (TRY (type__element_type(lhs_type)))));
-    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(rtoc_self_view, elem_zig));
-    MUTABLE shard_items = FieldGet{ object: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(rtoc_self_view) }, field: "shards", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "items", lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE loop_node = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ Lit: COPY Lit{ value: COPY (type__shard_count(lhs_type) OR_ELSE 0).toString(), lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__psi", body: COPY [Emittable{ ExprStmt: COPY TRY (pipelineMaterializer__append_slice(rtoc_self_view, shard_items)) }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(rtoc_self_view) }] AS []Emittable);
-}
+    MUTABLE buffer = TRY (pipelineMaterializer__var_and_defer(self, elem_zig));
+    MUTABLE shard_items = FieldGet{ object: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY pipelineMaterializer__source_ident(self) }, field: "shards", lowered_node_id: NIL, ownership_consumption: NIL } }, index: Emittable{ Ident: COPY Ident{ name: "__psi", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "items", lowered_node_id: NIL, ownership_consumption: NIL };
+    MUTABLE loop_node = ForStmt{ iter: Emittable{ IterRange: COPY IterRange{ start: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, end_val: Emittable{ Lit: COPY Lit{ value: COPY (type__shard_count(lhs_type) OR_ELSE 0).toString(), lowered_node_id: NIL, ownership_consumption: NIL } }, capture_type: :usize, lowered_node_id: NIL, ownership_consumption: NIL } }, capture: "__psi", body: COPY [Emittable{ ExprStmt: COPY TRY (pipelineMaterializer__append_slice(self, shard_items)) }], index_capture: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN CAST([Emittable{ Let: COPY buffer.var_decl }, Emittable{ MIRDeferStmt: COPY buffer.defer_stmt }, Emittable{ ForStmt: COPY loop_node }, Emittable{ Let: COPY pipelineMaterializer__items_let(self) }] AS []Emittable);
 END
-PRIVATE FN pipelineMaterializer__range_concurrent_source_setup(self: PipelineMaterializer, lhs: RangeLit) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE source_mir = pipelineMaterializerRuntimeHost__materializer_visit_mir(rtoc_self_view.host, Locatable{ RangeLit: COPY lhs });
+PRIVATE FN pipelineMaterializer__range_concurrent_source_setup(self: PipelineMaterializer, lhs: RangeLit) RETURNS ![]Emittable ->
+    MUTABLE source_mir = pipelineMaterializerRuntimeHost__materializer_visit_mir(self.host, Locatable{ RangeLit: COPY lhs });
     MUTABLE to_list = MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "pipe_src_list", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "toList", args: [CAST(AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     RETURN CAST([Emittable{ Let: COPY Let{ name: COPY "pipe_src_list", init: COPY source_mir, mutable: TRUE, annotation: NIL, suppression: "_ = &pipe_src_list;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Let: COPY Let{ name: COPY "pipe_mat", init: Emittable{ MIRMethodCall: COPY to_list }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "pipe_mat", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "deinit", args: [CAST(AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Let: COPY Let{ name: COPY "pipe_items", init: Emittable{ ItemsAccess: COPY ItemsAccess{ expr: Emittable{ Ident: COPY Ident{ name: "pipe_mat", lowered_node_id: NIL, ownership_consumption: NIL } }, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
-}
 END
 PUB FN pipelineMaterializer__new(host: PipelineMaterializerRuntimeHost) RETURNS PipelineMaterializer@multiowned ->
   MUTABLE self = PipelineMaterializer{ host: COPY host };

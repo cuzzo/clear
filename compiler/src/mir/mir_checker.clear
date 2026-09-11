@@ -147,50 +147,34 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.terminated = FALSE;
 }
 END
-PUB FN linearOwnershipState__copy(self: LinearOwnershipState) RETURNS LinearOwnershipState@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN linearOwnershipState__copy(self: LinearOwnershipState) RETURNS LinearOwnershipState@multiowned ->
     MUTABLE other = linearOwnershipState__new();
-    &other.owned.merge(rtoc_self_view.owned);
-    &other.released.merge(rtoc_self_view.released);
-    &other.maybe_released.merge(rtoc_self_view.maybe_released);
-    &other.cleanup_finalizers.merge(rtoc_self_view.cleanup_finalizers);
-    &other.guarded_finalizers.merge(rtoc_self_view.guarded_finalizers);
-    &other.err_finalizers.merge(rtoc_self_view.err_finalizers);
-    &other.pending_return_transfers.merge(rtoc_self_view.pending_return_transfers);
-    &other.pending_block_transfers.merge(rtoc_self_view.pending_block_transfers);
-    &other.alloc_kinds.merge_mut(rtoc_self_view.alloc_kinds);
-    &other.alloc_scopes.merge_mut(rtoc_self_view.alloc_scopes);
-    &other.move_marks.merge(rtoc_self_view.move_marks);
-    other.terminated = rtoc_self_view.terminated;
+    &other.owned.merge(self.owned);
+    &other.released.merge(self.released);
+    &other.maybe_released.merge(self.maybe_released);
+    &other.cleanup_finalizers.merge(self.cleanup_finalizers);
+    &other.guarded_finalizers.merge(self.guarded_finalizers);
+    &other.err_finalizers.merge(self.err_finalizers);
+    &other.pending_return_transfers.merge(self.pending_return_transfers);
+    &other.pending_block_transfers.merge(self.pending_block_transfers);
+    &other.alloc_kinds.merge_mut(self.alloc_kinds);
+    &other.alloc_scopes.merge_mut(self.alloc_scopes);
+    &other.move_marks.merge(self.move_marks);
+    other.terminated = self.terminated;
     RETURN other;
-}
 END
 PUB FN linearOwnershipState__same_state?(self: LinearOwnershipState, other: LinearOwnershipState) RETURNS !Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = TRY (linearOwnershipState__snapshot(rtoc_self_view));
+  EFFECTS REENTRANT ->
+    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = TRY (linearOwnershipState__snapshot(self));
     linearOwnershipSnapshot__same_state?(rtoc_local_receiver_1, TRY (linearOwnershipState__snapshot(other))) };
-}
 END
 PUB FN linearOwnershipState__summary(self: LinearOwnershipState) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = TRY (linearOwnershipState__snapshot(rtoc_self_view));
+  EFFECTS REENTRANT ->
+    RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_2 = TRY (linearOwnershipState__snapshot(self));
     linearOwnershipSnapshot__summary(rtoc_local_receiver_2) };
-}
 END
-PUB FN linearOwnershipState__snapshot(self: LinearOwnershipState) RETURNS !LinearOwnershipSnapshot@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (linearOwnershipSnapshot__from_state(rtoc_self_view));
-}
+PUB FN linearOwnershipState__snapshot(self: LinearOwnershipState) RETURNS !LinearOwnershipSnapshot@multiowned ->
+    RETURN TRY (linearOwnershipSnapshot__from_state(self));
 END
 PUB FN linearOwnershipState__new() RETURNS LinearOwnershipState@multiowned ->
   MUTABLE self = LinearOwnershipState{ alloc_kinds: {}, alloc_scopes: {}, cleanup_finalizers: Set[], err_finalizers: Set[], guarded_finalizers: Set[], maybe_released: Set[], move_marks: Set[], owned: Set[], pending_block_transfers: Set[], pending_return_transfers: Set[], released: Set[], terminated: FALSE };
@@ -227,33 +211,17 @@ END
 PUB FN linearOwnershipSnapshot__from_state(state: LinearOwnershipState) RETURNS !LinearOwnershipSnapshot@multiowned ->
   RETURN linearOwnershipSnapshot__new(TRY (linearOwnershipSnapshot__place_set(state.owned)), TRY (linearOwnershipSnapshot__place_set(state.released)), TRY (linearOwnershipSnapshot__place_set(state.maybe_released)), TRY (linearOwnershipSnapshot__place_set(state.cleanup_finalizers)), TRY (linearOwnershipSnapshot__place_set(state.guarded_finalizers)), TRY (linearOwnershipSnapshot__place_set(state.err_finalizers)), TRY (linearOwnershipSnapshot__place_set(state.pending_return_transfers)), TRY (linearOwnershipSnapshot__place_set(state.pending_block_transfers)), TRY (linearOwnershipSnapshot__place_hash(state.alloc_kinds)));
 END
-PUB FN linearOwnershipSnapshot__owned(self: LinearOwnershipSnapshot) RETURNS ![Set]PlaceId
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.owned;
-}
+PUB FN linearOwnershipSnapshot__owned(self: LinearOwnershipSnapshot) RETURNS ![Set]PlaceId ->
+    RETURN COPY self.owned;
 END
-PUB FN linearOwnershipSnapshot__alloc_kinds(self: LinearOwnershipSnapshot) RETURNS !{PlaceId}String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.alloc_kinds;
-}
+PUB FN linearOwnershipSnapshot__alloc_kinds(self: LinearOwnershipSnapshot) RETURNS !{PlaceId}String@symbol ->
+    RETURN COPY self.alloc_kinds;
 END
-PUB FN linearOwnershipSnapshot__same_state?(self: LinearOwnershipSnapshot, other: LinearOwnershipSnapshot) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((((((((rtoc_self_view.owned == other.owned) AND (rtoc_self_view.released == other.released)) AND (rtoc_self_view.maybe_released == other.maybe_released)) AND (rtoc_self_view.cleanup_finalizers == other.cleanup_finalizers)) AND (rtoc_self_view.guarded_finalizers == other.guarded_finalizers)) AND (rtoc_self_view.err_finalizers == other.err_finalizers)) AND (rtoc_self_view.pending_return_transfers == other.pending_return_transfers)) AND (rtoc_self_view.pending_block_transfers == other.pending_block_transfers)) AND (rtoc_self_view.alloc_kinds == other.alloc_kinds));
-}
+PUB FN linearOwnershipSnapshot__same_state?(self: LinearOwnershipSnapshot, other: LinearOwnershipSnapshot) RETURNS Bool ->
+    RETURN (((((((((self.owned == other.owned) AND (self.released == other.released)) AND (self.maybe_released == other.maybe_released)) AND (self.cleanup_finalizers == other.cleanup_finalizers)) AND (self.guarded_finalizers == other.guarded_finalizers)) AND (self.err_finalizers == other.err_finalizers)) AND (self.pending_return_transfers == other.pending_return_transfers)) AND (self.pending_block_transfers == other.pending_block_transfers)) AND (self.alloc_kinds == other.alloc_kinds));
 END
-PUB FN linearOwnershipSnapshot__summary(self: LinearOwnershipSnapshot) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (["owned=${linearOwnershipSnapshot__format_places(rtoc_self_view, rtoc_self_view.owned)}", "released=${linearOwnershipSnapshot__format_places(rtoc_self_view, rtoc_self_view.released)}", "maybe=${linearOwnershipSnapshot__format_places(rtoc_self_view, rtoc_self_view.maybe_released)}", "cleanup=${linearOwnershipSnapshot__format_places(rtoc_self_view, rtoc_self_view.cleanup_finalizers)}", "guarded=${linearOwnershipSnapshot__format_places(rtoc_self_view, rtoc_self_view.guarded_finalizers)}", "err=${linearOwnershipSnapshot__format_places(rtoc_self_view, rtoc_self_view.err_finalizers)}", "return=${linearOwnershipSnapshot__format_places(rtoc_self_view, rtoc_self_view.pending_return_transfers)}", "block=${linearOwnershipSnapshot__format_places(rtoc_self_view, rtoc_self_view.pending_block_transfers)}", "alloc=${((rtoc_self_view.alloc_kinds.keys() |> SELECT "${_.path}:${COPY UNWRAP (rtoc_self_view.alloc_kinds[_])}") |> ORDER_BY _).join(",")}"]).join(" ");
-}
+PUB FN linearOwnershipSnapshot__summary(self: LinearOwnershipSnapshot) RETURNS String ->
+    RETURN (["owned=${linearOwnershipSnapshot__format_places(self, self.owned)}", "released=${linearOwnershipSnapshot__format_places(self, self.released)}", "maybe=${linearOwnershipSnapshot__format_places(self, self.maybe_released)}", "cleanup=${linearOwnershipSnapshot__format_places(self, self.cleanup_finalizers)}", "guarded=${linearOwnershipSnapshot__format_places(self, self.guarded_finalizers)}", "err=${linearOwnershipSnapshot__format_places(self, self.err_finalizers)}", "return=${linearOwnershipSnapshot__format_places(self, self.pending_return_transfers)}", "block=${linearOwnershipSnapshot__format_places(self, self.pending_block_transfers)}", "alloc=${((self.alloc_kinds.keys() |> SELECT "${_.path}:${COPY UNWRAP (self.alloc_kinds[_])}") |> ORDER_BY _).join(",")}"]).join(" ");
 END
 PRIVATE FN linearOwnershipSnapshot__place_set(names: [Set]String) RETURNS ![Set]PlaceId ->
   MUTABLE out: [Set]PlaceId = Set[];
@@ -270,12 +238,8 @@ PRIVATE FN linearOwnershipSnapshot__place_hash(allocs: {String}String@symbol) RE
   END
   RETURN out;
 END
-PRIVATE FN linearOwnershipSnapshot__format_places(self: LinearOwnershipSnapshot, places: [Set]PlaceId) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN linearOwnershipSnapshot__format_places(self: LinearOwnershipSnapshot, places: [Set]PlaceId) RETURNS String ->
     RETURN ((places |> SELECT _.path) |> ORDER_BY _).join(",");
-}
 END
 PUB FN linearOwnershipSnapshot__new(owned: [Set]PlaceId, released: [Set]PlaceId, maybe_released: [Set]PlaceId, cleanup_finalizers: [Set]PlaceId, guarded_finalizers: [Set]PlaceId, err_finalizers: [Set]PlaceId, pending_return_transfers: [Set]PlaceId, pending_block_transfers: [Set]PlaceId, alloc_kinds: {PlaceId}String@symbol) RETURNS LinearOwnershipSnapshot@multiowned ->
   MUTABLE self = LinearOwnershipSnapshot{ alloc_kinds: {}, cleanup_finalizers: Set[], err_finalizers: Set[], guarded_finalizers: Set[], maybe_released: Set[], owned: Set[], pending_block_transfers: Set[], pending_return_transfers: Set[], released: Set[] };
@@ -592,12 +556,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN CAST(List[] AS []String);
 }
 END
-PUB FN mIRChecker__ownership_consumption_operand_names(self: MIRChecker, fact: OwnershipConsumptionFact) RETURNS ![]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__ownership_consumption_operand_names(self: MIRChecker, fact: OwnershipConsumptionFact) RETURNS ![]String ->
     RETURN CAST(((fact.operands |> SELECT:? _.name |> WHERE _ != NIL |> SELECT UNWRAP _) |> SELECT _.toString() |> WHERE !(_.empty?()) |> DISTINCT _) AS []String);
-}
 END
 PUB FN mIRChecker__verify_linear_ownership_mut(MUTABLE self: MIRChecker, body: []Emittable) RETURNS !Void
   REQUIRES self: LOCAL
@@ -1068,15 +1028,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__escaping_transfer_target?(self: MIRChecker, target: String@symbol, target_alloc: ?String@symbol) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__escaping_transfer_target?(self: MIRChecker, target: String@symbol, target_alloc: ?String@symbol) RETURNS Bool ->
     IF (target == :owned_sink) THEN
       RETURN placement__explicit_heap?(target_alloc);
     END
     RETURN ([:return, :external_param, :capture, :field_store, :aggregate_store] |> DISTINCT _).contains?(target);
-}
 END
 PUB FN mIRChecker__check_linear_branch_join_mut(MUTABLE self: MIRChecker, then_body: []Emittable, else_body: []Emittable, MUTABLE state: LinearOwnershipState, label: String) RETURNS !Void
   REQUIRES self: LOCAL
@@ -1293,14 +1249,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__linear_expr_consumed_names(self: MIRChecker, expr: ?Emittable) RETURNS ![Set]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__linear_expr_consumed_names(self: MIRChecker, expr: ?Emittable) RETURNS ![Set]String ->
     MUTABLE names: [Set]String = Set[];
-    mIRChecker__walk_mir_node(rtoc_self_view, ruby_wrap_optional_Emittable_NodeRoot(expr), %(node: Emittable) USE(MUTABLE names, rtoc_self_view) -> {
+    mIRChecker__walk_mir_node(self, ruby_wrap_optional_Emittable_NodeRoot(expr), %(node: Emittable) USE(MUTABLE names, self) -> {
     IF ((node IS_A StructInit OR node IS_A ArrayInit) OR node IS_A TupleLiteral) THEN
-        TRY (mIRChecker__collect_linear_expr_ident_names(rtoc_self_view, node, &names));
+        TRY (mIRChecker__collect_linear_expr_ident_names(self, node, &names));
     END
     IF !((((node IS_A Call OR node IS_A RuntimeCall) OR node IS_A TailCall) OR node IS_A MIRMethodCall)) THEN
         RETURN;
@@ -1320,22 +1273,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rubyToClearVoid__mir_checker()
     });
     RETURN names;
-}
 END
-PUB FN mIRChecker__linear_expr_ident_names(self: MIRChecker, expr: ?Emittable) RETURNS ![Set]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__linear_expr_ident_names(self: MIRChecker, expr: ?Emittable) RETURNS ![Set]String ->
     MUTABLE names: [Set]String = Set[];
-    TRY (mIRChecker__collect_linear_expr_ident_names(rtoc_self_view, expr, &names));
+    TRY (mIRChecker__collect_linear_expr_ident_names(self, expr, &names));
     RETURN names;
-}
 END
 PUB FN mIRChecker__collect_linear_expr_ident_names(self: MIRChecker, expr: ?Emittable, MUTABLE names: [Set]String) RETURNS !Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF expr EXISTS AS expr_value THEN
       MUTABLE expr_value_mutable = COPY expr_value;
       IF expr_value_mutable IS_A Ident AS ident THEN
@@ -1345,13 +1290,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN;
       END
       FOR _ IN TRY (emittable__child_exprs(expr_value_mutable)) DO
-      mIRChecker__collect_linear_expr_ident_names(rtoc_self_view, _, &names);
+      mIRChecker__collect_linear_expr_ident_names(self, _, &names);
       END
       NIL;
     ELSE
       RETURN;
     END
-}
 END
 PUB FN mIRChecker__verify_move_mark_scope_mut(MUTABLE self: MIRChecker, body: []Emittable, MUTABLE visible: [Set]String = Set[]) RETURNS !Void
   REQUIRES self: LOCAL
@@ -1679,17 +1623,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PUB FN mIRChecker__each_heap_create(self: MIRChecker, nodes: []Emittable, blk: FN(HeapCreate) -> Void) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__each_heap_create(self: MIRChecker, nodes: []Emittable, blk: FN(HeapCreate) -> Void) RETURNS Void ->
     FOR _ IN nodes DO
     IF _ IS_A HeapCreate AS heap_create THEN
       blk(heap_create);
     END
     END
     NIL;
-}
 END
 PUB FN mIRChecker__check_program_mut(MUTABLE self: MIRChecker, program: MIRProgram, strict: Bool = FALSE) RETURNS ![]String
   REQUIRES self: LOCAL
@@ -1708,10 +1648,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN mIRChecker__program_functions(self: MIRChecker, items: []Emittable) RETURNS ![]FnDef
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE functions: []FnDef = List[];
     FOR _ IN items DO
     IF _ IS_A FnDef AS fn_def THEN
@@ -1723,11 +1660,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       END
     ELSE_IF _ IS_A ModuleNamespace AS module_namespace THEN
-      functions = ruby_array_concat_FnDef(functions, TRY (mIRChecker__program_functions(rtoc_self_view, module_namespace.items)));
+      functions = ruby_array_concat_FnDef(functions, TRY (mIRChecker__program_functions(self, module_namespace.items)));
     END
     END
     RETURN functions;
-}
 END
 # Ruby walks its own class registry here, asking whether every MIR::Stmt
 # subclass is registered and whether any node carrying ownership fields was
@@ -1743,10 +1679,7 @@ PUB FN mIRChecker__ownership_registry_errors(self: MIRChecker) RETURNS ![]String
   MUTABLE none: []String = List[];
   RETURN none;
 END
-PUB FN mIRChecker__owned_return_init?(self: MIRChecker, init: ?Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__owned_return_init?(self: MIRChecker, init: ?Emittable) RETURNS !Bool ->
     IF (IF init? IS_A Call AS call THEN call__owned_return?(call) ELSE FALSE END) THEN
       RETURN TRUE;
     END
@@ -1756,7 +1689,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       MUTABLE return_type = TRY (type__success_type(extern_trampoline.return_type));
       MUTABLE schema: ?TypeSchemaLookupResult = NIL;
-      IF rtoc_self_view.schema_lookup EXISTS AS rtoc_lookup THEN
+      IF self.schema_lookup EXISTS AS rtoc_lookup THEN
         schema = rtoc_lookup(type__resolved(return_type));
       END
       MUTABLE rtoc_schema_value: ?SchemaValue = NIL;
@@ -1769,7 +1702,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     IF init EXISTS AS rtoc_init THEN
       IF ((rtoc_init IS_A InlineBc) OR (rtoc_init IS_A RegistryCall)) THEN
-        IF !(TRY (mIRChecker__stdlib_owned_return?(rtoc_self_view, rtoc_init))) THEN
+        IF !(TRY (mIRChecker__stdlib_owned_return?(self, rtoc_init))) THEN
           RETURN FALSE;
         END
         MUTABLE sig: ?FunctionSignature@multiowned = emittable__stdlib_def(rtoc_init);
@@ -1785,7 +1718,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN FALSE;
-}
 END
 PUB FN mIRChecker__verify_cleanup_sources_own_values_mut(MUTABLE self: MIRChecker, body: []Emittable, cleanups: {String}[]MIRCheckerCleanupMarksByNameValueItem, err_cleanups: {String}[]MIRCheckerCleanupMarksByNameValueItem) RETURNS !Void
   REQUIRES self: LOCAL
@@ -1937,10 +1869,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN mIRChecker__value_constructor_expr?(self: MIRChecker, node: ?Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF (((((node != NIL) AND (node IS_A StructInit)) OR ((node != NIL) AND (node IS_A TupleLiteral))) OR ((node != NIL) AND (node IS_A ArrayInit))) OR ((node != NIL) AND (node IS_A ArrayDefaultInit))) THEN
       RETURN TRUE;
     END
@@ -1961,7 +1890,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       IF terminal? IS_A BreakStmt AS rtoc_terminal THEN
         IF rtoc_terminal.value EXISTS AS rtoc_terminal_value THEN
-          RETURN TRY (mIRChecker__value_constructor_expr?(rtoc_self_view, rtoc_terminal_value));
+          RETURN TRY (mIRChecker__value_constructor_expr?(self, rtoc_terminal_value));
         END
       END
       RETURN FALSE;
@@ -1979,23 +1908,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN FALSE;
     END
-}
 END
-PUB FN mIRChecker__ownership_source_expr(self: MIRChecker, node: Emittable) RETURNS Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__ownership_source_expr(self: MIRChecker, node: Emittable) RETURNS Emittable ->
     MUTABLE current: Emittable = COPY node;
     WHILE ((((current IS_A MIRCast OR current IS_A TryExpr) OR current IS_A TryOptional) OR current IS_A MIROptionalUnwrap)) DO
       current = UNWRAP (emittable__expr(current));
     END
     RETURN current;
-}
 END
-PUB FN mIRChecker__stdlib_owned_return?(self: MIRChecker, node: Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__stdlib_owned_return?(self: MIRChecker, node: Emittable) RETURNS !Bool ->
     MUTABLE sig: ?FunctionSignature@multiowned = emittable__stdlib_def(node);
     IF sig EXISTS AS sig_value THEN
       MUTABLE sig_value_mutable = COPY sig_value;
@@ -2009,7 +1930,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF TRY (functionSignature__heap_return_alloc?(sig_value_mutable)) THEN
         RETURN TRUE;
       END
-      MUTABLE metadata: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY node });
+      MUTABLE metadata: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(self, MIRCheckerAllocatorMetadataSource{ Emittable: COPY node });
       IF metadata EXISTS AS metadata_value THEN
         RETURN TRY (inlineAllocMetadata__any_heap?(metadata_value));
       ELSE
@@ -2018,19 +1939,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN FALSE;
     END
-}
 END
-PUB FN mIRChecker__stdlib_owned_fixed_return?(self: MIRChecker, node: Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__stdlib_owned_fixed_return?(self: MIRChecker, node: Emittable) RETURNS !Bool ->
     MUTABLE sig: ?FunctionSignature@multiowned = emittable__stdlib_def(node);
     IF sig EXISTS AS sig_value THEN
-      RETURN (TRY (mIRChecker__stdlib_owned_return?(rtoc_self_view, node)) AND TRY (functionSignature__fixed_return?(sig_value)));
+      RETURN (TRY (mIRChecker__stdlib_owned_return?(self, node)) AND TRY (functionSignature__fixed_return?(sig_value)));
     ELSE
       RETURN FALSE;
     END
-}
 END
 PUB FN mIRChecker__verify_owned_return_alloc_marks_mut(MUTABLE self: MIRChecker, lets: []Let, allocs: {String}[]AllocMark) RETURNS !Void
   REQUIRES self: LOCAL
@@ -2053,16 +1969,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN mIRChecker__expr_owned_result_alloc(self: MIRChecker, init: ?Emittable) RETURNS !?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRChecker__expr_owned_result_alloc(self: MIRChecker, init: ?Emittable) RETURNS !?String@symbol ->
     MUTABLE effect = TRY (ownershipEffect__of(init));
     IF !(effect.requires_hoist) THEN
       RETURN NIL;
     END
     RETURN effect.alloc;
-}
 END
 PUB FN mIRChecker__verify_owned_result_alloc_marks_mut(MUTABLE self: MIRChecker, lets: []Let, allocs: {String}[]AllocMark) RETURNS !Void
   REQUIRES self: LOCAL
@@ -2363,19 +2275,12 @@ PUB FN mIRChecker__format_fsm_error(invariant: String, message: String, source: 
   END
   RETURN "[FSM checker]${loc} ${invariant}: ${message}";
 END
-PRIVATE FN mIRChecker__allocator_metadata_node?(self: MIRChecker, node: Emittable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE metadata: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY node });
+PRIVATE FN mIRChecker__allocator_metadata_node?(self: MIRChecker, node: Emittable) RETURNS Bool ->
+    MUTABLE metadata: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(self, MIRCheckerAllocatorMetadataSource{ Emittable: COPY node });
     RETURN ((metadata != NIL) AND !(inlineAllocMetadata__empty?(metadata)));
-}
 END
-PRIVATE FN mIRChecker__allocator_metadata_for(self: MIRChecker, node: MIRCheckerAllocatorMetadataSource) RETURNS ?InlineAllocMetadata@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE carrier: ?MIRCheckerAllocatorMetadataCarrier = mIRChecker__allocator_metadata_carrier(rtoc_self_view, node);
+PRIVATE FN mIRChecker__allocator_metadata_for(self: MIRChecker, node: MIRCheckerAllocatorMetadataSource) RETURNS ?InlineAllocMetadata@multiowned ->
+    MUTABLE carrier: ?MIRCheckerAllocatorMetadataCarrier = mIRChecker__allocator_metadata_carrier(self, node);
     IF carrier? IS_A RegistryCall AS registry_call THEN
       MUTABLE rtoc_owned_return_45: ?InlineAllocMetadata@multiowned = KEEP registry_call.allocs;
       RETURN rtoc_owned_return_45;
@@ -2391,12 +2296,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
-PRIVATE FN mIRChecker__allocator_metadata_carrier(self: MIRChecker, node: MIRCheckerAllocatorMetadataSource) RETURNS ?MIRCheckerAllocatorMetadataCarrier
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__allocator_metadata_carrier(self: MIRChecker, node: MIRCheckerAllocatorMetadataSource) RETURNS ?MIRCheckerAllocatorMetadataCarrier ->
     IF node IS_A Emittable AS rtoc_emittable THEN
       IF rtoc_emittable IS_A RegistryCall AS rtoc_carrier THEN
         RETURN MIRCheckerAllocatorMetadataCarrier{ RegistryCall: COPY rtoc_carrier };
@@ -2412,13 +2313,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN NIL;
-}
 END
-PRIVATE FN mIRChecker__allocator_metadata_target(self: MIRChecker, node: MIRCheckerAllocatorMetadataSource) RETURNS ?String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE carrier: ?MIRCheckerAllocatorMetadataCarrier = mIRChecker__allocator_metadata_carrier(rtoc_self_view, node);
+PRIVATE FN mIRChecker__allocator_metadata_target(self: MIRChecker, node: MIRCheckerAllocatorMetadataSource) RETURNS ?String ->
+    MUTABLE carrier: ?MIRCheckerAllocatorMetadataCarrier = mIRChecker__allocator_metadata_carrier(self, node);
     IF carrier? IS_A RegistryCall AS registry_call THEN
       MUTABLE target: ?String = COPY registry_call.target_var;
       IF ((target != NIL) AND !((target.length() == 0))) THEN
@@ -2449,13 +2346,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN NIL;
-}
 END
-PRIVATE FN mIRChecker__allocator_metadata_label(self: MIRChecker, node: MIRCheckerAllocatorMetadataSource) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE target: ?String = mIRChecker__allocator_metadata_target(rtoc_self_view, node);
+PRIVATE FN mIRChecker__allocator_metadata_label(self: MIRChecker, node: MIRCheckerAllocatorMetadataSource) RETURNS String ->
+    MUTABLE target: ?String = mIRChecker__allocator_metadata_target(self, node);
     IF target EXISTS AS target_value THEN
       RETURN COPY target_value;
     END
@@ -2472,7 +2365,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN COPY emittable__variant_name(rtoc_emittable);
     END
     RETURN COPY "CallableContract";
-}
 END
 PRIVATE FN mIRChecker__verify_allocator_closed_set_mut(MUTABLE self: MIRChecker, allocs: {String}[]AllocMark, cleanups: {String}[]MIRCheckerCleanupMarksByNameValueItem, metadata_nodes: []Emittable) RETURNS !Void
   REQUIRES self: LOCAL
@@ -2571,32 +2463,20 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRChecker__walk_mir(self: MIRChecker, stmts: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__walk_mir(self: MIRChecker, stmts: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void ->
     TRY (mIR__each_node(UNWRAP (stmts), block));
     NIL;
-}
 END
-PRIVATE FN mIRChecker__walk_mir_node(self: MIRChecker, node: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__walk_mir_node(self: MIRChecker, node: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void ->
     IF !((((node != NIL) AND (node IS_A Emittable)) OR ((node != NIL) AND (node IS_A Emittable[])))) THEN
       RETURN;
     END
     TRY (mIR__each_node(UNWRAP (node), block));
     NIL;
-}
 END
-PRIVATE FN mIRChecker__walk_mir_expr(self: MIRChecker, expr: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (mIRChecker__walk_mir_node(rtoc_self_view, expr, block));
+PRIVATE FN mIRChecker__walk_mir_expr(self: MIRChecker, expr: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void ->
+    TRY (mIRChecker__walk_mir_node(self, expr, block));
     NIL;
-}
 END
 PRIVATE FN mIRChecker__scan_expr_for_hpt_leak_mut(MUTABLE self: MIRChecker, node: ?Emittable, MUTABLE leaks: []String) RETURNS !Void
   REQUIRES self: LOCAL
@@ -2625,10 +2505,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRChecker__ownership_effect_label(self: MIRChecker, node: Emittable) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__ownership_effect_label(self: MIRChecker, node: Emittable) RETURNS String ->
     IF node IS_A Call AS call THEN
       RETURN COPY call.callee;
     ELSE_IF node IS_A MIRMethodCall AS mir_method_call THEN
@@ -2638,7 +2515,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN COPY emittable__variant_name(node);
     END
-}
 END
 PRIVATE FN mIRChecker__verify_allocator_metadata_contracts_mut(MUTABLE self: MIRChecker, metadata_nodes: []Emittable, allocs: {String}[]AllocMark, fn_def: FnDef) RETURNS !Void
   REQUIRES self: LOCAL
@@ -2936,12 +2812,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN mIRChecker__function_signature_takes_ownership?(self: MIRChecker, sig: FunctionSignature, checked_arg_count: Int64) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__function_signature_takes_ownership?(self: MIRChecker, sig: FunctionSignature, checked_arg_count: Int64) RETURNS !Bool ->
     RETURN (TRY (functionSignature__params(sig))) |> LIMIT checked_arg_count |> ANY (_.takes OR_ELSE FALSE);
-}
 END
 PRIVATE FN mIRChecker__verify_explicit_ownership_contracts_mut(MUTABLE self: MIRChecker, nodes: []Emittable, transfers: [Set]String, allocs: {String}[]AllocMark) RETURNS !Void
   REQUIRES self: LOCAL
@@ -3166,23 +3038,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRChecker__callable_contract_consumes?(self: MIRChecker, contract: ?CallableContract) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__callable_contract_consumes?(self: MIRChecker, contract: ?CallableContract) RETURNS !Bool ->
     IF !((contract != NIL)) THEN
       RETURN FALSE;
     END
-    RETURN !(((TRY (mIRChecker__ownership_contract_consumes(rtoc_self_view, (contract).ownership_contract))).length() == 0));
-}
+    RETURN !(((TRY (mIRChecker__ownership_contract_consumes(self, (contract).ownership_contract))).length() == 0));
 END
-PRIVATE FN mIRChecker__registry_ownership_side_channel?(self: MIRChecker, node: MIRCheckerRegistryOwnershipNode) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__registry_ownership_side_channel?(self: MIRChecker, node: MIRCheckerRegistryOwnershipNode) RETURNS !Bool ->
     MUTABLE sig: ?FunctionSignature@multiowned = mIRCheckerRegistryOwnershipNode__stdlib_def(node);
-    IF mIRChecker__stdlib_takes_ownership?(rtoc_self_view, castMIRCheckerRegistryOwnershipNodeToEmittable(node)) THEN
-      IF mIRChecker__ownership_surface_has_no_owned_operands?(rtoc_self_view, castMIRCheckerRegistryOwnershipNodeToMIRCheckerOwnershipSurfaceNode(node)) THEN
+    IF mIRChecker__stdlib_takes_ownership?(self, castMIRCheckerRegistryOwnershipNodeToEmittable(node)) THEN
+      IF mIRChecker__ownership_surface_has_no_owned_operands?(self, castMIRCheckerRegistryOwnershipNodeToMIRCheckerOwnershipSurfaceNode(node)) THEN
         RETURN FALSE;
       END
       RETURN TRUE;
@@ -3212,24 +3077,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN FALSE;
     END
-}
 END
-PRIVATE FN mIRChecker__ownership_fact_covers_node?(self: MIRChecker, fact_sources: [Set]String, node: Emittable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__ownership_fact_covers_node?(self: MIRChecker, fact_sources: [Set]String, node: Emittable) RETURNS Bool ->
     IF (emittable__ownership_consumption(node) != NIL) THEN
     IF emittable__ownership_consumption(node) != NIL THEN
       RETURN TRUE;
     END
     END
-    RETURN fact_sources.contains?(mIRChecker__ownership_node_name(rtoc_self_view, node));
-}
+    RETURN fact_sources.contains?(mIRChecker__ownership_node_name(self, node));
 END
-PRIVATE FN mIRChecker__ownership_fact_source(self: MIRChecker, fact: Emittable) RETURNS ?String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__ownership_fact_source(self: MIRChecker, fact: Emittable) RETURNS ?String ->
     IF fact IS_A OwnedCreate AS owned_create THEN
       RETURN COPY owned_create.source;
     ELSE_IF fact IS_A OwnedDestroy AS owned_destroy THEN
@@ -3245,7 +3102,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
 PRIVATE FN mIRChecker__check_consumed_allocators_match_sink_mut(MUTABLE self: MIRChecker, node: MIRCheckerAllocatorMetadataSource, consumes: []String, allocs: {String}[]AllocMark) RETURNS !Void
   REQUIRES self: LOCAL
@@ -3285,21 +3141,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRChecker__ownership_consumption_has_no_owned_operands?(self: MIRChecker, node: Emittable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__ownership_consumption_has_no_owned_operands?(self: MIRChecker, node: Emittable) RETURNS Bool ->
     MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(node);
     IF !(fact EXISTS) THEN
       RETURN FALSE;
     END
     RETURN !((fact).operands |> ANY (((_.kind == :owned_binding) AND (_.name != NIL))));
-}
 END
-PRIVATE FN mIRChecker__ownership_contract_has_no_owned_operands?(self: MIRChecker, node: MIRCheckerOwnershipSurfaceNode) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__ownership_contract_has_no_owned_operands?(self: MIRChecker, node: MIRCheckerOwnershipSurfaceNode) RETURNS Bool ->
     MUTABLE contract: ?OwnershipContract@multiowned = NIL;
     PARTIAL MATCH node START
       MIRCheckerOwnershipSurfaceNode.RegistryCall AS registry_call -> contract = KEEP registry_call.ownership_contract;,
@@ -3310,19 +3159,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN !(rtoc_contract.operands |> ANY (((_.kind == :owned_binding) AND (_.name != NIL))));
     END
     RETURN FALSE;
-}
 END
-PRIVATE FN mIRChecker__ownership_surface_has_no_owned_operands?(self: MIRChecker, node: MIRCheckerOwnershipSurfaceNode) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (mIRChecker__ownership_consumption_has_no_owned_operands?(rtoc_self_view, castMIRCheckerOwnershipSurfaceNodeToEmittable(node)) OR mIRChecker__ownership_contract_has_no_owned_operands?(rtoc_self_view, node));
-}
+PRIVATE FN mIRChecker__ownership_surface_has_no_owned_operands?(self: MIRChecker, node: MIRCheckerOwnershipSurfaceNode) RETURNS Bool ->
+    RETURN (mIRChecker__ownership_consumption_has_no_owned_operands?(self, castMIRCheckerOwnershipSurfaceNodeToEmittable(node)) OR mIRChecker__ownership_contract_has_no_owned_operands?(self, node));
 END
-PRIVATE FN mIRChecker__stdlib_takes_ownership?(self: MIRChecker, node: Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__stdlib_takes_ownership?(self: MIRChecker, node: Emittable) RETURNS !Bool ->
     IF node IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
       RETURN TRUE;
     END
@@ -3335,29 +3176,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN TRY (functionSignature__takes_ownership?(&rtoc_sig_mutable));
     END
     RETURN FALSE;
-}
 END
-PRIVATE FN mIRChecker__ownership_contract_consumes(self: MIRChecker, contract: OwnershipContract) RETURNS ![]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__ownership_contract_consumes(self: MIRChecker, contract: OwnershipContract) RETURNS ![]String ->
     RETURN TRY (ownershipContract__owned_operand_names(contract));
-}
 END
-PRIVATE FN mIRChecker__ownership_contract_present?(self: MIRChecker, contract: OwnershipContract) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__ownership_contract_present?(self: MIRChecker, contract: OwnershipContract) RETURNS Bool ->
     RETURN (!(ownershipContract__empty?(contract)) OR contract.covers_consuming_params);
-}
 END
 PRIVATE FN mIRChecker__ownership_node_name(self: MIRChecker, node: Emittable) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF (node IS_A MIRCast OR node IS_A TryExpr) THEN
-      RETURN mIRChecker__ownership_node_name(rtoc_self_view, UNWRAP (emittable__expr(node)));
+      RETURN mIRChecker__ownership_node_name(self, UNWRAP (emittable__expr(node)));
     END
     MUTABLE target: ?String = PARTIAL MATCH node START
       Emittable.RegistryCall AS registry_call -> registry_call.target_var,
@@ -3393,7 +3222,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN COPY emittable__variant_name(node);
     END
-}
 END
 PRIVATE FN mIRChecker__verify_frame_rewind_mut(MUTABLE self: MIRChecker, body: []Emittable) RETURNS !Void
   REQUIRES self: LOCAL
@@ -3418,33 +3246,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN mIRChecker__frame_rewind_nodes(self: MIRChecker, root: ?NodeRoot) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIR__nodes_until(root, %(node: Emittable) USE(rtoc_self_view) -> mIRChecker__frame_rewind_boundary?(rtoc_self_view, node)));
-}
+  EFFECTS REENTRANT ->
+    RETURN TRY (mIR__nodes_until(root, %(node: Emittable) USE(self) -> mIRChecker__frame_rewind_boundary?(self, node)));
 END
-PRIVATE FN mIRChecker__each_frame_rewind_node(self: MIRChecker, root: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (mIR__each_node_until(UNWRAP (root), %(node) USE(rtoc_self_view) -> mIRChecker__frame_rewind_boundary?(rtoc_self_view, node), block));
-}
+PRIVATE FN mIRChecker__each_frame_rewind_node(self: MIRChecker, root: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void ->
+    TRY (mIR__each_node_until(UNWRAP (root), %(node) USE(self) -> mIRChecker__frame_rewind_boundary?(self, node), block));
 END
-PRIVATE FN mIRChecker__frame_rewind_boundary?(self: MIRChecker, node: Emittable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__frame_rewind_boundary?(self: MIRChecker, node: Emittable) RETURNS Bool ->
     RETURN (node IS_A MIRBgBlock OR node IS_A LambdaExpr);
-}
 END
-PRIVATE FN mIRChecker__body_has_loop_restore?(self: MIRChecker, stmts: []Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__body_has_loop_restore?(self: MIRChecker, stmts: []Emittable) RETURNS !Bool ->
     MUTABLE found: Bool = FALSE;
-    FOR node IN TRY (mIRChecker__loop_local_nodes(rtoc_self_view, NodeRoot{ ArrayValue: COPY stmts })) DO
+    FOR node IN TRY (mIRChecker__loop_local_nodes(self, NodeRoot{ ArrayValue: COPY stmts })) DO
       IF node IS_A MIRDeferStmt AS rtoc_defer THEN
         IF rtoc_defer.body IS_A Emittable AS rtoc_defer_body THEN
         IF rtoc_defer_body IS_A MIRMethodCall AS rtoc_call THEN
@@ -3456,28 +3269,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN found;
-}
 END
-PRIVATE FN mIRChecker__body_has_iteration_frame_alloc?(self: MIRChecker, stmts: ?NodeRoot) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIRChecker__body_has_frame_alloc_scope?(rtoc_self_view, stmts, %(scope: String@symbol) -> (scope == :iteration)));
-}
+PRIVATE FN mIRChecker__body_has_iteration_frame_alloc?(self: MIRChecker, stmts: ?NodeRoot) RETURNS !Bool ->
+    RETURN TRY (mIRChecker__body_has_frame_alloc_scope?(self, stmts, %(scope: String@symbol) -> (scope == :iteration)));
 END
-PRIVATE FN mIRChecker__body_has_non_iteration_frame_alloc?(self: MIRChecker, stmts: ?NodeRoot) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIRChecker__body_has_frame_alloc_scope?(rtoc_self_view, stmts, %(scope: String@symbol) -> (scope != :iteration)));
-}
+PRIVATE FN mIRChecker__body_has_non_iteration_frame_alloc?(self: MIRChecker, stmts: ?NodeRoot) RETURNS !Bool ->
+    RETURN TRY (mIRChecker__body_has_frame_alloc_scope?(self, stmts, %(scope: String@symbol) -> (scope != :iteration)));
 END
-PRIVATE FN mIRChecker__iteration_frame_alloc_summary(self: MIRChecker, stmts: ?NodeRoot) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__iteration_frame_alloc_summary(self: MIRChecker, stmts: ?NodeRoot) RETURNS !String ->
     MUTABLE allocations: []String = List[];
-    FOR node IN TRY (mIRChecker__loop_local_nodes(rtoc_self_view, stmts)) DO
+    FOR node IN TRY (mIRChecker__loop_local_nodes(self, stmts)) DO
       IF node IS_A AllocMark AS rtoc_mark THEN
         IF (placement__frame?(rtoc_mark.alloc) AND ((rtoc_mark.scope OR_ELSE :none) == :iteration)) THEN
           MUTABLE line: ?Int64 = rtoc_mark.source_line;
@@ -3490,14 +3291,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN (CAST((allocations |> DISTINCT _) AS []String)).join(", ");
-}
 END
-PRIVATE FN mIRChecker__body_has_frame_alloc_scope?(self: MIRChecker, stmts: ?NodeRoot, block: FN(String@symbol) -> Bool) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__body_has_frame_alloc_scope?(self: MIRChecker, stmts: ?NodeRoot, block: FN(String@symbol) -> Bool) RETURNS !Bool ->
     MUTABLE found: Bool = FALSE;
-    FOR node IN TRY (mIRChecker__loop_local_nodes(rtoc_self_view, stmts)) DO
+    FOR node IN TRY (mIRChecker__loop_local_nodes(self, stmts)) DO
       IF node IS_A AllocMark AS rtoc_mark THEN
         IF placement__frame?(rtoc_mark.alloc) THEN
           found = (found OR block((rtoc_mark.scope OR_ELSE :unknown)));
@@ -3505,36 +3302,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN found;
-}
 END
 PRIVATE FN mIRChecker__loop_local_nodes(self: MIRChecker, root: ?NodeRoot) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIR__nodes_until(root, %(node: Emittable) USE(rtoc_self_view) -> mIRChecker__loop_local_boundary?(rtoc_self_view, node)));
-}
+  EFFECTS REENTRANT ->
+    RETURN TRY (mIR__nodes_until(root, %(node: Emittable) USE(self) -> mIRChecker__loop_local_boundary?(self, node)));
 END
-PRIVATE FN mIRChecker__each_loop_local_node(self: MIRChecker, root: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (mIR__each_node_until(UNWRAP (root), %(node) USE(rtoc_self_view) -> mIRChecker__loop_local_boundary?(rtoc_self_view, node), block));
-}
+PRIVATE FN mIRChecker__each_loop_local_node(self: MIRChecker, root: ?NodeRoot, block: FN(Emittable) -> Void) RETURNS !Void ->
+    TRY (mIR__each_node_until(UNWRAP (root), %(node) USE(self) -> mIRChecker__loop_local_boundary?(self, node), block));
 END
-PRIVATE FN mIRChecker__loop_local_boundary?(self: MIRChecker, node: Emittable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__loop_local_boundary?(self: MIRChecker, node: Emittable) RETURNS Bool ->
     RETURN (((node IS_A WhileStmt OR node IS_A ForStmt) OR node IS_A MIRBgBlock) OR node IS_A LambdaExpr);
-}
 END
-PRIVATE FN mIRChecker__expr_has_frame_alloc?(self: MIRChecker, expr: ?Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__expr_has_frame_alloc?(self: MIRChecker, expr: ?Emittable) RETURNS !Bool ->
     IF expr EXISTS AS expr_value THEN
-      MUTABLE metadata: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(rtoc_self_view, MIRCheckerAllocatorMetadataSource{ Emittable: COPY expr_value });
+      MUTABLE metadata: ?InlineAllocMetadata@multiowned = mIRChecker__allocator_metadata_for(self, MIRCheckerAllocatorMetadataSource{ Emittable: COPY expr_value });
       IF ((metadata != NIL) AND !(inlineAllocMetadata__empty?(metadata))) THEN
         IF (IF expr_value IS_A ShardedMapPut AS sharded_map_put THEN shardedMapPut__mutating_receiver_allocator_op?(sharded_map_put) ELSE FALSE END) THEN
           RETURN FALSE;
@@ -3557,17 +3338,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN FALSE;
     END
-}
 END
-PRIVATE FN mIRChecker__error(self: MIRChecker, kind: String@symbol, name: ?Name, msg: String) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__error(self: MIRChecker, kind: String@symbol, name: ?Name, msg: String) RETURNS !String ->
     IF !(TRY (diagnosticRegistry__known?(kind))) THEN
       panic("{}Add an entry in src/ast/diagnostic_registry.rb (category: :mir).");
     END
-    RETURN "[${kind}] ${UNWRAP (rtoc_self_view.fn_name)}::${castOptionalNameToString(name)} -- ${msg}";
-}
+    RETURN "[${kind}] ${UNWRAP (self.fn_name)}::${castOptionalNameToString(name)} -- ${msg}";
 END
 PRIVATE FN mIRChecker__verify_unhoisted_allocs_mut(MUTABLE self: MIRChecker, body: []Emittable) RETURNS ![]Emittable
   REQUIRES self: LOCAL
@@ -3657,23 +3433,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     NIL;
 }
 END
-PRIVATE FN mIRChecker__binder_capture_cleanup?(self: MIRChecker, body: []Emittable, name: String) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__binder_capture_cleanup?(self: MIRChecker, body: []Emittable, name: String) RETURNS Bool ->
     RETURN body |> ANY (IF _ IS_A Cleanup AS cleanup THEN (cleanup.name == name) ELSE FALSE END);
-}
 END
-PRIVATE FN mIRChecker__block_expr_transfers_result?(self: MIRChecker, expr: Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__block_expr_transfers_result?(self: MIRChecker, expr: Emittable) RETURNS !Bool ->
     IF expr IS_A MIRBlockExpr AS mir_block_expr THEN
       RETURN TRY (blockExpr__body(mir_block_expr)) |> ANY (IF _ IS_A TransferMark AS rtoc_mark THEN (rtoc_mark.target == :block_result) ELSE FALSE END);
     ELSE
       RETURN FALSE;
     END
-}
 END
 PRIVATE FN mIRChecker__check_owned_expr_position_for_unhoisted(MUTABLE self: MIRChecker, expr: ?Emittable, context: String) RETURNS !Void
   REQUIRES self: LOCAL
@@ -3731,13 +3499,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRChecker__allocating_expr?(self: MIRChecker, expr: ?Emittable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRChecker__allocating_expr?(self: MIRChecker, expr: ?Emittable) RETURNS !Bool ->
     MUTABLE effect = TRY (ownershipEffect__of(expr));
     RETURN ((effect.produces_owned AND effect.requires_hoist) AND ((!(effect.alloc) OR (valid_allocators |> ANY (_ == effect.alloc)))));
-}
 END
 PUB FN mIRChecker__new(fn_name: ?String = NIL, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS MIRChecker@multiowned ->
   MUTABLE self = MIRChecker{ captured_names: NIL, errors: List[], fn_name: COPY fn_name, schema_lookup: COPY schema_lookup };

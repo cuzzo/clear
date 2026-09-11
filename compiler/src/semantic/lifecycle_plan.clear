@@ -103,16 +103,12 @@ PUB FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@
   END
   RETURN linearResourceFacts__new(known, linear);
 END
-PUB FN linearResourceFacts__contains?(self: LinearResourceFacts, type_info: Type) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN linearResourceFacts__contains?(self: LinearResourceFacts, type_info: Type) RETURNS !Bool ->
     MUTABLE key = linearResourceFacts__fact_key(type_info);
-    IF !(rtoc_self_view.known.contains?(key)) THEN
+    IF !(self.known.contains?(key)) THEN
       panic("missing linear-resource fact for {} (type absent from post-annotation inventory)");
     END
-    RETURN rtoc_self_view.linear.contains?(key);
-}
+    RETURN self.linear.contains?(key);
 END
 FN linearResourceFacts__fact_key(type_info: Type) RETURNS String ->
   RETURN regexReplaceFirst__lifecycle_plan(type__semantic_type_key(type_info), "\\|loc=[^|]+", "|loc=any");
@@ -490,37 +486,26 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN LifecyclePlan{ type_key: COPY key, drop_strategy: :none, copy_strategy: :bit_copy, resource_close_plan: NIL };
 }
 END
-PUB FN lifecycleRegistry__fetch_monomorphic(self: LifecycleRegistry, type_info: Type) RETURNS LifecyclePlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF rtoc_self_view.plans[lifecyclePlanner__monomorphic_carrier_key(type_info)] EXISTS AS carrier_plan THEN
+PUB FN lifecycleRegistry__fetch_monomorphic(self: LifecycleRegistry, type_info: Type) RETURNS LifecyclePlan ->
+    IF self.plans[lifecyclePlanner__monomorphic_carrier_key(type_info)] EXISTS AS carrier_plan THEN
       RETURN COPY carrier_plan;
     END
     RETURN lifecyclePlanner__monomorphic_carrier_plan(type_info);
-}
 END
-PUB FN lifecycleRegistry__fetch_binding(self: LifecycleRegistry, node: Locatable, type_info: Type) RETURNS !LifecyclePlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE place_id: ?Int64 = lifecycleRegistry__binding_place_id(rtoc_self_view, node);
+PUB FN lifecycleRegistry__fetch_binding(self: LifecycleRegistry, node: Locatable, type_info: Type) RETURNS !LifecyclePlan ->
+    MUTABLE place_id: ?Int64 = lifecycleRegistry__binding_place_id(self, node);
     IF place_id EXISTS AS place_id_value THEN
-      IF rtoc_self_view.binding_plans[place_id_value] EXISTS AS binding_plan THEN
+      IF self.binding_plans[place_id_value] EXISTS AS binding_plan THEN
         RETURN COPY binding_plan;
       END
       panic("missing annotation binding lifecycle plan for place {}");
     ELSE
       # Ruby falls back to `TRY (lifecycleRegistry__fetch(type_info))`; the translation turned that into
       # an unwrap of a one-element list literal.
-      RETURN TRY (lifecycleRegistry__fetch(rtoc_self_view, type_info));
+      RETURN TRY (lifecycleRegistry__fetch(self, type_info));
     END
-}
 END
-PRIVATE FN lifecycleRegistry__binding_place_id(self: LifecycleRegistry, node: Locatable) RETURNS ?Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN lifecycleRegistry__binding_place_id(self: LifecycleRegistry, node: Locatable) RETURNS ?Int64 ->
     MUTABLE symbol_branch_value: ?SymbolEntry = NIL;
     IF TRUE THEN
       MATCH node START Locatable.Program AS item -> symbol_branch_value = COPY item.symbol;, Locatable.RequireNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ProtocolRequirement AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ProtocolDef AS item -> symbol_branch_value = COPY item.symbol;, Locatable.FunctionDef AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ImplementationDef AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ConformanceDef AS item -> symbol_branch_value = COPY item.symbol;, Locatable.StructDef AS item -> symbol_branch_value = COPY item.symbol;, Locatable.VarDecl AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Assignment AS item -> symbol_branch_value = COPY item.symbol;, Locatable.DestructureTarget AS item -> symbol_branch_value = COPY item.symbol;, Locatable.DestructuringAssignment AS item -> symbol_branch_value = COPY item.symbol;, Locatable.BindExpr AS item -> symbol_branch_value = COPY item.symbol;, Locatable.BinaryOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.IsA AS item -> symbol_branch_value = COPY item.symbol;, Locatable.UnaryOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.CallSiteOverride AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Identifier AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Literal AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ListLit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.TupleLit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.DefaultArrayLit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.HashLit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.DefaultLit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.StructLit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.LambdaLit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.IfStatement AS item -> symbol_branch_value = COPY item.symbol;, Locatable.IfBind AS item -> symbol_branch_value = COPY item.symbol;, Locatable.WhileLoop AS item -> symbol_branch_value = COPY item.symbol;, Locatable.WhileBindLoop AS item -> symbol_branch_value = COPY item.symbol;, Locatable.BreakNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ContinueNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.FuncCall AS item -> symbol_branch_value = COPY item.symbol;, Locatable.MethodCall AS item -> symbol_branch_value = COPY item.symbol;, Locatable.GetField AS item -> symbol_branch_value = COPY item.symbol;, Locatable.GetIndex AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Cast AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ReturnNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Assert AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Raise AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ThrowNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.DieNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Slice AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Require AS item -> symbol_branch_value = COPY item.symbol;, Locatable.DeferStmt AS item -> symbol_branch_value = COPY item.symbol;, Locatable.WithBlock AS item -> symbol_branch_value = COPY item.symbol;, Locatable.SyncPolicyDecl AS item -> symbol_branch_value = COPY item.symbol;, Locatable.SelectOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.WhereOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.IndexOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ReduceOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.OrderByOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.LimitOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.UnnestOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.DistinctOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.EachOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.TapOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.SkipOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.CollectOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.TakeWhileOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.WindowOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.BatchWindowOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.JoinOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.FindOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.AnyOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.AllOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.CountOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.SumOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.AverageOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.MinOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.MaxOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ShardOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ConcurrentOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Placeholder AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Copy AS item -> symbol_branch_value = COPY item.symbol;, Locatable.OptionalUnwrap AS item -> symbol_branch_value = COPY item.symbol;, Locatable.TenseNavigation AS item -> symbol_branch_value = COPY item.symbol;, Locatable.MutableBorrow AS item -> symbol_branch_value = COPY item.symbol;, Locatable.OrElseRaise AS item -> symbol_branch_value = COPY item.symbol;, Locatable.OrElseExit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.OrElsePass AS item -> symbol_branch_value = COPY item.symbol;, Locatable.OrElsePrune AS item -> symbol_branch_value = COPY item.symbol;, Locatable.OrElseBreak AS item -> symbol_branch_value = COPY item.symbol;, Locatable.CatchBlock AS item -> symbol_branch_value = COPY item.symbol;, Locatable.RecoverOp AS item -> symbol_branch_value = COPY item.symbol;, Locatable.BlockExpr AS item -> symbol_branch_value = COPY item.symbol;, Locatable.StringConcat AS item -> symbol_branch_value = COPY item.symbol;, Locatable.CapabilityWrap AS item -> symbol_branch_value = COPY item.symbol;, Locatable.MoveNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.CopyNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.KeepNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ShareNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.LinkNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ResolveNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.FreezeNode AS item -> symbol_branch_value = COPY item.symbol;, Locatable.PassStmt AS item -> symbol_branch_value = COPY item.symbol;, Locatable.StructPattern AS item -> symbol_branch_value = COPY item.symbol;, Locatable.RangeLit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ExternFnDecl AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ExternStructDecl AS item -> symbol_branch_value = COPY item.symbol;, Locatable.EnumDef AS item -> symbol_branch_value = COPY item.symbol;, Locatable.UnionDef AS item -> symbol_branch_value = COPY item.symbol;, Locatable.UnionVariantLit AS item -> symbol_branch_value = COPY item.symbol;, Locatable.StaticCall AS item -> symbol_branch_value = COPY item.symbol;, Locatable.DoBlock AS item -> symbol_branch_value = COPY item.symbol;, Locatable.BgBlock AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ThenChain AS item -> symbol_branch_value = COPY item.symbol;, Locatable.BgStreamBlock AS item -> symbol_branch_value = COPY item.symbol;, Locatable.YieldExpr AS item -> symbol_branch_value = COPY item.symbol;, Locatable.CloseStream AS item -> symbol_branch_value = COPY item.symbol;, Locatable.NextExpr AS item -> symbol_branch_value = COPY item.symbol;, Locatable.MatchStatement AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ForRange AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ForEach AS item -> symbol_branch_value = COPY item.symbol;, Locatable.TestBlock AS item -> symbol_branch_value = COPY item.symbol;, Locatable.WhenBlock AS item -> symbol_branch_value = COPY item.symbol;, Locatable.LetBinding AS item -> symbol_branch_value = COPY item.symbol;, Locatable.TestThat AS item -> symbol_branch_value = COPY item.symbol;, Locatable.AssertRaises AS item -> symbol_branch_value = COPY item.symbol;, Locatable.BenchmarkStmt AS item -> symbol_branch_value = COPY item.symbol;, Locatable.SmashStmt AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ProfileStmt AS item -> symbol_branch_value = COPY item.symbol;, Locatable.StubDecl AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Drop AS item -> symbol_branch_value = COPY item.symbol;, Locatable.SuppressCleanup AS item -> symbol_branch_value = COPY item.symbol;, Locatable.Return AS item -> symbol_branch_value = COPY item.symbol;, Locatable.ReassignCleanup AS item -> symbol_branch_value = COPY item.symbol;, Locatable.FieldCleanup AS item -> symbol_branch_value = COPY item.symbol; END
@@ -533,7 +518,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
 PRIVATE FN lifecycleRegistry__add_type_mut(MUTABLE types: {String}Type, type_info: Type) RETURNS !Void EFFECTS REENTRANT ->
   MUTABLE key = type__lifecycle_type_key(type_info);

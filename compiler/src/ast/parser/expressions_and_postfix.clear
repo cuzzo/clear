@@ -167,10 +167,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN order;
 }
 END
-PRIVATE FN clearParser__select_effect_mode_for(self: ClearParser, order: ?String) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__select_effect_mode_for(self: ClearParser, order: ?String) RETURNS ?String@symbol ->
     IF order EXISTS AS order_value THEN
       IF (order_value == "~") THEN
         RETURN NIL;
@@ -190,7 +187,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
 PRIVATE FN clearParser__parse_cast(MUTABLE self: ClearParser) RETURNS !Cast
   REQUIRES self: LOCAL
@@ -339,12 +335,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END;
 }
 END
-PRIVATE FN clearParser__conditional_binding_suffix?(self: ClearParser) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((clearParser__peek(rtoc_self_view).type == :KEYWORD) AND (token__text_is?(clearParser__peek(rtoc_self_view), "AS")));
-}
+PRIVATE FN clearParser__conditional_binding_suffix?(self: ClearParser) RETURNS Bool ->
+    RETURN ((clearParser__peek(self).type == :KEYWORD) AND (token__text_is?(clearParser__peek(self), "AS")));
 END
 PRIVATE FN clearParser__parse_exists_suffix(MUTABLE self: ClearParser, lhs: Locatable) RETURNS !UnaryOp
   REQUIRES self: LOCAL
@@ -530,14 +522,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN Locatable{ TenseNavigation: COPY TenseNavigation{ token: COPY token, target: COPY lhs, markers: COPY markers, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
 }
 END
-PRIVATE FN clearParser__tense_navigation_marker_run(self: ClearParser) RETURNS ?String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__tense_navigation_marker_run(self: ClearParser) RETURNS ?String ->
     MUTABLE offset: Int64 = 0;
     MUTABLE markers = "";
     WHILE TRUE DO
-      MUTABLE peeked: ?Token = clearParser__peek_at(rtoc_self_view, offset);
+      MUTABLE peeked: ?Token = clearParser__peek_at(self, offset);
       IF peeked EXISTS AS marker_token THEN
         IF ((marker_token.type != :CHAR) OR !((["!", "?", "~"]).contains?(token__display_value(marker_token)))) THEN
           BREAK;
@@ -551,7 +540,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (markers.length() == 0) THEN
       RETURN NIL;
     END
-    MUTABLE dot: ?Token = clearParser__peek_at(rtoc_self_view, offset);
+    MUTABLE dot: ?Token = clearParser__peek_at(self, offset);
     IF dot EXISTS AS dot_token THEN
       IF ((dot_token.type != :CHAR) OR !(token__text_is?(dot_token, "."))) THEN
         RETURN NIL;
@@ -560,7 +549,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     RETURN COPY markers;
-}
 END
 PRIVATE FN clearParser__parse_capability_wrap_suffix(MUTABLE self: ClearParser, lhs: Locatable) RETURNS !CapabilityWrap
   REQUIRES self: LOCAL
@@ -626,16 +614,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN TRY (clearParser__parse_suffixes(&rtoc_self_view, Locatable{ Literal: COPY node }));
 }
 END
-PUB FN clearParser__literal_token_type(self: ClearParser, val: String) RETURNS String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN clearParser__literal_token_type(self: ClearParser, val: String) RETURNS String@symbol ->
     IF regexMatch__expressions_and_postfix?(val, "[a-zA-Z]") THEN
       RETURN :KEYWORD;
     ELSE
       RETURN :CHAR;
     END
-}
 END
 PUB FN clearParser__parse_expression(MUTABLE self: ClearParser, precedence: Int64 = 0) RETURNS !Locatable
   REQUIRES self: LOCAL
@@ -653,15 +637,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN expression;
 }
 END
-PRIVATE FN clearParser__wrapper_operand_precedence(self: ClearParser) RETURNS Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF rtoc_self_view.wrapper_operand_precedence EXISTS AS ambient THEN
+PRIVATE FN clearParser__wrapper_operand_precedence(self: ClearParser) RETURNS Int64 ->
+    IF self.wrapper_operand_precedence EXISTS AS ambient THEN
       RETURN COPY ambient;
     END
     RETURN 0;
-}
 END
 PRIVATE FN clearParser__parse_expression_body(MUTABLE self: ClearParser, precedence: Int64) RETURNS !Locatable
   REQUIRES self: LOCAL
@@ -692,10 +672,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN clearParser__stamp_source_range_mut(&rtoc_self_view, &lhs, start_token, clearParser__previous(rtoc_self_view));
 }
 END
-PRIVATE FN clearParser__binary_operator_precedence(self: ClearParser, MUTABLE token: Token) RETURNS !?Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__binary_operator_precedence(self: ClearParser, MUTABLE token: Token) RETURNS !?Int64 ->
     IF (token.type == :LEGACY_LOGICAL) THEN
       IF (TRY (token__text_mut(token)) == "&&") THEN
         RETURN 5;
@@ -703,13 +680,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN 4;
       END
     END
-    RETURN TRY (clearParser__get_precedence(rtoc_self_view, token));
-}
+    RETURN TRY (clearParser__get_precedence(self, token));
 END
-PRIVATE FN clearParser__get_precedence(self: ClearParser, token: Token) RETURNS !?Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__get_precedence(self: ClearParser, token: Token) RETURNS !?Int64 ->
     IF !(((((((token.type == :CHAR) OR (token.type == :KEYWORD)) OR (token.type == :SMOOTH)) OR (token.type == symbol("OR_ELSE"))) OR (token.type == :RANGE_EXCL)) OR (token.type == :RANGE_INCL))) THEN
       RETURN NIL;
     END
@@ -742,7 +715,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
 PRIVATE FN clearParser__canonical_binary_operator_token(MUTABLE self: ClearParser, token: Token) RETURNS !Token
   REQUIRES self: LOCAL

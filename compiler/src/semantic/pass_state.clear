@@ -48,29 +48,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RAISE Input, MIRPassOrderError, "{} requires {}; completed stages: {}";
 }
 END
-PRIVATE FN mIRPassState__completed_stages(self: MIRPassState) RETURNS ![]String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRPassState__completed_stages(self: MIRPassState) RETURNS ![]String@symbol ->
     MUTABLE done: []String@symbol = [];
     FOR stage IN passStages() DO
-      IF rtoc_self_view.completed.contains?(stage.name) THEN
+      IF self.completed.contains?(stage.name) THEN
         &done.append(COPY stage.name);
       END
     END
     RETURN done;
-}
 END
-PUB FN mIRPassState__copy(self: MIRPassState) RETURNS MIRPassState@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN mIRPassState__copy(self: MIRPassState) RETURNS MIRPassState@multiowned ->
     MUTABLE state = mIRPassState__new();
-    FOR _ IN rtoc_self_view.completed DO
+    FOR _ IN self.completed DO
     &state.completed.insert(COPY _);
     END
     RETURN state;
-}
 END
 # Ruby asks `program.respond_to?(:mir_pass_state)`; Program is the only node
 # that carries the state, so the answer is a narrowing.
@@ -123,17 +115,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RAISE Input, MIRPassOrderError, "unknown MIR pass stage {}";
 }
 END
-PRIVATE FN mIRPassState__next_unmarked_stage(self: MIRPassState) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN mIRPassState__next_unmarked_stage(self: MIRPassState) RETURNS ?String@symbol ->
     FOR spec IN passStages() DO
-      IF !(rtoc_self_view.completed.contains?(spec.name)) THEN
+      IF !(self.completed.contains?(spec.name)) THEN
         RETURN COPY spec.name;
       END
     END
     RETURN NIL;
-}
 END
 PUB FN mIRPassState__new() RETURNS MIRPassState@multiowned ->
   MUTABLE self = MIRPassState{ completed: Set[] };

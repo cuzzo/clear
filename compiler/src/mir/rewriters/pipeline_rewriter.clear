@@ -367,23 +367,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN COPY Locatable{ BinaryOp: COPY node };
 }
 END
-PRIVATE FN pipelineRewriter__is_fusible?(self: PipelineRewriter, node: ?Locatable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineRewriter__is_fusible?(self: PipelineRewriter, node: ?Locatable) RETURNS Bool ->
     RETURN aST__pipeline_fusible_stage?( UNWRAP (node));
-}
 END
-PRIVATE FN pipelineRewriter__binding_source?(self: PipelineRewriter, node: ?Locatable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineRewriter__binding_source?(self: PipelineRewriter, node: ?Locatable) RETURNS Bool ->
     IF (IF node? IS_A BinaryOp AS binary_op THEN (binary_op.op == :BIND_VAR) ELSE FALSE END) THEN
       RETURN TRUE;
     END
     IF node? IS_A BinaryOp AS binary_op THEN
     IF binaryOp__smooth?(binary_op) THEN
-        MUTABLE inner_src = COPY pipelineRewriter__collect_chain(rtoc_self_view, binary_op).source;
+        MUTABLE inner_src = COPY pipelineRewriter__collect_chain(self, binary_op).source;
         RETURN (IF inner_src IS_A BinaryOp AS binary_op THEN (binary_op.op == :BIND_VAR) ELSE FALSE END);
       ELSE
         RETURN FALSE;
@@ -391,17 +384,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN FALSE;
     END
-}
 END
-PRIVATE FN pipelineRewriter__collect_chain(self: PipelineRewriter, node: BinaryOp) RETURNS PipelineChain
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineRewriter__collect_chain(self: PipelineRewriter, node: BinaryOp) RETURNS PipelineChain ->
     MUTABLE stages: []Locatable = List[];
     MUTABLE cursor: BinaryOp = COPY node;
     MUTABLE terminal: ?Locatable = NIL;
     MUTABLE right = COPY node.right;
-    IF pipelineRewriter__is_fusible?(rtoc_self_view, right) THEN
+    IF pipelineRewriter__is_fusible?(self, right) THEN
       terminal = NIL;
       cursor = COPY node;
     ELSE
@@ -410,7 +399,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     WHILE (TRUE AND binaryOp__smooth?(cursor)) DO
       MUTABLE r = COPY cursor.right;
-      IF pipelineRewriter__is_fusible?(rtoc_self_view, r) THEN
+      IF pipelineRewriter__is_fusible?(self, r) THEN
         stages = ([r] + stages);
         cursor = castLocatableToBinaryOp__pipeline_rewriter(COPY cursor.left);
       ELSE
@@ -418,7 +407,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN PipelineChain{ source: Locatable{ BinaryOp: COPY cursor }, stages: COPY stages, terminal: COPY terminal };
-}
 END
 PRIVATE FN pipelineRewriter__fuse_pipeline(MUTABLE self: PipelineRewriter, MUTABLE smooth_node: BinaryOp, MUTABLE source: Locatable, stages: []Locatable, MUTABLE terminal: ?Locatable) RETURNS !Locatable
   REQUIRES self: LOCAL
@@ -966,16 +954,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN pipelineRewriter__select_stage_value_type(self: PipelineRewriter, stage: SelectOp) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineRewriter__select_stage_value_type(self: PipelineRewriter, stage: SelectOp) RETURNS !Type ->
     MUTABLE expression = COPY stage.expression;
     IF (((((stage.effect_mode == :fallible) OR (stage.effect_mode == :fallible_optional))) AND TRUE) AND locatable__error_union_type(expression)) THEN
       RETURN TRY (type__new( CAST(locatable__error_union_type(expression) AS TypeConstructionInput)));
     END
     RETURN TRY (aST__full_type_mut(expression));
-}
 END
 PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewriter, terminal: ?Locatable, MUTABLE current_val: Identifier, res_var: String, token: Token, res_type: ?Type = NIL) RETURNS ![]Node
   REQUIRES self: LOCAL
@@ -1223,10 +1207,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN actions;
 }
 END
-PRIVATE FN pipelineRewriter__synthetic_append_call(self: PipelineRewriter, token: Token, receiver: Locatable, value: Locatable) RETURNS !MethodCall
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineRewriter__synthetic_append_call(self: PipelineRewriter, token: Token, receiver: Locatable, value: Locatable) RETURNS !MethodCall ->
     MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(std_lib, RegistryKey{ StringValue: COPY "append" })))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "append", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
     MUTABLE rtoc_union_writeback_900: Locatable = Locatable{ MethodCall: COPY call };
@@ -1235,12 +1216,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(defn)));
     call.matched_stdlib_def = defn;
     RETURN call;
-}
 END
-PRIVATE FN pipelineRewriter__synthetic_set_insert_call(self: PipelineRewriter, token: Token, receiver: Locatable, value: Locatable) RETURNS !MethodCall
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineRewriter__synthetic_set_insert_call(self: PipelineRewriter, token: Token, receiver: Locatable, value: Locatable) RETURNS !MethodCall ->
     MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(:set_methods, RegistryKey{ StringValue: COPY "insert" })))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "insert", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
     MUTABLE rtoc_union_writeback_901: Locatable = Locatable{ MethodCall: COPY call };
@@ -1249,18 +1226,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(defn)));
     call.matched_stdlib_def = defn;
     RETURN call;
-}
 END
-PRIVATE FN pipelineRewriter__build_final_result(self: PipelineRewriter, terminal: ?Locatable, res_var: String, token: Token, MUTABLE smooth_node: BinaryOp) RETURNS !Identifier
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineRewriter__build_final_result(self: PipelineRewriter, terminal: ?Locatable, res_var: String, token: Token, MUTABLE smooth_node: BinaryOp) RETURNS !Identifier ->
     MUTABLE res = Identifier{ token: COPY token, name: COPY res_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
     MUTABLE rtoc_union_writeback_88: Locatable = Locatable{ Identifier: COPY res };
     TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_88, COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: COPY smooth_node })), "synthetic AST type"));
     PARTIAL MATCH rtoc_union_writeback_88 START Locatable.Identifier AS rtoc_union_writeback_88_item -> res = COPY rtoc_union_writeback_88_item;, END
     NIL;
-    MUTABLE sym: ?SymbolEntry@multiowned = COPY rtoc_self_view.list_res_symbols[res_var];
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY self.list_res_symbols[res_var];
     IF sym EXISTS AS sym_value THEN
       res.symbol = sym_value;
       res.storage = symbolEntry__storage(sym_value);
@@ -1268,7 +1241,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       res.storage = locatable__storage( Locatable{ BinaryOp: COPY smooth_node });
     END
     RETURN res;
-}
 END
 PRIVATE FN pipelineRewriter__schema_lookup(MUTABLE self: PipelineRewriter) RETURNS Any@multiowned
   REQUIRES self: LOCAL
@@ -1282,10 +1254,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN UNWRAP (rtoc_self_view.schema_lookup);
 }
 END
-PRIVATE FN pipelineRewriter__callee_returns_error?(self: PipelineRewriter, MUTABLE rhs: Locatable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineRewriter__callee_returns_error?(self: PipelineRewriter, MUTABLE rhs: Locatable) RETURNS !Bool ->
     MUTABLE ti = TRY (aST__full_type_mut(rhs));
     IF type__function_type(ti) EXISTS AS function_type THEN
       RETURN type__error_union?(COPY function_type.return_type);
@@ -1294,15 +1263,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN type__error_union?(functionSignature__return_type(signature));
     END
     RETURN FALSE;
-}
 END
-PRIVATE FN pipelineRewriter__needs_transpiler_pipeline?(self: PipelineRewriter, MUTABLE source: Locatable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelineRewriter__needs_transpiler_pipeline?(self: PipelineRewriter, MUTABLE source: Locatable) RETURNS !Bool ->
     MUTABLE ti = TRY (aST__full_type_mut(source));
     RETURN ((type__pool?(ti) OR type__soa?(ti)) OR type__sharded?(ti));
-}
 END
 PRIVATE FN pipelineRewriter__patch_chain_source_mut(MUTABLE self: PipelineRewriter, node: BinaryOp, new_source: Locatable) RETURNS Locatable
   REQUIRES self: LOCAL
@@ -1317,41 +1281,29 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PRIVATE FN pipelineRewriter__replace_named_placeholder(self: PipelineRewriter, node: Locatable, name: String, replacement: Identifier) RETURNS Locatable
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF (IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == name) ELSE FALSE END) THEN
       RETURN Locatable{ Identifier: COPY replacement };
     END
-    RETURN locatable__map_children(node, %(rtoc_child: Locatable) USE(rtoc_self_view, name, replacement) -> pipelineRewriter__replace_named_placeholder(rtoc_self_view, rtoc_child, name, replacement));
-}
+    RETURN locatable__map_children(node, %(rtoc_child: Locatable) USE(self, name, replacement) -> pipelineRewriter__replace_named_placeholder(self, rtoc_child, name, replacement));
 END
 PRIVATE FN pipelineRewriter__replace_placeholder(self: PipelineRewriter, node: Locatable, replacement: Identifier) RETURNS Locatable
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF (node IS_A Placeholder OR ((IF node IS_A Identifier AS identifier THEN (identifier__name(identifier) == "_") ELSE FALSE END))) THEN
       RETURN Locatable{ Identifier: COPY replacement };
     END
     IF (IF node IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) THEN
       MUTABLE new_node = COPY node;
-      new_node.left = pipelineRewriter__replace_placeholder(rtoc_self_view, locatable__left(node), replacement);
-      new_node.right = pipelineRewriter__clone_ast_node(rtoc_self_view, UNWRAP (aST__node_right(node)));
+      new_node.left = pipelineRewriter__replace_placeholder(self, locatable__left(node), replacement);
+      new_node.right = pipelineRewriter__clone_ast_node(self, UNWRAP (aST__node_right(node)));
       RETURN new_node;
     END
-    RETURN locatable__map_children(node, %(rtoc_child: Locatable) USE(rtoc_self_view, replacement) -> pipelineRewriter__replace_placeholder(rtoc_self_view, rtoc_child, replacement));
-}
+    RETURN locatable__map_children(node, %(rtoc_child: Locatable) USE(self, replacement) -> pipelineRewriter__replace_placeholder(self, rtoc_child, replacement));
 END
 PRIVATE FN pipelineRewriter__clone_ast_node(self: PipelineRewriter, node: Locatable) RETURNS Locatable
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE new_node = COPY node;
     RETURN new_node;
-}
 END
 PUB FN pipelineRewriter__new(annotator: ?SemanticAnnotator = NIL) RETURNS PipelineRewriter@multiowned ->
   MUTABLE self = PipelineRewriter{ annotator: COPY annotator, dest_storage: NIL, list_res_symbols: {}, reduce_acc_symbols: {}, schema_lookup: NIL, var_counter: 0 };

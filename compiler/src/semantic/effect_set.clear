@@ -22,103 +22,71 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN effectSet__include?(self: EffectSet, effect: String@symbol) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.effects.contains?(effect);
-}
+  EFFECTS REENTRANT ->
+    RETURN self.effects.contains?(effect);
 END
 PUB FN effectSet__empty?(self: EffectSet) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.effects.empty?();
-}
+  EFFECTS REENTRANT ->
+    RETURN self.effects.empty?();
 END
-PUB FN effectSet__union(self: EffectSet, other: EffectSet) RETURNS !EffectSet@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (effectSet__new(ruby_set_union_String_symbol_set(rtoc_self_view.effects, other.effects)));
-}
+PUB FN effectSet__union(self: EffectSet, other: EffectSet) RETURNS !EffectSet@multiowned ->
+    RETURN TRY (effectSet__new(ruby_set_union_String_symbol_set(self.effects, other.effects)));
 END
 PUB FN effectSet__equals?(self: EffectSet, other: EffectSet) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRUE AND (rtoc_self_view.effects == other.effects));
-}
+  EFFECTS REENTRANT ->
+    RETURN (TRUE AND (self.effects == other.effects));
 END
 FN effectSet__eql?(self: EffectSet, other: EffectSet) RETURNS Bool ->
   effectSet__equals?(self, other);
 END
-PUB FN effectSet__hash(self: EffectSet) RETURNS Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN effectSet__hash(self: EffectSet) RETURNS Int64 ->
     MUTABLE value = 0;
-    IF rtoc_self_view.effects.contains?(:yield) THEN
+    IF self.effects.contains?(:yield) THEN
       value = (value BIT_OR 1);
     END
-    IF rtoc_self_view.effects.contains?(:alloc_heap) THEN
+    IF self.effects.contains?(:alloc_heap) THEN
       value = (value BIT_OR 2);
     END
-    IF rtoc_self_view.effects.contains?(:io) THEN
+    IF self.effects.contains?(:io) THEN
       value = (value BIT_OR 4);
     END
-    IF rtoc_self_view.effects.contains?(:fail) THEN
+    IF self.effects.contains?(:fail) THEN
       value = (value BIT_OR 8);
     END
-    IF rtoc_self_view.effects.contains?(:contention) THEN
+    IF self.effects.contains?(:contention) THEN
       value = (value BIT_OR 16);
     END
-    IF rtoc_self_view.effects.contains?(:blocking) THEN
+    IF self.effects.contains?(:blocking) THEN
       value = (value BIT_OR 32);
     END
-    IF rtoc_self_view.effects.contains?(:contends_maybe) THEN
+    IF self.effects.contains?(:contends_maybe) THEN
       value = (value BIT_OR 64);
     END
-    IF rtoc_self_view.effects.contains?(:blocks_maybe) THEN
+    IF self.effects.contains?(:blocks_maybe) THEN
       value = (value BIT_OR 128);
     END
-    IF rtoc_self_view.effects.contains?(symbol("contention?")) THEN
+    IF self.effects.contains?(symbol("contention?")) THEN
       value = (value BIT_OR 256);
     END
-    IF rtoc_self_view.effects.contains?(symbol("blocking?")) THEN
+    IF self.effects.contains?(symbol("blocking?")) THEN
       value = (value BIT_OR 512);
     END
     RETURN value;
-}
 END
-PUB FN effectSet__to_a(self: EffectSet) RETURNS ![]String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN effectSet__to_a(self: EffectSet) RETURNS ![]String@symbol ->
     MUTABLE ordered: []String@symbol = List[];
     FOR _ IN effect_order DO
-    IF rtoc_self_view.effects.contains?(_) THEN
+    IF self.effects.contains?(_) THEN
       &ordered.append(COPY _);
     END
     END
     RETURN ordered;
-}
 END
-PUB FN effectSet__to_s(self: EffectSet) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN "EffectSet(${(TRY (effectSet__to_a(rtoc_self_view))).join(", ")})";
-}
+PUB FN effectSet__to_s(self: EffectSet) RETURNS !String ->
+    RETURN "EffectSet(${(TRY (effectSet__to_a(self))).join(", ")})";
 END
-PUB FN effectSet__inspect(self: EffectSet) RETURNS !String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (effectSet__to_s(rtoc_self_view));
-}
+PUB FN effectSet__inspect(self: EffectSet) RETURNS !String ->
+    RETURN TRY (effectSet__to_s(self));
 END
 PUB FN effectSet__new(effects: ?[Set]String@symbol = NIL) RETURNS !EffectSet@multiowned ->
   MUTABLE self = EffectSet{ effects: Set[] };

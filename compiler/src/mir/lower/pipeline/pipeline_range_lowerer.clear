@@ -148,33 +148,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.task_config_variant = COPY task_config_variant;
 }
 END
-PUB FN runtimeHost__range_visit_mir(self: RuntimeHost, node: Locatable) RETURNS Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__visit_mir_call(rtoc_self_view, node);
-}
+PUB FN runtimeHost__range_visit_mir(self: RuntimeHost, node: Locatable) RETURNS Emittable ->
+    RETURN runtimeHost__visit_mir_call(self, node);
 END
-PUB FN runtimeHost__range_visit_mir_with_decl_alloc(self: RuntimeHost, node: Locatable, alloc: String@symbol) RETURNS Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__visit_mir_with_decl_alloc_call(rtoc_self_view, node, alloc);
-}
+PUB FN runtimeHost__range_visit_mir_with_decl_alloc(self: RuntimeHost, node: Locatable, alloc: String@symbol) RETURNS Emittable ->
+    RETURN runtimeHost__visit_mir_with_decl_alloc_call(self, node, alloc);
 END
-PUB FN runtimeHost__range_visit_mir_with_context(self: RuntimeHost, node: Locatable, placeholder: ?String, acc: ?String = NIL) RETURNS Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__visit_mir_with_context_call(rtoc_self_view, node, placeholder, acc);
-}
+PUB FN runtimeHost__range_visit_mir_with_context(self: RuntimeHost, node: Locatable, placeholder: ?String, acc: ?String = NIL) RETURNS Emittable ->
+    RETURN runtimeHost__visit_mir_with_context_call(self, node, placeholder, acc);
 END
-PUB FN runtimeHost__range_lower_head_with_context(self: RuntimeHost, node: Locatable, placeholder: ?String) RETURNS PipelineLowerHeadResult
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__lower_head_with_context_call(rtoc_self_view, node, placeholder);
-}
+PUB FN runtimeHost__range_lower_head_with_context(self: RuntimeHost, node: Locatable, placeholder: ?String) RETURNS PipelineLowerHeadResult ->
+    RETURN runtimeHost__lower_head_with_context_call(self, node, placeholder);
 END
 PUB FN runtimeHost__range_with_fiber_rt<U>(self: RuntimeHost, rt_name: String, blk: FN() -> U) RETURNS U
   REQUIRES self: LOCAL
@@ -183,68 +167,32 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN runtimeHost__with_fiber_rt_call(rtoc_self_view, rt_name, blk);
 }
 END
-PUB FN runtimeHost__range_visit_pipeline_body_mir(self: RuntimeHost, body_stmts: []Locatable, placeholder: String) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (runtimeHost__visit_pipeline_body_mir_call(rtoc_self_view, body_stmts, placeholder));
-}
+PUB FN runtimeHost__range_visit_pipeline_body_mir(self: RuntimeHost, body_stmts: []Locatable, placeholder: String) RETURNS ![]Emittable ->
+    RETURN TRY (runtimeHost__visit_pipeline_body_mir_call(self, body_stmts, placeholder));
 END
-PUB FN runtimeHost__range_ast_stmts_use_placeholder?(self: RuntimeHost, body_stmts: []Locatable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__ast_stmts_use_placeholder_call(rtoc_self_view, body_stmts);
-}
+PUB FN runtimeHost__range_ast_stmts_use_placeholder?(self: RuntimeHost, body_stmts: []Locatable) RETURNS Bool ->
+    RETURN runtimeHost__ast_stmts_use_placeholder_call(self, body_stmts);
 END
-PUB FN runtimeHost__range_bc_target?(self: RuntimeHost) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__bc_target_call(rtoc_self_view);
-}
+PUB FN runtimeHost__range_bc_target?(self: RuntimeHost) RETURNS Bool ->
+    RETURN runtimeHost__bc_target_call(self);
 END
-PUB FN runtimeHost__range_next_label(self: RuntimeHost) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__next_label_call(rtoc_self_view);
-}
+PUB FN runtimeHost__range_next_label(self: RuntimeHost) RETURNS String ->
+    RETURN runtimeHost__next_label_call(self);
 END
-PUB FN runtimeHost__range_transpile_type(self: RuntimeHost, type_info: PipelineTypeInput) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__transpile_type_call(rtoc_self_view, type_info);
-}
+PUB FN runtimeHost__range_transpile_type(self: RuntimeHost, type_info: PipelineTypeInput) RETURNS String ->
+    RETURN runtimeHost__transpile_type_call(self, type_info);
 END
-PUB FN runtimeHost__range_schema_lookup(self: RuntimeHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__schema_lookup_call(rtoc_self_view);
-}
+PUB FN runtimeHost__range_schema_lookup(self: RuntimeHost) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult ->
+    RETURN runtimeHost__schema_lookup_call(self);
 END
-PUB FN runtimeHost__range_runtime_name(self: RuntimeHost) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__runtime_name_call(rtoc_self_view);
-}
+PUB FN runtimeHost__range_runtime_name(self: RuntimeHost) RETURNS String ->
+    RETURN runtimeHost__runtime_name_call(self);
 END
-PUB FN runtimeHost__range_next_observable_id(self: RuntimeHost) RETURNS Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__next_observable_id_call(rtoc_self_view);
-}
+PUB FN runtimeHost__range_next_observable_id(self: RuntimeHost) RETURNS Int64 ->
+    RETURN runtimeHost__next_observable_id_call(self);
 END
-PUB FN runtimeHost__range_task_config_variant(self: RuntimeHost) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN runtimeHost__task_config_variant_call(rtoc_self_view);
-}
+PUB FN runtimeHost__range_task_config_variant(self: RuntimeHost) RETURNS String ->
+    RETURN runtimeHost__task_config_variant_call(self);
 END
 PUB FN runtimeHost__new(visit_mir: FN(Locatable) -> Emittable, visit_mir_with_decl_alloc: FN(Locatable, String@symbol) -> Emittable, visit_mir_with_context: FN(Locatable, ?String, ?String) -> Emittable, lower_head_with_context: FN(Locatable, ?String) -> PipelineLowerHeadResult, with_fiber_rt: FN(String, FN() -> Any) -> Any, visit_pipeline_body_mir: FN(Locatable[], String) -> ![]Emittable, ast_stmts_use_placeholder: FN(Locatable[]) -> Bool, bc_target: FN() -> Bool, next_label: FN() -> String, transpile_type: FN(PipelineTypeInput) -> String, schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult, runtime_name: FN() -> String, next_observable_id: FN() -> Int64, task_config_variant: FN() -> String) RETURNS RuntimeHost@multiowned ->
   MUTABLE self = RuntimeHost{ ast_stmts_use_placeholder: COPY ast_stmts_use_placeholder, bc_target: COPY bc_target, lower_head_with_context: COPY lower_head_with_context, next_label: COPY next_label, next_observable_id: COPY next_observable_id, runtime_name: COPY runtime_name, schema_lookup: COPY schema_lookup, task_config_variant: COPY task_config_variant, transpile_type: COPY transpile_type, visit_mir: COPY visit_mir, visit_mir_with_context: COPY visit_mir_with_context, visit_mir_with_decl_alloc: COPY visit_mir_with_decl_alloc, visit_pipeline_body_mir: COPY visit_pipeline_body_mir, with_fiber_rt: COPY with_fiber_rt };
@@ -259,19 +207,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.host = COPY host;
 }
 END
-PUB FN pipelineRangeLowerer__finite_stream_source_node?(self: PipelineRangeLowerer, node: Locatable) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__finite_stream_source_node?(self: PipelineRangeLowerer, node: Locatable) RETURNS !Bool ->
     RETURN ((((node IS_A RangeLit OR TRY (type__dynamic_stream?((TRY (aST__full_type_mut(node)))))) OR TRY (type__open_stream?((TRY (aST__full_type_mut(node)))))) OR TRY (type__bounded_stream?((TRY (aST__full_type_mut(node)))))) OR TRY (type__inf_stream?((TRY (aST__full_type_mut(node))))));
-}
 END
-PUB FN pipelineRangeLowerer__unwrap_range_chain(self: PipelineRangeLowerer, MUTABLE node: Locatable) RETURNS !?PipelineRangeChain
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__unwrap_range_chain(self: PipelineRangeLowerer, MUTABLE node: Locatable) RETURNS !?PipelineRangeChain ->
     IF !((IF node IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END)) THEN
-      IF TRY (pipelineRangeLowerer__finite_stream_source_node?(rtoc_self_view, node)) THEN
+      IF TRY (pipelineRangeLowerer__finite_stream_source_node?(self, node)) THEN
         RETURN PipelineRangeChain{ source: COPY node, stages: List[] };
       END
       RETURN NIL;
@@ -287,18 +228,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN NIL;
       END
     END
-    IF !(TRY (pipelineRangeLowerer__finite_stream_source_node?(rtoc_self_view, cursor))) THEN
+    IF !(TRY (pipelineRangeLowerer__finite_stream_source_node?(self, cursor))) THEN
       RETURN NIL;
     END
     RETURN PipelineRangeChain{ source: COPY cursor, stages: COPY stages };
-}
 END
-PUB FN pipelineRangeLowerer__build_lazy_range_prefix(self: PipelineRangeLowerer, source_node: Locatable, stages: []Locatable, on_skip: ?[]FN(String) -> !Emittable = NIL, source_alloc: ?String@symbol = NIL, fiber_rt: ?String = NIL, track_owned_items: Bool = FALSE) RETURNS !?PipelineLazyRangePrefix
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__build_lazy_range_prefix(self: PipelineRangeLowerer, source_node: Locatable, stages: []Locatable, on_skip: ?[]FN(String) -> !Emittable = NIL, source_alloc: ?String@symbol = NIL, fiber_rt: ?String = NIL, track_owned_items: Bool = FALSE) RETURNS !?PipelineLazyRangePrefix ->
     MUTABLE source_ti = TRY (aST__full_type_mut(source_node));
-    MUTABLE elem_t = (TRY (type__runtime_stream_storage_element_type(source_ti)) OR TRY (pipelineRangeLowerer__range_literal_element_type(rtoc_self_view, source_node)));
+    MUTABLE elem_t = (TRY (type__runtime_stream_storage_element_type(source_ti)) OR TRY (pipelineRangeLowerer__range_literal_element_type(self, source_node)));
     MUTABLE elem_zig = TRY (type__zig_type( CAST(elem_t AS Type)));
     MUTABLE initial_capture = "__each_item";
     MUTABLE item_var: String = initial_capture;
@@ -306,15 +243,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE item_used: Bool = FALSE;
     MUTABLE outer_stmts: []Emittable = List[];
     MUTABLE stage_stmts: []Emittable = List[];
-    MUTABLE track_owned = (track_owned_items AND !(runtimeHost__range_bc_target?(rtoc_self_view.host)));
+    MUTABLE track_owned = (track_owned_items AND !(runtimeHost__range_bc_target?(self.host)));
     MUTABLE current_type: Type = elem_t;
     MUTABLE current_owned: Bool = FALSE;
     IF (track_owned AND TRY (type__runtime_stream?(source_ti))) THEN
-      MUTABLE owned_stmts = TRY (pipelineRangeLowerer__owned_stream_item_stmts(rtoc_self_view, initial_capture, CAST(elem_t AS ?Type)));
+      MUTABLE owned_stmts = TRY (pipelineRangeLowerer__owned_stream_item_stmts(self, initial_capture, CAST(elem_t AS ?Type)));
       stage_stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stage_stmts, owned_stmts);
       current_owned = !((owned_stmts.length() == 0));
     END
-    MUTABLE lower_stages = %() USE(MUTABLE current_owned, MUTABLE current_type, initial_capture, item_counter, MUTABLE item_var, on_skip, MUTABLE outer_stmts, MUTABLE stage_stmts, stages, MUTABLE track_owned, MUTABLE owned_stmts, rtoc_self_view) -> {
+    MUTABLE lower_stages = %() USE(MUTABLE current_owned, MUTABLE current_type, initial_capture, item_counter, MUTABLE item_var, on_skip, MUTABLE outer_stmts, MUTABLE stage_stmts, stages, MUTABLE track_owned, MUTABLE owned_stmts, self) -> {
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < stages.length() DO
       IF stages[rtoc_idx]? IS_A SelectOp AS select_op THEN
@@ -324,7 +261,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           END
           item_counter = (item_counter + 1);
           MUTABLE next_item = "__each_item_${item_counter.toString()}";
-          MUTABLE head = runtimeHost__range_lower_head_with_context(rtoc_self_view.host, selectOp__expression(select_op), item_var);
+          MUTABLE head = runtimeHost__range_lower_head_with_context(self.host, selectOp__expression(select_op), item_var);
           stage_stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stage_stmts, CAST(head.pending AS []Emittable));
           &stage_stmts.append(Emittable{ Let: COPY Let{ name: COPY next_item, init: COPY head.value(), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
           item_var = COPY next_item;
@@ -332,7 +269,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF (!(track_owned) OR pipelinePlaceholderUsage__placeholder_projection?(selectOp__expression(select_op))) THEN
             current_owned = FALSE;
           ELSE
-            MUTABLE owned_stmts = TRY (pipelineRangeLowerer__owned_stream_item_stmts(rtoc_self_view, next_item, current_type));
+            MUTABLE owned_stmts = TRY (pipelineRangeLowerer__owned_stream_item_stmts(self, next_item, current_type));
             stage_stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stage_stmts, owned_stmts);
             current_owned = !((owned_stmts.length() == 0));
             IF current_owned THEN
@@ -350,7 +287,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF (item_var == initial_capture) THEN
             item_used = TRUE;
           END
-          MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, whereOp__expression(where_op), item_var);
+          MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(self.host, whereOp__expression(where_op), item_var);
           MUTABLE skip_stmts = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_13: ?[]Any = NIL;
           IF on_skip != NIL THEN
             rtoc_ternary_value_13 = (on_skip.call(item_var) + [Emittable{ ContinueStmt: COPY ContinueStmt{ unused: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
@@ -363,7 +300,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF (item_var == initial_capture) THEN
             item_used = TRUE;
           END
-          MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, takeWhileOp__expression(take_while_op), item_var);
+          MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(self.host, takeWhileOp__expression(take_while_op), item_var);
           MUTABLE skip_stmts = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_15: ?[]Any = NIL;
           IF on_skip != NIL THEN
             rtoc_ternary_value_15 = (on_skip.call(item_var) + [Emittable{ BreakStmt: COPY BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
@@ -376,7 +313,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           item_counter = (item_counter + 1);
           MUTABLE cvar = "__limit_cnt_${item_counter.toString()}";
           MUTABLE cnt_var = "__limit_max_${item_counter.toString()}";
-          MUTABLE cnt_mir = runtimeHost__range_visit_mir(rtoc_self_view.host, limit_op.count);
+          MUTABLE cnt_mir = runtimeHost__range_visit_mir(self.host, limit_op.count);
           &outer_stmts.append(Emittable{ Let: COPY Let{ name: COPY cvar, init: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "i64", method: :as, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
           &outer_stmts.append(Emittable{ Let: COPY Let{ name: COPY cnt_var, init: COPY cnt_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
           &stage_stmts.append(Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY MIRBinOp{ op: ">=", left: Emittable{ Ident: COPY Ident{ name: COPY cvar, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: COPY cnt_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ BreakStmt: COPY BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } });
@@ -385,7 +322,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           item_counter = (item_counter + 1);
           MUTABLE cvar = "__skip_cnt_${item_counter.toString()}";
           MUTABLE cnt_var = "__skip_max_${item_counter.toString()}";
-          MUTABLE cnt_mir = runtimeHost__range_visit_mir(rtoc_self_view.host, skip_op.count);
+          MUTABLE cnt_mir = runtimeHost__range_visit_mir(self.host, skip_op.count);
           &outer_stmts.append(Emittable{ Let: COPY Let{ name: COPY cvar, init: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "i64", method: :as, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
           &outer_stmts.append(Emittable{ Let: COPY Let{ name: COPY cnt_var, init: COPY cnt_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
           &stage_stmts.append(Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "<", left: Emittable{ Ident: COPY Ident{ name: COPY cvar, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: COPY cnt_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY cvar, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: COPY cvar, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ContinueStmt: COPY ContinueStmt{ unused: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } });
@@ -393,21 +330,21 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           IF (item_var == initial_capture) THEN
             item_used = TRUE;
           END
-          stage_stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stage_stmts, CAST(TRY (runtimeHost__range_visit_pipeline_body_mir(rtoc_self_view.host, tap_op.body, item_var)) AS []Emittable));
+          stage_stmts = ruby_array_concat_Emittable__pipeline_range_lowerer(stage_stmts, CAST(TRY (runtimeHost__range_visit_pipeline_body_mir(self.host, tap_op.body, item_var)) AS []Emittable));
       END
       rtoc_idx = rtoc_idx + 1;
     END
     NIL
     };
     IF fiber_rt EXISTS AS fiber_rt_value THEN
-      runtimeHost__range_with_fiber_rt(rtoc_self_view.host, fiber_rt_value, %() USE(lower_stages) -> lower_stages());
+      runtimeHost__range_with_fiber_rt(self.host, fiber_rt_value, %() USE(lower_stages) -> lower_stages());
     ELSE
       lower_stages();
     END
     MUTABLE is_var_stream = (IF source_node IS_A Identifier AS identifier THEN ((((TRY (type__dynamic_stream?(source_ti)) OR TRY (type__open_stream?(source_ti))) OR TRY (type__bounded_stream?(source_ti))) OR TRY (type__inf_stream?(source_ti)))) ELSE FALSE END);
     MUTABLE source_name: String = "";
     IF is_var_stream THEN
-      MUTABLE resolved = runtimeHost__range_visit_mir(rtoc_self_view.host, source_node);
+      MUTABLE resolved = runtimeHost__range_visit_mir(self.host, source_node);
       IF resolved IS_A Ident THEN
         source_name = COPY CAST(emittable__name(resolved) AS String);
       ELSE
@@ -420,9 +357,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE source_mir =   IF source_alloc THEN
-      runtimeHost__range_visit_mir_with_decl_alloc(rtoc_self_view.host, source_node, symbol(UNWRAP (source_alloc)))
+      runtimeHost__range_visit_mir_with_decl_alloc(self.host, source_node, symbol(UNWRAP (source_alloc)))
     ELSE
-      runtimeHost__range_visit_mir(rtoc_self_view.host, source_node)
+      runtimeHost__range_visit_mir(self.host, source_node)
     END;
     Let{ name: COPY "__range_src", init: COPY source_mir, mutable: TRUE, annotation: NIL, suppression: "_ = &__range_src;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }
     }
@@ -443,12 +380,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       next_method = "next";
     END
     RETURN PipelineLazyRangePrefix{ range_mark: COPY range_mark, range_let: COPY range_let, source_name: COPY source_name, outer_stmts: COPY outer_stmts, stage_stmts: COPY stage_stmts, item_var: COPY item_var, initial_capture: COPY initial_capture, item_used: item_used, elem_zig: COPY elem_zig, next_method: COPY next_method, item_type: COPY current_type, item_owned: current_owned };
-}
 END
-PUB FN pipelineRangeLowerer__range_literal_element_type(self: PipelineRangeLowerer, source_node: Locatable) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__range_literal_element_type(self: PipelineRangeLowerer, source_node: Locatable) RETURNS !Type ->
     MUTABLE start_ft_branch_value: ?Type = NIL;
     IF source_node IS_A RangeLit THEN
       start_ft_branch_value = TRY (aST__full_type_mut(UNWRAP (locatable__start(source_node))));
@@ -457,18 +390,14 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE start_ft: Type = start_ft_branch_value?;
     RETURN TRY (type__new(TypeConstructionInput{ Type: COPY start_ft }));
-}
 END
-PUB FN pipelineRangeLowerer__lower_each_range(self: PipelineRangeLowerer, MUTABLE range_lit: Locatable, stages: []Locatable, each_op: EachOp) RETURNS !ScopeBlock
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE prefix: ?PipelineLazyRangePrefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(rtoc_self_view, range_lit, stages, NIL, NIL, NIL, TRUE));
+PUB FN pipelineRangeLowerer__lower_each_range(self: PipelineRangeLowerer, MUTABLE range_lit: Locatable, stages: []Locatable, each_op: EachOp) RETURNS !ScopeBlock ->
+    MUTABLE prefix: ?PipelineLazyRangePrefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(self, range_lit, stages, NIL, NIL, NIL, TRUE));
     MUTABLE item_var = COPY UNWRAP (prefix).item_var;
     MUTABLE initial_capture = COPY UNWRAP (prefix).initial_capture;
     MUTABLE item_used = UNWRAP (prefix).item_used;
-    MUTABLE body_mir = TRY (runtimeHost__range_visit_pipeline_body_mir(rtoc_self_view.host, each_op.body, item_var));
-    MUTABLE body_uses_initial = (((item_var == initial_capture)) AND runtimeHost__range_ast_stmts_use_placeholder?(rtoc_self_view.host, each_op.body));
+    MUTABLE body_mir = TRY (runtimeHost__range_visit_pipeline_body_mir(self.host, each_op.body, item_var));
+    MUTABLE body_uses_initial = (((item_var == initial_capture)) AND runtimeHost__range_ast_stmts_use_placeholder?(self.host, each_op.body));
     item_used = (item_used OR body_uses_initial);
     MUTABLE capture_name: String = "";
     IF item_used THEN
@@ -484,7 +413,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       defer_deinit_branch_value = NIL;
     END
     MUTABLE defer_deinit: ?MIRDeferStmt = defer_deinit_branch_value;
-    MUTABLE bc_iter: ?PipelineRangeLoopIter = TRY (pipelineRangeLowerer__bc_loop_iter(rtoc_self_view, range_lit, source_ti, IF (capture_name == "_") THEN
+    MUTABLE bc_iter: ?PipelineRangeLoopIter = TRY (pipelineRangeLowerer__bc_loop_iter(self, range_lit, source_ti, IF (capture_name == "_") THEN
       "_"
     ELSE
       initial_capture
@@ -493,14 +422,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN ScopeBlock{ body: COPY (TRY (pipelineLazyRangePrefix__outer_setup_stmts( UNWRAP (prefix))) + [TRY (pipelineLazyRangePrefix__loop_stmt( UNWRAP (prefix), bc_iter_value.iter, body_mir, bc_iter_value.capture_name))]), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
     RETURN ScopeBlock{ body: COPY (TRY (pipelineLazyRangePrefix__setup_stmts( UNWRAP (prefix))) + (([defer_deinit])) + [TRY (pipelineLazyRangePrefix__loop_stmt( UNWRAP (prefix), NIL, body_mir, capture_name))]), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-}
 END
-PUB FN pipelineRangeLowerer__bc_for_iter_range(self: PipelineRangeLowerer, range_lit: RangeLit, capture_name: ?String) RETURNS Tuple<IterRange, ?String>
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE start_mir = runtimeHost__range_visit_mir(rtoc_self_view.host, range_lit.start);
-    MUTABLE end_mir = runtimeHost__range_visit_mir(rtoc_self_view.host, range_lit.finish);
+PUB FN pipelineRangeLowerer__bc_for_iter_range(self: PipelineRangeLowerer, range_lit: RangeLit, capture_name: ?String) RETURNS Tuple<IterRange, ?String> ->
+    MUTABLE start_mir = runtimeHost__range_visit_mir(self.host, range_lit.start);
+    MUTABLE end_mir = runtimeHost__range_visit_mir(self.host, range_lit.finish);
     MUTABLE end_expr_branch_value: ?MIRBinOp = NIL;
     IF range_lit.inclusive THEN
       end_expr_branch_value = MIRBinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
@@ -509,13 +434,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE end_expr: MIRBinOp = end_expr_branch_value?;
     RETURN CAST(Tuple{IterRange{ start: start_mir, end_val: end_expr, capture_type: :i64, lowered_node_id: NIL, ownership_consumption: NIL }, capture_name} AS Tuple<IterRange, ?String>);
-}
 END
-PUB FN pipelineRangeLowerer__numeric_fold_expr_typed(self: PipelineRangeLowerer, expr_ast: Locatable, item_var: String, acc_zig: String) RETURNS !Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE expr_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, expr_ast, item_var);
+PUB FN pipelineRangeLowerer__numeric_fold_expr_typed(self: PipelineRangeLowerer, expr_ast: Locatable, item_var: String, acc_zig: String) RETURNS !Emittable ->
+    MUTABLE expr_mir = runtimeHost__range_visit_mir_with_context(self.host, expr_ast, item_var);
     MUTABLE expr_type = TRY (aST__full_type_mut(expr_ast));
     MUTABLE expr_is_int = type__integer?((TRY (type__new( TypeConstructionInput{ Type: COPY expr_type }))));
     MUTABLE acc_is_float = ((acc_zig == "f64") OR (acc_zig == "f32"));
@@ -524,12 +445,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN expr_mir;
     END
-}
 END
-PUB FN pipelineRangeLowerer__lower_range_fold(self: PipelineRangeLowerer, MUTABLE range_lit: Locatable, stages: []Locatable, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__lower_range_fold(self: PipelineRangeLowerer, MUTABLE range_lit: Locatable, stages: []Locatable, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp) RETURNS !MIRBlockExpr ->
     MUTABLE label: ?String = NIL;
     IF smooth_node.observable_dest THEN
       MUTABLE terminal: ?String@symbol = COPY (TRY (type__observable_terminals())).each_with_object({}, %(tuple_param_0, h) -> {
@@ -546,158 +463,110 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       })[fold_op.class()];
       IF terminal EXISTS AS terminal_value THEN
         MUTABLE terminal_value_mutable = COPY terminal_value;
-        MUTABLE fid = runtimeHost__range_next_observable_id(rtoc_self_view.host);
-        MUTABLE prefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(rtoc_self_view, range_lit, stages, NIL, :heap, "__rt_obs_${fid}", TRUE));
-        label = runtimeHost__range_next_label(rtoc_self_view.host);
-        RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable_default(rtoc_self_view, UNWRAP (prefix), fold_op, &smooth_node, label, range_lit, terminal_value_mutable, fid));
+        MUTABLE fid = runtimeHost__range_next_observable_id(self.host);
+        MUTABLE prefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(self, range_lit, stages, NIL, :heap, "__rt_obs_${fid}", TRUE));
+        label = runtimeHost__range_next_label(self.host);
+        RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable_default(self, UNWRAP (prefix), fold_op, &smooth_node, label, range_lit, terminal_value_mutable, fid));
       ELSE
         RAISE Input, CompilerError, "lower_range_fold: observable_dest set but no terminal registered for {}";
       END
     END
-    MUTABLE prefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(rtoc_self_view, range_lit, stages, NIL, NIL, NIL, TRUE));
-    label = runtimeHost__range_next_label(rtoc_self_view.host);
-    MUTABLE names = pipelineRangeFoldNames__for_label(label, runtimeHost__range_bc_target?(rtoc_self_view.host));
-    MUTABLE plan = TRY (pipelineRangeLowerer__scalar_fold_plan(rtoc_self_view, UNWRAP (prefix), fold_op, &smooth_node, names));
-    RETURN TRY (pipelineRangeLowerer__range_accumulating_block(rtoc_self_view, range_lit, UNWRAP (prefix), label, UNWRAP (plan), prefix.initial_capture));
-}
+    MUTABLE prefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(self, range_lit, stages, NIL, NIL, NIL, TRUE));
+    label = runtimeHost__range_next_label(self.host);
+    MUTABLE names = pipelineRangeFoldNames__for_label(label, runtimeHost__range_bc_target?(self.host));
+    MUTABLE plan = TRY (pipelineRangeLowerer__scalar_fold_plan(self, UNWRAP (prefix), fold_op, &smooth_node, names));
+    RETURN TRY (pipelineRangeLowerer__range_accumulating_block(self, range_lit, UNWRAP (prefix), label, UNWRAP (plan), prefix.initial_capture));
 END
-PUB FN pipelineRangeLowerer__lower_range_reduce(self: PipelineRangeLowerer, MUTABLE range_lit: Locatable, stages: []Locatable, reduce_op: ReduceOp, smooth_node: ?BinaryOp = NIL) RETURNS !MIRBlockExpr
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__lower_range_reduce(self: PipelineRangeLowerer, MUTABLE range_lit: Locatable, stages: []Locatable, reduce_op: ReduceOp, smooth_node: ?BinaryOp = NIL) RETURNS !MIRBlockExpr ->
     MUTABLE label: ?String = NIL;
-    MUTABLE prefix: ?PipelineLazyRangePrefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(rtoc_self_view, range_lit, stages, NIL, IF smooth_node?.observable_dest THEN
+    MUTABLE prefix: ?PipelineLazyRangePrefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(self, range_lit, stages, NIL, IF smooth_node?.observable_dest THEN
       :heap
     ELSE
       NIL
     END, NIL, TRUE));
     MUTABLE item_var = COPY UNWRAP (prefix).item_var;
     IF smooth_node?.observable_dest THEN
-      label = runtimeHost__range_next_label(rtoc_self_view.host);
-      RETURN TRY (pipelineRangeLowerer__lower_range_reduce_observable(rtoc_self_view, UNWRAP (prefix), reduce_op, UNWRAP (smooth_node), UNWRAP (label), range_lit));
+      label = runtimeHost__range_next_label(self.host);
+      RETURN TRY (pipelineRangeLowerer__lower_range_reduce_observable(self, UNWRAP (prefix), reduce_op, UNWRAP (smooth_node), UNWRAP (label), range_lit));
     END
-    label = runtimeHost__range_next_label(rtoc_self_view.host);
-    MUTABLE acc_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ ReduceOp: COPY reduce_op })))) });
-    MUTABLE init_mir = runtimeHost__range_visit_mir(rtoc_self_view.host, UNWRAP (reduce_op.initial_value));
-    MUTABLE expr_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (reduce_op.expression), item_var, "acc");
+    label = runtimeHost__range_next_label(self.host);
+    MUTABLE acc_zig = runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ ReduceOp: COPY reduce_op })))) });
+    MUTABLE init_mir = runtimeHost__range_visit_mir(self.host, UNWRAP (reduce_op.initial_value));
+    MUTABLE expr_mir = runtimeHost__range_visit_mir_with_context(self.host, UNWRAP (reduce_op.expression), item_var, "acc");
     MUTABLE plan = PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY "acc", init: COPY init_mir, mutable: TRUE, annotation: COPY TRY (type__new( TypeConstructionInput{ StringValue: COPY acc_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY expr_mir, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], post_loop_stmts: List[], result_expr: Emittable{ Ident: COPY Ident{ name: "acc", lowered_node_id: NIL, ownership_consumption: NIL } } };
-    RETURN TRY (pipelineRangeLowerer__range_accumulating_block(rtoc_self_view, range_lit, UNWRAP (prefix), UNWRAP (label), plan, UNWRAP (prefix).initial_capture));
-}
+    RETURN TRY (pipelineRangeLowerer__range_accumulating_block(self, range_lit, UNWRAP (prefix), UNWRAP (label), plan, UNWRAP (prefix).initial_capture));
 END
-PUB FN pipelineRangeLowerer__scalar_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !?PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__scalar_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !?PipelineRangeFoldPlan ->
     IF fold_op IS_A CountOp@multiowned AS count_op_multiowned THEN
-      RETURN TRY (pipelineRangeLowerer__count_fold_plan(rtoc_self_view, prefix, CAST(COPY count_op_multiowned AS CountOp), names));
+      RETURN TRY (pipelineRangeLowerer__count_fold_plan(self, prefix, CAST(COPY count_op_multiowned AS CountOp), names));
     ELSE_IF fold_op IS_A SumOp@multiowned AS sum_op_multiowned THEN
       MUTABLE sum_op_multiowned_mutable = COPY sum_op_multiowned;
-      RETURN TRY (pipelineRangeLowerer__sum_fold_plan(rtoc_self_view, prefix, CAST(COPY sum_op_multiowned_mutable AS SumOp), smooth_node, names));
+      RETURN TRY (pipelineRangeLowerer__sum_fold_plan(self, prefix, CAST(COPY sum_op_multiowned_mutable AS SumOp), smooth_node, names));
     ELSE_IF fold_op IS_A AverageOp@multiowned AS average_op_multiowned THEN
-      RETURN TRY (pipelineRangeLowerer__average_fold_plan(rtoc_self_view, prefix, CAST(COPY average_op_multiowned AS AverageOp), names));
+      RETURN TRY (pipelineRangeLowerer__average_fold_plan(self, prefix, CAST(COPY average_op_multiowned AS AverageOp), names));
     ELSE_IF fold_op IS_A MinOp@multiowned AS min_op_multiowned THEN
-      RETURN TRY (pipelineRangeLowerer__min_fold_plan(rtoc_self_view, prefix, CAST(COPY min_op_multiowned AS MinOp), &smooth_node, names));
+      RETURN TRY (pipelineRangeLowerer__min_fold_plan(self, prefix, CAST(COPY min_op_multiowned AS MinOp), &smooth_node, names));
     ELSE_IF fold_op IS_A MaxOp@multiowned AS max_op_multiowned THEN
-      RETURN TRY (pipelineRangeLowerer__max_fold_plan(rtoc_self_view, prefix, CAST(COPY max_op_multiowned AS MaxOp), &smooth_node, names));
+      RETURN TRY (pipelineRangeLowerer__max_fold_plan(self, prefix, CAST(COPY max_op_multiowned AS MaxOp), &smooth_node, names));
     ELSE_IF fold_op IS_A AnyOp@multiowned AS any_op_multiowned THEN
-      RETURN pipelineRangeLowerer__any_fold_plan(rtoc_self_view, prefix, CAST(COPY any_op_multiowned AS AnyOp), names);
+      RETURN pipelineRangeLowerer__any_fold_plan(self, prefix, CAST(COPY any_op_multiowned AS AnyOp), names);
     ELSE_IF fold_op IS_A AllOp@multiowned AS all_op_multiowned THEN
-      RETURN pipelineRangeLowerer__all_fold_plan(rtoc_self_view, prefix, CAST(COPY all_op_multiowned AS AllOp), names);
+      RETURN pipelineRangeLowerer__all_fold_plan(self, prefix, CAST(COPY all_op_multiowned AS AllOp), names);
     ELSE_IF fold_op IS_A FindOp@multiowned AS find_op_multiowned THEN
       MUTABLE find_op_multiowned_mutable = COPY find_op_multiowned;
-      RETURN TRY (pipelineRangeLowerer__find_fold_plan(rtoc_self_view, prefix, CAST(COPY find_op_multiowned_mutable AS FindOp), smooth_node, names));
+      RETURN TRY (pipelineRangeLowerer__find_fold_plan(self, prefix, CAST(COPY find_op_multiowned_mutable AS FindOp), smooth_node, names));
     ELSE
       RETURN NIL;
     END
-}
 END
-PUB FN pipelineRangeLowerer__count_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: CountOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (fold_op.expression), prefix.item_var);
+PUB FN pipelineRangeLowerer__count_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: CountOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan ->
+    MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(self.host, UNWRAP (fold_op.expression), prefix.item_var);
     RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.acc, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "i64" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ IfStmt: COPY IfStmt{ cond: COPY pred_mir, then_body: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], post_loop_stmts: List[], result_expr: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } } };
-}
 END
-PUB FN pipelineRangeLowerer__sum_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: SumOp, smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE acc_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))) });
-    MUTABLE expr_mir = TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, UNWRAP (fold_op.expression), prefix.item_var, acc_zig));
+PUB FN pipelineRangeLowerer__sum_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: SumOp, smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan ->
+    MUTABLE acc_zig = runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))) });
+    MUTABLE expr_mir = TRY (pipelineRangeLowerer__numeric_fold_expr_typed(self, UNWRAP (fold_op.expression), prefix.item_var, acc_zig));
     RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.acc, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new( TypeConstructionInput{ StringValue: acc_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, right: COPY expr_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], post_loop_stmts: List[], result_expr: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } } };
-}
 END
-PUB FN pipelineRangeLowerer__average_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: AverageOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE expr_f64 = TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, UNWRAP (fold_op.expression), prefix.item_var, "f64"));
+PUB FN pipelineRangeLowerer__average_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: AverageOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan ->
+    MUTABLE expr_f64 = TRY (pipelineRangeLowerer__numeric_fold_expr_typed(self, UNWRAP (fold_op.expression), prefix.item_var, "f64"));
     RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.sum, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "f64" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Let: COPY Let{ name: COPY names.cnt, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "i64" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.sum, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: COPY names.sum, lowered_node_id: NIL, ownership_consumption: NIL } }, right: COPY expr_f64, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.cnt, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: COPY names.cnt, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], post_loop_stmts: List[], result_expr: Emittable{ Conditional: COPY Conditional{ cond: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "==", left: Emittable{ Ident: COPY Ident{ name: COPY names.cnt, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "f64", method: :as, lowered_node_id: NIL, ownership_consumption: NIL } }, else_val: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "/", left: Emittable{ Ident: COPY Ident{ name: COPY names.sum, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ Ident: COPY Ident{ name: COPY names.cnt, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: NIL, method: :floatFromInt, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "f64", method: :as, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } } };
-}
 END
-PUB FN pipelineRangeLowerer__min_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: MinOp, MUTABLE smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (pipelineRangeLowerer__min_max_fold_plan(rtoc_self_view, prefix, UNWRAP (fold_op.expression), smooth_node, names, :max, "<", "MIN applied to empty sequence"));
-}
+PUB FN pipelineRangeLowerer__min_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: MinOp, MUTABLE smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan ->
+    RETURN TRY (pipelineRangeLowerer__min_max_fold_plan(self, prefix, UNWRAP (fold_op.expression), smooth_node, names, :max, "<", "MIN applied to empty sequence"));
 END
-PUB FN pipelineRangeLowerer__max_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: MaxOp, MUTABLE smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (pipelineRangeLowerer__min_max_fold_plan(rtoc_self_view, prefix, UNWRAP (fold_op.expression), smooth_node, names, :min, ">", "MAX applied to empty sequence"));
-}
+PUB FN pipelineRangeLowerer__max_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: MaxOp, MUTABLE smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan ->
+    RETURN TRY (pipelineRangeLowerer__min_max_fold_plan(self, prefix, UNWRAP (fold_op.expression), smooth_node, names, :min, ">", "MAX applied to empty sequence"));
 END
-PUB FN pipelineRangeLowerer__min_max_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE expr_ast: Locatable, smooth_node: BinaryOp, names: PipelineRangeFoldNames, sentinel: String@symbol, compare_op: String, empty_message: String) RETURNS !PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE acc_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))) });
-    MUTABLE expr_mir = TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, expr_ast, prefix.item_var, acc_zig));
+PUB FN pipelineRangeLowerer__min_max_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE expr_ast: Locatable, smooth_node: BinaryOp, names: PipelineRangeFoldNames, sentinel: String@symbol, compare_op: String, empty_message: String) RETURNS !PipelineRangeFoldPlan ->
+    MUTABLE acc_zig = runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))) });
+    MUTABLE expr_mir = TRY (pipelineRangeLowerer__numeric_fold_expr_typed(self, expr_ast, prefix.item_var, acc_zig));
     RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.acc, init: Emittable{ TypeSentinel: COPY TypeSentinel{ extreme: sentinel, zig_type: COPY acc_zig, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new( TypeConstructionInput{ StringValue: COPY acc_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Let: COPY Let{ name: COPY names.found, init: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Let: COPY Let{ name: COPY names.val, init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY MIRBinOp{ op: COPY compare_op, left: Emittable{ Ident: COPY Ident{ name: COPY names.val, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: COPY names.val, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.found, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], post_loop_stmts: [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: Emittable{ Ident: COPY Ident{ name: COPY names.found, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Panic: COPY Panic{ message: COPY empty_message, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], result_expr: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } } };
-}
 END
-PUB FN pipelineRangeLowerer__any_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: AnyOp, names: PipelineRangeFoldNames) RETURNS PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (fold_op.expression), prefix.item_var);
+PUB FN pipelineRangeLowerer__any_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: AnyOp, names: PipelineRangeFoldNames) RETURNS PipelineRangeFoldPlan ->
+    MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(self.host, UNWRAP (fold_op.expression), prefix.item_var);
     RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.acc, init: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ IfStmt: COPY IfStmt{ cond: COPY pred_mir, then_body: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], post_loop_stmts: List[], result_expr: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } } };
-}
 END
-PUB FN pipelineRangeLowerer__all_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: AllOp, names: PipelineRangeFoldNames) RETURNS PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (fold_op.expression), prefix.item_var);
+PUB FN pipelineRangeLowerer__all_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: AllOp, names: PipelineRangeFoldNames) RETURNS PipelineRangeFoldPlan ->
+    MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(self.host, UNWRAP (fold_op.expression), prefix.item_var);
     RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.acc, init: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY pred_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], post_loop_stmts: List[], result_expr: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } } };
-}
 END
-PUB FN pipelineRangeLowerer__find_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: FindOp, smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__find_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, fold_op: FindOp, smooth_node: BinaryOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan ->
     MUTABLE result_ft = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) }));
     MUTABLE find_zig: String = "";
     IF type__optional?(result_ft) THEN
-      find_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ StringValue: COPY CAST((type__resolved(UNWRAP (TRY (type__wrapped_type(result_ft))))) AS String) });
+      find_zig = runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ StringValue: COPY CAST((type__resolved(UNWRAP (TRY (type__wrapped_type(result_ft))))) AS String) });
     ELSE
       find_zig = COPY prefix.elem_zig;
     END
-    MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (fold_op.expression), prefix.item_var);
+    MUTABLE pred_mir = runtimeHost__range_visit_mir_with_context(self.host, UNWRAP (fold_op.expression), prefix.item_var);
     RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.result, init: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY find_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Let: COPY Let{ name: COPY names.found, init: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ IfStmt: COPY IfStmt{ cond: COPY pred_mir, then_body: ((IF prefix.item_owned THEN
       TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY prefix.item_var, target: :owned_sink, target_alloc: :heap, move_guarded: TRUE })))
     ELSE
       List[]
     END) + [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.result, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: COPY prefix.item_var, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.found, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], post_loop_stmts: List[], result_expr: Emittable{ Conditional: COPY Conditional{ cond: Emittable{ Ident: COPY Ident{ name: COPY names.found, lowered_node_id: NIL, ownership_consumption: NIL } }, then_val: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ Ident: COPY Ident{ name: COPY names.result, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "?${find_zig}", method: :as, lowered_node_id: NIL, ownership_consumption: NIL } }, else_val: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } } };
-}
 END
-PUB FN pipelineRangeLowerer__range_accumulating_block(self: PipelineRangeLowerer, range_lit: Locatable, prefix: PipelineLazyRangePrefix, label: String, plan: PipelineRangeFoldPlan, capture_name: String) RETURNS !MIRBlockExpr
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__range_accumulating_block(self: PipelineRangeLowerer, range_lit: Locatable, prefix: PipelineLazyRangePrefix, label: String, plan: PipelineRangeFoldPlan, capture_name: String) RETURNS !MIRBlockExpr ->
     MUTABLE source_ti = TRY (aST__full_type_mut(range_lit));
     MUTABLE defer_deinit_branch_value: ?MIRDeferStmt = NIL;
     IF TRY (type__bounded_stream?(source_ti)) THEN
@@ -706,35 +575,27 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       defer_deinit_branch_value = NIL;
     END
     MUTABLE defer_deinit: ?MIRDeferStmt = defer_deinit_branch_value;
-    MUTABLE bc_iter: ?PipelineRangeLoopIter = TRY (pipelineRangeLowerer__bc_loop_iter(rtoc_self_view, range_lit, source_ti, capture_name));
+    MUTABLE bc_iter: ?PipelineRangeLoopIter = TRY (pipelineRangeLowerer__bc_loop_iter(self, range_lit, source_ti, capture_name));
     IF bc_iter EXISTS AS bc_iter_value THEN
       RETURN MIRBlockExpr{ label: COPY label, body: COPY (TRY (pipelineLazyRangePrefix__outer_setup_stmts(prefix)) + plan.acc_init_stmts + [TRY (pipelineLazyRangePrefix__loop_stmt(prefix, bc_iter_value.iter, plan.loop_acc_stmts, bc_iter_value.capture_name))] + plan.post_loop_stmts + [Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY plan.result_expr, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
     END
     RETURN MIRBlockExpr{ label: COPY label, body: COPY (TRY (pipelineLazyRangePrefix__setup_stmts(prefix)) + plan.acc_init_stmts + (([defer_deinit])) + [TRY (pipelineLazyRangePrefix__loop_stmt(prefix, NIL, plan.loop_acc_stmts, capture_name))] + plan.post_loop_stmts + [Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY plan.result_expr, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
-}
 END
-PUB FN pipelineRangeLowerer__lower_range_fold_observable(self: PipelineRangeLowerer, p: PipelineLazyRangePrefix, smooth_node: BinaryOp, label: String, source_node: Locatable, acc_alloc_expr: Emittable, publish_stmts: []Emittable, observable_id: ?Int64 = NIL) RETURNS !MIRBlockExpr
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__lower_range_fold_observable(self: PipelineRangeLowerer, p: PipelineLazyRangePrefix, smooth_node: BinaryOp, label: String, source_node: Locatable, acc_alloc_expr: Emittable, publish_stmts: []Emittable, observable_id: ?Int64 = NIL) RETURNS !MIRBlockExpr ->
     MUTABLE source_name = COPY p.source_name;
     MUTABLE obs_type: ?Type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY smooth_node }, "observable accumulator"));
-    MUTABLE rt_name = runtimeHost__range_runtime_name(rtoc_self_view.host);
+    MUTABLE rt_name = runtimeHost__range_runtime_name(self.host);
     MUTABLE wg_init = HeapCreate{ zig_type: "CheatHeader.WaitGroup", init: Emittable{ Call: COPY Call{ callee: "CheatHeader.WaitGroup.init", args: [Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY rt_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "getSched", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, alloc: :heap, label: "__obs_wg_alloc", lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE obs_wg_anyopaque = MIRCast{ expr: Emittable{ Call: COPY Call{ callee: "@ptrCast", args: [Emittable{ Ident: COPY Ident{ name: "__obs_wg", lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, target_type: "*anyopaque", method: :as, lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE set_completion_contract = callableContract__new(TRY (functionSignature__new([Param{ name: "ctx", type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, mutable: NIL, takes: NIL, comptime: NIL, name_token: NIL, required: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }, Param{ name: "done", type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, mutable: NIL, takes: NIL, comptime: NIL, name_token: NIL, required: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }, Param{ name: "wait", type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, mutable: NIL, takes: NIL, comptime: NIL, name_token: NIL, required: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }, Param{ name: "destroy", type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, mutable: NIL, takes: NIL, comptime: NIL, name_token: NIL, required: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }], TypeTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, NIL, NIL, List[], {}, FALSE, FALSE, NIL, NIL, NIL, List[], NIL, List[])), TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding("__obs_wg", TRY (type__new(TypeConstructionInput{ SymbolValue: symbol("CheatHeader.WaitGroup") }, NIL, NIL, :indirect)), "observable completion", :heap)])), 4);
     MUTABLE set_completion = MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "__obs_acc", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "setCompletion", args: [CAST(obs_wg_anyopaque AS Any), CAST(FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "CheatHeader", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "obsWgDone", lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "CheatHeader", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "obsWgWait", lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "CheatHeader", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "obsWgDestroy", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: COPY set_completion_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     MUTABLE acc_init_stmts = (TRY (pipelineLazyRangePrefix__setup_stmts(p)) + [Emittable{ AllocMark: COPY AllocMark{ name: "__obs_acc", alloc: :heap, type_info: UNWRAP (COPY obs_type), scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Let: COPY Let{ name: COPY "__obs_acc", init: COPY acc_alloc_expr, mutable: FALSE, annotation: COPY obs_type, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ AllocMark: COPY AllocMark{ name: "__obs_wg", alloc: :heap, type_info: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: symbol("CheatHeader.WaitGroup") }, NIL, NIL, :indirect)), scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Let: COPY Let{ name: COPY "__obs_wg", init: Emittable{ HeapCreate: COPY wg_init }, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "*CheatHeader.WaitGroup" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: "__obs_wg", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "add", args: [CAST(Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY set_completion }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
     MUTABLE body_mir = [TRY (pipelineLazyRangePrefix__loop_stmt(p, NIL, publish_stmts))];
-    MUTABLE fid = (observable_id OR_ELSE runtimeHost__range_next_observable_id(rtoc_self_view.host));
-    MUTABLE spawn = ObservableConsumerSpawn{ id: fid, acc_name: "__obs_acc", source_name: COPY source_name, acc_type: UNWRAP (COPY obs_type), runtime_name: COPY rt_name, task_config_variant: COPY runtimeHost__range_task_config_variant(rtoc_self_view.host), stdlib_def: pipeline_alloc_ref_def, ownership_contract: TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding(source_name, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "observable consumer spawn", :heap)])), body: COPY body_mir };
+    MUTABLE fid = (observable_id OR_ELSE runtimeHost__range_next_observable_id(self.host));
+    MUTABLE spawn = ObservableConsumerSpawn{ id: fid, acc_name: "__obs_acc", source_name: COPY source_name, acc_type: UNWRAP (COPY obs_type), runtime_name: COPY rt_name, task_config_variant: COPY runtimeHost__range_task_config_variant(self.host), stdlib_def: pipeline_alloc_ref_def, ownership_contract: TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding(source_name, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "observable consumer spawn", :heap)])), body: COPY body_mir };
     RETURN MIRBlockExpr{ label: COPY label, body: COPY (acc_init_stmts + [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ ObservableConsumerSpawn: COPY spawn }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: "__obs_acc", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
-}
 END
-PUB FN pipelineRangeLowerer__lower_range_fold_observable_default(self: PipelineRangeLowerer, p: PipelineLazyRangePrefix, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp, label: String, source_node: Locatable, terminal: String@symbol, observable_id: ?Int64 = NIL) RETURNS !?MIRBlockExpr
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__lower_range_fold_observable_default(self: PipelineRangeLowerer, p: PipelineLazyRangePrefix, fold_op: PipelineDefaultObservableFoldOp, MUTABLE smooth_node: BinaryOp, label: String, source_node: Locatable, terminal: String@symbol, observable_id: ?Int64 = NIL) RETURNS !?MIRBlockExpr ->
     MUTABLE spec = COPY (TRY (type__observable_terminals())).each_with_object({}, %(tuple_param_0, h) -> {
     MUTABLE sym = tuple_param_0._0;
     MUTABLE entry = tuple_param_0._1;
@@ -746,15 +607,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     })[terminal]?;
     MUTABLE item = COPY p.item_var;
     MUTABLE inner_recv = FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__obs_acc", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE fid = (observable_id OR_ELSE runtimeHost__range_next_observable_id(rtoc_self_view.host));
-    MUTABLE arg = runtimeHost__range_with_fiber_rt(rtoc_self_view.host, "__rt_obs_${fid}", %() USE(fold_op, item, MUTABLE smooth_node, spec, rtoc_self_view) -> {
+    MUTABLE fid = (observable_id OR_ELSE runtimeHost__range_next_observable_id(self.host));
+    MUTABLE arg = runtimeHost__range_with_fiber_rt(self.host, "__rt_obs_${fid}", %() USE(fold_op, item, MUTABLE smooth_node, spec, self) -> {
     IF (spec.expr == :typed) THEN
-        MUTABLE inner_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node }))))) });
-        [TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, pipelineDefaultObservableFoldOp__expression(fold_op), item, inner_zig))];
+        MUTABLE inner_zig = runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node }))))) });
+        [TRY (pipelineRangeLowerer__numeric_fold_expr_typed(self, pipelineDefaultObservableFoldOp__expression(fold_op), item, inner_zig))];
     ELSE_IF (spec.expr == :f64) THEN
-        [TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, pipelineDefaultObservableFoldOp__expression(fold_op), item, "f64"))];
+        [TRY (pipelineRangeLowerer__numeric_fold_expr_typed(self, pipelineDefaultObservableFoldOp__expression(fold_op), item, "f64"))];
     ELSE_IF (spec.expr == :pred) THEN
-        [runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, pipelineDefaultObservableFoldOp__expression(fold_op), item)];
+        [runtimeHost__range_visit_mir_with_context(self.host, pipelineDefaultObservableFoldOp__expression(fold_op), item)];
     ELSE_IF (spec.expr == :item) THEN
         [Emittable{ Ident: COPY Ident{ name: COPY item, lowered_node_id: NIL, ownership_consumption: NIL } }];
     ELSE_IF (spec.expr == :none) THEN
@@ -783,7 +644,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       :always -> [call],
       :pred -> {
         MUTABLE rtoc_value_block_marker = 0;
-        MUTABLE pred_mir = runtimeHost__range_with_fiber_rt(rtoc_self_view.host, "__rt_obs_${fid}", %() USE(fold_op, item, rtoc_self_view) -> runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, pipelineDefaultObservableFoldOp__expression(fold_op), item));
+        MUTABLE pred_mir = runtimeHost__range_with_fiber_rt(self.host, "__rt_obs_${fid}", %() USE(fold_op, item, self) -> runtimeHost__range_visit_mir_with_context(self.host, pipelineDefaultObservableFoldOp__expression(fold_op), item));
         (IF (spec.transfers_item_on_success AND (published_item_type != NIL)) THEN
           [Emittable{ IfStmt: COPY IfStmt{ cond: COPY pred_mir, then_body: (TRY (ownershipTransferPlan__marks((OwnershipTransferPlan{ name: COPY item, target: :call, target_alloc: :heap, move_guarded: TRUE }))) + [Emittable{ ExprStmt: COPY call }]), else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }]
         ELSE
@@ -792,46 +653,34 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       },
       DEFAULT -> panic("unsupported observable publish gate {}")
     END;
-    RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable(rtoc_self_view, p, smooth_node, label, source_node, Emittable{ TryCatch: COPY TRY (pipelineRangeLowerer__default_obs_alloc_expr(rtoc_self_view, smooth_node)) }, publish, fid));
-}
+    RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable(self, p, smooth_node, label, source_node, Emittable{ TryCatch: COPY TRY (pipelineRangeLowerer__default_obs_alloc_expr(self, smooth_node)) }, publish, fid));
 END
-PUB FN pipelineRangeLowerer__pipeline_element_owns_heap?(self: PipelineRangeLowerer, type_info: Type) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((TRY (type__string?(type_info)) OR TRY (type__heap_ptr?(type_info))) OR TRY (type__recursive_cleanup_shape?(type_info, runtimeHost__range_schema_lookup(rtoc_self_view.host)))) OR TRY (type__needs_explicit_cleanup?(type_info, :heap, runtimeHost__range_schema_lookup(rtoc_self_view.host))));
-}
+PUB FN pipelineRangeLowerer__pipeline_element_owns_heap?(self: PipelineRangeLowerer, type_info: Type) RETURNS !Bool ->
+    RETURN (((TRY (type__string?(type_info)) OR TRY (type__heap_ptr?(type_info))) OR TRY (type__recursive_cleanup_shape?(type_info, runtimeHost__range_schema_lookup(self.host)))) OR TRY (type__needs_explicit_cleanup?(type_info, :heap, runtimeHost__range_schema_lookup(self.host))));
 END
-PUB FN pipelineRangeLowerer__bc_loop_iter(self: PipelineRangeLowerer, range_lit: Locatable, source_ti: Type, capture_name: ?String) RETURNS !?PipelineRangeLoopIter
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(runtimeHost__range_bc_target?(rtoc_self_view.host)) THEN
+PUB FN pipelineRangeLowerer__bc_loop_iter(self: PipelineRangeLowerer, range_lit: Locatable, source_ti: Type, capture_name: ?String) RETURNS !?PipelineRangeLoopIter ->
+    IF !(runtimeHost__range_bc_target?(self.host)) THEN
       RETURN NIL;
     END
     IF range_lit IS_A RangeLit AS range_lit_narrowed THEN
-      MUTABLE iter, cap = pipelineRangeLowerer__bc_for_iter_range(rtoc_self_view, range_lit_narrowed, capture_name);
+      MUTABLE iter, cap = pipelineRangeLowerer__bc_for_iter_range(self, range_lit_narrowed, capture_name);
       RETURN PipelineRangeLoopIter{ iter: Emittable{ IterRange: COPY iter }, capture_name: COPY cap };
     END
     IF range_lit IS_A Identifier AS identifier THEN
     IF TRY (type__runtime_stream?(source_ti)) THEN
-        RETURN PipelineRangeLoopIter{ iter: COPY runtimeHost__range_visit_mir(rtoc_self_view.host, Locatable{ Identifier: COPY identifier }), capture_name: COPY capture_name };
+        RETURN PipelineRangeLoopIter{ iter: COPY runtimeHost__range_visit_mir(self.host, Locatable{ Identifier: COPY identifier }), capture_name: COPY capture_name };
       ELSE
         RETURN NIL;
       END
     ELSE
       RETURN NIL;
     END
-}
 END
-PUB FN pipelineRangeLowerer__owned_stream_item_stmts(self: PipelineRangeLowerer, item_var: String, elem_t: ?Type) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__owned_stream_item_stmts(self: PipelineRangeLowerer, item_var: String, elem_t: ?Type) RETURNS ![]Emittable ->
     IF elem_t EXISTS AS elem_t_value THEN
       MUTABLE elem_t_value_mutable = COPY elem_t_value;
-      IF TRY (pipelineRangeLowerer__pipeline_element_owns_heap?(rtoc_self_view, elem_t_value_mutable)) THEN
-        MUTABLE entry: ?CleanupEntry@multiowned = TRY (cleanupClassifier__owned_value_entry(elem_t_value_mutable, runtimeHost__range_schema_lookup(rtoc_self_view.host)));
+      IF TRY (pipelineRangeLowerer__pipeline_element_owns_heap?(self, elem_t_value_mutable)) THEN
+        MUTABLE entry: ?CleanupEntry@multiowned = TRY (cleanupClassifier__owned_value_entry(elem_t_value_mutable, runtimeHost__range_schema_lookup(self.host)));
         IF !((IF entry != NIL THEN
           cleanupEntry__needs_cleanup?(entry)
         ELSE
@@ -848,43 +697,35 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN CAST(List[] AS []Emittable);
     END
-}
 END
-PUB FN pipelineRangeLowerer__lower_range_reduce_observable(self: PipelineRangeLowerer, p: PipelineLazyRangePrefix, reduce_op: ReduceOp, smooth_node: BinaryOp, label: String, source_node: Locatable) RETURNS !MIRBlockExpr
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE inner_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node }))))) });
-    MUTABLE init_mir = runtimeHost__range_visit_mir(rtoc_self_view.host, UNWRAP (reduce_op.initial_value));
-    MUTABLE fid = runtimeHost__range_next_observable_id(rtoc_self_view.host);
+PUB FN pipelineRangeLowerer__lower_range_reduce_observable(self: PipelineRangeLowerer, p: PipelineLazyRangePrefix, reduce_op: ReduceOp, smooth_node: BinaryOp, label: String, source_node: Locatable) RETURNS !MIRBlockExpr ->
+    MUTABLE inner_zig = runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node }))))) });
+    MUTABLE init_mir = runtimeHost__range_visit_mir(self.host, UNWRAP (reduce_op.initial_value));
+    MUTABLE fid = runtimeHost__range_next_observable_id(self.host);
     MUTABLE curr_var = "__obs_reduce_curr_${fid.toString()}";
     MUTABLE next_var = "__obs_reduce_next_${fid.toString()}";
     MUTABLE actual_var = "__obs_reduce_actual_${fid.toString()}";
     MUTABLE blk_label = "__obs_reduce_blk_${fid.toString()}";
     MUTABLE item_var = COPY p.item_var;
-    MUTABLE body_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (reduce_op.expression), item_var, curr_var);
+    MUTABLE body_mir = runtimeHost__range_visit_mir_with_context(self.host, UNWRAP (reduce_op.expression), item_var, curr_var);
     MUTABLE inner_recv = FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__obs_acc", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE publish = [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY blk_label, body: COPY [Emittable{ Let: COPY Let{ name: COPY curr_var, init: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: inner_recv, method: "view", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ WhileStmt: COPY WhileStmt{ cond: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, body: COPY [Emittable{ Let: COPY Let{ name: COPY next_var, init: COPY body_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ IfBindStmt: COPY IfBindStmt{ bindings: COPY [TRY (mIR__if_binding(Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: inner_recv, method: "tryCommit", args: [CAST(Ident{ name: COPY curr_var, lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(Ident{ name: COPY next_var, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(2)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, Capture{ StringValue: COPY actual_var }))], then_body: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY curr_var, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: COPY actual_var, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: [Emittable{ BreakStmt: COPY BreakStmt{ label: NIL, value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], capture: NIL, update: NIL, mark_per_iter: NIL, tight: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: inner_recv, method: "markSeen", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY blk_label, value: Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: "i32", method: :as, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } }, discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
-    MUTABLE obs_target = pipelineRangeLowerer__without_pointer_prefix(rtoc_self_view, runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) }));
-    MUTABLE acc_alloc = TRY (pipelineRangeLowerer__observable_alloc_expr(rtoc_self_view, obs_target, "newWith", [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ RuntimeCall: COPY RuntimeCall{ spec: COPY TRY (runtimeCalls__atomic_reduce_init_spec(inner_zig)), args: [init_mir], lowered_node_id: NIL, ownership_consumption: NIL } }]));
-    RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable(rtoc_self_view, p, smooth_node, label, source_node, Emittable{ TryCatch: COPY acc_alloc }, publish, fid));
-}
+    MUTABLE obs_target = pipelineRangeLowerer__without_pointer_prefix(self, runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) }));
+    MUTABLE acc_alloc = TRY (pipelineRangeLowerer__observable_alloc_expr(self, obs_target, "newWith", [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ RuntimeCall: COPY RuntimeCall{ spec: COPY TRY (runtimeCalls__atomic_reduce_init_spec(inner_zig)), args: [init_mir], lowered_node_id: NIL, ownership_consumption: NIL } }]));
+    RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable(self, p, smooth_node, label, source_node, Emittable{ TryCatch: COPY acc_alloc }, publish, fid));
 END
-PUB FN pipelineRangeLowerer__lower_range_fold_observable_distinct(self: PipelineRangeLowerer, p: PipelineLazyRangePrefix, distinct_op: DistinctOp, smooth_node: BinaryOp, label: String, source_node: Locatable) RETURNS !MIRBlockExpr
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__lower_range_fold_observable_distinct(self: PipelineRangeLowerer, p: PipelineLazyRangePrefix, distinct_op: DistinctOp, smooth_node: BinaryOp, label: String, source_node: Locatable) RETURNS !MIRBlockExpr ->
     MUTABLE item_var = COPY p.item_var;
-    MUTABLE key_expr_mir = runtimeHost__range_visit_mir_with_context(rtoc_self_view.host, UNWRAP (distinct_op.expression), item_var);
-    MUTABLE obs_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) });
-    MUTABLE target = pipelineRangeLowerer__without_pointer_prefix(rtoc_self_view, obs_zig);
+    MUTABLE key_expr_mir = runtimeHost__range_visit_mir_with_context(self.host, UNWRAP (distinct_op.expression), item_var);
+    MUTABLE obs_zig = runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) });
+    MUTABLE target = pipelineRangeLowerer__without_pointer_prefix(self, obs_zig);
     MUTABLE set_type = TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))));
     MUTABLE elem_type = UNWRAP (TRY (type__element_type(set_type)));
-    MUTABLE elem_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ TypeMultiowned: COPY elem_type });
+    MUTABLE elem_zig = runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ TypeMultiowned: COPY elem_type });
     MUTABLE is_bounded = type__fixed?(set_type);
     MUTABLE cap: ?TypeArrayCapacity = type__capacity(set_type);
     MUTABLE submit_contract_branch_value: ?CallableContract = NIL;
-    IF TRY (pipelineRangeLowerer__pipeline_element_owns_heap?(rtoc_self_view, elem_type)) THEN
+    IF TRY (pipelineRangeLowerer__pipeline_element_owns_heap?(self, elem_type)) THEN
       submit_contract_branch_value = callableContract__new(TRY (functionSignature__new([Param{ name: "item", type: COPY elem_type, takes: TRUE, default: NIL, mutable: NIL, comptime: NIL, name_token: NIL, required: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL }], TypeTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, NIL, NIL, List[], {}, FALSE, FALSE, NIL, NIL, NIL, List[], NIL, List[])), TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding(item_var, elem_type, "observable distinct item", :heap)])), 1);
     ELSE
       submit_contract_branch_value = TRY (callableContract__no_ownership(1));
@@ -897,61 +738,37 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE publish = [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY submit_expr }, discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
     MUTABLE inner_ctor_branch_value: ?TryCatch = NIL;
     IF is_bounded THEN
-      inner_ctor_branch_value = pipelineRangeLowerer__observable_catch_unreachable(rtoc_self_view, Emittable{ Call: COPY Call{ callee: "CheatLib.obs.StreamSetBounded(${elem_zig}, ${cap}).init", args: [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
+      inner_ctor_branch_value = pipelineRangeLowerer__observable_catch_unreachable(self, Emittable{ Call: COPY Call{ callee: "CheatLib.obs.StreamSetBounded(${elem_zig}, ${cap}).init", args: [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
     ELSE
-      inner_ctor_branch_value = pipelineRangeLowerer__observable_catch_unreachable(rtoc_self_view, Emittable{ Call: COPY Call{ callee: "CheatLib.obs.StreamSet(${elem_zig}).init", args: [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
+      inner_ctor_branch_value = pipelineRangeLowerer__observable_catch_unreachable(self, Emittable{ Call: COPY Call{ callee: "CheatLib.obs.StreamSet(${elem_zig}).init", args: [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
     END
     MUTABLE inner_ctor: TryCatch = inner_ctor_branch_value?;
-    RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable(rtoc_self_view, p, smooth_node, label, source_node, Emittable{ TryCatch: COPY TRY (pipelineRangeLowerer__observable_alloc_expr(rtoc_self_view, target, "newWith", [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ TryCatch: COPY inner_ctor }])) }, publish));
-}
+    RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable(self, p, smooth_node, label, source_node, Emittable{ TryCatch: COPY TRY (pipelineRangeLowerer__observable_alloc_expr(self, target, "newWith", [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ TryCatch: COPY inner_ctor }])) }, publish));
 END
-PUB FN pipelineRangeLowerer__default_obs_alloc_expr(self: PipelineRangeLowerer, smooth_node: BinaryOp) RETURNS !TryCatch
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE target = pipelineRangeLowerer__without_pointer_prefix(rtoc_self_view, runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) }));
-    RETURN TRY (pipelineRangeLowerer__observable_alloc_expr(rtoc_self_view, target, "new", [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }]));
-}
+PUB FN pipelineRangeLowerer__default_obs_alloc_expr(self: PipelineRangeLowerer, smooth_node: BinaryOp) RETURNS !TryCatch ->
+    MUTABLE target = pipelineRangeLowerer__without_pointer_prefix(self, runtimeHost__range_transpile_type(self.host, PipelineTypeInput{ TypeMultiowned: COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })) }));
+    RETURN TRY (pipelineRangeLowerer__observable_alloc_expr(self, target, "new", [Emittable{ AllocatorRef: COPY AllocatorRef{ kind: :heap, lowered_node_id: NIL, ownership_consumption: NIL } }]));
 END
-PUB FN pipelineRangeLowerer__observable_catch_unreachable(self: PipelineRangeLowerer, expr: Emittable) RETURNS TryCatch
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__observable_catch_unreachable(self: PipelineRangeLowerer, expr: Emittable) RETURNS TryCatch ->
     RETURN TryCatch{ expr: COPY expr, catch_body: Emittable{ Lit: COPY Lit{ value: "unreachable", lowered_node_id: NIL, ownership_consumption: NIL } }, capture: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-}
 END
-PUB FN pipelineRangeLowerer__observable_alloc_expr(self: PipelineRangeLowerer, target: String, method_value: String, args: []Emittable) RETURNS !TryCatch
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineRangeLowerer__observable_catch_unreachable(rtoc_self_view, Emittable{ Call: COPY Call{ callee: "${target}.${method_value}", args: COPY args, try_wrap: FALSE, owned_return: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(args.length())), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
-}
+PUB FN pipelineRangeLowerer__observable_alloc_expr(self: PipelineRangeLowerer, target: String, method_value: String, args: []Emittable) RETURNS !TryCatch ->
+    RETURN pipelineRangeLowerer__observable_catch_unreachable(self, Emittable{ Call: COPY Call{ callee: "${target}.${method_value}", args: COPY args, try_wrap: FALSE, owned_return: TRUE, callable_contract: COPY TRY (callableContract__no_ownership(args.length())), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } });
 END
-PUB FN pipelineRangeLowerer__without_const_prefix(self: PipelineRangeLowerer, type_name: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__without_const_prefix(self: PipelineRangeLowerer, type_name: String) RETURNS String ->
     MUTABLE prefix = "const ";
     IF !(type_name.startsWith?(prefix)) THEN
       RETURN COPY type_name;
     END
     RETURN type_name.substr(prefix.codepointCount(), (type_name.length() - prefix.codepointCount()));
-}
 END
-PUB FN pipelineRangeLowerer__without_pointer_prefix(self: PipelineRangeLowerer, type_name: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__without_pointer_prefix(self: PipelineRangeLowerer, type_name: String) RETURNS String ->
     IF !(type_name.startsWith?("*")) THEN
       RETURN COPY type_name;
     END
     RETURN type_name.substr(1, (type_name.length() - 1));
-}
 END
-PUB FN pipelineRangeLowerer__replace_zig_identifier(self: PipelineRangeLowerer, source: String, needle: String, replacement: String) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__replace_zig_identifier(self: PipelineRangeLowerer, source: String, needle: String, replacement: String) RETURNS String ->
     IF (needle.length() == 0) THEN
       RETURN COPY source;
     END
@@ -959,7 +776,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE needle_len = needle.bytes();
     MUTABLE result = "";
     WHILE (idx < source.bytes()) DO
-      IF (((source.substr(idx, needle_len) == needle) AND pipelineRangeLowerer__zig_identifier_boundary?(rtoc_self_view, source, (idx - 1))) AND pipelineRangeLowerer__zig_identifier_boundary?(rtoc_self_view, source, (idx + needle_len))) THEN
+      IF (((source.substr(idx, needle_len) == needle) AND pipelineRangeLowerer__zig_identifier_boundary?(self, source, (idx - 1))) AND pipelineRangeLowerer__zig_identifier_boundary?(self, source, (idx + needle_len))) THEN
         &result.append(COPY replacement);
         idx = (idx + needle_len);
       ELSE
@@ -968,25 +785,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN result;
-}
 END
-PUB FN pipelineRangeLowerer__zig_identifier_boundary?(self: PipelineRangeLowerer, source: String, idx: Int64) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__zig_identifier_boundary?(self: PipelineRangeLowerer, source: String, idx: Int64) RETURNS Bool ->
     IF ((idx < 0) OR (idx >= source.bytes())) THEN
       RETURN TRUE;
     END
     MUTABLE byte = byteAt(source, idx);
-    RETURN !(pipelineRangeLowerer__zig_identifier_byte?(rtoc_self_view, byte));
-}
+    RETURN !(pipelineRangeLowerer__zig_identifier_byte?(self, byte));
 END
-PUB FN pipelineRangeLowerer__zig_identifier_byte?(self: PipelineRangeLowerer, byte: Int64) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN pipelineRangeLowerer__zig_identifier_byte?(self: PipelineRangeLowerer, byte: Int64) RETURNS Bool ->
     RETURN ((((((byte >= 65) AND (byte <= 90))) OR (((byte >= 97) AND (byte <= 122)))) OR (((byte >= 48) AND (byte <= 57)))) OR (byte == 95));
-}
 END
 PUB FN pipelineRangeLowerer__new(host: RuntimeHost) RETURNS PipelineRangeLowerer@multiowned ->
   MUTABLE self = PipelineRangeLowerer{ host: COPY host };

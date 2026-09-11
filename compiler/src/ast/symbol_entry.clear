@@ -60,12 +60,8 @@ STRUCT BindingLifecycleFacts {
 }
 provenance_storage: [5]String@symbol = [:heap, :frame, :rodata, :borrow, :stack];
 PUB FN symbolEntry__async_result_shape(self: SymbolEntry) RETURNS ?AsyncResultShape
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.lifecycle.async_result_shape;
-}
+  EFFECTS REENTRANT ->
+    RETURN COPY self.lifecycle.async_result_shape;
 END
 PUB FN symbolEntry__set_async_result_shape(MUTABLE self: SymbolEntry, value: ?AsyncResultShape) RETURNS Void
   REQUIRES self: LOCAL
@@ -128,12 +124,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__resource(self: SymbolEntry) RETURNS ?Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.lifecycle.resource;
-}
+  EFFECTS REENTRANT ->
+    RETURN self.lifecycle.resource;
 END
 PUB FN symbolEntry__set_resource(MUTABLE self: SymbolEntry, value: ?Bool) RETURNS Void
   REQUIRES self: LOCAL
@@ -144,12 +136,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__close_plan(self: SymbolEntry) RETURNS ?ResourceClosePlan
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.lifecycle.close_plan;
-}
+  EFFECTS REENTRANT ->
+    RETURN COPY self.lifecycle.close_plan;
 END
 PUB FN symbolEntry__set_close_plan(MUTABLE self: SymbolEntry, value: ?ResourceClosePlan) RETURNS Void
   REQUIRES self: LOCAL
@@ -160,12 +148,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__ownership_kind(self: SymbolEntry) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.lifecycle.ownership_kind;
-}
+  EFFECTS REENTRANT ->
+    RETURN self.lifecycle.ownership_kind;
 END
 PUB FN symbolEntry__set_ownership_kind(MUTABLE self: SymbolEntry, value: ?String@symbol) RETURNS Void
   REQUIRES self: LOCAL
@@ -176,12 +160,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__takes(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.lifecycle.takes;
-}
+  EFFECTS REENTRANT ->
+    RETURN self.lifecycle.takes;
 END
 PUB FN symbolEntry__set_takes(MUTABLE self: SymbolEntry, value: Bool) RETURNS Void
   REQUIRES self: LOCAL
@@ -252,12 +232,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__link_source(self: SymbolEntry) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.lifecycle.link_source;
-}
+  EFFECTS REENTRANT ->
+    RETURN self.lifecycle.link_source;
 END
 PUB FN symbolEntry__set_link_source(MUTABLE self: SymbolEntry, value: ?String@symbol) RETURNS Void
   REQUIRES self: LOCAL
@@ -268,12 +244,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__foreign_out_owner(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.lifecycle.foreign_out_owner;
-}
+  EFFECTS REENTRANT ->
+    RETURN self.lifecycle.foreign_out_owner;
 END
 PUB FN symbolEntry__set_foreign_out_owner(MUTABLE self: SymbolEntry, value: Bool) RETURNS Void
   REQUIRES self: LOCAL
@@ -284,12 +256,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__owned_optional_capture(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.lifecycle.owned_optional_capture;
-}
+  EFFECTS REENTRANT ->
+    RETURN self.lifecycle.owned_optional_capture;
 END
 PUB FN symbolEntry__set_owned_optional_capture(MUTABLE self: SymbolEntry, value: Bool) RETURNS Void
   REQUIRES self: LOCAL
@@ -300,12 +268,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN symbolEntry__semantic_place_id(self: SymbolEntry) RETURNS ?Int64
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.lifecycle.semantic_place_id;
-}
+  EFFECTS REENTRANT ->
+    RETURN self.lifecycle.semantic_place_id;
 END
 PUB FN symbolEntry__adopt_semantic_place_id_mut(MUTABLE self: SymbolEntry, value: Int64) RETURNS Void
   REQUIRES self: LOCAL
@@ -332,28 +296,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN symbolEntry__valid(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__flow_facts(rtoc_self_view).valid;
-}
+  EFFECTS REENTRANT ->
+    RETURN symbolEntry__flow_facts(self).valid;
 END
 PUB FN symbolEntry__invalid_reason(self: SymbolEntry) RETURNS ?String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY symbolEntry__flow_facts(rtoc_self_view).invalid_reason;
-}
+  EFFECTS REENTRANT ->
+    RETURN COPY symbolEntry__flow_facts(self).invalid_reason;
 END
 PUB FN symbolEntry__read(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__flow_facts(rtoc_self_view).read;
-}
+  EFFECTS REENTRANT ->
+    RETURN symbolEntry__flow_facts(self).read;
 END
 PUB FN symbolEntry__mutated(self: SymbolEntry) RETURNS Bool
   EFFECTS REENTRANT
@@ -363,28 +315,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN symbolEntry__mutable_ref_target(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__flow_facts(rtoc_self_view).mutable_ref_target;
-}
+  EFFECTS REENTRANT ->
+    RETURN symbolEntry__flow_facts(self).mutable_ref_target;
 END
 PUB FN symbolEntry__poly_borrow_target(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__flow_facts(rtoc_self_view).poly_borrow_target;
-}
+  EFFECTS REENTRANT ->
+    RETURN symbolEntry__flow_facts(self).poly_borrow_target;
 END
 PUB FN symbolEntry__init_contents_heap(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__flow_facts(rtoc_self_view).init_contents_heap;
-}
+  EFFECTS REENTRANT ->
+    RETURN symbolEntry__flow_facts(self).init_contents_heap;
 END
 PUB FN symbolEntry__inherit_ownership_identity_mut(MUTABLE self: SymbolEntry, source: SymbolEntry) RETURNS Void
   REQUIRES self: LOCAL
@@ -401,26 +341,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.flow.non_escaping = symbolEntry__lifetime_self_only?(rtoc_self_view);
 }
 END
-PUB FN symbolEntry__lifetime_self_only?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((rtoc_self_view.lifetime.length() == 1)) THEN
+PUB FN symbolEntry__lifetime_self_only?(self: SymbolEntry) RETURNS Bool ->
+    IF !((self.lifetime.length() == 1)) THEN
       RETURN FALSE;
     END
-    MUTABLE source: ?SymbolEntry@multiowned = COPY rtoc_self_view.lifetime.first();
+    MUTABLE source: ?SymbolEntry@multiowned = COPY self.lifetime.first();
     IF source EXISTS AS source_value THEN
-      RETURN (source_value.binding_id == rtoc_self_view.binding_id);
+      RETURN (source_value.binding_id == self.binding_id);
     ELSE
       RETURN FALSE;
     END
-}
 END
-PUB FN symbolEntry__fn_signature(self: SymbolEntry) RETURNS ?FunctionSignature@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE function_type: ?FunctionType = type__function_type(symbolEntry__type(rtoc_self_view));
+PUB FN symbolEntry__fn_signature(self: SymbolEntry) RETURNS ?FunctionSignature@multiowned ->
+    MUTABLE function_type: ?FunctionType = type__function_type(symbolEntry__type(self));
     IF function_type EXISTS AS function_type_value THEN
       IF function_type_value.source_signature EXISTS AS signature_value THEN
         PARTIAL MATCH signature_value START
@@ -433,14 +366,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
-PUB FN symbolEntry__atomic?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__atomic_sync?(symbolEntry__sync(rtoc_self_view));
-}
+PUB FN symbolEntry__atomic?(self: SymbolEntry) RETURNS Bool ->
+    RETURN symbolEntry__atomic_sync?(symbolEntry__sync(self));
 END
 PUB FN symbolEntry__atomic_sync?(sync_value: ?String@symbol) RETURNS Bool ->
   RETURN symbolEntry__sync_matches?(sync_value, :atomic);
@@ -451,96 +379,48 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (symbolEntry__layout(rtoc_self_view) == :indirect);
 }
 END
-PUB FN symbolEntry__atomic_ptr?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (symbolEntry__atomic?(rtoc_self_view) AND symbolEntry__indirect?(rtoc_self_view));
-}
+PUB FN symbolEntry__atomic_ptr?(self: SymbolEntry) RETURNS Bool ->
+    RETURN (symbolEntry__atomic?(self) AND symbolEntry__indirect?(self));
 END
-PUB FN symbolEntry__locked?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__locked_sync?(symbolEntry__sync(rtoc_self_view));
-}
+PUB FN symbolEntry__locked?(self: SymbolEntry) RETURNS Bool ->
+    RETURN symbolEntry__locked_sync?(symbolEntry__sync(self));
 END
-PUB FN symbolEntry__local?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__local_sync?(symbolEntry__sync(rtoc_self_view));
-}
+PUB FN symbolEntry__local?(self: SymbolEntry) RETURNS Bool ->
+    RETURN symbolEntry__local_sync?(symbolEntry__sync(self));
 END
-PUB FN symbolEntry__write_locked?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__write_locked_sync?(symbolEntry__sync(rtoc_self_view));
-}
+PUB FN symbolEntry__write_locked?(self: SymbolEntry) RETURNS Bool ->
+    RETURN symbolEntry__write_locked_sync?(symbolEntry__sync(self));
 END
-PUB FN symbolEntry__declared_sync_contract?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !((symbolEntry__sync(rtoc_self_view) == NIL)) THEN
+PUB FN symbolEntry__declared_sync_contract?(self: SymbolEntry) RETURNS Bool ->
+    IF !((symbolEntry__sync(self) == NIL)) THEN
       RETURN TRUE;
     END
-    MUTABLE families: ?[Set]String@symbol = COPY rtoc_self_view.sync_families;
+    MUTABLE families: ?[Set]String@symbol = COPY self.sync_families;
     IF !((families != NIL)) THEN
       RETURN FALSE;
     END
     RETURN !((families).empty?());
-}
 END
-PRIVATE FN symbolEntry__lock_sync?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (symbolEntry__locked?(rtoc_self_view) OR symbolEntry__write_locked?(rtoc_self_view));
-}
+PRIVATE FN symbolEntry__lock_sync?(self: SymbolEntry) RETURNS Bool ->
+    RETURN (symbolEntry__locked?(self) OR symbolEntry__write_locked?(self));
 END
-PUB FN symbolEntry__sync_or_shared_storage?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((symbolEntry__lock_sync?(rtoc_self_view) OR symbolEntry__rc_stored?(rtoc_self_view)) OR symbolEntry__local_storage?(rtoc_self_view));
-}
+PUB FN symbolEntry__sync_or_shared_storage?(self: SymbolEntry) RETURNS Bool ->
+    RETURN ((symbolEntry__lock_sync?(self) OR symbolEntry__rc_stored?(self)) OR symbolEntry__local_storage?(self));
 END
-PUB FN symbolEntry__boxed_capture_storage?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (symbolEntry__lock_sync?(rtoc_self_view) OR symbolEntry__local_storage?(rtoc_self_view));
-}
+PUB FN symbolEntry__boxed_capture_storage?(self: SymbolEntry) RETURNS Bool ->
+    RETURN (symbolEntry__lock_sync?(self) OR symbolEntry__local_storage?(self));
 END
-PUB FN symbolEntry__affine_locked_capture?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (symbolEntry__lock_sync?(rtoc_self_view) AND !(symbolEntry__rc_stored?(rtoc_self_view)));
-}
+PUB FN symbolEntry__affine_locked_capture?(self: SymbolEntry) RETURNS Bool ->
+    RETURN (symbolEntry__lock_sync?(self) AND !(symbolEntry__rc_stored?(self)));
 END
-PUB FN symbolEntry__with_match_capability_family?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((!((symbolEntry__sync(rtoc_self_view) == NIL)) OR symbolEntry__rc_stored?(rtoc_self_view)) OR symbolEntry__local_storage?(rtoc_self_view)) OR symbolEntry__heap_storage?(rtoc_self_view));
-}
+PUB FN symbolEntry__with_match_capability_family?(self: SymbolEntry) RETURNS Bool ->
+    RETURN (((!((symbolEntry__sync(self) == NIL)) OR symbolEntry__rc_stored?(self)) OR symbolEntry__local_storage?(self)) OR symbolEntry__heap_storage?(self));
 END
-PUB FN symbolEntry__plain_local_family?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((symbolEntry__sync(rtoc_self_view) == NIL) AND (((symbolEntry__storage(rtoc_self_view) == :stack) OR symbolEntry__heap_storage?(rtoc_self_view))));
-}
+PUB FN symbolEntry__plain_local_family?(self: SymbolEntry) RETURNS Bool ->
+    RETURN ((symbolEntry__sync(self) == NIL) AND (((symbolEntry__storage(self) == :stack) OR symbolEntry__heap_storage?(self))));
 END
-PUB FN symbolEntry__capture_move_required?(self: SymbolEntry, live: Bool) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (live AND ((((symbolEntry__ownership_kind(rtoc_self_view) == :resource) OR (symbolEntry__ownership_kind(rtoc_self_view) == :affine)) OR TRY (type__needs_escape_promotion?(symbolEntry__type(rtoc_self_view))))));
-}
+PUB FN symbolEntry__capture_move_required?(self: SymbolEntry, live: Bool) RETURNS !Bool ->
+    RETURN (live AND ((((symbolEntry__ownership_kind(self) == :resource) OR (symbolEntry__ownership_kind(self) == :affine)) OR TRY (type__needs_escape_promotion?(symbolEntry__type(self))))));
 END
 PUB FN symbolEntry__locked_sync?(sync_value: ?String@symbol) RETURNS Bool ->
   RETURN symbolEntry__sync_matches?(sync_value, :locked);
@@ -566,56 +446,32 @@ END
 PUB FN symbolEntry__sync_matches?(sync_value: ?String@symbol, expected: String@symbol) RETURNS Bool ->
   RETURN (sync_value == expected);
 END
-PUB FN symbolEntry__rc_stored?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__rc_storage?(symbolEntry__storage(rtoc_self_view));
-}
+PUB FN symbolEntry__rc_stored?(self: SymbolEntry) RETURNS Bool ->
+    RETURN symbolEntry__rc_storage?(symbolEntry__storage(self));
 END
 PUB FN symbolEntry__rc_storage?(storage: ?String@symbol) RETURNS Bool ->
   RETURN ((storage == :shared) OR (storage == :multiowned));
 END
-PUB FN symbolEntry__provenance(self: SymbolEntry) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF !(provenance_storage.contains?(symbolEntry__storage(rtoc_self_view))) THEN
+PUB FN symbolEntry__provenance(self: SymbolEntry) RETURNS ?String@symbol ->
+    IF !(provenance_storage.contains?(symbolEntry__storage(self))) THEN
       RETURN NIL;
     END
-    RETURN symbolEntry__storage(rtoc_self_view);
-}
+    RETURN symbolEntry__storage(self);
 END
 PUB FN symbolEntry__heap_storage?(self: SymbolEntry) RETURNS Bool ->
     RETURN symbolEntry__heap_storage_value?(symbolEntry__storage(self));
 END
-PUB FN symbolEntry__frame_provenance?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__frame_storage_value?(symbolEntry__storage(rtoc_self_view));
-}
+PUB FN symbolEntry__frame_provenance?(self: SymbolEntry) RETURNS Bool ->
+    RETURN symbolEntry__frame_storage_value?(symbolEntry__storage(self));
 END
-PUB FN symbolEntry__rodata_provenance?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (symbolEntry__storage(rtoc_self_view) == :rodata);
-}
+PUB FN symbolEntry__rodata_provenance?(self: SymbolEntry) RETURNS Bool ->
+    RETURN (symbolEntry__storage(self) == :rodata);
 END
-PUB FN symbolEntry__borrow_provenance?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (symbolEntry__storage(rtoc_self_view) == :borrow);
-}
+PUB FN symbolEntry__borrow_provenance?(self: SymbolEntry) RETURNS Bool ->
+    RETURN (symbolEntry__storage(self) == :borrow);
 END
-PRIVATE FN symbolEntry__local_storage?(self: SymbolEntry) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN symbolEntry__local_storage_value?(symbolEntry__storage(rtoc_self_view));
-}
+PRIVATE FN symbolEntry__local_storage?(self: SymbolEntry) RETURNS Bool ->
+    RETURN symbolEntry__local_storage_value?(symbolEntry__storage(self));
 END
 PUB FN symbolEntry__heap_storage_value?(storage: ?String@symbol) RETURNS Bool ->
   RETURN (storage == :heap);
@@ -749,26 +605,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.lifetime = COPY original.lifetime;
 }
 END
-PUB FN symbolEntry__flow_facts(self: SymbolEntry) RETURNS BindingFlowFacts
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.flow;
-}
+PUB FN symbolEntry__flow_facts(self: SymbolEntry) RETURNS BindingFlowFacts ->
+    RETURN COPY self.flow;
 END
-PUB FN symbolEntry__flow_snapshot(self: SymbolEntry) RETURNS BindingFlowFacts
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN BindingFlowFacts{ non_escaping: rtoc_self_view.flow.non_escaping, borrowed_alias: rtoc_self_view.flow.borrowed_alias, valid: rtoc_self_view.flow.valid, invalid_reason: COPY rtoc_self_view.flow.invalid_reason, read: rtoc_self_view.flow.read, mutated: rtoc_self_view.flow.mutated, mutable_ref_target: rtoc_self_view.flow.mutable_ref_target, poly_borrow_target: rtoc_self_view.flow.poly_borrow_target, init_contents_heap: rtoc_self_view.flow.init_contents_heap };
-}
+PUB FN symbolEntry__flow_snapshot(self: SymbolEntry) RETURNS BindingFlowFacts ->
+    RETURN BindingFlowFacts{ non_escaping: self.flow.non_escaping, borrowed_alias: self.flow.borrowed_alias, valid: self.flow.valid, invalid_reason: COPY self.flow.invalid_reason, read: self.flow.read, mutated: self.flow.mutated, mutable_ref_target: self.flow.mutable_ref_target, poly_borrow_target: self.flow.poly_borrow_target, init_contents_heap: self.flow.init_contents_heap };
 END
-PUB FN symbolEntry__lifetime_sources(self: SymbolEntry) RETURNS ![]SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.lifetime;
-}
+PUB FN symbolEntry__lifetime_sources(self: SymbolEntry) RETURNS ![]SymbolEntry@multiowned ->
+    RETURN COPY self.lifetime;
 END
 PUB FN symbolEntry__tied_lifetime(sources: []SymbolEntry@multiowned) RETURNS ![]SymbolEntry@multiowned ->
   RETURN TRY (symbolEntry__unique_sources(sources));
@@ -999,13 +843,10 @@ PRIVATE FN symbolEntry__next_binding_id() RETURNS Int64 ->
   next_binding_id_value = (next_binding_id_value + 1);
   RETURN id;
 END
-PRIVATE FN symbolEntry__normalize_lifetime(self: SymbolEntry, value: ?SymbolEntryLifetimeInput) RETURNS ![]SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN symbolEntry__normalize_lifetime(self: SymbolEntry, value: ?SymbolEntryLifetimeInput) RETURNS ![]SymbolEntry@multiowned ->
     IF value? IS_A String@symbol AS string_symbol THEN
       IF (string_symbol == :current_scope) THEN
-        RETURN CAST([rtoc_self_view] AS []SymbolEntry@multiowned);
+        RETURN CAST([self] AS []SymbolEntry@multiowned);
       END
     END
     MUTABLE sources: []SymbolEntryLifetimeSourceInput = List[];
@@ -1024,7 +865,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     &normalized.append(castSymbolEntryLifetimeSourceInputToSymbolEntryMultiowned(COPY _));
     END
     RETURN TRY (symbolEntry__unique_sources(normalized));
-}
 END
 PUB FN symbolEntry__new(reg: ?SymbolEntryRegInput, type: ?SymbolEntryTypeInput, mutable: Bool, storage: String@symbol, sync: ?String@symbol = NIL, layout: ?String@symbol = NIL, rebindable: Bool = FALSE, size: Int64 = 0, capabilities: [Set]String@symbol = Set[], valid: Bool = TRUE, invalid_reason: ?String = NIL, resource: ?Bool = NIL, close_plan: ?ResourceClosePlan = NIL) RETURNS !SymbolEntry@multiowned ->
   MUTABLE self = SymbolEntry{ binding_id: 0_i64, capabilities: COPY capabilities, flow: BindingFlowFacts{ valid: valid, invalid_reason: COPY invalid_reason, non_escaping: FALSE, borrowed_alias: FALSE, read: FALSE, mutated: FALSE, mutable_ref_target: FALSE, poly_borrow_target: FALSE, init_contents_heap: FALSE }, lifecycle: BindingLifecycleFacts{ type: COPY TRY (symbolEntry__normalize_type_input(COPY type)), storage: COPY storage, sync: COPY sync, layout: COPY layout, resource: resource, close_plan: COPY close_plan, semantic_place_id: NIL, ownership_kind: NIL, takes: FALSE, is_param: FALSE, link_source: NIL, async_result_shape: NIL, foreign_out_owner: FALSE, owned_optional_capture: FALSE, kept_identity: NIL, carrier_contract: :polymorphic, carrier_polymorphic: FALSE }, lifetime: List[], mutable: mutable, ownership_binding_id: 0_i64, param_decl_token: NIL, reassigned: FALSE, rebindable: rebindable, reg: COPY reg, scope: NIL, scope_depth: NIL, size: size, sync_families: NIL };

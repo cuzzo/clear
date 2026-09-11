@@ -12099,18 +12099,15 @@ END
 PUB FN ownershipContract__consume_operands(operands: []OwnershipOperandFact) RETURNS !OwnershipContract@multiowned ->
   RETURN TRY (ownershipContract__new(operands, List[], List[], TRUE));
 END
-PUB FN ownershipContract__owned_operand_names(self: OwnershipContract) RETURNS ![]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN ownershipContract__owned_operand_names(self: OwnershipContract) RETURNS ![]String ->
     MUTABLE names: []String = List[];
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_self_view.operands.length() DO
-      IF rtoc_self_view.operands[rtoc_idx]?.borrowed THEN
+    WHILE rtoc_idx < self.operands.length() DO
+      IF self.operands[rtoc_idx]?.borrowed THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE name: ?String = COPY rtoc_self_view.operands[rtoc_idx]?.name;
+      MUTABLE name: ?String = COPY self.operands[rtoc_idx]?.name;
       IF !(name) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -12130,20 +12127,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN distinct_names;
-}
 END
 PUB FN ownershipContract__empty?(self: OwnershipContract) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((((rtoc_self_view.operands.length() == 0) AND (rtoc_self_view.produces.length() == 0)) AND (rtoc_self_view.borrows.length() == 0)) AND !(rtoc_self_view.covers_consuming_params));
-}
+  EFFECTS REENTRANT ->
+    RETURN ((((self.operands.length() == 0) AND (self.produces.length() == 0)) AND (self.borrows.length() == 0)) AND !(self.covers_consuming_params));
 END
-PRIVATE FN ownershipContract__normalize_names(self: OwnershipContract, names: []String) RETURNS ![]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN ownershipContract__normalize_names(self: OwnershipContract, names: []String) RETURNS ![]String ->
     MUTABLE normalized: []String = [];
     FOR raw_name IN names DO
       IF !(raw_name.empty?()) THEN
@@ -12153,7 +12142,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
     END
     RETURN normalized;
-}
 END
 PUB FN ownershipContract__new(operands: []OwnershipOperandFact, produces: []String, borrows: []String, covers_consuming_params: Bool = FALSE) RETURNS !OwnershipContract@multiowned ->
   MUTABLE self = OwnershipContract{ borrows: List[], covers_consuming_params: covers_consuming_params, operands: List[], produces: List[] };
@@ -12816,92 +12804,49 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN inlineAllocMetadata__empty?(self: InlineAllocMetadata) RETURNS Bool
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view.slots.count() == 0);
-}
+  EFFECTS REENTRANT ->
+    RETURN (self.slots.count() == 0);
 END
 PUB FN inlineAllocMetadata__each(self: InlineAllocMetadata, blk: FN(String@symbol, String@symbol) -> Void) RETURNS Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    FOR rtoc_each_key IN rtoc_self_view.slots.keys() DO
-    MUTABLE alloc: String@symbol = COPY UNWRAP (rtoc_self_view.slots[rtoc_each_key]);
+  EFFECTS REENTRANT ->
+    FOR rtoc_each_key IN self.slots.keys() DO
+    MUTABLE alloc: String@symbol = COPY UNWRAP (self.slots[rtoc_each_key]);
     blk(symbol(rtoc_each_key), alloc);
     END
     NIL;
-}
 END
 PUB FN inlineAllocMetadata__values(self: InlineAllocMetadata) RETURNS ![]String@symbol
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.slots.values();
-}
+  EFFECTS REENTRANT ->
+    RETURN self.slots.values();
 END
-PUB FN inlineAllocMetadata__slot(self: InlineAllocMetadata, key: String@symbol) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN rtoc_self_view.slots[key];
-}
+PUB FN inlineAllocMetadata__slot(self: InlineAllocMetadata, key: String@symbol) RETURNS ?String@symbol ->
+    RETURN self.slots[key];
 END
-PUB FN inlineAllocMetadata__primary(self: InlineAllocMetadata) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN inlineAllocMetadata__slot(rtoc_self_view, :alloc);
-}
+PUB FN inlineAllocMetadata__primary(self: InlineAllocMetadata) RETURNS ?String@symbol ->
+    RETURN inlineAllocMetadata__slot(self, :alloc);
 END
-PUB FN inlineAllocMetadata__key_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN inlineAllocMetadata__slot(rtoc_self_view, :key_alloc);
-}
+PUB FN inlineAllocMetadata__key_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol ->
+    RETURN inlineAllocMetadata__slot(self, :key_alloc);
 END
-PUB FN inlineAllocMetadata__value_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN inlineAllocMetadata__slot(rtoc_self_view, :val_alloc);
-}
+PUB FN inlineAllocMetadata__value_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol ->
+    RETURN inlineAllocMetadata__slot(self, :val_alloc);
 END
-PUB FN inlineAllocMetadata__shard_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN inlineAllocMetadata__slot(rtoc_self_view, :shard_alloc);
-}
+PUB FN inlineAllocMetadata__shard_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol ->
+    RETURN inlineAllocMetadata__slot(self, :shard_alloc);
 END
-PUB FN inlineAllocMetadata__sink_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF inlineAllocMetadata__value_alloc(rtoc_self_view) != NIL THEN
-    RETURN (inlineAllocMetadata__value_alloc(rtoc_self_view))?;
+PUB FN inlineAllocMetadata__sink_alloc(self: InlineAllocMetadata) RETURNS ?String@symbol ->
+    IF inlineAllocMetadata__value_alloc(self) != NIL THEN
+    RETURN (inlineAllocMetadata__value_alloc(self))?;
     ELSE
-    RETURN inlineAllocMetadata__primary(rtoc_self_view);
+    RETURN inlineAllocMetadata__primary(self);
     END
-}
 END
-PUB FN inlineAllocMetadata__requires_target_alloc?(self: InlineAllocMetadata) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (!((inlineAllocMetadata__primary(rtoc_self_view) == NIL)) OR !((inlineAllocMetadata__key_alloc(rtoc_self_view) == NIL)));
-}
+PUB FN inlineAllocMetadata__requires_target_alloc?(self: InlineAllocMetadata) RETURNS Bool ->
+    RETURN (!((inlineAllocMetadata__primary(self) == NIL)) OR !((inlineAllocMetadata__key_alloc(self) == NIL)));
 END
-FN inlineAllocMetadata__single_alloc(self: InlineAllocMetadata) RETURNS !?String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN inlineAllocMetadata__single_alloc(self: InlineAllocMetadata) RETURNS !?String@symbol ->
     MUTABLE uniq: []String@symbol = [];
-    FOR alloc_value IN (TRY (inlineAllocMetadata__values(rtoc_self_view))) DO
+    FOR alloc_value IN (TRY (inlineAllocMetadata__values(self))) DO
       IF !(uniq.contains?(alloc_value)) THEN
         &uniq.append(COPY alloc_value);
       END
@@ -12911,41 +12856,24 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
-PUB FN inlineAllocMetadata__any_heap?(self: InlineAllocMetadata) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (inlineAllocMetadata__values(rtoc_self_view))).contains?(:heap);
-}
+PUB FN inlineAllocMetadata__any_heap?(self: InlineAllocMetadata) RETURNS !Bool ->
+    RETURN (TRY (inlineAllocMetadata__values(self))).contains?(:heap);
 END
-PUB FN inlineAllocMetadata__any_frame?(self: InlineAllocMetadata) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (inlineAllocMetadata__values(rtoc_self_view))).contains?(:frame);
-}
+PUB FN inlineAllocMetadata__any_frame?(self: InlineAllocMetadata) RETURNS !Bool ->
+    RETURN (TRY (inlineAllocMetadata__values(self))).contains?(:frame);
 END
-PUB FN inlineAllocMetadata__with_all(self: InlineAllocMetadata, alloc: String@symbol) RETURNS InlineAllocMetadata@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN inlineAllocMetadata__with_all(self: InlineAllocMetadata, alloc: String@symbol) RETURNS InlineAllocMetadata@multiowned ->
     MUTABLE updated: {String@symbol}String@symbol = {};
-    FOR rtoc_each_key IN rtoc_self_view.slots.keys() DO
-    MUTABLE ignored_slot_alloc: String@symbol = COPY UNWRAP (rtoc_self_view.slots[rtoc_each_key]);
+    FOR rtoc_each_key IN self.slots.keys() DO
+    MUTABLE ignored_slot_alloc: String@symbol = COPY UNWRAP (self.slots[rtoc_each_key]);
     updated[rtoc_each_key] = COPY alloc;
     END
     RETURN inlineAllocMetadata__new(updated[:alloc], updated[:key_alloc], updated[:val_alloc], updated[:shard_alloc]);
-}
 END
 PUB FN inlineAllocMetadata__inspect(self: InlineAllocMetadata) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     RETURN CAST(compilerInspectValue() AS String);
-}
 END
 PUB FN inlineAllocMetadata__new(alloc: ?String@symbol = NIL, key_alloc: ?String@symbol = NIL, val_alloc: ?String@symbol = NIL, shard_alloc: ?String@symbol = NIL) RETURNS InlineAllocMetadata@multiowned ->
   MUTABLE self = InlineAllocMetadata{ slots: {} };
@@ -12965,12 +12893,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.pass_state = COPY pass_state;
 }
 END
-FN program__mir_pass_state(self: MIRProgram) RETURNS ?MIRPassState@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN KEEP rtoc_self_view.pass_state;
-}
+FN program__mir_pass_state(self: MIRProgram) RETURNS ?MIRPassState@multiowned ->
+    RETURN KEEP self.pass_state;
 END
 FN program__set_mir_pass_state(MUTABLE self: MIRProgram, state: ?MIRPassState) RETURNS Void
   REQUIRES self: LOCAL
@@ -12979,90 +12903,46 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.pass_state = COPY state;
 }
 END
-FN program__mir?(self: MIRProgram) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__mir?(self: MIRProgram) RETURNS Bool ->
     RETURN TRUE;
-}
 END
-FN program__stmt?(self: MIRProgram) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__stmt?(self: MIRProgram) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN program__expr?(self: MIRProgram) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__expr?(self: MIRProgram) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN program__ownership_effect(self: MIRProgram) RETURNS OwnershipEffect
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__ownership_effect(self: MIRProgram) RETURNS OwnershipEffect ->
     RETURN ownershipEffect__none();
-}
 END
-FN program__child_exprs(self: MIRProgram) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__child_exprs(self: MIRProgram) RETURNS ![]Emittable ->
     MUTABLE empty_child_exprs: []Emittable = [];
     RETURN empty_child_exprs;
-}
 END
-FN program__ownership_source_exprs(self: MIRProgram) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__ownership_source_exprs(self: MIRProgram) RETURNS ![]Emittable ->
     MUTABLE empty_child_exprs: []Emittable = [];
     RETURN empty_child_exprs;
-}
 END
-FN program__owned_position_source_exprs(self: MIRProgram) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__owned_position_source_exprs(self: MIRProgram) RETURNS ![]Emittable ->
     MUTABLE empty_child_exprs: []Emittable = [];
     RETURN empty_child_exprs;
-}
 END
-FN program__body_slots(self: MIRProgram) RETURNS ![]MIRBodySlot
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__body_slots(self: MIRProgram) RETURNS ![]MIRBodySlot ->
     MUTABLE empty_body_slots: []MIRBodySlot = [];
     RETURN empty_body_slots;
-}
 END
-FN program__without_try(self: MIRProgram) RETURNS Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view;
-}
+FN program__without_try(self: MIRProgram) RETURNS Emittable ->
+    RETURN COPY self;
 END
-FN program__explicit_ownership_contract(self: MIRProgram) RETURNS ?OwnershipContract@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__explicit_ownership_contract(self: MIRProgram) RETURNS ?OwnershipContract@multiowned ->
     RETURN NIL;
-}
 END
-FN program__compact_child_exprs(self: MIRProgram, values: []Any) RETURNS ![]Emittable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__compact_child_exprs(self: MIRProgram, values: []Any) RETURNS ![]Emittable ->
     MUTABLE children: []Emittable = List[];
     FOR _ IN values DO
-    program__append_child_expr(rtoc_self_view, &children, _);
+    program__append_child_expr(self, &children, _);
     END
     RETURN children;
-}
 END
 FN program__append_child_expr<T>(self: MIRProgram, MUTABLE children: []Emittable, value: T) RETURNS Void
   REQUIRES self: LOCAL
@@ -13079,19 +12959,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     NIL;
 }
 END
-FN program__body_slot(self: MIRProgram, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__body_slot(self: MIRProgram, name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
     RETURN bodySlot__new(name, body);
-}
 END
-FN program__owned_effect_for_alloc(self: MIRProgram, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN program__owned_effect_for_alloc(self: MIRProgram, alloc: ?String@symbol, cleanup_kind: String@symbol = :uniform) RETURNS OwnershipEffect ->
     RETURN ownershipEffect__owned(alloc, cleanup_kind);
-}
 END
 FN program__new(items: []Emittable, pass_state: ?MIRPassState = NIL) RETURNS MIRProgram@multiowned ->
   MUTABLE self = MIRProgram{ items: COPY items, pass_state: COPY pass_state };

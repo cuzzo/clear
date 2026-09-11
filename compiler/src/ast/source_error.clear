@@ -22,30 +22,23 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.code = COPY code;
 }
 END
-FN sourceError__error_type(self: SourceError) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN sourceError__error_type(self: SourceError) RETURNS String ->
     RETURN "Error";
-}
 END
-PRIVATE FN sourceError__build_message(self: SourceError) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF rtoc_self_view.token EXISTS AS token_value THEN
+PRIVATE FN sourceError__build_message(self: SourceError) RETURNS String ->
+    IF self.token EXISTS AS token_value THEN
       IF (token_value.type == :EOF) THEN
-        RETURN "\n\x1B[31m[${sourceError__error_type(rtoc_self_view)}]\x1B[0m${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message} (at End of File)\n";
+        RETURN "\n\x1B[31m[${sourceError__error_type(self)}]\x1B[0m${sourceError__code_suffix(self)} ${self.original_message} (at End of File)\n";
       ELSE
         MUTABLE line_num = token_value.line;
         MUTABLE col_num = token_value.column;
-        IF rtoc_self_view.source_code EXISTS AS source_code_value THEN
+        IF self.source_code EXISTS AS source_code_value THEN
           IF (source_code_value.length() == 0) THEN
-            RETURN "[${sourceError__error_type(rtoc_self_view)}]${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message} (Line ${line_num.toString()})";
+            RETURN "[${sourceError__error_type(self)}]${sourceError__code_suffix(self)} ${self.original_message} (Line ${line_num.toString()})";
           ELSE
             MUTABLE lines = source_code_value.split("\n");
             MUTABLE raw_line = (lines[(line_num - 1)] OR_ELSE "");
-            MUTABLE out = "\n\x1B[31m[${sourceError__error_type(rtoc_self_view)}]\x1B[0m${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message}\n";
+            MUTABLE out = "\n\x1B[31m[${sourceError__error_type(self)}]\x1B[0m${sourceError__code_suffix(self)} ${self.original_message}\n";
             out = (out $+ "\x1B[90mLocation:\x1B[0m Line ${line_num.toString()}, Column ${col_num.toString()}\n\n");
             MUTABLE gutter_width = line_num.toString().codepointCount();
             out = (out $+ "  ${compilerRepeatString(" ", gutter_width)} | \n");
@@ -57,24 +50,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
             RETURN out;
           END
         ELSE
-          RETURN "[${sourceError__error_type(rtoc_self_view)}]${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message} (Line ${line_num.toString()})";
+          RETURN "[${sourceError__error_type(self)}]${sourceError__code_suffix(self)} ${self.original_message} (Line ${line_num.toString()})";
         END
       END
     ELSE
-      RETURN "\n\x1B[31m[${sourceError__error_type(rtoc_self_view)}]\x1B[0m${sourceError__code_suffix(rtoc_self_view)} ${rtoc_self_view.original_message} (at End of File)\n";
+      RETURN "\n\x1B[31m[${sourceError__error_type(self)}]\x1B[0m${sourceError__code_suffix(self)} ${self.original_message} (at End of File)\n";
     END
-}
 END
-PRIVATE FN sourceError__code_suffix(self: SourceError) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    IF rtoc_self_view.code EXISTS AS code_value THEN
+PRIVATE FN sourceError__code_suffix(self: SourceError) RETURNS String ->
+    IF self.code EXISTS AS code_value THEN
       RETURN " [${code_value}]";
     ELSE
       RETURN "";
     END
-}
 END
 FN sourceError__new(token: ?Token, message: String, source_code: ?String, code: ?String@symbol = NIL) RETURNS SourceError@multiowned ->
   MUTABLE self = SourceError{ code: COPY code, original_message: COPY message, source_code: COPY source_code, token: COPY token };
@@ -85,23 +73,15 @@ PUB STRUCT ParserError {
 
 }
 
-FN parserError__error_type(self: ParserError) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN parserError__error_type(self: ParserError) RETURNS String ->
     RETURN "Parser Error";
-}
 END
 PUB STRUCT CompilerError {
 
 }
 
-FN compilerError__error_type(self: CompilerError) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN compilerError__error_type(self: CompilerError) RETURNS String ->
     RETURN "Compiler Error";
-}
 END
 
 PUB UNION DiagnosticAnchor { TokenValue: Token, Locatable: Locatable, AnchorTokenValue: AnchorToken }

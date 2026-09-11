@@ -250,10 +250,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN t;
 }
 END
-PRIVATE FN clearParser__emit_legacy_type_migration(self: ClearParser, start_token: Token, end_token: Token, type: Type) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__emit_legacy_type_migration(self: ClearParser, start_token: Token, end_token: Token, type: Type) RETURNS !Void ->
     IF !(fixCollector__type_migrations_enabled?()) THEN
       RETURN;
     END
@@ -272,7 +269,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE replacement: ?String = TRY (type__inline_migration_name(type));
     IF replacement EXISTS AS replacement_value THEN
-      MUTABLE line: ?String = COPY rtoc_self_view.source_code.split("\n")[(start_token.line - 1)];
+      MUTABLE line: ?String = COPY self.source_code.split("\n")[(start_token.line - 1)];
       IF line EXISTS AS line_value THEN
         MUTABLE length = ((end_token.column + (token__display_value(end_token)).codepointCount()) - start_token.column);
         MUTABLE original = COPY (line_value.substr(((start_token.column - 1)), length));
@@ -280,19 +277,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN;
         END
         MUTABLE edit = edit__new(span__new(NIL, start_token.line, start_token.column, length), replacement_value);
-        TRY (fixCollector__push(TRY (fixableFinding__new(:info, "Legacy type syntax can be written in Inline Pivot form", start_token, :type_migration, [TRY (fix__new(TRY (clearParser__fix_description(rtoc_self_view, :REWRITE_INLINE_PIVOT_TYPE, {:type: "${replacement_value}"})), [edit], :auto))]))));
+        TRY (fixCollector__push(TRY (fixableFinding__new(:info, "Legacy type syntax can be written in Inline Pivot form", start_token, :type_migration, [TRY (fix__new(TRY (clearParser__fix_description(self, :REWRITE_INLINE_PIVOT_TYPE, {:type: "${replacement_value}"})), [edit], :auto))]))));
       ELSE
         RETURN;
       END
     ELSE
       RETURN;
     END
-}
 END
-PUB FN clearParser__emit_boxed_capability_migration(self: ClearParser, token: Token) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN clearParser__emit_boxed_capability_migration(self: ClearParser, token: Token) RETURNS !Void ->
     IF !(fixCollector__type_migrations_enabled?()) THEN
       RETURN;
     END
@@ -306,26 +299,21 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       replacement = "boxed";
     END
     MUTABLE edit = edit__new(span__new(NIL, token.line, token.column, (TRY (token__text_mut(token))).codepointCount()), replacement);
-    TRY (fixCollector__push(TRY (fixableFinding__new(:info, "Legacy @indirect capability is now spelled @boxed", token, :type_migration, [TRY (fix__new(TRY (clearParser__fix_description(rtoc_self_view, :RENAME_BOXED_CAPABILITY, {:old: "${TRY (token__text_mut(token))}", :new: "${replacement}"})), [edit], :auto))]))));
-}
+    TRY (fixCollector__push(TRY (fixableFinding__new(:info, "Legacy @indirect capability is now spelled @boxed", token, :type_migration, [TRY (fix__new(TRY (clearParser__fix_description(self, :RENAME_BOXED_CAPABILITY, {:old: "${TRY (token__text_mut(token))}", :new: "${replacement}"})), [edit], :auto))]))));
 END
-PRIVATE FN clearParser__inline_type_annotation_start?(self: ClearParser) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__inline_type_annotation_start?(self: ClearParser) RETURNS Bool ->
     MUTABLE offset: Int64 = 0;
-    MUTABLE token = UNWRAP (clearParser__peek_at(rtoc_self_view, 0));
+    MUTABLE token = UNWRAP (clearParser__peek_at(self, 0));
     MUTABLE prefixes: String = "";
     WHILE ((token.type == :CHAR) AND (["?", "!", "~"]).contains?(token__display_value(token))) DO
       prefixes = (prefixes $+ COPY token__display_value(token));
       offset = (offset + 1);
-      token = (clearParser__peek_at(rtoc_self_view, offset) OR_ELSE token);
+      token = (clearParser__peek_at(self, offset) OR_ELSE token);
     END
     IF ((token.type == :CHAR) AND (["[", "{"]).contains?(token__display_value(token))) THEN
       RETURN TRUE;
     END
     RETURN (!((prefixes.length() == 0)) AND !((["~", "!", "?", "~!", "~?", "!?", "~!?"]).contains?(prefixes)));
-}
 END
 PRIVATE FN clearParser__parse_inline_type_expression(MUTABLE self: ClearParser) RETURNS !TypeExpression
   REQUIRES self: LOCAL
@@ -551,31 +539,24 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN clearParser__mark_polymorphic_shared_type(self: ClearParser, type: Type) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN clearParser__mark_polymorphic_shared_type(self: ClearParser, type: Type) RETURNS !Type ->
     MUTABLE t = TRY (type__new(TypeConstructionInput{ Type: COPY type }));
     TRY (type__apply_reference_ownership_mut(&t, :shared));
     TRY (type__mark_polymorphic_shared_mut(&t));
     RETURN t;
-}
 END
 PRIVATE FN clearParser__type_annotation_source(self: ClearParser, type: Type) RETURNS !String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     MUTABLE t = COPY type;
     IF type__polymorphic_shared?(t) THEN
       MUTABLE shared_inner = TRY (type__new(TypeConstructionInput{ Type: COPY t }));
       TRY (type__apply_reference_ownership_mut(&shared_inner, :affine));
       TRY (type__mark_polymorphic_shared_mut(&shared_inner, FALSE));
-      RETURN "SHARED ${TRY (clearParser__type_annotation_source(rtoc_self_view, shared_inner))}";
+      RETURN "SHARED ${TRY (clearParser__type_annotation_source(self, shared_inner))}";
     END
     IF type__optional?(t) THEN
       MUTABLE wrapped = UNWRAP (TRY (type__wrapped_type(t)));
-      MUTABLE inner = TRY (clearParser__type_annotation_source(rtoc_self_view, wrapped));
+      MUTABLE inner = TRY (clearParser__type_annotation_source(self, wrapped));
       IF (type__array?(wrapped) OR type__map?(wrapped)) THEN
         RETURN "?(${inner})";
       ELSE
@@ -645,5 +626,4 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN "${base}@${capabilities.join(":")}";
     END
-}
 END

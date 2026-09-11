@@ -196,12 +196,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PRIVATE FN pipelinePlaceholderRewriter__soa_each_field?(self: PipelinePlaceholderRewriter, node: Locatable) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN pipelineContextState__soa_each_field_node?(rtoc_self_view.context, node);
-}
+PRIVATE FN pipelinePlaceholderRewriter__soa_each_field?(self: PipelinePlaceholderRewriter, node: Locatable) RETURNS Bool ->
+    RETURN pipelineContextState__soa_each_field_node?(self.context, node);
 END
 PRIVATE FN pipelinePlaceholderRewriter__soa_each_field(MUTABLE self: PipelinePlaceholderRewriter, node: GetField) RETURNS Identifier
   REQUIRES self: LOCAL
@@ -213,20 +209,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN new_id;
 }
 END
-PRIVATE FN pipelinePlaceholderRewriter__substitute_identifier(self: PipelinePlaceholderRewriter, node: Identifier) RETURNS Locatable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE replacement: ?String = pipelineContextState__replacement_for_identifier(rtoc_self_view.context, node.name);
+PRIVATE FN pipelinePlaceholderRewriter__substitute_identifier(self: PipelinePlaceholderRewriter, node: Identifier) RETURNS Locatable ->
+    MUTABLE replacement: ?String = pipelineContextState__replacement_for_identifier(self.context, node.name);
     IF replacement EXISTS AS replacement_value THEN
       MUTABLE replacement_value_mutable = COPY replacement_value;
       MUTABLE new_id = Identifier{ token: COPY node.token, name: COPY replacement_value_mutable, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
-      pipelinePlaceholderRewriter__copy_type_info(rtoc_self_view, PipelineRewriteNode{ Identifier: COPY node }, PipelineRewriteNode{ Identifier: COPY new_id });
+      pipelinePlaceholderRewriter__copy_type_info(self, PipelineRewriteNode{ Identifier: COPY node }, PipelineRewriteNode{ Identifier: COPY new_id });
       RETURN Locatable{ Identifier: COPY new_id };
     ELSE
       RETURN COPY Locatable{ Identifier: COPY node };
     END
-}
 END
 PRIVATE FN pipelinePlaceholderRewriter__substitute_func_call(MUTABLE self: PipelinePlaceholderRewriter, node: FuncCall) RETURNS !Locatable
   REQUIRES self: LOCAL
@@ -688,24 +680,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN Locatable{ IfStatement: COPY new_if };
 }
 END
-PRIVATE FN pipelinePlaceholderRewriter__copy_type_info(self: PipelinePlaceholderRewriter, src: PipelineRewriteNode, MUTABLE dst: PipelineRewriteNode) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelinePlaceholderRewriter__copy_type_info(self: PipelinePlaceholderRewriter, src: PipelineRewriteNode, MUTABLE dst: PipelineRewriteNode) RETURNS Void ->
     aST__copy_pipeline_rewrite_metadata_mut(&dst, src);
-}
 END
-PRIVATE FN pipelinePlaceholderRewriter__copy_call_metadata(self: PipelinePlaceholderRewriter, src: PipelineRewriteNode, MUTABLE dst: PipelineRewriteNode) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelinePlaceholderRewriter__copy_call_metadata(self: PipelinePlaceholderRewriter, src: PipelineRewriteNode, MUTABLE dst: PipelineRewriteNode) RETURNS Void ->
     aST__copy_pipeline_rewrite_metadata_mut(&dst, src, TRUE);
-}
 END
-PRIVATE FN pipelinePlaceholderRewriter__soa_field_slice_type(self: PipelinePlaceholderRewriter, field_node: GetField) RETURNS !Type
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN pipelinePlaceholderRewriter__soa_field_slice_type(self: PipelinePlaceholderRewriter, field_node: GetField) RETURNS !Type ->
     MUTABLE field_type: ?Type@multiowned = COPY field_node.type_object;
     IF field_type EXISTS AS field_type_value THEN
       MUTABLE concrete_type = field_type_value;
@@ -716,7 +697,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       panic("SOA field slice: missing annotated type");
     END
-}
 END
 PUB FN pipelinePlaceholderRewriter__new(context: PipelineContextState) RETURNS PipelinePlaceholderRewriter@multiowned ->
   MUTABLE self = PipelinePlaceholderRewriter{ context: COPY context };

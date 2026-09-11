@@ -533,20 +533,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-PUB FN keptEdgeLiveness__last_use?(self: KeptEdgeLiveness, arg: Identifier) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE occ: ?Occurrence = COPY rtoc_self_view.by_object[aST__node_identity(Locatable{ Identifier: COPY arg })];
+PUB FN keptEdgeLiveness__last_use?(self: KeptEdgeLiveness, arg: Identifier) RETURNS Bool ->
+    MUTABLE occ: ?Occurrence = COPY self.by_object[aST__node_identity(Locatable{ Identifier: COPY arg })];
     IF occ EXISTS AS occ_value THEN
       IF occ_value.loop_depth.positive?() THEN
         RETURN FALSE;
       END
-      RETURN ((rtoc_self_view.last_position[arg.name] OR_ELSE -1) <= occ_value.position);
+      RETURN ((self.last_position[arg.name] OR_ELSE -1) <= occ_value.position);
     ELSE
       RETURN FALSE;
     END
-}
 END
 PRIVATE FN keptEdgeLiveness__index_node(MUTABLE self: KeptEdgeLiveness, node: Locatable, loop_depth: Int64) RETURNS Void
   REQUIRES self: LOCAL

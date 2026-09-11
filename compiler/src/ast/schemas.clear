@@ -33,16 +33,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.visibility = COPY visibility;
 }
 END
-FN enumSchema__normalize_variants(self: EnumSchema, variants: []SchemasEnumSchemaVariantInputItem) RETURNS ![Set]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN enumSchema__normalize_variants(self: EnumSchema, variants: []SchemasEnumSchemaVariantInputItem) RETURNS ![Set]String ->
     MUTABLE normalized: [Set]String = Set[];
     FOR _ IN variants DO
     &normalized.insert(COPY CAST(_ AS String));
     END
     RETURN normalized;
-}
 END
 FN enumSchema__kind(self: EnumSchema) RETURNS ?String@symbol
 ->
@@ -50,33 +46,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN :enum;
 }
 END
-FN enumSchema__enum?(self: EnumSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN enumSchema__enum?(self: EnumSchema) RETURNS Bool ->
     RETURN TRUE;
-}
 END
-FN enumSchema__union?(self: EnumSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN enumSchema__union?(self: EnumSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN enumSchema__struct?(self: EnumSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN enumSchema__struct?(self: EnumSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN enumSchema__resource?(self: EnumSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN enumSchema__resource?(self: EnumSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
 PUB FN enumSchema__new(variants: []SchemasEnumSchemaVariantInputItem, visibility: String@symbol = :package) RETURNS !EnumSchema@multiowned ->
   MUTABLE self = EnumSchema{ variants: Set[], visibility: COPY visibility };
@@ -172,60 +152,33 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN :resource;
 }
 END
-FN resourceSchema__resource?(self: ResourceSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN resourceSchema__resource?(self: ResourceSchema) RETURNS Bool ->
     RETURN TRUE;
-}
 END
-FN resourceSchema__union?(self: ResourceSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN resourceSchema__union?(self: ResourceSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN resourceSchema__enum?(self: ResourceSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN resourceSchema__enum?(self: ResourceSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN resourceSchema__struct?(self: ResourceSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN resourceSchema__struct?(self: ResourceSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-PUB FN resourceSchema__type_params(self: ResourceSchema) RETURNS ![]String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.type_params;
-}
+PUB FN resourceSchema__type_params(self: ResourceSchema) RETURNS ![]String@symbol ->
+    RETURN COPY self.type_params;
 END
-FN resourceSchema__normalize_fields(self: ResourceSchema, fields: {String@symbol}SchemasResourceSchemaFieldInput) RETURNS !{String}StructField
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN resourceSchema__normalize_fields(self: ResourceSchema, fields: {String@symbol}SchemasResourceSchemaFieldInput) RETURNS !{String}StructField ->
     MUTABLE out: {String}StructField = {};
     MUTABLE keys = fields.keys();
     MUTABLE i: Int64 = 0;
     WHILE (i < keys.length()) DO
       MUTABLE current_key: String = COPY UNWRAP (keys[i]);
-      out[current_key] = CAST(TRY (resourceSchema__normalize_field(rtoc_self_view, UNWRAP (fields[current_key]))) AS StructField);
+      out[current_key] = CAST(TRY (resourceSchema__normalize_field(self, UNWRAP (fields[current_key]))) AS StructField);
       i = (i + 1);
     END
     RETURN out;
-}
 END
-PUB FN resourceSchema__normalize_field(self: ResourceSchema, field: SchemasResourceSchemaFieldInput) RETURNS !StructField
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN resourceSchema__normalize_field(self: ResourceSchema, field: SchemasResourceSchemaFieldInput) RETURNS !StructField ->
     IF field IS_A StructField AS struct_field THEN
       RETURN COPY struct_field;
     END
@@ -271,7 +224,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: COPY field_symbol })), default: NIL, borrowed: FALSE };
     END
     RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, borrowed: FALSE };
-}
 END
 PUB FN resourceSchema__new(close_plan: ResourceClosePlan, static_methods: {String}{String@symbol}SchemasResourceSchemaStaticMethodValue, fields: {String@symbol}SchemasResourceSchemaFieldInput, type_params: []String@symbol, extern_module: ?String = NIL, as_type: ?String = NIL, visibility: String@symbol = :package, methods: {String@symbol}FunctionSignature@multiowned) RETURNS !ResourceSchema@multiowned ->
   MUTABLE self = ResourceSchema{ as_type: COPY as_type, close_plan: COPY close_plan, extern_module: COPY extern_module, fields: {}, methods: COPY methods, static_methods: COPY static_methods, type_params: COPY type_params, visibility: COPY visibility };
@@ -307,12 +259,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.deinit_entries = COPY deinit_entries;
 }
 END
-FN inlineStructVariant__deinit_entries(self: InlineStructVariant) RETURNS ![]InlineStructDeinitEntry
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.deinit_entries;
-}
+FN inlineStructVariant__deinit_entries(self: InlineStructVariant) RETURNS ![]InlineStructDeinitEntry ->
+    RETURN COPY self.deinit_entries;
 END
 PUB FN inlineStructVariant__set_deinit_entries(MUTABLE self: InlineStructVariant, entries: []InlineStructDeinitEntry) RETURNS ![]InlineStructDeinitEntry
   REQUIRES self: LOCAL
@@ -329,17 +277,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (other.fields == rtoc_self_view.fields);
 }
 END
-FN inlineStructVariant__eql?(self: InlineStructVariant, other: InlineStructVariant) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (rtoc_self_view == other);
-}
+FN inlineStructVariant__eql?(self: InlineStructVariant, other: InlineStructVariant) RETURNS Bool ->
+    RETURN (self == other);
 END
-FN inlineStructVariant__normalize_fields(self: InlineStructVariant, fields: {String@symbol}TypeTypeInput) RETURNS !{String@symbol}TypeTypeInput
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN inlineStructVariant__normalize_fields(self: InlineStructVariant, fields: {String@symbol}TypeTypeInput) RETURNS !{String@symbol}TypeTypeInput ->
     MUTABLE out: {String@symbol}TypeTypeInput = {};
     MUTABLE keys = fields.keys();
     MUTABLE i: Int64 = 0;
@@ -349,7 +290,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       i = (i + 1);
     END
     RETURN out;
-}
 END
 PUB FN inlineStructVariant__new(fields: {String@symbol}TypeTypeInput, deinit_entries: []InlineStructDeinitEntry) RETURNS !InlineStructVariant@multiowned ->
   MUTABLE self = InlineStructVariant{ deinit_entries: COPY deinit_entries, fields: {} };
@@ -373,25 +313,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.visibility = COPY visibility;
 }
 END
-FN unionSchema__normalize_variants(self: UnionSchema, variants: {String@symbol}?SchemasUnionSchemaVariantInput) RETURNS !{String@symbol}?SchemasUnionSchemaVariantValue
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN unionSchema__normalize_variants(self: UnionSchema, variants: {String@symbol}?SchemasUnionSchemaVariantInput) RETURNS !{String@symbol}?SchemasUnionSchemaVariantValue ->
     MUTABLE out: {String@symbol}?SchemasUnionSchemaVariantValue = {};
     MUTABLE keys = variants.keys();
     MUTABLE i: Int64 = 0;
     WHILE (i < keys.length()) DO
       MUTABLE key: String = COPY UNWRAP (keys[i]);
-      out[key] = unionSchema__normalize_variant(rtoc_self_view, variants[key]);
+      out[key] = unionSchema__normalize_variant(self, variants[key]);
       i = (i + 1);
     END
     RETURN out;
-}
 END
-FN unionSchema__normalize_variant(self: UnionSchema, variant: ?SchemasUnionSchemaVariantInput) RETURNS ?SchemasUnionSchemaVariantValue
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN unionSchema__normalize_variant(self: UnionSchema, variant: ?SchemasUnionSchemaVariantInput) RETURNS ?SchemasUnionSchemaVariantValue ->
     IF variant EXISTS AS variant_value THEN
       IF variant_value IS_A InlineStructVariant AS inline_struct_variant THEN
         RETURN COPY SchemasUnionSchemaVariantValue{ InlineStructVariantMultiowned: COPY inline_struct_variant };
@@ -400,7 +333,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       RETURN NIL;
     END
-}
 END
 FN unionSchema__kind(self: UnionSchema) RETURNS ?String@symbol
 ->
@@ -408,40 +340,20 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN :union;
 }
 END
-FN unionSchema__union?(self: UnionSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN unionSchema__union?(self: UnionSchema) RETURNS Bool ->
     RETURN TRUE;
-}
 END
-FN unionSchema__enum?(self: UnionSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN unionSchema__enum?(self: UnionSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN unionSchema__struct?(self: UnionSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN unionSchema__struct?(self: UnionSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN unionSchema__resource?(self: UnionSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN unionSchema__resource?(self: UnionSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-PUB FN unionSchema__type_params(self: UnionSchema) RETURNS ![]String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.type_params;
-}
+PUB FN unionSchema__type_params(self: UnionSchema) RETURNS ![]String@symbol ->
+    RETURN COPY self.type_params;
 END
 PUB FN unionSchema__new(variants: {String@symbol}?SchemasUnionSchemaVariantInput, type_params: []String@symbol, visibility: String@symbol = :package) RETURNS !UnionSchema@multiowned ->
   MUTABLE self = UnionSchema{ type_params: COPY type_params, variants: {}, visibility: COPY visibility };
@@ -475,45 +387,33 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.as_type = COPY as_type;
 }
 END
-PUB FN structSchema__type_params(self: StructSchema) RETURNS ![]String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.type_params;
-}
+PUB FN structSchema__type_params(self: StructSchema) RETURNS ![]String@symbol ->
+    RETURN COPY self.type_params;
 END
-PUB FN structSchema__field_defaults(self: StructSchema) RETURNS !{String}Locatable
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN structSchema__field_defaults(self: StructSchema) RETURNS !{String}Locatable ->
     MUTABLE out: {String}Locatable = {};
-    MUTABLE keys = rtoc_self_view.fields.keys();
+    MUTABLE keys = self.fields.keys();
     MUTABLE i: Int64 = 0;
     WHILE (i < keys.length()) DO
-      MUTABLE default_value: ?Locatable = COPY (UNWRAP (rtoc_self_view.fields[UNWRAP (keys[i])])).default;
+      MUTABLE default_value: ?Locatable = COPY (UNWRAP (self.fields[UNWRAP (keys[i])])).default;
       IF default_value EXISTS AS present_default THEN
         out[UNWRAP (keys[i])] = COPY present_default;
       END
       i = (i + 1);
     END
     RETURN out;
-}
 END
-PUB FN structSchema__borrowed_fields(self: StructSchema) RETURNS ![Set]String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN structSchema__borrowed_fields(self: StructSchema) RETURNS ![Set]String ->
     MUTABLE out: [Set]String = Set[];
-    MUTABLE keys = rtoc_self_view.fields.keys();
+    MUTABLE keys = self.fields.keys();
     MUTABLE i: Int64 = 0;
     WHILE (i < keys.length()) DO
-      IF (UNWRAP (rtoc_self_view.fields[UNWRAP (keys[i])])).borrowed THEN
+      IF (UNWRAP (self.fields[UNWRAP (keys[i])])).borrowed THEN
         &out.insert(COPY UNWRAP (keys[i]));
       END
       i = (i + 1);
     END
     RETURN out;
-}
 END
 FN structSchema__kind(self: StructSchema) RETURNS ?String@symbol
 ->
@@ -521,53 +421,30 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-FN structSchema__struct?(self: StructSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN structSchema__struct?(self: StructSchema) RETURNS Bool ->
     RETURN TRUE;
-}
 END
-FN structSchema__union?(self: StructSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN structSchema__union?(self: StructSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN structSchema__enum?(self: StructSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN structSchema__enum?(self: StructSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN structSchema__resource?(self: StructSchema) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN structSchema__resource?(self: StructSchema) RETURNS Bool ->
     RETURN FALSE;
-}
 END
-FN structSchema__normalize_fields(self: StructSchema, fields: {String@symbol}SchemasStructSchemaFieldInput) RETURNS !{String}StructField
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+FN structSchema__normalize_fields(self: StructSchema, fields: {String@symbol}SchemasStructSchemaFieldInput) RETURNS !{String}StructField ->
     MUTABLE out: {String}StructField = {};
     MUTABLE keys = fields.keys();
     MUTABLE i: Int64 = 0;
     WHILE (i < keys.length()) DO
       MUTABLE current_key: String = COPY UNWRAP (keys[i]);
-      out[current_key] = CAST(TRY (structSchema__normalize_field(rtoc_self_view, UNWRAP (fields[current_key]))) AS StructField);
+      out[current_key] = CAST(TRY (structSchema__normalize_field(self, UNWRAP (fields[current_key]))) AS StructField);
       i = (i + 1);
     END
     RETURN out;
-}
 END
-PUB FN structSchema__normalize_field(self: StructSchema, field: SchemasStructSchemaFieldInput) RETURNS !StructField
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PUB FN structSchema__normalize_field(self: StructSchema, field: SchemasStructSchemaFieldInput) RETURNS !StructField ->
     IF field IS_A StructField AS struct_field THEN
       RETURN COPY struct_field;
     END
@@ -611,7 +488,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: COPY field_symbol })), default: NIL, borrowed: FALSE };
     END
     RETURN StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, borrowed: FALSE };
-}
 END
 PUB FN structSchema__new(fields: {String@symbol}SchemasStructSchemaFieldInput, type_params: []String@symbol, generic_params: []GenericParamDecl, methods: {String@symbol}FunctionSignature@multiowned, static_methods: {String@symbol}FunctionSignature@multiowned, visibility: String@symbol = :package, extern_module: ?String = NIL, as_type: ?String = NIL) RETURNS !StructSchema@multiowned ->
   MUTABLE self = StructSchema{ as_type: COPY as_type, extern_module: COPY extern_module, fields: {}, generic_params: COPY generic_params, methods: COPY methods, static_methods: COPY static_methods, type_params: COPY type_params, visibility: COPY visibility };

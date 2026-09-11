@@ -30,12 +30,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN pipelineLoweringBridge__fn_sigs(self: PipelineLoweringBridge) RETURNS !{String@symbol}FunctionSignature@multiowned
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIRLowering__fn_sigs(rtoc_self_view.lowering));
-}
+  EFFECTS REENTRANT ->
+    RETURN TRY (mIRLowering__fn_sigs(self.lowering));
 END
 PUB FN pipelineLoweringBridge__lowering_target(MUTABLE self: PipelineLoweringBridge) RETURNS String@symbol
   REQUIRES self: LOCAL
@@ -78,12 +74,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN pipelineLoweringBridge__task_config_variant(self: PipelineLoweringBridge, size_name: ?String@symbol) RETURNS String
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN mIRLowering__task_config_variant(rtoc_self_view.lowering, size_name, NIL);
-}
+  EFFECTS REENTRANT ->
+    RETURN mIRLowering__task_config_variant(self.lowering, size_name, NIL);
 END
 PUB FN pipelineLoweringBridge__guarded_cleanup_name?(MUTABLE self: PipelineLoweringBridge, name: String) RETURNS Bool
   REQUIRES self: LOCAL

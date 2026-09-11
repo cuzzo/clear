@@ -498,13 +498,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN ClearParserReturnValue{ ImplementationDef: COPY ImplementationDef{ token: COPY token, owner_name: TRY (token__text_mut(owner_token)), owner_token: owner_token, binders: COPY binders, members: COPY members, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
 }
 END
-PRIVATE FN clearParser__conformance_implementation_header?(self: ClearParser) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE index = rtoc_self_view.pos;
-    WHILE (index < rtoc_self_view.tokens.length()) DO
-      MUTABLE token = COPY UNWRAP (rtoc_self_view.tokens[index]);
+PRIVATE FN clearParser__conformance_implementation_header?(self: ClearParser) RETURNS Bool ->
+    MUTABLE index = self.pos;
+    WHILE (index < self.tokens.length()) DO
+      MUTABLE token = COPY UNWRAP (self.tokens[index]);
       IF ((token.type == :KEYWORD) AND (token__text_is?(token, "FOR"))) THEN
         RETURN TRUE;
       END
@@ -514,7 +511,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       index = (index + 1);
     END
     RETURN FALSE;
-}
 END
 PRIVATE FN clearParser__parse_conformance_def(MUTABLE self: ClearParser, token: Token) RETURNS !ConformanceDef
   REQUIRES self: LOCAL
@@ -661,14 +657,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN node;
 }
 END
-PRIVATE FN clearParser__source_slice_between(self: ClearParser, start_tok: Token, end_tok: Token) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+PRIVATE FN clearParser__source_slice_between(self: ClearParser, start_tok: Token, end_tok: Token) RETURNS String ->
     IF !(((TRUE AND TRUE) AND TRUE)) THEN
       RETURN "";
     END
-    MUTABLE lines = rtoc_self_view.source_code.split("\n");
+    MUTABLE lines = self.source_code.split("\n");
     MUTABLE sl, sc = [start_tok.line, start_tok.column];
     MUTABLE el, ec = [end_tok.line, end_tok.column];
     IF ((sl < 1) OR (sl > lines.length())) THEN
@@ -685,7 +678,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &parts.append(((UNWRAP (lines[(el - 1)])).substr(0, (ec - 1))));
       RETURN parts.join("").trim();
     END
-}
 END
 PUB FN clearParser__parse_function_def(MUTABLE self: ClearParser, visibility: String@symbol = :package, is_method_input: Bool = FALSE) RETURNS !FunctionDef
   REQUIRES self: LOCAL
@@ -1157,20 +1149,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN clearParser__deep_clone_node(self: ClearParser, node: Locatable) RETURNS Locatable
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node IS_A Identifier AS identifier THEN
       RETURN Locatable{ Identifier: COPY Identifier{ token: COPY identifier.token, name: COPY identifier__name(identifier), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL } };
     ELSE_IF node IS_A GetField AS get_field THEN
-      RETURN Locatable{ GetField: COPY GetField{ token: COPY get_field.token, target: COPY clearParser__deep_clone_node(rtoc_self_view, get_field.target), field: get_field.field, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, is_assignment_lhs: NIL, indirect_field: NIL, safe_nav_chain: NIL, tuple_position: NIL } };
+      RETURN Locatable{ GetField: COPY GetField{ token: COPY get_field.token, target: COPY clearParser__deep_clone_node(self, get_field.target), field: get_field.field, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, is_assignment_lhs: NIL, indirect_field: NIL, safe_nav_chain: NIL, tuple_position: NIL } };
     ELSE_IF node IS_A GetIndex AS get_index THEN
-      RETURN Locatable{ GetIndex: COPY GetIndex{ token: COPY get_index.token, target: clearParser__deep_clone_node(rtoc_self_view, get_index.target), index: clearParser__deep_clone_node(rtoc_self_view, get_index.index), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, safe_nav_chain: NIL, protocol_operation: NIL } };
+      RETURN Locatable{ GetIndex: COPY GetIndex{ token: COPY get_index.token, target: clearParser__deep_clone_node(self, get_index.target), index: clearParser__deep_clone_node(self, get_index.index), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, safe_nav_chain: NIL, protocol_operation: NIL } };
     ELSE
       RETURN COPY node;
     END
-}
 END
 PUB FN clearParser__parse_test_block(MUTABLE self: ClearParser) RETURNS !TestBlock
   REQUIRES self: LOCAL
