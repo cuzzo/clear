@@ -10436,7 +10436,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN TRUE;
       END
     END
-    RETURN ((((((TRY (type__ownership_bearing?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&rtoc_self_view))) OR type__indirect?( UNWRAP (ti))) OR type__collection?( UNWRAP (ti))) OR TRY (type__any_rc?( UNWRAP (ti)))) OR type__any_sync?( UNWRAP (UNWRAP (ti)))) OR type__resource(ti)) OR TRY (type__recursive_cleanup_shape?(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view))));
+    RETURN ((((((TRY (type__ownership_bearing?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&rtoc_self_view))) OR type__indirect?( UNWRAP (ti))) OR type__collection?( UNWRAP (ti))) OR TRY (type__any_rc?( UNWRAP (ti)))) OR type__any_sync?( UNWRAP (UNWRAP (ti)))) OR type__resource(ti)) OR TRY (type__recursive_cleanup_shape(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view))));
 }
 END
 PRIVATE FN mIRLowering__call_owned_return_from_args?(MUTABLE self: MIRLowering, MUTABLE node: CallNode, sig_obj: ?FunctionSignature) RETURNS !?Bool
