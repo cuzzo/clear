@@ -821,7 +821,7 @@ END
 PRIVATE FN pipelineConcurrentLowerer__struct_name_hint_for_sym(self: PipelineConcurrentLowerer, sym: ?SymbolEntry) RETURNS !?String ->
   IF sym EXISTS AS sym_value THEN
     MUTABLE bare = TRY (type__bare_data_type(symbolEntry__type(sym_value)));
-    IF ((bare AND TRUE) AND TRY (type__struct?(bare))) THEN
+    IF TRY (type__struct?(bare)) THEN
       RETURN COPY type__to_s(bare);
     END
     RETURN NIL;

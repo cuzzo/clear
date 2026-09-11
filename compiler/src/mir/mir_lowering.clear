@@ -6101,7 +6101,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE last_step_value_mutable = COPY last_step_value;
         MUTABLE expr_type = TRY (aST__full_type_mut(last_step_value_mutable.expr));
         MUTABLE retained_error =       IF ((TRUE AND (locatable__retain_error_channel(last_step_value_mutable.expr) == TRUE)) AND TRUE) THEN
-          locatable__expr( CAST(last_step_value_mutable AS Locatable)).error_union_type
+          locatable__error_union_type(UNWRAP (locatable__expr( CAST(last_step_value_mutable AS Locatable))))
         ELSE
           NIL
         END;
@@ -13386,7 +13386,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE mir: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(step.expr)));
     MUTABLE binding: ?String = COPY step.binding;
     IF !(binding) THEN
-      MUTABLE mir = TRY (mIRLowering__finalize_bg_discard_expr(&rtoc_self_view, step.expr, CAST(&mir AS NodeRoot)));
+      MUTABLE mir = TRY (mIRLowering__finalize_bg_discard_expr(&rtoc_self_view, step.expr, CAST(mir AS NodeRoot)));
     END
     MUTABLE step_pending = TRY (mIRLowering__flush_pending(&rtoc_self_view));
     MUTABLE mir_nodes = TRY (mIRLowering__bg_mir_nodes(rtoc_self_view, castNodeRootToMir(mir)));
@@ -14717,7 +14717,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE left: Emittable = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable);
     MUTABLE ft = TRY (aST__full_type_mut(node.left));
     MUTABLE collect_method: String = "";
-    IF ((type__observable?(ft) AND ((TRY (type__tense_type(ft)) != NIL) AND type__array?(((TRY (type__tense_type(ft)))?))))) THEN
+    IF (type__observable?(ft) AND type__array?(TRY (type__tense_type(ft)))) THEN
       collect_method = "materializeNext";
     ELSE
       collect_method = "next";

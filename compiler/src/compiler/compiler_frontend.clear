@@ -100,8 +100,8 @@ PUB FN compilerFrontend__synthesize_test_body_wrappers_mut(ast: Program, MUTABLE
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    IF ast.statements[rtoc_idx].whens != NIL THEN
-          FOR _ IN (ast.statements[rtoc_idx].whens) DO
+    IF UNWRAP (ast.statements[rtoc_idx]) IS_A TestBlock AS test_block THEN
+          FOR _ IN test_block.whens DO
           IF _.tests != NIL THEN
               FOR _ IN (_.tests) DO
               counter = (counter + 1);

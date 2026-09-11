@@ -834,8 +834,8 @@ PRIVATE FN ownershipDataflow__exit_ownership_state(self: OwnershipDataflow) RETU
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF rtoc_self_view.block_in[(COPY rtoc_self_view.cfg.exit_block).id] != NIL THEN
-    RETURN COPY (rtoc_self_view.block_in[(COPY rtoc_self_view.cfg.exit_block).id])?;
+    IF rtoc_self_view.block_in[UNWRAP (COPY rtoc_self_view.cfg.exit_block).id] != NIL THEN
+    RETURN COPY (rtoc_self_view.block_in[UNWRAP (COPY rtoc_self_view.cfg.exit_block).id])?;
     ELSE
     RETURN TRY (ownershipDataflow__empty_ownership_state(rtoc_self_view));
     END
@@ -1389,7 +1389,7 @@ PRIVATE FN ownershipDataflow__collect_bg_body_gives(self: OwnershipDataflow, bg_
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN (((IF bgNode__capture_analysis(bg_node) != NIL THEN
-      (bgNode__capture_analysis(bg_node)).move_mark_names
+      UNWRAP (bgNode__capture_analysis(bg_node)).move_mark_names
     ELSE
       NIL
     END) |> SELECT COPY _) OR_ELSE List[]);
@@ -1928,10 +1928,10 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   IF !(root?.symbol) THEN
       RETURN;
   END
-  IF local_names.contains?(root.name) THEN
+  IF local_names.contains?(UNWRAP (root).name) THEN
       RETURN;
   END
-  MUTABLE root_symbol = COPY UNWRAP (root.symbol);
+  MUTABLE root_symbol = COPY UNWRAP (UNWRAP (root).symbol);
   MUTABLE sym = (aST__declaration_symbol(root_symbol) OR_ELSE root_symbol);
   IF !(symbolEntry__heap_storage?(sym)) THEN
       found = TRUE;
@@ -2172,7 +2172,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF !(borrowState__empty?(state)) THEN
         FOR _ IN (IF locatable__capture_analysis(stmt) != NIL THEN
           { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_30:? = (locatable__capture_analysis(stmt));
-        COPY rtoc_local_receiver_30.resource_captures }
+        COPY UNWRAP (rtoc_local_receiver_30).resource_captures }
         ELSE
           NIL
         END) DO
