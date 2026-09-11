@@ -262,14 +262,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
     real_source = TRY (pipelineRewriter__rewrite_mut(&rtoc_self_view, &real_source));
-    IF (pipelineRewriter__needs_transpiler_pipeline?(rtoc_self_view, &real_source) OR ((IF real_source IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END))) THEN
+    IF (TRY (pipelineRewriter__needs_transpiler_pipeline?(rtoc_self_view, &real_source)) OR ((IF real_source IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END))) THEN
         pipelineRewriter__patch_chain_source_mut(&rtoc_self_view, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
     MUTABLE is_range_fold_terminal = (((terminal != NIL) AND (terminal IS_A EachOp)) OR aST__pipeline_terminal_fold?(UNWRAP (terminal)));
-    MUTABLE source_type = &aST__full_type_mut(real_source);
+    MUTABLE source_type = TRY (aST__full_type_mut(real_source));
     MUTABLE has_limit = stages |> ANY _ IS_A LimitOp;
-    IF (TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY &aST__full_type_mut(node) }))))) AND (stages |> ANY _ IS_A SelectOp)) THEN
+    IF (TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node)) }))))) AND (stages |> ANY _ IS_A SelectOp)) THEN
         pipelineRewriter__patch_chain_source_mut(&rtoc_self_view, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
@@ -295,14 +295,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         MUTABLE list_proxy = COPY node;
         MUTABLE rtoc_union_writeback_1: Locatable = Locatable{ BinaryOp: COPY list_proxy };
-        TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_1, &real_source.full_type_mut(), "synthetic AST type"));
+        TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_1, TRY (aST__full_type_mut(real_source)), "synthetic AST type"));
         PARTIAL MATCH rtoc_union_writeback_1 START Locatable.BinaryOp AS rtoc_union_writeback_1_item -> list_proxy = COPY rtoc_union_writeback_1_item;, END
         NIL;
         list_proxy.storage = locatable__storage(real_source);
         MUTABLE fused_loop = TRY (pipelineRewriter__fuse_pipeline(&rtoc_self_view, &list_proxy, &real_source, stages, NIL));
         MUTABLE outer_smooth = BinaryOp{ token: COPY node.token, left: COPY fused_loop, op: :SMOOTH, right: UNWRAP (COPY terminal), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
         MUTABLE rtoc_union_writeback_2: Locatable = Locatable{ BinaryOp: COPY outer_smooth };
-        TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_2, SyntheticTypeInput{ Type: COPY &node.full_type_mut() }, "synthetic AST type"));
+        TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_2, COPY TRY (aST__full_type_mut(node)), "synthetic AST type"));
         PARTIAL MATCH rtoc_union_writeback_2 START Locatable.BinaryOp AS rtoc_union_writeback_2_item -> outer_smooth = COPY rtoc_union_writeback_2_item;, END
         NIL;
         outer_smooth.storage = node.storage();
@@ -310,9 +310,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     source = real_source;
-    MUTABLE result_is_error = type__error_union?((TRY (type__new(TypeConstructionInput{ Type: COPY &node.full_type_mut() }))));
-    result_is_error = (result_is_error OR pipelineRewriter__callee_returns_error?(rtoc_self_view, &rhs));
-    MUTABLE needs_try = type__error_union?((TRY (type__new(&source.full_type_mut()))));
+    MUTABLE result_is_error = type__error_union?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node)) }))));
+    result_is_error = (result_is_error OR TRY (pipelineRewriter__callee_returns_error?(rtoc_self_view, &rhs)));
+    MUTABLE needs_try = type__error_union?((TRY (type__new(TRY (aST__full_type_mut(source))))));
     IF (IF rhs IS_A FuncCall AS func_call THEN !(result_is_error) ELSE FALSE END) THEN
       IF needs_try THEN
         lhs_node = UnaryOp{ token: COPY rhs.token(), op: :TRY, right: COPY source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
@@ -320,7 +320,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         lhs_node = COPY source;
       END
       IF needs_try THEN
-        TRY (aST__stamp_synthetic_type_mut(&lhs_node, SyntheticTypeInput{ Type: COPY UNWRAP (TRY (type__payload_type((TRY (type__new(&source.full_type_mut())))))) }, "synthetic AST type"));
+        TRY (aST__stamp_synthetic_type_mut(&lhs_node, COPY UNWRAP (TRY (type__payload_type((TRY (type__new(TRY (aST__full_type_mut(source)))))))), "synthetic AST type"));
       END
       rhs.args().unshift(lhs_node);
       RETURN rhs;
@@ -332,11 +332,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         lhs_node = COPY source;
       END
       IF needs_try THEN
-        TRY (aST__stamp_synthetic_type_mut(&lhs_node, SyntheticTypeInput{ Type: COPY UNWRAP (TRY (type__payload_type((TRY (type__new(&source.full_type_mut())))))) }, "synthetic AST type"));
+        TRY (aST__stamp_synthetic_type_mut(&lhs_node, COPY UNWRAP (TRY (type__payload_type((TRY (type__new(TRY (aST__full_type_mut(source)))))))), "synthetic AST type"));
       END
       MUTABLE call = FuncCall{ token: COPY rhs.token(), name: rhs.name(), args: COPY [lhs_node], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, module_alias: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, fn_var_call: NIL, pipe_lhs: NIL, heap_dupe_result: NIL, arg_families: NIL, collapsed_errors: NIL, error_union_type: NIL, protocol_name: NIL, protocol_operation: NIL, protocol_receiver_index: NIL, retain_error_channel: NIL };
       MUTABLE rtoc_union_writeback_3: Locatable = Locatable{ FuncCall: COPY call };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_3, SyntheticTypeInput{ Type: COPY &node.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_3, COPY TRY (aST__full_type_mut(node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_3 START Locatable.FuncCall AS rtoc_union_writeback_3_item -> call = COPY rtoc_union_writeback_3_item;, END
       NIL;
       call.storage = node.storage();
@@ -357,7 +357,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF rhs IS_A RecoverOp AS recover_op THEN
       MUTABLE op = BinaryOp{ token: COPY recover_op.token, left: COPY source, op: symbol("OR_ELSE"), right: COPY recover_op.default_expr, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
       MUTABLE rtoc_union_writeback_4: Locatable = Locatable{ BinaryOp: COPY op };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_4, SyntheticTypeInput{ Type: COPY &node.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_4, COPY TRY (aST__full_type_mut(node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_4 START Locatable.BinaryOp AS rtoc_union_writeback_4_item -> op = COPY rtoc_union_writeback_4_item;, END
       NIL;
       op.storage = node.storage();
@@ -432,7 +432,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE init_nodes = TRY (pipelineRewriter__build_init(&rtoc_self_view, terminal, res_var, token, &smooth_node));
     body = ruby_array_concat_Any__pipeline_rewriter(body, CAST(init_nodes AS []Any));
     MUTABLE current_it = Identifier{ token: COPY token, name: COPY it_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
-    MUTABLE src_t = TRY (type__new(&aST__full_type_mut(source, "fused pipeline source")));
+    MUTABLE src_t = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(source)) }));
     MUTABLE elem_t_branch_value: ?Type = NIL;
     IF TRY (type__open_stream?(src_t)) THEN
       elem_t_branch_value = TRY (type__open_stream_element_type(src_t));
@@ -446,18 +446,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE elem_t: ?Type = elem_t_branch_value;
     IF elem_t EXISTS AS elem_t_value THEN
       MUTABLE rtoc_union_writeback_6: Locatable = Locatable{ Identifier: COPY current_it };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_6, CAST(SyntheticTypeInput{ Type: COPY elem_t_value } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_6, CAST(COPY elem_t_value AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_6 START Locatable.Identifier AS rtoc_union_writeback_6_item -> current_it = COPY rtoc_union_writeback_6_item;, END
       NIL;
     END
     MUTABLE stage_inits = List[];
-    MUTABLE res_type = &aST__full_type_mut(smooth_node);
+    MUTABLE res_type = TRY (aST__full_type_mut(smooth_node));
     MUTABLE loop_body = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, stages, terminal, &current_it, res_var, token, &stage_inits, CAST(res_type AS ?Type)));
     body = ruby_array_concat_Any__pipeline_rewriter(body, stage_inits);
     MUTABLE is_each = ((terminal != NIL) AND (terminal IS_A EachOp));
     MUTABLE foreach = ForEach{ token: COPY token, var_name: it_var, collection: COPY source, body: loop_body, deferred_drops: NIL, is_mutable: is_each, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE };
     MUTABLE rtoc_union_writeback_7: Locatable = Locatable{ ForEach: COPY foreach };
-    TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_7, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+    TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_7, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
     PARTIAL MATCH rtoc_union_writeback_7 START Locatable.ForEach AS rtoc_union_writeback_7_item -> foreach = COPY rtoc_union_writeback_7_item;, END
     NIL;
     foreach.var_used = TRUE;
@@ -465,12 +465,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (((terminal != NIL) AND (terminal IS_A MinOp)) OR ((terminal != NIL) AND (terminal IS_A MaxOp))) THEN
       MUTABLE found_ident = Identifier{ token: COPY token, name: "${res_var}_found", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
       MUTABLE rtoc_union_writeback_8: Locatable = Locatable{ Identifier: COPY found_ident };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_8, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_8, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_8 START Locatable.Identifier AS rtoc_union_writeback_8_item -> found_ident = COPY rtoc_union_writeback_8_item;, END
       NIL;
       guard = Assert{ token: COPY token, condition: Locatable{ Identifier: found_ident }, message: AssertMessage{ StringValue: "MIN/MAX applied to empty list" }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_9: Locatable = Locatable{ Assert: CAST(COPY guard AS Assert)};
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_9, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_9, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_9 START Locatable.Assert AS rtoc_union_writeback_9_item -> guard = COPY rtoc_union_writeback_9_item;, END
       NIL;
       &body.append(guard);
@@ -480,19 +480,19 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN Locatable{ ForEach: COPY foreach };
       END
       MUTABLE wrapper = BlockExpr{ token: COPY token, body: COPY body, result: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-      TRY (aST__stamp_synthetic_type_mut(&wrapper, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&wrapper, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       RETURN wrapper;
     END
     IF terminal? IS_A AverageOp AS average_op THEN
       MUTABLE avg_var = "${res_var}_avg";
       MUTABLE zero = Literal{ token: COPY token, type: :NUMBER, value: 0.0, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_10: Locatable = Locatable{ Literal: COPY zero };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_10, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_10, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_10 START Locatable.Literal AS rtoc_union_writeback_10_item -> zero = COPY rtoc_union_writeback_10_item;, END
       NIL;
       MUTABLE avg_decl = VarDecl{ token: COPY token, name: COPY avg_var, type: NIL, value: COPY zero, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_11: Locatable = Locatable{ VarDecl: COPY avg_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_11, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_11, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_11 START Locatable.VarDecl AS rtoc_union_writeback_11_item -> avg_decl = COPY rtoc_union_writeback_11_item;, END
       NIL;
       avg_decl.storage = :stack;
@@ -503,44 +503,44 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE sum_id = Identifier{ token: COPY token, name: "${res_var}_sum", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
       MUTABLE cnt_id = Identifier{ token: COPY token, name: "${res_var}_cnt", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
       MUTABLE rtoc_union_writeback_12: Locatable = Locatable{ Identifier: COPY sum_id };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_12, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_12, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_12 START Locatable.Identifier AS rtoc_union_writeback_12_item -> sum_id = COPY rtoc_union_writeback_12_item;, END
       NIL;
       MUTABLE rtoc_union_writeback_13: Locatable = Locatable{ Identifier: COPY cnt_id };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_13, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_13, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_13 START Locatable.Identifier AS rtoc_union_writeback_13_item -> cnt_id = COPY rtoc_union_writeback_13_item;, END
       NIL;
       MUTABLE cond = BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY cnt_id }, op: :GT, right: Locatable{ Literal: COPY zero }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
       MUTABLE rtoc_union_writeback_14: Locatable = Locatable{ BinaryOp: COPY cond };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_14, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_14, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_14 START Locatable.BinaryOp AS rtoc_union_writeback_14_item -> cond = COPY rtoc_union_writeback_14_item;, END
       NIL;
       MUTABLE div = BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY sum_id }, op: :DIV, right: Locatable{ Identifier: COPY cnt_id }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
       MUTABLE rtoc_union_writeback_15: Locatable = Locatable{ BinaryOp: COPY div };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_15, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_15, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_15 START Locatable.BinaryOp AS rtoc_union_writeback_15_item -> div = COPY rtoc_union_writeback_15_item;, END
       NIL;
       MUTABLE avg_assign = Assignment{ token: COPY token, name: AssignmentName{ StringValue: COPY avg_var }, value: Locatable{ BinaryOp: COPY div }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
       MUTABLE rtoc_union_writeback_16: Locatable = Locatable{ Assignment: COPY avg_assign };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_16, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_16, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_16 START Locatable.Assignment AS rtoc_union_writeback_16_item -> avg_assign = COPY rtoc_union_writeback_16_item;, END
       NIL;
       guard = IfStatement{ token: COPY token, condition: Locatable{ BinaryOp: COPY cond }, then_branch: COPY [avg_assign], else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
       MUTABLE rtoc_union_writeback_17: Locatable = Locatable{ IfStatement: COPY guard };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_17, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_17, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_17 START Locatable.IfStatement AS rtoc_union_writeback_17_item -> guard = COPY rtoc_union_writeback_17_item;, END
       NIL;
       &body.append(guard);
       MUTABLE result = Identifier{ token: COPY token, name: COPY avg_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
       MUTABLE rtoc_union_writeback_18: Locatable = Locatable{ Identifier: COPY result };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_18, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_18, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_18 START Locatable.Identifier AS rtoc_union_writeback_18_item -> result = COPY rtoc_union_writeback_18_item;, END
       NIL;
     ELSE
       MUTABLE result = TRY (pipelineRewriter__build_final_result(rtoc_self_view, terminal, res_var, token, &smooth_node));
     END
     MUTABLE block = BlockExpr{ token: COPY token, body: COPY body, result: Locatable{ Identifier: COPY result }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-    TRY (aST__stamp_synthetic_type_mut(&block, SyntheticTypeInput{ Type: COPY &smooth_node.full_type_mut() }, "synthetic AST type"));
+    TRY (aST__stamp_synthetic_type_mut(&block, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
     block.storage = smooth_node.storage();
     RETURN block;
 }
@@ -550,7 +550,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF terminal IS_A SumOp AS sum_op THEN
-      MUTABLE is_int = type__integer?((TRY (type__new(TypeConstructionInput{ Type: COPY &aST__full_type_mut(smooth_node) }))));
+      MUTABLE is_int = type__integer?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }))));
       MUTABLE val = Literal{ token: COPY token, type: IF is_int THEN
         :INT64
       ELSE
@@ -561,12 +561,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         0.0
       END, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_19: Locatable = Locatable{ Literal: COPY val };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_19, SyntheticTypeInput{ Type: COPY &smooth_node.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_19, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_19 START Locatable.Literal AS rtoc_union_writeback_19_item -> val = COPY rtoc_union_writeback_19_item;, END
       NIL;
       MUTABLE decl = VarDecl{ token: COPY token, name: COPY res_var, type: NIL, value: COPY val, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_20: Locatable = Locatable{ VarDecl: COPY decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_20, SyntheticTypeInput{ Type: COPY &smooth_node.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_20, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_20 START Locatable.VarDecl AS rtoc_union_writeback_20_item -> decl = COPY rtoc_union_writeback_20_item;, END
       NIL;
       decl.storage = :stack;
@@ -575,7 +575,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       decl.var_mutated = TRUE;
       RETURN CAST([Node{ VarDecl: COPY decl }] AS []Node);
     ELSE_IF terminal IS_A CountOp AS count_op THEN
-      MUTABLE is_int = type__integer?((TRY (type__new(TypeConstructionInput{ Type: COPY &aST__full_type_mut(smooth_node) }))));
+      MUTABLE is_int = type__integer?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }))));
       MUTABLE val = Literal{ token: COPY token, type: IF is_int THEN
         :INT64
       ELSE
@@ -586,12 +586,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         0.0
       END, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_21: Locatable = Locatable{ Literal: COPY val };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_21, SyntheticTypeInput{ Type: COPY &smooth_node.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_21, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_21 START Locatable.Literal AS rtoc_union_writeback_21_item -> val = COPY rtoc_union_writeback_21_item;, END
       NIL;
       MUTABLE decl = VarDecl{ token: COPY token, name: COPY res_var, type: NIL, value: COPY val, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_22: Locatable = Locatable{ VarDecl: COPY decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_22, SyntheticTypeInput{ Type: COPY &smooth_node.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_22, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_22 START Locatable.VarDecl AS rtoc_union_writeback_22_item -> decl = COPY rtoc_union_writeback_22_item;, END
       NIL;
       decl.storage = :stack;
@@ -602,7 +602,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF terminal IS_A AverageOp AS average_op THEN
       MUTABLE sum_decl = VarDecl{ token: COPY token, name: "${res_var}_sum", type: NIL, value: COPY Literal{ token: COPY token, type: :NUMBER, value: 0.0, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_23: Locatable = Locatable{ VarDecl: COPY sum_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_23, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_23, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_23 START Locatable.VarDecl AS rtoc_union_writeback_23_item -> sum_decl = COPY rtoc_union_writeback_23_item;, END
       NIL;
       sum_decl.storage = :stack;
@@ -611,7 +611,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       sum_decl.var_mutated = TRUE;
       MUTABLE cnt_decl = VarDecl{ token: COPY token, name: "${res_var}_cnt", type: NIL, value: COPY Literal{ token: COPY token, type: :NUMBER, value: 0.0, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_24: Locatable = Locatable{ VarDecl: COPY cnt_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_24, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_24, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_24 START Locatable.VarDecl AS rtoc_union_writeback_24_item -> cnt_decl = COPY rtoc_union_writeback_24_item;, END
       NIL;
       cnt_decl.storage = :stack;
@@ -623,12 +623,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE init_val = any_op IS_A AllOp;
       MUTABLE val = Literal{ token: COPY token, type: :BOOLEAN, value: init_val, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_25: Locatable = Locatable{ Literal: COPY val };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_25, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_25, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_25 START Locatable.Literal AS rtoc_union_writeback_25_item -> val = COPY rtoc_union_writeback_25_item;, END
       NIL;
       MUTABLE decl = VarDecl{ token: COPY token, name: COPY res_var, type: NIL, value: COPY val, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_26: Locatable = Locatable{ VarDecl: COPY decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_26, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_26, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_26 START Locatable.VarDecl AS rtoc_union_writeback_26_item -> decl = COPY rtoc_union_writeback_26_item;, END
       NIL;
       decl.storage = :stack;
@@ -640,12 +640,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE init_val = TRUE;
       MUTABLE val = Literal{ token: COPY token, type: :BOOLEAN, value: init_val, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_27: Locatable = Locatable{ Literal: COPY val };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_27, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_27, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_27 START Locatable.Literal AS rtoc_union_writeback_27_item -> val = COPY rtoc_union_writeback_27_item;, END
       NIL;
       MUTABLE decl = VarDecl{ token: COPY token, name: COPY res_var, type: NIL, value: COPY val, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_28: Locatable = Locatable{ VarDecl: COPY decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_28, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_28, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_28 START Locatable.VarDecl AS rtoc_union_writeback_28_item -> decl = COPY rtoc_union_writeback_28_item;, END
       NIL;
       decl.storage = :stack;
@@ -657,10 +657,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE reduce_op_mutable = COPY reduce_op;
       MUTABLE decl = VarDecl{ token: COPY token, name: COPY res_var, type: NIL, value: COPY reduce_op_mutable.initial_value, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_29: Locatable = Locatable{ VarDecl: COPY decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_29, SyntheticTypeInput{ Type: COPY &reduce_op_mutable.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_29, COPY TRY (aST__full_type_mut(reduce_op_mutable)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_29 START Locatable.VarDecl AS rtoc_union_writeback_29_item -> decl = COPY rtoc_union_writeback_29_item;, END
       NIL;
-      MUTABLE acc_ty = TRY (type__new(TypeConstructionInput{ Type: COPY &decl.full_type_mut() }));
+      MUTABLE acc_ty = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(decl)) }));
       MUTABLE owned_acc = (TRY (type__string?(acc_ty)) OR TRY (type__needs_cleanup?(acc_ty, pipelineRewriter__schema_lookup(&rtoc_self_view))));
       decl.storage = IF owned_acc THEN
         :heap
@@ -680,15 +680,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE find_op_mutable = COPY find_op;
       MUTABLE val = Literal{ token: COPY token, type: symbol("NIL"), value: NIL, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_30: Locatable = Locatable{ Literal: COPY val };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_30, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: symbol("NIL") })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_30, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: symbol("NIL") })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_30 START Locatable.Literal AS rtoc_union_writeback_30_item -> val = COPY rtoc_union_writeback_30_item;, END
       NIL;
       MUTABLE decl = VarDecl{ token: COPY token, name: COPY res_var, type: NIL, value: COPY val, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_31: Locatable = Locatable{ VarDecl: COPY decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_31, SyntheticTypeInput{ Type: COPY &smooth_node.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_31, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_31 START Locatable.VarDecl AS rtoc_union_writeback_31_item -> decl = COPY rtoc_union_writeback_31_item;, END
       NIL;
-      MUTABLE found_ty = TRY (type__new(TypeConstructionInput{ Type: COPY &decl.full_type_mut() }));
+      MUTABLE found_ty = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(decl)) }));
       MUTABLE owned_found = (TRY (type__needs_cleanup?(found_ty, pipelineRewriter__schema_lookup(&rtoc_self_view))) OR TRY (type__recursive_cleanup_shape?(found_ty, pipelineRewriter__schema_lookup(&rtoc_self_view))));
       decl.storage = IF owned_found THEN
         :heap
@@ -706,7 +706,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN CAST([Node{ VarDecl: COPY decl }] AS []Node);
     ELSE_IF terminal IS_A MinOp AS min_op THEN
       MUTABLE min_op_mutable = COPY min_op;
-      MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY &smooth_node.full_type_mut() }));
+      MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }));
       MUTABLE zero = Literal{ token: COPY token, type: IF type__integer?(result_type) THEN
         :INT64
       ELSE
@@ -717,12 +717,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         0.0
       END, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_32: Locatable = Locatable{ Literal: COPY zero };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_32, SyntheticTypeInput{ Type: COPY result_type }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_32, COPY result_type, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_32 START Locatable.Literal AS rtoc_union_writeback_32_item -> zero = COPY rtoc_union_writeback_32_item;, END
       NIL;
       MUTABLE val_decl = VarDecl{ token: COPY token, name: COPY res_var, type: NIL, value: COPY zero, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_33: Locatable = Locatable{ VarDecl: COPY val_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_33, SyntheticTypeInput{ Type: COPY result_type }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_33, COPY result_type, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_33 START Locatable.VarDecl AS rtoc_union_writeback_33_item -> val_decl = COPY rtoc_union_writeback_33_item;, END
       NIL;
       val_decl.storage = :stack;
@@ -731,12 +731,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       val_decl.var_mutated = TRUE;
       MUTABLE found_init = Literal{ token: COPY token, type: :BOOLEAN, value: FALSE, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_34: Locatable = Locatable{ Literal: COPY found_init };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_34, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_34, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_34 START Locatable.Literal AS rtoc_union_writeback_34_item -> found_init = COPY rtoc_union_writeback_34_item;, END
       NIL;
       MUTABLE found_decl = VarDecl{ token: COPY token, name: "${res_var}_found", type: NIL, value: COPY found_init, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_35: Locatable = Locatable{ VarDecl: COPY found_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_35, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_35, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_35 START Locatable.VarDecl AS rtoc_union_writeback_35_item -> found_decl = COPY rtoc_union_writeback_35_item;, END
       NIL;
       found_decl.storage = :stack;
@@ -746,7 +746,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN CAST([Node{ VarDecl: COPY val_decl }, Node{ VarDecl: COPY found_decl }] AS []Node);
     ELSE_IF terminal IS_A MaxOp AS max_op THEN
       MUTABLE max_op_mutable = COPY max_op;
-      MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY &smooth_node.full_type_mut() }));
+      MUTABLE result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(smooth_node)) }));
       MUTABLE zero = Literal{ token: COPY token, type: IF type__integer?(result_type) THEN
         :INT64
       ELSE
@@ -757,12 +757,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         0.0
       END, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_36: Locatable = Locatable{ Literal: COPY zero };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_36, SyntheticTypeInput{ Type: COPY result_type }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_36, COPY result_type, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_36 START Locatable.Literal AS rtoc_union_writeback_36_item -> zero = COPY rtoc_union_writeback_36_item;, END
       NIL;
       MUTABLE val_decl = VarDecl{ token: COPY token, name: COPY res_var, type: NIL, value: COPY zero, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_37: Locatable = Locatable{ VarDecl: COPY val_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_37, SyntheticTypeInput{ Type: COPY result_type }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_37, COPY result_type, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_37 START Locatable.VarDecl AS rtoc_union_writeback_37_item -> val_decl = COPY rtoc_union_writeback_37_item;, END
       NIL;
       val_decl.storage = :stack;
@@ -771,12 +771,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       val_decl.var_mutated = TRUE;
       MUTABLE found_init = Literal{ token: COPY token, type: :BOOLEAN, value: FALSE, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_38: Locatable = Locatable{ Literal: COPY found_init };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_38, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_38, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_38 START Locatable.Literal AS rtoc_union_writeback_38_item -> found_init = COPY rtoc_union_writeback_38_item;, END
       NIL;
       MUTABLE found_decl = VarDecl{ token: COPY token, name: "${res_var}_found", type: NIL, value: COPY found_init, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_39: Locatable = Locatable{ VarDecl: COPY found_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_39, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_39, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_39 START Locatable.VarDecl AS rtoc_union_writeback_39_item -> found_decl = COPY rtoc_union_writeback_39_item;, END
       NIL;
       found_decl.storage = :stack;
@@ -787,12 +787,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (terminal == NIL) OR (terminal IS_A SelectOp) OR (terminal IS_A WhereOp) OR (terminal IS_A TapOp) OR (terminal IS_A TakeWhileOp) OR (terminal IS_A UnnestOp) OR (terminal IS_A DistinctOp) THEN
       MUTABLE lit = ListLit{ token: COPY token, items: COPY List[], storage: :stack, constructor_options: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_40: Locatable = Locatable{ ListLit: COPY lit };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_40, SyntheticTypeInput{ Type: COPY &smooth_node.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_40, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_40 START Locatable.ListLit AS rtoc_union_writeback_40_item -> lit = COPY rtoc_union_writeback_40_item;, END
       NIL;
       MUTABLE decl = VarDecl{ token: COPY token, name: COPY res_var, type: NIL, value: COPY lit, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_41: Locatable = Locatable{ VarDecl: COPY decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_41, SyntheticTypeInput{ Type: COPY &smooth_node.full_type_mut() }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_41, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_41 START Locatable.VarDecl AS rtoc_union_writeback_41_item -> decl = COPY rtoc_union_writeback_41_item;, END
       NIL;
       decl.storage = IF (rtoc_self_view.dest_storage == :heap) THEN
@@ -800,10 +800,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         smooth_node.storage()
       END;
-      MUTABLE sym = TRY (symbolEntry__new(SymbolEntryRegInput{ VarDecl: COPY decl }, SymbolEntryTypeInput{ TypeMultiowned: COPY TRY (type__new(TypeConstructionInput{ Type: COPY &decl.full_type_mut() })) }, TRUE, symbol(UNWRAP (decl.storage()))));
+      MUTABLE sym = TRY (symbolEntry__new(SymbolEntryRegInput{ VarDecl: COPY decl }, SymbolEntryTypeInput{ TypeMultiowned: COPY TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(decl)) })) }, TRUE, symbol(UNWRAP (decl.storage()))));
       decl.symbol = sym;
       rtoc_self_view.list_res_symbols[res_var] = sym;
-      decl.slot_size = TRY (type__slot_size((TRY (type__new(TypeConstructionInput{ Type: COPY &decl.full_type_mut() }))), pipelineRewriter__schema_lookup(&rtoc_self_view)));
+      decl.slot_size = TRY (type__slot_size((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(decl)) }))), pipelineRewriter__schema_lookup(&rtoc_self_view)));
       decl.var_used = TRUE;
       RETURN CAST([Node{ VarDecl: COPY decl }] AS []Node);
     ELSE
@@ -827,7 +827,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
       MUTABLE if_stmt = IfStatement{ token: COPY where_op_mutable.token, condition: COPY pred, then_branch: COPY then_branch, else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
       MUTABLE rtoc_union_writeback_43: Locatable = Locatable{ IfStatement: COPY if_stmt };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_43, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_43, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_43 START Locatable.IfStatement AS rtoc_union_writeback_43_item -> if_stmt = COPY rtoc_union_writeback_43_item;, END
       NIL;
       RETURN CAST([Node{ IfStatement: COPY if_stmt }] AS []Node);
@@ -838,7 +838,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE sel_var = pipelineRewriter__next_var(&rtoc_self_view, "__sel");
       MUTABLE sel_decl = VarDecl{ token: COPY select_op_mutable.token, name: COPY sel_var, type: NIL, value: Locatable{ Literal: castLocatableToLiteral__pipeline_rewriter(COPY expr) }, mutable: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_44: Locatable = Locatable{ VarDecl: COPY sel_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_44, CAST(SyntheticTypeInput{ Type: COPY selected_type } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_44, CAST(COPY selected_type AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_44 START Locatable.VarDecl AS rtoc_union_writeback_44_item -> sel_decl = COPY rtoc_union_writeback_44_item;, END
       NIL;
       sel_decl.storage = IF type__future?(selected_type) THEN
@@ -850,7 +850,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       sel_decl.var_used = TRUE;
       MUTABLE sel_ident = Identifier{ token: COPY select_op_mutable.token, name: COPY sel_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
       MUTABLE rtoc_union_writeback_45: Locatable = Locatable{ Identifier: COPY sel_ident };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_45, CAST(SyntheticTypeInput{ Type: COPY selected_type } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_45, CAST(COPY selected_type AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_45 START Locatable.Identifier AS rtoc_union_writeback_45_item -> sel_ident = COPY rtoc_union_writeback_45_item;, END
       NIL;
       MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &sel_ident, res_var, token, &stage_inits, res_type));
@@ -865,7 +865,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
       MUTABLE if_stmt = IfStatement{ token: COPY take_while_op_mutable.token, condition: COPY pred, then_branch: COPY then_branch, else_branch: COPY [BreakNode{ token: COPY take_while_op_mutable.token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
       MUTABLE rtoc_union_writeback_46: Locatable = Locatable{ IfStatement: COPY if_stmt };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_46, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_46, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_46 START Locatable.IfStatement AS rtoc_union_writeback_46_item -> if_stmt = COPY rtoc_union_writeback_46_item;, END
       NIL;
       RETURN CAST([Node{ IfStatement: COPY if_stmt }] AS []Node);
@@ -874,12 +874,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE cnt_var = pipelineRewriter__next_var(&rtoc_self_view, "__skip_cnt");
       MUTABLE zero = Literal{ token: COPY token, type: :INT64, value: CAST(0 AS ?TokenValue), storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_47: Locatable = Locatable{ Literal: COPY zero };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_47, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_47, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_47 START Locatable.Literal AS rtoc_union_writeback_47_item -> zero = COPY rtoc_union_writeback_47_item;, END
       NIL;
       MUTABLE cnt_decl = VarDecl{ token: COPY token, name: COPY cnt_var, type: NIL, value: Locatable{ Literal: COPY zero }, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_48: Locatable = Locatable{ VarDecl: COPY cnt_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_48, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_48, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_48 START Locatable.VarDecl AS rtoc_union_writeback_48_item -> cnt_decl = COPY rtoc_union_writeback_48_item;, END
       NIL;
       cnt_decl.storage = :stack;
@@ -889,28 +889,28 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &stage_inits.append(Node{ VarDecl: COPY cnt_decl });
       MUTABLE cnt_ident = Identifier{ token: COPY token, name: COPY cnt_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
       MUTABLE rtoc_union_writeback_49: Locatable = Locatable{ Identifier: COPY cnt_ident };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_49, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_49, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_49 START Locatable.Identifier AS rtoc_union_writeback_49_item -> cnt_ident = COPY rtoc_union_writeback_49_item;, END
       NIL;
       MUTABLE one = Literal{ token: COPY token, type: :INT64, value: CAST(1 AS ?TokenValue), storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_50: Locatable = Locatable{ Literal: COPY one };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_50, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_50, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_50 START Locatable.Literal AS rtoc_union_writeback_50_item -> one = COPY rtoc_union_writeback_50_item;, END
       NIL;
       MUTABLE increment = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY cnt_ident }, value: Locatable{ BinaryOp: COPY BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY cnt_ident }, op: :ADD, right: Locatable{ Literal: COPY one }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
       MUTABLE rtoc_union_writeback_51: Locatable = Locatable{ Assignment: COPY increment };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_51, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_51, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_51 START Locatable.Assignment AS rtoc_union_writeback_51_item -> increment = COPY rtoc_union_writeback_51_item;, END
       NIL;
       MUTABLE skip_n = COPY skip_op_mutable.count;
       MUTABLE cond = BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY cnt_ident }, op: :LTE, right: UNWRAP (COPY skip_n), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
       MUTABLE rtoc_union_writeback_52: Locatable = Locatable{ BinaryOp: COPY cond };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_52, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_52, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_52 START Locatable.BinaryOp AS rtoc_union_writeback_52_item -> cond = COPY rtoc_union_writeback_52_item;, END
       NIL;
       MUTABLE skip_if = IfStatement{ token: COPY token, condition: Locatable{ BinaryOp: COPY cond }, then_branch: CAST(COPY [ContinueNode{ token: COPY token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }] AS []Locatable), else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
       MUTABLE rtoc_union_writeback_53: Locatable = Locatable{ IfStatement: COPY skip_if };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_53, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_53, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_53 START Locatable.IfStatement AS rtoc_union_writeback_53_item -> skip_if = COPY rtoc_union_writeback_53_item;, END
       NIL;
       MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
@@ -920,12 +920,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE cnt_var = pipelineRewriter__next_var(&rtoc_self_view, "__lim_cnt");
       MUTABLE zero = Literal{ token: COPY token, type: :INT64, value: CAST(0 AS ?TokenValue), storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_54: Locatable = Locatable{ Literal: COPY zero };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_54, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_54, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_54 START Locatable.Literal AS rtoc_union_writeback_54_item -> zero = COPY rtoc_union_writeback_54_item;, END
       NIL;
       MUTABLE cnt_decl = VarDecl{ token: COPY token, name: COPY cnt_var, type: NIL, value: Locatable{ Literal: COPY zero }, mutable: TRUE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE rtoc_union_writeback_55: Locatable = Locatable{ VarDecl: COPY cnt_decl };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_55, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_55, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_55 START Locatable.VarDecl AS rtoc_union_writeback_55_item -> cnt_decl = COPY rtoc_union_writeback_55_item;, END
       NIL;
       cnt_decl.storage = :stack;
@@ -935,28 +935,28 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &stage_inits.append(Node{ VarDecl: COPY cnt_decl });
       MUTABLE cnt_ident = Identifier{ token: COPY token, name: COPY cnt_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
       MUTABLE rtoc_union_writeback_56: Locatable = Locatable{ Identifier: COPY cnt_ident };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_56, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_56, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_56 START Locatable.Identifier AS rtoc_union_writeback_56_item -> cnt_ident = COPY rtoc_union_writeback_56_item;, END
       NIL;
       MUTABLE one = Literal{ token: COPY token, type: :INT64, value: CAST(1 AS ?TokenValue), storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_57: Locatable = Locatable{ Literal: COPY one };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_57, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_57, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_57 START Locatable.Literal AS rtoc_union_writeback_57_item -> one = COPY rtoc_union_writeback_57_item;, END
       NIL;
       MUTABLE increment = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY cnt_ident }, value: Locatable{ BinaryOp: COPY BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY cnt_ident }, op: :ADD, right: Locatable{ Literal: COPY one }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
       MUTABLE rtoc_union_writeback_58: Locatable = Locatable{ Assignment: COPY increment };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_58, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_58, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_58 START Locatable.Assignment AS rtoc_union_writeback_58_item -> increment = COPY rtoc_union_writeback_58_item;, END
       NIL;
       MUTABLE limit_n = COPY limit_op_mutable.count;
       MUTABLE cond = BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY cnt_ident }, op: :GT, right: UNWRAP (COPY limit_n), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
       MUTABLE rtoc_union_writeback_59: Locatable = Locatable{ BinaryOp: COPY cond };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_59, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_59, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_59 START Locatable.BinaryOp AS rtoc_union_writeback_59_item -> cond = COPY rtoc_union_writeback_59_item;, END
       NIL;
       MUTABLE limit_if = IfStatement{ token: COPY token, condition: Locatable{ BinaryOp: COPY cond }, then_branch: CAST(COPY [BreakNode{ token: COPY token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }] AS []Locatable), else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
       MUTABLE rtoc_union_writeback_60: Locatable = Locatable{ IfStatement: COPY limit_if };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_60, CAST(SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_60, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_60 START Locatable.IfStatement AS rtoc_union_writeback_60_item -> limit_if = COPY rtoc_union_writeback_60_item;, END
       NIL;
       MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
@@ -974,7 +974,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (((((stage.effect_mode == :fallible) OR (stage.effect_mode == :fallible_optional))) AND TRUE) AND locatable__error_union_type(expression)) THEN
       RETURN TRY (type__new( CAST(locatable__error_union_type(expression) AS TypeConstructionInput)));
     END
-    RETURN &aST__full_type_mut(expression, "SELECT stage value");
+    RETURN TRY (aST__full_type_mut(expression));
 }
 END
 PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewriter, terminal: ?Locatable, MUTABLE current_val: Identifier, res_var: String, token: Token, res_type: ?Type = NIL) RETURNS ![]Node
@@ -984,7 +984,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE res_ident = Identifier{ token: COPY token, name: COPY res_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
     IF res_type EXISTS AS res_type_value THEN
       MUTABLE rtoc_union_writeback_61: Locatable = Locatable{ Identifier: COPY res_ident };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_61, CAST(SyntheticTypeInput{ Type: COPY res_type_value } AS Type), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_61, CAST(COPY res_type_value AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_61 START Locatable.Identifier AS rtoc_union_writeback_61_item -> res_ident = COPY rtoc_union_writeback_61_item;, END
       NIL;
     END
@@ -997,7 +997,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE expr = pipelineRewriter__replace_placeholder(rtoc_self_view, sumOp__expression(sum_op), current_val);
         MUTABLE assign = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: Locatable{ BinaryOp: COPY BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY res_ident }, op: :ADD, right: COPY expr, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_62: Locatable = Locatable{ Assignment: COPY assign };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_62, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_62, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_62 START Locatable.Assignment AS rtoc_union_writeback_62_item -> assign = COPY rtoc_union_writeback_62_item;, END
       NIL;
         [assign]
@@ -1008,12 +1008,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE one = Literal{ token: COPY token, type: :INT64, value: 1, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
         MUTABLE increment = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: Locatable{ BinaryOp: COPY BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY res_ident }, op: :ADD, right: Locatable{ Literal: COPY one }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_63: Locatable = Locatable{ Assignment: COPY increment };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_63, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_63, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_63 START Locatable.Assignment AS rtoc_union_writeback_63_item -> increment = COPY rtoc_union_writeback_63_item;, END
       NIL;
         MUTABLE if_stmt = IfStatement{ token: COPY token, condition: COPY expr, then_branch: COPY [increment], else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
         MUTABLE rtoc_union_writeback_64: Locatable = Locatable{ IfStatement: COPY if_stmt };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_64, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_64, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_64 START Locatable.IfStatement AS rtoc_union_writeback_64_item -> if_stmt = COPY rtoc_union_writeback_64_item;, END
       NIL;
         [if_stmt]
@@ -1024,11 +1024,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE sum_ident = Identifier{ token: COPY token, name: "${res_var}_sum", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
         MUTABLE cnt_ident = Identifier{ token: COPY token, name: "${res_var}_cnt", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
         MUTABLE rtoc_union_writeback_65: Locatable = Locatable{ Identifier: COPY sum_ident };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_65, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_65, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_65 START Locatable.Identifier AS rtoc_union_writeback_65_item -> sum_ident = COPY rtoc_union_writeback_65_item;, END
       NIL;
         MUTABLE rtoc_union_writeback_66: Locatable = Locatable{ Identifier: COPY cnt_ident };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_66, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_66, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_66 START Locatable.Identifier AS rtoc_union_writeback_66_item -> cnt_ident = COPY rtoc_union_writeback_66_item;, END
       NIL;
         [Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY sum_ident }, value: Locatable{ BinaryOp: COPY BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY sum_ident }, op: :ADD, right: COPY expr, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL }, Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY cnt_ident }, value: Locatable{ BinaryOp: COPY BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY cnt_ident }, op: :ADD, right: Locatable{ Literal: COPY Literal{ token: COPY token, type: :NUMBER, value: 1.0, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL }]
@@ -1038,12 +1038,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         expr = pipelineRewriter__replace_placeholder(rtoc_self_view, anyOp__expression(any_op), current_val);
         MUTABLE set_true = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: Locatable{ Literal: COPY Literal{ token: COPY token, type: :BOOLEAN, value: TRUE, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_67: Locatable = Locatable{ Assignment: COPY set_true };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_67, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_67, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_67 START Locatable.Assignment AS rtoc_union_writeback_67_item -> set_true = COPY rtoc_union_writeback_67_item;, END
       NIL;
         if_stmt = IfStatement{ token: COPY token, condition: COPY expr, then_branch: COPY CAST(Tuple{set_true, BreakNode{ token: COPY token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }} AS Tuple<Assignment, BreakNode>), else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
         MUTABLE rtoc_union_writeback_68: Locatable = Locatable{ IfStatement: COPY if_stmt };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_68, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_68, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_68 START Locatable.IfStatement AS rtoc_union_writeback_68_item -> if_stmt = COPY rtoc_union_writeback_68_item;, END
       NIL;
         [if_stmt]
@@ -1053,12 +1053,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         expr = pipelineRewriter__replace_placeholder(rtoc_self_view, allOp__expression(all_op), current_val);
         MUTABLE set_false = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: Locatable{ Literal: COPY Literal{ token: COPY token, type: :BOOLEAN, value: FALSE, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_69: Locatable = Locatable{ Assignment: COPY set_false };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_69, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_69, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_69 START Locatable.Assignment AS rtoc_union_writeback_69_item -> set_false = COPY rtoc_union_writeback_69_item;, END
       NIL;
         if_stmt = IfStatement{ token: COPY token, condition: COPY UnaryOp{ token: COPY token, op: :NOT, right: expr, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }, then_branch: COPY CAST(Tuple{set_false, BreakNode{ token: COPY token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }} AS Tuple<Assignment, BreakNode>), else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
         MUTABLE rtoc_union_writeback_70: Locatable = Locatable{ IfStatement: COPY if_stmt };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_70, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_70, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_70 START Locatable.IfStatement AS rtoc_union_writeback_70_item -> if_stmt = COPY rtoc_union_writeback_70_item;, END
       NIL;
         [if_stmt]
@@ -1071,7 +1071,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         assign.mode = :assign;
         assign.symbol = COPY rtoc_self_view.reduce_acc_symbols[res_var];
         MUTABLE rtoc_union_writeback_71: Locatable = Locatable{ BindExpr: COPY assign };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_71, SyntheticTypeInput{ Type: COPY (res_type OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }))) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_71, COPY (res_type OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }))), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_71 START Locatable.BindExpr AS rtoc_union_writeback_71_item -> assign = COPY rtoc_union_writeback_71_item;, END
       NIL;
         [assign]
@@ -1083,18 +1083,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE found: Locatable = Locatable{ Identifier: COPY current_val };
         IF acc_symbol EXISTS AS acc_symbol_value THEN
           found = Locatable{ CopyNode: COPY CopyNode{ token: COPY token, value: COPY found, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL } };
-          TRY (aST__stamp_synthetic_type_mut(&found, SyntheticTypeInput{ Type: COPY &current_val.full_type_mut("pipeline found value") }, "synthetic AST type"));
+          TRY (aST__stamp_synthetic_type_mut(&found, COPY &current_val.full_type_mut("pipeline found value"), "synthetic AST type"));
       END
         assign = BindExpr{ token: COPY token, name: COPY res_var, type: NIL, value: found, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL };
         assign.mode = :assign;
         assign.symbol = acc_symbol;
         MUTABLE rtoc_union_writeback_72: Locatable = Locatable{ BindExpr: COPY assign };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_72, SyntheticTypeInput{ Type: COPY (res_type OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }))) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_72, COPY (res_type OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Void }))), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_72 START Locatable.BindExpr AS rtoc_union_writeback_72_item -> assign = COPY rtoc_union_writeback_72_item;, END
       NIL;
         if_stmt = IfStatement{ token: COPY token, condition: COPY expr, then_branch: COPY CAST(Tuple{assign, BreakNode{ token: COPY token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }} AS Tuple<BindExpr, BreakNode>), else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
         MUTABLE rtoc_union_writeback_73: Locatable = Locatable{ IfStatement: COPY if_stmt };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_73, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_73, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_73 START Locatable.IfStatement AS rtoc_union_writeback_73_item -> if_stmt = COPY rtoc_union_writeback_73_item;, END
       NIL;
         [if_stmt]
@@ -1105,34 +1105,34 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE op = :LT;
         MUTABLE found_ident = Identifier{ token: COPY token, name: "${res_var}_found", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
         MUTABLE rtoc_union_writeback_74: Locatable = Locatable{ Identifier: COPY found_ident };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_74, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_74, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_74 START Locatable.Identifier AS rtoc_union_writeback_74_item -> found_ident = COPY rtoc_union_writeback_74_item;, END
       NIL;
         MUTABLE not_found = UnaryOp{ token: COPY token, op: :NOT, right: COPY found_ident, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-        TRY (aST__stamp_synthetic_type_mut(&not_found, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+        TRY (aST__stamp_synthetic_type_mut(&not_found, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
         MUTABLE cmp = BinaryOp{ token: COPY token, left: COPY expr, op: COPY op, right: Locatable{ Identifier: COPY res_ident }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
         MUTABLE rtoc_union_writeback_75: Locatable = Locatable{ BinaryOp: COPY cmp };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_75, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_75, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_75 START Locatable.BinaryOp AS rtoc_union_writeback_75_item -> cmp = COPY rtoc_union_writeback_75_item;, END
       NIL;
         MUTABLE cond = BinaryOp{ token: COPY token, left: COPY not_found, op: symbol("OR"), right: Locatable{ BinaryOp: COPY cmp }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
         MUTABLE rtoc_union_writeback_76: Locatable = Locatable{ BinaryOp: COPY cond };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_76, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_76, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_76 START Locatable.BinaryOp AS rtoc_union_writeback_76_item -> cond = COPY rtoc_union_writeback_76_item;, END
       NIL;
         MUTABLE assign_val = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: COPY expr, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_77: Locatable = Locatable{ Assignment: COPY assign_val };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_77, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_77, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_77 START Locatable.Assignment AS rtoc_union_writeback_77_item -> assign_val = COPY rtoc_union_writeback_77_item;, END
       NIL;
         MUTABLE set_found = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY found_ident }, value: Locatable{ Literal: COPY Literal{ token: COPY token, type: :BOOLEAN, value: TRUE, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_78: Locatable = Locatable{ Assignment: COPY set_found };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_78, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_78, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_78 START Locatable.Assignment AS rtoc_union_writeback_78_item -> set_found = COPY rtoc_union_writeback_78_item;, END
       NIL;
         if_stmt = IfStatement{ token: COPY token, condition: Locatable{ BinaryOp: COPY cond }, then_branch: COPY [assign_val, set_found], else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
         MUTABLE rtoc_union_writeback_79: Locatable = Locatable{ IfStatement: COPY if_stmt };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_79, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_79, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_79 START Locatable.IfStatement AS rtoc_union_writeback_79_item -> if_stmt = COPY rtoc_union_writeback_79_item;, END
       NIL;
         [if_stmt]
@@ -1147,34 +1147,34 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END;
         found_ident = Identifier{ token: COPY token, name: "${res_var}_found", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
         MUTABLE rtoc_union_writeback_80: Locatable = Locatable{ Identifier: COPY found_ident };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_80, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_80, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_80 START Locatable.Identifier AS rtoc_union_writeback_80_item -> found_ident = COPY rtoc_union_writeback_80_item;, END
       NIL;
         not_found = UnaryOp{ token: COPY token, op: :NOT, right: COPY found_ident, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-        TRY (aST__stamp_synthetic_type_mut(&not_found, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+        TRY (aST__stamp_synthetic_type_mut(&not_found, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
         cmp = BinaryOp{ token: COPY token, left: COPY expr, op: COPY op, right: Locatable{ Identifier: COPY res_ident }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
         MUTABLE rtoc_union_writeback_81: Locatable = Locatable{ BinaryOp: COPY cmp };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_81, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_81, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_81 START Locatable.BinaryOp AS rtoc_union_writeback_81_item -> cmp = COPY rtoc_union_writeback_81_item;, END
       NIL;
         cond = BinaryOp{ token: COPY token, left: COPY not_found, op: symbol("OR"), right: Locatable{ BinaryOp: COPY cmp }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
         MUTABLE rtoc_union_writeback_82: Locatable = Locatable{ BinaryOp: COPY cond };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_82, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_82, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_82 START Locatable.BinaryOp AS rtoc_union_writeback_82_item -> cond = COPY rtoc_union_writeback_82_item;, END
       NIL;
         assign_val = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: COPY expr, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_83: Locatable = Locatable{ Assignment: COPY assign_val };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_83, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_83, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_83 START Locatable.Assignment AS rtoc_union_writeback_83_item -> assign_val = COPY rtoc_union_writeback_83_item;, END
       NIL;
         set_found = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY found_ident }, value: Locatable{ Literal: COPY Literal{ token: COPY token, type: :BOOLEAN, value: TRUE, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_84: Locatable = Locatable{ Assignment: COPY set_found };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_84, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_84, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_84 START Locatable.Assignment AS rtoc_union_writeback_84_item -> set_found = COPY rtoc_union_writeback_84_item;, END
       NIL;
         if_stmt = IfStatement{ token: COPY token, condition: Locatable{ BinaryOp: COPY cond }, then_branch: COPY [assign_val, set_found], else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
         MUTABLE rtoc_union_writeback_85: Locatable = Locatable{ IfStatement: COPY if_stmt };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_85, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_85, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_85 START Locatable.IfStatement AS rtoc_union_writeback_85_item -> if_stmt = COPY rtoc_union_writeback_85_item;, END
       NIL;
         [if_stmt]
@@ -1188,14 +1188,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE et: ?Type = TRY (type__element_type((TRY (type__new(&inner_expr.full_type_mut("pipeline unnest inner expression"))))));
         IF et EXISTS AS et_value THEN
           MUTABLE rtoc_union_writeback_86: Locatable = Locatable{ Identifier: COPY inner_it };
-          TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_86, SyntheticTypeInput{ Type: COPY et_value }, "synthetic AST type"));
+          TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_86, COPY et_value, "synthetic AST type"));
           PARTIAL MATCH rtoc_union_writeback_86 START Locatable.Identifier AS rtoc_union_writeback_86_item -> inner_it = COPY rtoc_union_writeback_86_item;, END
           NIL;
       END
         MUTABLE append = TRY (pipelineRewriter__synthetic_append_call(rtoc_self_view, token, Locatable{ Identifier: COPY res_ident }, Locatable{ Identifier: COPY inner_it }));
         MUTABLE inner_foreach = ForEach{ token: COPY token, var_name: inner_it_var, collection: inner_expr, body: [append], deferred_drops: NIL, is_mutable: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mark_per_iter: NIL, tight: FALSE };
         MUTABLE rtoc_union_writeback_87: Locatable = Locatable{ ForEach: COPY inner_foreach };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_87, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_87, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_87 START Locatable.ForEach AS rtoc_union_writeback_87_item -> inner_foreach = COPY rtoc_union_writeback_87_item;, END
       NIL;
         inner_foreach.var_used = TRUE;
@@ -1209,13 +1209,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       },
       DEFAULT -> {
         MUTABLE rtoc_value_block_marker = 0;
-        MUTABLE current_type = &aST__full_type_mut(current_val, "pipeline selected value");
+        MUTABLE current_type = TRY (aST__full_type_mut(current_val));
         MUTABLE value =   IF type__future?(current_type) THEN
           MoveNode{ token: COPY token, value: Locatable{ Identifier: COPY current_val }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }
         ELSE
           CopyNode{ token: COPY token, value: Locatable{ Identifier: COPY current_val }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, deep_copy: NIL, carrier_op: NIL, own: NIL, alloc: NIL }
         END;
-        TRY (aST__stamp_synthetic_type_mut(&value, SyntheticTypeInput{ Type: COPY &current_val.full_type_mut() }, "synthetic AST type"));
+        TRY (aST__stamp_synthetic_type_mut(&value, COPY TRY (aST__full_type_mut(current_val)), "synthetic AST type"));
         MUTABLE call = TRY (pipelineRewriter__synthetic_append_call(rtoc_self_view, token, Locatable{ Identifier: COPY res_ident }, value));
         [call]
       }
@@ -1229,7 +1229,9 @@ PRIVATE FN pipelineRewriter__synthetic_append_call(self: PipelineRewriter, token
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(std_lib, RegistryKey{ StringValue: COPY "append" })))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "append", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
-    TRY (aST__stamp_synthetic_type_mut( Locatable{ MethodCall: &call }, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+    MUTABLE rtoc_union_writeback_900: Locatable = Locatable{ MethodCall: COPY call };
+    TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_900, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
+    PARTIAL MATCH rtoc_union_writeback_900 START Locatable.MethodCall AS rtoc_union_writeback_900_item -> call = COPY rtoc_union_writeback_900_item;, END
     call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(defn)));
     call.matched_stdlib_def = defn;
     RETURN call;
@@ -1241,7 +1243,9 @@ PRIVATE FN pipelineRewriter__synthetic_set_insert_call(self: PipelineRewriter, t
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE defn = UNWRAP (functionSignature__unwrap(castOptionalLookupResultToOptionalX__pipeline_rewriter(TRY (intrinsicRegistry__lookup(:set_methods, RegistryKey{ StringValue: COPY "insert" })))));
     MUTABLE call = MethodCall{ token: COPY token, object: COPY receiver, name: "insert", args: COPY [value], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, pool_method: NIL, set_method: NIL, map_method: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, heap_dupe_result: NIL, safe_nav_chain: NIL, error_union_type: NIL, explicit_mutable_receiver_token: NIL, protocol_name: NIL, protocol_operation: NIL, retain_error_channel: NIL, source_method_name: NIL };
-    TRY (aST__stamp_synthetic_type_mut( Locatable{ MethodCall: &call }, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
+    MUTABLE rtoc_union_writeback_901: Locatable = Locatable{ MethodCall: COPY call };
+    TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_901, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
+    PARTIAL MATCH rtoc_union_writeback_901 START Locatable.MethodCall AS rtoc_union_writeback_901_item -> call = COPY rtoc_union_writeback_901_item;, END
     call.zig_pattern = castOptionalFunctionSignatureReturnValueToOptionalStringSymbol__pipeline_rewriter(TRY (functionSignature__intrinsic_pattern(defn)));
     call.matched_stdlib_def = defn;
     RETURN call;
@@ -1253,7 +1257,7 @@ PRIVATE FN pipelineRewriter__build_final_result(self: PipelineRewriter, terminal
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE res = Identifier{ token: COPY token, name: COPY res_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
     MUTABLE rtoc_union_writeback_88: Locatable = Locatable{ Identifier: COPY res };
-    TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_88, SyntheticTypeInput{ Type: COPY &aST__full_type_mut(smooth_node) }, "synthetic AST type"));
+    TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_88, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
     PARTIAL MATCH rtoc_union_writeback_88 START Locatable.Identifier AS rtoc_union_writeback_88_item -> res = COPY rtoc_union_writeback_88_item;, END
     NIL;
     MUTABLE sym: ?SymbolEntry@multiowned = COPY rtoc_self_view.list_res_symbols[res_var];
@@ -1278,37 +1282,26 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN UNWRAP (rtoc_self_view.schema_lookup);
 }
 END
-PRIVATE FN pipelineRewriter__callee_returns_error?(self: PipelineRewriter, MUTABLE rhs: Locatable) RETURNS Bool
+PRIVATE FN pipelineRewriter__callee_returns_error?(self: PipelineRewriter, MUTABLE rhs: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE ti = &aST__full_type_mut(rhs, "pipeline callee");
-    MUTABLE function_type = type__function_type(ti);
-    IF function_type THEN
-      RETURN type__error_union?(functionSignature__return_type(function_type));
+    MUTABLE ti = TRY (aST__full_type_mut(rhs));
+    IF type__function_type(ti) EXISTS AS function_type THEN
+      RETURN type__error_union?(COPY function_type.return_type);
     END
-    MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap(ti);
-    IF type__error_union?((IF signature != NIL THEN
-      functionSignature__return_type(signature)
-    ELSE
-      NIL
-    END)) != NIL THEN
-    RETURN (type__error_union?((IF signature != NIL THEN
-      functionSignature__return_type(signature)
-    ELSE
-      NIL
-    END)))?;
-    ELSE
+    IF functionSignature__unwrap(X{ Type: COPY ti }) EXISTS AS signature THEN
+      RETURN type__error_union?(functionSignature__return_type(signature));
+    END
     RETURN FALSE;
-    END
 }
 END
-PRIVATE FN pipelineRewriter__needs_transpiler_pipeline?(self: PipelineRewriter, MUTABLE source: Locatable) RETURNS Bool
+PRIVATE FN pipelineRewriter__needs_transpiler_pipeline?(self: PipelineRewriter, MUTABLE source: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE ti = &aST__full_type_mut(source, "pipeline source");
-    RETURN ((ti.pool?() OR type__soa?(ti)) OR type__sharded?(ti));
+    MUTABLE ti = TRY (aST__full_type_mut(source));
+    RETURN ((type__pool?(ti) OR type__soa?(ti)) OR type__sharded?(ti));
 }
 END
 PRIVATE FN pipelineRewriter__patch_chain_source_mut(MUTABLE self: PipelineRewriter, node: BinaryOp, new_source: Locatable) RETURNS Locatable
