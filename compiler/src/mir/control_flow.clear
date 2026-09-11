@@ -906,7 +906,7 @@ PRIVATE FN ownershipDataflow__transfer_stmt(MUTABLE self: OwnershipDataflow, stm
       MUTABLE inner = move_node.value;
       IF inner IS_A Identifier THEN
         MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(inner) AS String), castLocatableToNode__auto_inference(inner));
-        IF ownershipDataflow__state_entry(self, state, Place{ PlaceId: place }) THEN
+        IF ownershipDataflow__state_entry(self, state, Place{ PlaceId: COPY place }) THEN
           ownershipDataflow__mark_moved_mut(&self, &state, place);
         END
       END
@@ -979,9 +979,9 @@ PRIVATE FN ownershipDataflow__update_declared_owner_mut(MUTABLE self: OwnershipD
     MUTABLE entry: ?OwnerEntry = TRY (ownershipDataflow__make_owner_entry(self, node));
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
-      ownershipDataflow__set_state_entry_mut(&self, &state, Place{ PlaceId: place }, entry_value_mutable);
+      ownershipDataflow__set_state_entry_mut(&self, &state, Place{ PlaceId: COPY place }, entry_value_mutable);
     ELSE
-      ownershipDataflow__delete_state_entry_mut(&self, &state, Place{ PlaceId: place });
+      ownershipDataflow__delete_state_entry_mut(&self, &state, Place{ PlaceId: COPY place });
     END
     NIL;
 END
@@ -1001,7 +1001,7 @@ PRIVATE FN ownershipDataflow__collect_ownership_transfers(self: OwnershipDataflo
       IF node_value_mutable IS_A Identifier AS identifier THEN
         MUTABLE identifier_mutable = COPY identifier;
         MUTABLE place = ownershipDataflow__place_for_binding_node(identifier__name(identifier_mutable), Node{ Identifier: identifier_mutable });
-        IF !(ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: place })) THEN
+        IF !(ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: COPY place })) THEN
           RETURN;
         END
         IF TRY (ownershipDataflow__copy_type?(self, identifier_mutable)) THEN
@@ -1032,7 +1032,7 @@ PRIVATE FN ownershipDataflow__collect_ownership_transfers(self: OwnershipDataflo
         MUTABLE inner = move_node.value;
         IF inner IS_A Identifier THEN
           MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(inner) AS String), castLocatableToNode__auto_inference(inner));
-          IF ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: place }) THEN
+          IF ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: COPY place }) THEN
             &step.consumed.insert(COPY place);
           END
         END
@@ -1068,12 +1068,12 @@ PRIVATE FN ownershipDataflow__collect_ownership_transfers(self: OwnershipDataflo
 END
 PRIVATE FN ownershipDataflow__collect_explicit_in(self: OwnershipDataflow, node: ?Locatable, MUTABLE step: DataflowStep) RETURNS !Void
   EFFECTS REENTRANT ->
-    TRY (ownershipDataflow__walk_expr_node(self, node, TRUE, %(n: Locatable) USE(step, self) -> {
+    TRY (ownershipDataflow__walk_expr_node(self, node, TRUE, %(n: Locatable) USE(MUTABLE step, self) -> {
     IF !((IF n IS_A Identifier AS identifier THEN (identifier.was_moved != NIL) ELSE FALSE END)) THEN
         RETURN;
     END
     MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(n) AS String), castLocatableToNode(n));
-    IF !(ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: place })) THEN
+    IF !(ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: COPY place })) THEN
         RETURN;
     END
     IF TRY (ownershipDataflow__copy_type?(self, castLocatableToIdentifier__control_flow(n))) THEN
@@ -1093,7 +1093,7 @@ PRIVATE FN ownershipDataflow__collect_field_owner_transfer(self: OwnershipDatafl
     MUTABLE root: ?Identifier = aST__root_identifier(Locatable{ GetField: COPY node });
     IF root EXISTS AS root_value THEN
       MUTABLE place = ownershipDataflow__place_for_binding_node(root_value.name, Node{ Identifier: root_value });
-      IF ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: place }) THEN
+      IF ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: COPY place }) THEN
         &step.consumed.insert(COPY place);
       END
       NIL;
@@ -1131,7 +1131,7 @@ PRIVATE FN ownershipDataflow__collect_share_transfer(self: OwnershipDataflow, no
         RETURN;
       END
       MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(source) AS String), castLocatableToNode__auto_inference(source));
-      IF ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: place }) THEN
+      IF ownershipDataflow__state_entry(self, step.state, Place{ PlaceId: COPY place }) THEN
         &step.consumed.insert(COPY place);
       END
       RETURN;
@@ -1305,22 +1305,31 @@ PRIVATE FN useAfterMoveChecker__check_stmt_reads(MUTABLE self: UseAfterMoveCheck
 END
 PRIVATE FN useAfterMoveChecker__check_call_reads(MUTABLE self: UseAfterMoveChecker, call_node: CallNode, state: {PlaceId}OwnerEntry) RETURNS !Void
   EFFECTS REENTRANT ->
-    MUTABLE rtoc_each_items_21 = ((MATCH call_node START CallNode.FuncCall AS item -> item.args, CallNode.MethodCall AS item -> item.args END));
+    MUTABLE rtoc_each_items_21: []Locatable = List[];
+    MATCH call_node START
+      CallNode.FuncCall AS item -> rtoc_each_items_21 = COPY item.args;,
+      CallNode.MethodCall AS item -> rtoc_each_items_21 = COPY item.args;
+    END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_21.length() DO
-    IF (UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A Identifier AND UNWRAP (rtoc_each_items_21[rtoc_idx]).was_moved) THEN
+    MUTABLE rtoc_arg = UNWRAP (rtoc_each_items_21[rtoc_idx]);
+    IF (IF rtoc_arg IS_A Identifier AS rtoc_arg_ident THEN (rtoc_arg_ident.was_moved != NIL) ELSE FALSE END) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
-    ELSE_IF UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A MoveNode THEN
-        IF !(UNWRAP (rtoc_each_items_21[rtoc_idx]).value() IS_A Identifier) THEN
-          TRY (useAfterMoveChecker__check_reads_in_expr(&self, UNWRAP (rtoc_each_items_21[rtoc_idx]), state));
+    ELSE_IF rtoc_arg IS_A MoveNode AS rtoc_move THEN
+        IF !(rtoc_move.value IS_A Identifier) THEN
+          TRY (useAfterMoveChecker__check_reads_in_expr(&self, rtoc_arg, state));
         END
-    ELSE_IF UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A ShareNode THEN
-        TRY (useAfterMoveChecker__check_share_reads(&self, UNWRAP (rtoc_each_items_21[rtoc_idx]), state));
-    ELSE_IF ((UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A CopyNode OR UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A KeepNode) OR UNWRAP (rtoc_each_items_21[rtoc_idx]) IS_A FreezeNode) THEN
-        TRY (useAfterMoveChecker__check_reads_in_expr(&self, UNWRAP (rtoc_each_items_21[rtoc_idx]).value(), state));
+    ELSE_IF rtoc_arg IS_A ShareNode AS rtoc_share THEN
+        TRY (useAfterMoveChecker__check_share_reads(&self, rtoc_share, state));
+    ELSE_IF rtoc_arg IS_A CopyNode AS rtoc_copy THEN
+        TRY (useAfterMoveChecker__check_reads_in_expr(&self, rtoc_copy.value, state));
+    ELSE_IF rtoc_arg IS_A KeepNode AS rtoc_keep THEN
+        TRY (useAfterMoveChecker__check_reads_in_expr(&self, rtoc_keep.value, state));
+    ELSE_IF rtoc_arg IS_A FreezeNode AS rtoc_freeze THEN
+        TRY (useAfterMoveChecker__check_reads_in_expr(&self, rtoc_freeze.value, state));
     ELSE
-        TRY (useAfterMoveChecker__check_reads_in_expr(&self, UNWRAP (rtoc_each_items_21[rtoc_idx]), state));
+        TRY (useAfterMoveChecker__check_reads_in_expr(&self, rtoc_arg, state));
     END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -1427,10 +1436,15 @@ PRIVATE FN useAfterMoveChecker__check_identifier_node_read(MUTABLE self: UseAfte
     useAfterMoveChecker__check_identifier_read(&self, node.name, state, node.token, place);
 END
 PRIVATE FN useAfterMoveChecker__check_identifier_read(MUTABLE self: UseAfterMoveChecker, name: String, state: {PlaceId}OwnerEntry, token: Token, place: ?PlaceId = NIL) RETURNS Void ->
-    MUTABLE entry: ?OwnerEntry = ownershipDataflow__lookup_state_entry(state, (place OR_ELSE name));
+    MUTABLE lookup: Place = IF place EXISTS AS place_value THEN
+      Place{ PlaceId: COPY place_value }
+    ELSE
+      Place{ StringValue: COPY name }
+    END;
+    MUTABLE entry: ?OwnerEntry = ownershipDataflow__lookup_state_entry(state, lookup);
     IF entry EXISTS AS entry_value THEN
       MUTABLE st = entry_value.state;
-      IF (st == moved) THEN
+      IF (st == :moved) THEN
         MUTABLE loc = " (line ${token.line.toString()})";
         &self.errors.append("[USE_AFTER_MOVE] ${self.fn_node.name}::${name} -- used after being moved${loc}");
       END
