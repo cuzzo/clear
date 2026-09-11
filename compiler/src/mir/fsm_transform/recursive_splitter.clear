@@ -146,7 +146,7 @@ PUB FN builder__new() RETURNS Builder@multiowned ->
   RETURN self @multiowned;
 END
 PUB FN fsmRecursiveSplitter__split(body: []Locatable, MUTABLE lowering: MIRLowering, ctx: ?{String@symbol}?TransformValue = NIL) RETURNS !?SegmentList ->
-  IF TRY (fsmRecursiveSplitter__contains_unsupported?(COPY body)) THEN
+  IF TRY (fsmRecursiveSplitter__contains_unsupported?( CAST(COPY body AS ?Body))) THEN
     RETURN NIL;
   END
   MUTABLE builder = builder__new();
@@ -282,7 +282,7 @@ PRIVATE FN fsmRecursiveSplitter__with_unsupported?(with_node: WithBlock) RETURNS
       RETURN TRUE;
     END
   END
-  RETURN TRY (fsmRecursiveSplitter__contains_unsupported?(COPY with_node.body));
+  RETURN TRY (fsmRecursiveSplitter__contains_unsupported?( CAST(COPY with_node.body AS ?Body)));
 END
 PRIVATE FN fsmRecursiveSplitter__stmt_unsupported_suspend?(stmt: ?SegmentStmt) RETURNS !Bool ->
   MUTABLE sus = IF ((stmt != NIL) AND (stmt IS_A Locatable)) THEN

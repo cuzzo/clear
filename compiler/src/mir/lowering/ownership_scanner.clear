@@ -23,7 +23,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
     END
     rubyToClearVoid__ownership_scanner()
   });
-  MUTABLE rtoc_each_items_2 = (((IF selectOp__capture_analysis(bg_value) != NIL THEN
+  MUTABLE rtoc_each_items_2 = (((IF selectOp__capture_analysis( CAST(bg_value AS SelectOp)) != NIL THEN
       (selectOp__capture_analysis(bg_value)).move_mark_names()
     ELSE
       NIL
@@ -59,7 +59,7 @@ PUB FN mIRLoweringOwnershipScanner__collect_explicit_move_roots(self: MIRLowerin
   collect( castLocatableToMIRLoweringOwnershipScannerScanRoot(node));
   aST__each_bg_block_in_stmt(node, %(bg_value: BgNode) USE(collect) -> {
   IF bgNode__body(bg_value) THEN
-      collect(bgNode__body(bg_value));
+      collect( CAST(bgNode__body(bg_value) AS MIRLoweringOwnershipScannerScanRoot));
   END
   rubyToClearVoid__ownership_scanner()
   });

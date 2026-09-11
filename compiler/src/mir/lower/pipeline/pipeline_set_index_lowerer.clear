@@ -207,7 +207,7 @@ PRIVATE FN pipelineSetIndexLowerer__bc_index_iter(self: PipelineSetIndexLowerer,
       end_expr_branch_value = end_mir;
     END
     MUTABLE end_expr: BinOp = end_expr_branch_value?;
-    RETURN Emittable{ IterRange: COPY IterRange{ start: start_mir, end_val: end_expr, capture_type: :i64, lowered_node_id: NIL, ownership_consumption: NIL } };
+    RETURN Emittable{ IterRange: COPY IterRange{ start: start_mir, end_val: CAST(end_expr AS Emittable), capture_type: :i64, lowered_node_id: NIL, ownership_consumption: NIL } };
   END
   IF range_source IS_A Identifier AS identifier THEN
     RETURN pipelineSetIndexLowerer__visit_mir_call(self, identifier);
@@ -221,7 +221,7 @@ PRIVATE FN pipelineSetIndexLowerer__build_index_gop_body(self: PipelineSetIndexL
   MUTABLE elem_zig_type = "@TypeOf(${item_var})";
   MUTABLE prepared = TRY (pipelineSetIndexLowerer__index_prepared_value(self, item_var, elem_zig_type, alloc, item_type, value_ownership));
   MUTABLE insert = IndexInsert{ map: Emittable{ Ident: COPY Ident{ name: "idx_result", lowered_node_id: NIL, ownership_consumption: NIL } }, key_expr: Emittable{ Ident: COPY Ident{ name: "idx_key", lowered_node_id: NIL, ownership_consumption: NIL } }, value_expr: COPY prepared.value, key_zig_type: "u8", elem_zig_type: elem_zig_type, alloc: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-  MUTABLE owned_insert = pipelineSetIndexLowerer__pipeline_index_insert_with_ownership_call(self, insert, prepared.value, prepared.owns_heap, alloc);
+  MUTABLE owned_insert = pipelineSetIndexLowerer__pipeline_index_insert_with_ownership_call(self, CAST(insert AS IndexInsert), prepared.value, prepared.owns_heap, alloc);
   MUTABLE body: []Emittable = (CAST([Emittable{ Let: COPY Let{ name: COPY "idx_key", init: COPY expr_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable) + COPY prepared.setup_stmts + CAST([Emittable{ IndexInsert: COPY owned_insert }] AS []Emittable));
   MUTABLE entry: ?CleanupEntry@multiowned = (COPY self.pipeline_owned_cleanup_entry)(expr_mir, expr_node);
   IF entry EXISTS AS entry_value THEN

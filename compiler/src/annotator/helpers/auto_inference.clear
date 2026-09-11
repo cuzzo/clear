@@ -10982,7 +10982,7 @@ END
 # The union either holds that variant or it does not.
 PUB FN castAutoConstraintCollectorObservedTypeToType(value: AutoConstraintCollectorObservedType) RETURNS ?Type@multiowned EFFECTS REENTRANT ->
   IF value IS_A Type AS item THEN
-    RETURN item;
+    RETURN CAST(item AS ?Type@multiowned);
   END
   RETURN NIL;
 END

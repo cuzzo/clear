@@ -104,7 +104,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PUB FN functionCFG__build(fn_node: FunctionDef, can_fail_fns: ?[Set]String = NIL) RETURNS !FunctionCFG@multiowned ->
   MUTABLE cfg = functionCFG__new(fn_node.name, can_fail_fns);
-  MUTABLE last_block: ?BasicBlock = TRY (functionCFG__build_body(fn_node.body, KEEP cfg.entry, KEEP cfg.exit_block, &cfg));
+  MUTABLE last_block: ?BasicBlock = TRY (functionCFG__build_body( CAST(fn_node.body AS []Node), KEEP cfg.entry, KEEP cfg.exit_block, &cfg));
   IF last_block EXISTS AS last_block_value THEN
     MUTABLE last_block_value_mutable = COPY last_block_value;
     basicBlock__add_successor(&last_block_value_mutable, KEEP cfg.exit_block);
@@ -589,7 +589,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rtoc_each_items_11 = (TRY (ownershipDataflow__cleanup_entry_pairs(rtoc_self_view, fn_node, facts)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_11.length() DO
-      MUTABLE var = COPY emittable__name(UNWRAP (rtoc_each_items_11[rtoc_idx]));
+      MUTABLE var = COPY emittable__name( CAST(UNWRAP (rtoc_each_items_11[rtoc_idx]) AS Emittable));
       MUTABLE entry = COPY KEEP rtoc_each_items_11[rtoc_idx]?.entry;
       IF !(cleanupEntry__needs_cleanup?( UNWRAP (entry))) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -653,7 +653,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rubyToClearVoid__control_flow()
     });
     frozenCleanupFacts__each_entry(facts, %(place: PlaceId, entry: CleanupEntry) USE(MUTABLE pairs, seen) -> {
-    IF seen.contains?(aST__node_identity(entry)) THEN
+    IF seen.contains?(aST__node_identity( CAST(entry AS Locatable))) THEN
         RETURN;
     END
     &pairs.append(CleanupEntryPair{ place: COPY place, name: COPY place.path, entry: entry });
@@ -896,7 +896,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE needs = TRY (type__needs_explicit_cleanup?( UNWRAP (ti), :heap, rtoc_self_view.schema_lookup));
-      ownershipDataflow__set_state_entry_mut(&rtoc_self_view, &state, Place{ PlaceId: COPY ownershipDataflow__place_for_binding_node( UNWRAP (name), rtoc_self_view.fn_node.params[rtoc_idx]?) }, OwnerEntry{ state: COPY :owned, allocator: :heap, needs_cleanup: needs });
+      ownershipDataflow__set_state_entry_mut(&rtoc_self_view, &state, Place{ PlaceId: COPY ownershipDataflow__place_for_binding_node( UNWRAP (name), CAST(rtoc_self_view.fn_node.params[rtoc_idx]? AS Node)) }, OwnerEntry{ state: COPY :owned, allocator: :heap, needs_cleanup: needs });
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN state;
@@ -1738,7 +1738,7 @@ PUB FN loopFrameAnalysis__analyze_mut(fn_nodes: {String}FunctionDef, schema_look
     CONTINUE;
   END
   TRY (loopFrameAnalysis__walk_stmts_mut(_.body, schema_lookup, fn_nodes));
-  TRY (loopFrameAnalysis__update_shard_contexts_mut(_.body, fn_nodes));
+  TRY (loopFrameAnalysis__update_shard_contexts_mut( CAST(_.body AS []Node), fn_nodes));
   END
   RETURN NIL;
 END
@@ -1851,7 +1851,7 @@ PUB FN loopFrameAnalysis__expression_allocates_frame_value?(node: Locatable, fn_
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(aST__node__matched_signature(node));
+    sig_branch_value = functionSignature__unwrap( CAST(aST__node__matched_signature(node) AS ?X));
   ELSE
     sig_branch_value = NIL;
   END
@@ -1880,7 +1880,7 @@ PUB FN loopFrameAnalysis__outer_mutating_receiver_call?(node: Locatable, local_n
   END
   MUTABLE sig_branch_value: ?FunctionSignature@multiowned = NIL;
   IF TRUE THEN
-    sig_branch_value = functionSignature__unwrap(aST__node__matched_signature(node));
+    sig_branch_value = functionSignature__unwrap( CAST(aST__node__matched_signature(node) AS ?X));
   ELSE
     sig_branch_value = NIL;
   END
@@ -1914,7 +1914,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   IF !(node IS_A MethodCall) THEN
       RETURN;
   END
-  MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(aST__node__matched_signature(node));
+  MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap( CAST(aST__node__matched_signature(node) AS ?X));
   IF !(sig) THEN
       RETURN;
   END

@@ -159,7 +159,7 @@ PUB UNION WalkNode { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolR
 PUB FN preMirTypeCheck__verify_mut(program: Program) RETURNS !Void ->
   TRY (mIRPassState__class_require_mut(PassStateProgram{ Program: COPY program }, :hoisted, "PreMirTypeCheck"));
   MUTABLE violations = List[];
-  preMirTypeCheck__walk(program, &violations, {});
+  preMirTypeCheck__walk( CAST(program AS ?WalkNode), &violations, {});
   IF (violations.length() == 0) THEN
     MUTABLE rtoc_mutable_receiver_1 = (mIRPassState__for_mut(PassStateProgram{ Emittable: COPY CAST(program AS Emittable) }));
     TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_1, :premir_type_checked));
@@ -234,22 +234,22 @@ FN castAssignmentNameToWalkNode(value: AssignmentName) RETURNS WalkNode ->
 END
 FN castLambdaBodyToWalkNode(value: LambdaBody) RETURNS WalkNode ->
   PARTIAL MATCH value START
-    LambdaBody.Program AS cast_payload -> RETURN WalkNode{ MIRProgram: COPY cast_payload };,
+    LambdaBody.Program AS cast_payload -> RETURN WalkNode{ MIRProgram: CAST(COPY cast_payload AS MIRProgram)};,
     LambdaBody.RequireNode AS cast_payload -> RETURN WalkNode{ RequireNode: COPY cast_payload };,
     LambdaBody.ProtocolRequirement AS cast_payload -> RETURN WalkNode{ ProtocolRequirement: COPY cast_payload };,
     LambdaBody.ProtocolDef AS cast_payload -> RETURN WalkNode{ ProtocolDef: COPY cast_payload };,
     LambdaBody.FunctionDef AS cast_payload -> RETURN WalkNode{ FunctionDef: COPY cast_payload };,
     LambdaBody.ImplementationDef AS cast_payload -> RETURN WalkNode{ ImplementationDef: COPY cast_payload };,
     LambdaBody.ConformanceDef AS cast_payload -> RETURN WalkNode{ ConformanceDef: COPY cast_payload };,
-    LambdaBody.StructDef AS cast_payload -> RETURN WalkNode{ MIRStructDef: COPY cast_payload };,
+    LambdaBody.StructDef AS cast_payload -> RETURN WalkNode{ MIRStructDef: CAST(COPY cast_payload AS MIRStructDef)};,
     LambdaBody.VarDecl AS cast_payload -> RETURN WalkNode{ VarDecl: COPY cast_payload };,
     LambdaBody.Assignment AS cast_payload -> RETURN WalkNode{ Assignment: COPY cast_payload };,
-    LambdaBody.DestructureTarget AS cast_payload -> RETURN WalkNode{ MIRDestructureTarget: COPY cast_payload };,
+    LambdaBody.DestructureTarget AS cast_payload -> RETURN WalkNode{ MIRDestructureTarget: CAST(COPY cast_payload AS MIRDestructureTarget)};,
     LambdaBody.DestructuringAssignment AS cast_payload -> RETURN WalkNode{ DestructuringAssignment: COPY cast_payload };,
     LambdaBody.BindExpr AS cast_payload -> RETURN WalkNode{ BindExpr: COPY cast_payload };,
     LambdaBody.BinaryOp AS cast_payload -> RETURN WalkNode{ BinaryOp: COPY cast_payload };,
     LambdaBody.IsA AS cast_payload -> RETURN WalkNode{ IsA: COPY cast_payload };,
-    LambdaBody.UnaryOp AS cast_payload -> RETURN WalkNode{ MIRUnaryOp: COPY cast_payload };,
+    LambdaBody.UnaryOp AS cast_payload -> RETURN WalkNode{ MIRUnaryOp: CAST(COPY cast_payload AS MIRUnaryOp)};,
     LambdaBody.CallSiteOverride AS cast_payload -> RETURN WalkNode{ CallSiteOverride: COPY cast_payload };,
     LambdaBody.Identifier AS cast_payload -> RETURN WalkNode{ Identifier: COPY cast_payload };,
     LambdaBody.Literal AS cast_payload -> RETURN WalkNode{ Literal: COPY cast_payload };,
@@ -267,10 +267,10 @@ FN castLambdaBodyToWalkNode(value: LambdaBody) RETURNS WalkNode ->
     LambdaBody.BreakNode AS cast_payload -> RETURN WalkNode{ BreakNode: COPY cast_payload };,
     LambdaBody.ContinueNode AS cast_payload -> RETURN WalkNode{ ContinueNode: COPY cast_payload };,
     LambdaBody.FuncCall AS cast_payload -> RETURN WalkNode{ FuncCall: COPY cast_payload };,
-    LambdaBody.MethodCall AS cast_payload -> RETURN WalkNode{ MIRMethodCall: COPY cast_payload };,
+    LambdaBody.MethodCall AS cast_payload -> RETURN WalkNode{ MIRMethodCall: CAST(COPY cast_payload AS MIRMethodCall)};,
     LambdaBody.GetField AS cast_payload -> RETURN WalkNode{ GetField: COPY cast_payload };,
     LambdaBody.GetIndex AS cast_payload -> RETURN WalkNode{ GetIndex: COPY cast_payload };,
-    LambdaBody.Cast AS cast_payload -> RETURN WalkNode{ MIRCast: COPY cast_payload };,
+    LambdaBody.Cast AS cast_payload -> RETURN WalkNode{ MIRCast: CAST(COPY cast_payload AS MIRCast)};,
     LambdaBody.ReturnNode AS cast_payload -> RETURN WalkNode{ ReturnNode: COPY cast_payload };,
     LambdaBody.Assert AS cast_payload -> RETURN WalkNode{ Assert: COPY cast_payload };,
     LambdaBody.Raise AS cast_payload -> RETURN WalkNode{ Raise: COPY cast_payload };,
@@ -278,7 +278,7 @@ FN castLambdaBodyToWalkNode(value: LambdaBody) RETURNS WalkNode ->
     LambdaBody.DieNode AS cast_payload -> RETURN WalkNode{ DieNode: COPY cast_payload };,
     LambdaBody.Slice AS cast_payload -> RETURN WalkNode{ Slice: COPY cast_payload };,
     LambdaBody.Require AS cast_payload -> RETURN WalkNode{ Require: COPY cast_payload };,
-    LambdaBody.DeferStmt AS cast_payload -> RETURN WalkNode{ MIRDeferStmt: COPY cast_payload };,
+    LambdaBody.DeferStmt AS cast_payload -> RETURN WalkNode{ MIRDeferStmt: CAST(COPY cast_payload AS MIRDeferStmt)};,
     LambdaBody.WithBlock AS cast_payload -> RETURN WalkNode{ WithBlock: COPY cast_payload };,
     LambdaBody.SyncPolicyDecl AS cast_payload -> RETURN WalkNode{ SyncPolicyDecl: COPY cast_payload };,
     LambdaBody.SelectOp AS cast_payload -> RETURN WalkNode{ SelectOp: COPY cast_payload };,
@@ -309,7 +309,7 @@ FN castLambdaBodyToWalkNode(value: LambdaBody) RETURNS WalkNode ->
     LambdaBody.ConcurrentOp AS cast_payload -> RETURN WalkNode{ ConcurrentOp: COPY cast_payload };,
     LambdaBody.Placeholder AS cast_payload -> RETURN WalkNode{ Placeholder: COPY cast_payload };,
     LambdaBody.Copy AS cast_payload -> RETURN WalkNode{ Copy: COPY cast_payload };,
-    LambdaBody.OptionalUnwrap AS cast_payload -> RETURN WalkNode{ MIROptionalUnwrap: COPY cast_payload };,
+    LambdaBody.OptionalUnwrap AS cast_payload -> RETURN WalkNode{ MIROptionalUnwrap: CAST(COPY cast_payload AS MIROptionalUnwrap)};,
     LambdaBody.TenseNavigation AS cast_payload -> RETURN WalkNode{ TenseNavigation: COPY cast_payload };,
     LambdaBody.MutableBorrow AS cast_payload -> RETURN WalkNode{ MutableBorrow: COPY cast_payload };,
     LambdaBody.OrElseRaise AS cast_payload -> RETURN WalkNode{ OrElseRaise: COPY cast_payload };,
@@ -319,7 +319,7 @@ FN castLambdaBodyToWalkNode(value: LambdaBody) RETURNS WalkNode ->
     LambdaBody.OrElseBreak AS cast_payload -> RETURN WalkNode{ OrElseBreak: COPY cast_payload };,
     LambdaBody.CatchBlock AS cast_payload -> RETURN WalkNode{ CatchBlock: COPY cast_payload };,
     LambdaBody.RecoverOp AS cast_payload -> RETURN WalkNode{ RecoverOp: COPY cast_payload };,
-    LambdaBody.BlockExpr AS cast_payload -> RETURN WalkNode{ MIRBlockExpr: COPY cast_payload };,
+    LambdaBody.BlockExpr AS cast_payload -> RETURN WalkNode{ MIRBlockExpr: CAST(COPY cast_payload AS MIRBlockExpr)};,
     LambdaBody.StringConcat AS cast_payload -> RETURN WalkNode{ StringConcat: COPY cast_payload };,
     LambdaBody.CapabilityWrap AS cast_payload -> RETURN WalkNode{ CapabilityWrap: COPY cast_payload };,
     LambdaBody.MoveNode AS cast_payload -> RETURN WalkNode{ MoveNode: COPY cast_payload };,
@@ -331,15 +331,15 @@ FN castLambdaBodyToWalkNode(value: LambdaBody) RETURNS WalkNode ->
     LambdaBody.FreezeNode AS cast_payload -> RETURN WalkNode{ FreezeNode: COPY cast_payload };,
     LambdaBody.PassStmt AS cast_payload -> RETURN WalkNode{ PassStmt: COPY cast_payload };,
     LambdaBody.StructPattern AS cast_payload -> RETURN WalkNode{ StructPattern: COPY cast_payload };,
-    LambdaBody.RangeLit AS cast_payload -> RETURN WalkNode{ MIRRangeLit: COPY cast_payload };,
+    LambdaBody.RangeLit AS cast_payload -> RETURN WalkNode{ MIRRangeLit: CAST(COPY cast_payload AS MIRRangeLit)};,
     LambdaBody.ExternFnDecl AS cast_payload -> RETURN WalkNode{ ExternFnDecl: COPY cast_payload };,
     LambdaBody.ExternStructDecl AS cast_payload -> RETURN WalkNode{ ExternStructDecl: COPY cast_payload };,
-    LambdaBody.EnumDef AS cast_payload -> RETURN WalkNode{ MIREnumDef: COPY cast_payload };,
+    LambdaBody.EnumDef AS cast_payload -> RETURN WalkNode{ MIREnumDef: CAST(COPY cast_payload AS MIREnumDef)};,
     LambdaBody.UnionDef AS cast_payload -> RETURN WalkNode{ UnionDef: COPY cast_payload };,
     LambdaBody.UnionVariantLit AS cast_payload -> RETURN WalkNode{ UnionVariantLit: COPY cast_payload };,
     LambdaBody.StaticCall AS cast_payload -> RETURN WalkNode{ StaticCall: COPY cast_payload };,
-    LambdaBody.DoBlock AS cast_payload -> RETURN WalkNode{ MIRDoBlock: COPY cast_payload };,
-    LambdaBody.BgBlock AS cast_payload -> RETURN WalkNode{ MIRBgBlock: COPY cast_payload };,
+    LambdaBody.DoBlock AS cast_payload -> RETURN WalkNode{ MIRDoBlock: CAST(COPY cast_payload AS MIRDoBlock)};,
+    LambdaBody.BgBlock AS cast_payload -> RETURN WalkNode{ MIRBgBlock: CAST(COPY cast_payload AS MIRBgBlock)};,
     LambdaBody.ThenChain AS cast_payload -> RETURN WalkNode{ ThenChain: COPY cast_payload };,
     LambdaBody.BgStreamBlock AS cast_payload -> RETURN WalkNode{ BgStreamBlock: COPY cast_payload };,
     LambdaBody.YieldExpr AS cast_payload -> RETURN WalkNode{ YieldExpr: COPY cast_payload };,
@@ -369,22 +369,22 @@ FN castLambdaBodyToWalkNode(value: LambdaBody) RETURNS WalkNode ->
 END
 FN castLocatableToWalkNode(value: Locatable) RETURNS WalkNode ->
   PARTIAL MATCH value START
-    Locatable.Program AS cast_payload -> RETURN WalkNode{ MIRProgram: COPY cast_payload };,
+    Locatable.Program AS cast_payload -> RETURN WalkNode{ MIRProgram: CAST(COPY cast_payload AS MIRProgram)};,
     Locatable.RequireNode AS cast_payload -> RETURN WalkNode{ RequireNode: COPY cast_payload };,
     Locatable.ProtocolRequirement AS cast_payload -> RETURN WalkNode{ ProtocolRequirement: COPY cast_payload };,
     Locatable.ProtocolDef AS cast_payload -> RETURN WalkNode{ ProtocolDef: COPY cast_payload };,
     Locatable.FunctionDef AS cast_payload -> RETURN WalkNode{ FunctionDef: COPY cast_payload };,
     Locatable.ImplementationDef AS cast_payload -> RETURN WalkNode{ ImplementationDef: COPY cast_payload };,
     Locatable.ConformanceDef AS cast_payload -> RETURN WalkNode{ ConformanceDef: COPY cast_payload };,
-    Locatable.StructDef AS cast_payload -> RETURN WalkNode{ MIRStructDef: COPY cast_payload };,
+    Locatable.StructDef AS cast_payload -> RETURN WalkNode{ MIRStructDef: CAST(COPY cast_payload AS MIRStructDef)};,
     Locatable.VarDecl AS cast_payload -> RETURN WalkNode{ VarDecl: COPY cast_payload };,
     Locatable.Assignment AS cast_payload -> RETURN WalkNode{ Assignment: COPY cast_payload };,
-    Locatable.DestructureTarget AS cast_payload -> RETURN WalkNode{ MIRDestructureTarget: COPY cast_payload };,
+    Locatable.DestructureTarget AS cast_payload -> RETURN WalkNode{ MIRDestructureTarget: CAST(COPY cast_payload AS MIRDestructureTarget)};,
     Locatable.DestructuringAssignment AS cast_payload -> RETURN WalkNode{ DestructuringAssignment: COPY cast_payload };,
     Locatable.BindExpr AS cast_payload -> RETURN WalkNode{ BindExpr: COPY cast_payload };,
     Locatable.BinaryOp AS cast_payload -> RETURN WalkNode{ BinaryOp: COPY cast_payload };,
     Locatable.IsA AS cast_payload -> RETURN WalkNode{ IsA: COPY cast_payload };,
-    Locatable.UnaryOp AS cast_payload -> RETURN WalkNode{ MIRUnaryOp: COPY cast_payload };,
+    Locatable.UnaryOp AS cast_payload -> RETURN WalkNode{ MIRUnaryOp: CAST(COPY cast_payload AS MIRUnaryOp)};,
     Locatable.CallSiteOverride AS cast_payload -> RETURN WalkNode{ CallSiteOverride: COPY cast_payload };,
     Locatable.Identifier AS cast_payload -> RETURN WalkNode{ Identifier: COPY cast_payload };,
     Locatable.Literal AS cast_payload -> RETURN WalkNode{ Literal: COPY cast_payload };,
@@ -402,10 +402,10 @@ FN castLocatableToWalkNode(value: Locatable) RETURNS WalkNode ->
     Locatable.BreakNode AS cast_payload -> RETURN WalkNode{ BreakNode: COPY cast_payload };,
     Locatable.ContinueNode AS cast_payload -> RETURN WalkNode{ ContinueNode: COPY cast_payload };,
     Locatable.FuncCall AS cast_payload -> RETURN WalkNode{ FuncCall: COPY cast_payload };,
-    Locatable.MethodCall AS cast_payload -> RETURN WalkNode{ MIRMethodCall: COPY cast_payload };,
+    Locatable.MethodCall AS cast_payload -> RETURN WalkNode{ MIRMethodCall: CAST(COPY cast_payload AS MIRMethodCall)};,
     Locatable.GetField AS cast_payload -> RETURN WalkNode{ GetField: COPY cast_payload };,
     Locatable.GetIndex AS cast_payload -> RETURN WalkNode{ GetIndex: COPY cast_payload };,
-    Locatable.Cast AS cast_payload -> RETURN WalkNode{ MIRCast: COPY cast_payload };,
+    Locatable.Cast AS cast_payload -> RETURN WalkNode{ MIRCast: CAST(COPY cast_payload AS MIRCast)};,
     Locatable.ReturnNode AS cast_payload -> RETURN WalkNode{ ReturnNode: COPY cast_payload };,
     Locatable.Assert AS cast_payload -> RETURN WalkNode{ Assert: COPY cast_payload };,
     Locatable.Raise AS cast_payload -> RETURN WalkNode{ Raise: COPY cast_payload };,
@@ -413,7 +413,7 @@ FN castLocatableToWalkNode(value: Locatable) RETURNS WalkNode ->
     Locatable.DieNode AS cast_payload -> RETURN WalkNode{ DieNode: COPY cast_payload };,
     Locatable.Slice AS cast_payload -> RETURN WalkNode{ Slice: COPY cast_payload };,
     Locatable.Require AS cast_payload -> RETURN WalkNode{ Require: COPY cast_payload };,
-    Locatable.DeferStmt AS cast_payload -> RETURN WalkNode{ MIRDeferStmt: COPY cast_payload };,
+    Locatable.DeferStmt AS cast_payload -> RETURN WalkNode{ MIRDeferStmt: CAST(COPY cast_payload AS MIRDeferStmt)};,
     Locatable.WithBlock AS cast_payload -> RETURN WalkNode{ WithBlock: COPY cast_payload };,
     Locatable.SyncPolicyDecl AS cast_payload -> RETURN WalkNode{ SyncPolicyDecl: COPY cast_payload };,
     Locatable.SelectOp AS cast_payload -> RETURN WalkNode{ SelectOp: COPY cast_payload };,
@@ -444,7 +444,7 @@ FN castLocatableToWalkNode(value: Locatable) RETURNS WalkNode ->
     Locatable.ConcurrentOp AS cast_payload -> RETURN WalkNode{ ConcurrentOp: COPY cast_payload };,
     Locatable.Placeholder AS cast_payload -> RETURN WalkNode{ Placeholder: COPY cast_payload };,
     Locatable.Copy AS cast_payload -> RETURN WalkNode{ Copy: COPY cast_payload };,
-    Locatable.OptionalUnwrap AS cast_payload -> RETURN WalkNode{ MIROptionalUnwrap: COPY cast_payload };,
+    Locatable.OptionalUnwrap AS cast_payload -> RETURN WalkNode{ MIROptionalUnwrap: CAST(COPY cast_payload AS MIROptionalUnwrap)};,
     Locatable.TenseNavigation AS cast_payload -> RETURN WalkNode{ TenseNavigation: COPY cast_payload };,
     Locatable.MutableBorrow AS cast_payload -> RETURN WalkNode{ MutableBorrow: COPY cast_payload };,
     Locatable.OrElseRaise AS cast_payload -> RETURN WalkNode{ OrElseRaise: COPY cast_payload };,
@@ -454,7 +454,7 @@ FN castLocatableToWalkNode(value: Locatable) RETURNS WalkNode ->
     Locatable.OrElseBreak AS cast_payload -> RETURN WalkNode{ OrElseBreak: COPY cast_payload };,
     Locatable.CatchBlock AS cast_payload -> RETURN WalkNode{ CatchBlock: COPY cast_payload };,
     Locatable.RecoverOp AS cast_payload -> RETURN WalkNode{ RecoverOp: COPY cast_payload };,
-    Locatable.BlockExpr AS cast_payload -> RETURN WalkNode{ MIRBlockExpr: COPY cast_payload };,
+    Locatable.BlockExpr AS cast_payload -> RETURN WalkNode{ MIRBlockExpr: CAST(COPY cast_payload AS MIRBlockExpr)};,
     Locatable.StringConcat AS cast_payload -> RETURN WalkNode{ StringConcat: COPY cast_payload };,
     Locatable.CapabilityWrap AS cast_payload -> RETURN WalkNode{ CapabilityWrap: COPY cast_payload };,
     Locatable.MoveNode AS cast_payload -> RETURN WalkNode{ MoveNode: COPY cast_payload };,
@@ -466,15 +466,15 @@ FN castLocatableToWalkNode(value: Locatable) RETURNS WalkNode ->
     Locatable.FreezeNode AS cast_payload -> RETURN WalkNode{ FreezeNode: COPY cast_payload };,
     Locatable.PassStmt AS cast_payload -> RETURN WalkNode{ PassStmt: COPY cast_payload };,
     Locatable.StructPattern AS cast_payload -> RETURN WalkNode{ StructPattern: COPY cast_payload };,
-    Locatable.RangeLit AS cast_payload -> RETURN WalkNode{ MIRRangeLit: COPY cast_payload };,
+    Locatable.RangeLit AS cast_payload -> RETURN WalkNode{ MIRRangeLit: CAST(COPY cast_payload AS MIRRangeLit)};,
     Locatable.ExternFnDecl AS cast_payload -> RETURN WalkNode{ ExternFnDecl: COPY cast_payload };,
     Locatable.ExternStructDecl AS cast_payload -> RETURN WalkNode{ ExternStructDecl: COPY cast_payload };,
-    Locatable.EnumDef AS cast_payload -> RETURN WalkNode{ MIREnumDef: COPY cast_payload };,
+    Locatable.EnumDef AS cast_payload -> RETURN WalkNode{ MIREnumDef: CAST(COPY cast_payload AS MIREnumDef)};,
     Locatable.UnionDef AS cast_payload -> RETURN WalkNode{ UnionDef: COPY cast_payload };,
     Locatable.UnionVariantLit AS cast_payload -> RETURN WalkNode{ UnionVariantLit: COPY cast_payload };,
     Locatable.StaticCall AS cast_payload -> RETURN WalkNode{ StaticCall: COPY cast_payload };,
-    Locatable.DoBlock AS cast_payload -> RETURN WalkNode{ MIRDoBlock: COPY cast_payload };,
-    Locatable.BgBlock AS cast_payload -> RETURN WalkNode{ MIRBgBlock: COPY cast_payload };,
+    Locatable.DoBlock AS cast_payload -> RETURN WalkNode{ MIRDoBlock: CAST(COPY cast_payload AS MIRDoBlock)};,
+    Locatable.BgBlock AS cast_payload -> RETURN WalkNode{ MIRBgBlock: CAST(COPY cast_payload AS MIRBgBlock)};,
     Locatable.ThenChain AS cast_payload -> RETURN WalkNode{ ThenChain: COPY cast_payload };,
     Locatable.BgStreamBlock AS cast_payload -> RETURN WalkNode{ BgStreamBlock: COPY cast_payload };,
     Locatable.YieldExpr AS cast_payload -> RETURN WalkNode{ YieldExpr: COPY cast_payload };,
@@ -1176,7 +1176,7 @@ FN rtocChildrenOfWalkNodeBatchWindowOp(v: BatchWindowOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   FOR rtoc_walk_item IN v.options DO
-    &out.append(castLocatableToWalkNode(rtoc_walk_item));
+    &out.append(castLocatableToWalkNode( CAST(rtoc_walk_item AS Locatable)));
   END
   IF v.expression EXISTS AS rtoc_opt_child THEN
     &out.append(castLocatableToWalkNode(rtoc_opt_child));
@@ -1244,7 +1244,7 @@ FN rtocChildrenOfWalkNodeBatchWindowOpMultiowned(v: BatchWindowOp) RETURNS []Wal
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   FOR rtoc_walk_item IN v.options DO
-    &out.append(castLocatableToWalkNode(rtoc_walk_item));
+    &out.append(castLocatableToWalkNode( CAST(rtoc_walk_item AS Locatable)));
   END
   IF v.expression EXISTS AS rtoc_opt_child THEN
     &out.append(castLocatableToWalkNode(rtoc_opt_child));
@@ -1513,7 +1513,7 @@ FN rtocChildrenOfWalkNodeBgStreamBlock(v: BgStreamBlock) RETURNS []WalkNode ->
   IF v.fsm_ineligible_reason EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.fsm_suspend_points });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.fsm_suspend_points AS []Node)});
   IF v.declared_yield_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
@@ -1684,7 +1684,7 @@ FN rtocChildrenOfWalkNodeBindExpr(v: BindExpr) RETURNS []WalkNode ->
   IF v.auto_atomic_op EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.ownership_transport_plan });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.ownership_transport_plan AS []Node)});
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeBreakNode(v: BreakNode) RETURNS []WalkNode ->
@@ -2076,9 +2076,9 @@ END
 FN rtocChildrenOfWalkNodeConcurrentOp(v: ConcurrentOp) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.op });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.op AS []Node)});
   FOR rtoc_walk_item IN v.options DO
-    &out.append(castLocatableToWalkNode(rtoc_walk_item));
+    &out.append(castLocatableToWalkNode( CAST(rtoc_walk_item AS Locatable)));
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -2137,7 +2137,7 @@ FN rtocChildrenOfWalkNodeConcurrentOp(v: ConcurrentOp) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.shard_context });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.shard_context AS []Node)});
   # capture_analysis: ?CaptureAnalysis holds no Locatable -- Ruby's walk stops at its leaves.
   RETURN out;
 END
@@ -3068,7 +3068,7 @@ FN rtocChildrenOfWalkNodeExternFnDecl(v: ExternFnDecl) RETURNS []WalkNode ->
     &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
   # extern_source: ?ExternSource holds no Locatable -- Ruby's walk stops at its leaves.
-  &out.append(WalkNode{ ArrayValue: COPY v.return_lifetime });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.return_lifetime AS []Node)});
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3618,7 +3618,7 @@ END
 FN rtocChildrenOfWalkNodeFuncCall(v: FuncCall) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.name });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.name AS []Node)});
   FOR rtoc_arr_child IN v.args DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
@@ -3717,15 +3717,15 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ StringValue: COPY v.name });
-  &out.append(WalkNode{ ArrayValue: COPY v.captures });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.captures AS []Node)});
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.return_lifetime });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.return_lifetime AS []Node)});
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.catch_clauses });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.catch_clauses AS []Node)});
   IF v.default_catch EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_item IN rtoc_opt_child DO
       &out.append(castLocatableToWalkNode(rtoc_walk_item));
@@ -3756,8 +3756,8 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   IF v.return_type_token EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.pre_clauses });
-  &out.append(WalkNode{ ArrayValue: COPY v.post_clauses });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.pre_clauses AS []Node)});
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.post_clauses AS []Node)});
   &out.append(WalkNode{ BoolValue: COPY v.is_method });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -3821,8 +3821,8 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   IF v.reentrance_kind EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.thunk_plan });
-  &out.append(WalkNode{ ArrayValue: COPY v.mutual_thunk_plan });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.thunk_plan AS []Node)});
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.mutual_thunk_plan AS []Node)});
   IF v.needs_rt EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3862,7 +3862,7 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   IF v.fsm_ineligible_reason EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.fsm_suspend_points });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.fsm_suspend_points AS []Node)});
   IF v.conformance_protocol EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
@@ -3876,15 +3876,15 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ StringValue: COPY v.name });
-  &out.append(WalkNode{ ArrayValue: COPY v.captures });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.captures AS []Node)});
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.return_lifetime });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.return_lifetime AS []Node)});
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.catch_clauses });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.catch_clauses AS []Node)});
   IF v.default_catch EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_item IN rtoc_opt_child DO
       &out.append(castLocatableToWalkNode(rtoc_walk_item));
@@ -3915,8 +3915,8 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
   IF v.return_type_token EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TokenMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.pre_clauses });
-  &out.append(WalkNode{ ArrayValue: COPY v.post_clauses });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.pre_clauses AS []Node)});
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.post_clauses AS []Node)});
   &out.append(WalkNode{ BoolValue: COPY v.is_method });
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
@@ -3980,8 +3980,8 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
   IF v.reentrance_kind EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.thunk_plan });
-  &out.append(WalkNode{ ArrayValue: COPY v.mutual_thunk_plan });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.thunk_plan AS []Node)});
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.mutual_thunk_plan AS []Node)});
   IF v.needs_rt EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -4021,7 +4021,7 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
   IF v.fsm_ineligible_reason EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.fsm_suspend_points });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.fsm_suspend_points AS []Node)});
   IF v.conformance_protocol EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
@@ -4663,7 +4663,7 @@ FN rtocChildrenOfWalkNodeIsA(v: IsA) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(castLocatableToWalkNode(v.left));
-  &out.append(WalkNode{ ArrayValue: COPY v.right });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.right AS []Node)});
   IF v.binding EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
   END
@@ -4872,7 +4872,7 @@ END
 FN rtocChildrenOfWalkNodeLambdaLit(v: LambdaLit) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.captures });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.captures AS []Node)});
   &out.append(castLambdaBodyToWalkNode(COPY v.body));
   IF v.storage EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
@@ -8101,7 +8101,7 @@ FN rtocChildrenOfWalkNodeStubDecl(v: StubDecl) RETURNS []WalkNode ->
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ StringValue: COPY v.function_name });
   &out.append(WalkNode{ SymbolValue: COPY v.kind });
-  &out.append(WalkNode{ ArrayValue: COPY v.value });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.value AS []Node)});
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8357,7 +8357,7 @@ END
 FN rtocChildrenOfWalkNodeSyncPolicyDecl(v: SyncPolicyDecl) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.handlers });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.handlers AS []Node)});
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8685,7 +8685,7 @@ FN rtocChildrenOfWalkNodeTestBlock(v: TestBlock) RETURNS []WalkNode ->
       &out.append(castLocatableToWalkNode(rtoc_walk_item));
     END
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.whens });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.whens AS []Node)});
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -8771,7 +8771,7 @@ FN rtocChildrenOfWalkNodeTestBlock(v: TestBlock) RETURNS []WalkNode ->
       END
     END
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.lets });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.lets AS []Node)});
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeTestThat(v: TestThat) RETURNS []WalkNode ->
@@ -8847,7 +8847,7 @@ END
 FN rtocChildrenOfWalkNodeThenChain(v: ThenChain) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ ArrayValue: COPY v.steps });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.steps AS []Node)});
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9132,7 +9132,7 @@ FN rtocChildrenOfWalkNodeUnionVariantLit(v: UnionVariantLit) RETURNS []WalkNode 
   &out.append(WalkNode{ StringValue: COPY v.union_name });
   &out.append(WalkNode{ StringValue: COPY v.variant_name });
   FOR rtoc_walk_item IN v.fields DO
-    &out.append(castLocatableToWalkNode(rtoc_walk_item));
+    &out.append(castLocatableToWalkNode( CAST(rtoc_walk_item AS Locatable)));
   END
   IF v.storage EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
@@ -9393,7 +9393,7 @@ FN rtocChildrenOfWalkNodeVarDecl(v: VarDecl) RETURNS []WalkNode ->
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
   # mir_binding_entry: ?CleanupEntry@multiowned holds no Locatable -- Ruby's walk stops at its leaves.
-  &out.append(WalkNode{ ArrayValue: COPY v.ownership_transport_plan });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.ownership_transport_plan AS []Node)});
   IF v.const_visibility EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -9411,8 +9411,8 @@ FN rtocChildrenOfWalkNodeWhenBlock(v: WhenBlock) RETURNS []WalkNode ->
       &out.append(castLocatableToWalkNode(rtoc_walk_item));
     END
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.tests });
-  &out.append(WalkNode{ ArrayValue: COPY v.benchmarks });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.tests AS []Node)});
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.benchmarks AS []Node)});
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -9498,7 +9498,7 @@ FN rtocChildrenOfWalkNodeWhenBlock(v: WhenBlock) RETURNS []WalkNode ->
       END
     END
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.lets });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.lets AS []Node)});
   # tags: ?[]String holds no Locatable -- Ruby's walk stops at its leaves.
   RETURN out;
 END
@@ -9972,7 +9972,7 @@ FN rtocChildrenOfWalkNodeWithBlock(v: WithBlock) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.lock_error_clause });
+  &out.append(WalkNode{ ArrayValue: CAST(COPY v.lock_error_clause AS []Node)});
   # deadlock_escape: ?DeadlockEscape holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.view_kind EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });

@@ -30,7 +30,7 @@ PUB FN mIRPlanner__plan_all_mut(fn_nodes: {String}FunctionDef, schema_lookup: FN
   MUTABLE fallible = fn_nodes.each_with_object(Set[], %(tuple_param_0: Tuple<String,FunctionDef>, names) -> {
   MUTABLE name = tuple_param_0._0;
   MUTABLE function = tuple_param_0._1;
-  IF functionSignature__can_fail(function) THEN
+  IF functionSignature__can_fail( CAST(function AS FunctionSignature)) THEN
     RETURN &names.append(COPY name);
   END
   NIL

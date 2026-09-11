@@ -153,7 +153,7 @@ PRIVATE FN mIRPass__pre_mark_bg_resource_captures_mut(MUTABLE self: MIRPass, fn_
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     aST__each_bg_block(COPY fn_value.body, %(bg_value: BgNode) USE(facts) -> {
-    MUTABLE resource_captures = (IF selectOp__capture_analysis(bg_value) != NIL THEN
+    MUTABLE resource_captures = (IF selectOp__capture_analysis( CAST(bg_value AS SelectOp)) != NIL THEN
         { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1 = (selectOp__capture_analysis(bg_value));
     COPY rtoc_local_receiver_1.resource_captures }
       ELSE
@@ -220,7 +220,7 @@ PRIVATE FN mIRPass__recurse_branches_mut(MUTABLE self: MIRPass, MUTABLE stmt: Lo
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE branch_ctx_branch_value: ?WalkCtx = NIL;
     IF (stmt IS_A BgBlock OR stmt IS_A BgStreamBlock) THEN
-      branch_ctx_branch_value = walkCtx__with(ctx, {:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castLocatableToBgNode__mir_pass(stmt), ctx.cleanup_facts)});
+      branch_ctx_branch_value = walkCtx__with(ctx, CAST({:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castLocatableToBgNode__mir_pass(stmt), ctx.cleanup_facts)} AS FrozenCleanupFacts));
     ELSE
       branch_ctx_branch_value = COPY ctx;
     END
@@ -262,7 +262,7 @@ PRIVATE FN mIRPass__recurse_expr_body_mut(MUTABLE self: MIRPass, MUTABLE val: ?L
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (((val != NIL) AND (val IS_A BgBlock)) AND locatable__body(val)) THEN
-      val.body = TRY (mIRPass__transform_body(&rtoc_self_view, locatable__body(val), walkCtx__with(ctx, {:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castOptionalLocatableToBgNode(val), ctx.cleanup_facts)})));
+      val.body = TRY (mIRPass__transform_body(&rtoc_self_view, locatable__body(val), walkCtx__with(ctx, CAST({:cleanup_facts: mIRPass__bg_inner_facts(rtoc_self_view, castOptionalLocatableToBgNode(val), ctx.cleanup_facts)} AS FrozenCleanupFacts))));
     ELSE_IF ((val != NIL) AND (val IS_A BlockExpr)) THEN
       val.body = TRY (mIRPass__transform_body(&rtoc_self_view, UNWRAP (locatable__body(val)), ctx));
     END
@@ -744,7 +744,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF node_value IS_A MoveNode AS move_node THEN
         RETURN TRY (mIRPass__collect_escaping_ids(rtoc_self_view, move_node.value));
       ELSE_IF node_value IS_A StructLit AS struct_lit THEN
-        RETURN (TRY (inlineAllocMetadata__values(struct_lit.fields))) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
+        RETURN (TRY (inlineAllocMetadata__values( CAST(struct_lit.fields AS InlineAllocMetadata)))) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
       ELSE_IF node_value IS_A UnionVariantLit AS union_variant_lit THEN
         RETURN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_9 = CAST(union_variant_lit.fields AS InlineAllocMetadata);
         TRY (inlineAllocMetadata__values(rtoc_local_receiver_9)) }) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
@@ -759,7 +759,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN mIRPass__new(fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult, lifecycle_registry: ?LifecycleRegistry = NIL, body_summaries: {String}FunctionBodySummary, hoist_bindings: ?{String}[]VarDecl = NIL) RETURNS MIRPass@multiowned ->
-  MUTABLE self = MIRPass{ body_summaries: COPY body_summaries, current_transform_fn: NIL, escape_placement_facts: EscapePlacementFacts{ placements: List[] }, fn_nodes: COPY fn_nodes, hoist_bindings: (COPY hoist_bindings OR_ELSE {}), lifecycle_registry: COPY lifecycle_registry, program_facts: NIL, schema_lookup: COPY schema_lookup };
+  MUTABLE self = MIRPass{ body_summaries: COPY body_summaries, current_transform_fn: NIL, escape_placement_facts: EscapePlacementFacts{ placements: List[] }, fn_nodes: COPY fn_nodes, hoist_bindings: (COPY hoist_bindings OR_ELSE {}), lifecycle_registry: COPY lifecycle_registry, program_facts: CAST(NIL AS ProgramMIRFacts), schema_lookup: COPY schema_lookup };
   mIRPass__initialize(&self, fn_nodes, schema_lookup, lifecycle_registry, body_summaries, hoist_bindings);
   RETURN self @multiowned;
 END
