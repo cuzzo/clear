@@ -132,12 +132,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 }
 END
 PUB FN functionSignature__return_type(self: FunctionSignature) RETURNS Type
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN COPY rtoc_self_view.contract.return_type;
-}
+  EFFECTS REENTRANT ->
+    RETURN COPY self.contract.return_type;
 END
 PUB FN functionSignature__extern(self: FunctionSignature) RETURNS Bool
   REQUIRES self: LOCAL
@@ -554,12 +550,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN intrinsicAllocationContract__placeholder(((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).allocation), kind);
 }
 END
-PUB FN functionSignature__intrinsic_suspends?(self: FunctionSignature) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN ((TRY (functionSignature__intrinsic_contract(rtoc_self_view))).behavior).suspends;
-}
+PUB FN functionSignature__intrinsic_suspends?(self: FunctionSignature) RETURNS !Bool ->
+  RETURN ((TRY (functionSignature__intrinsic_contract(self))).behavior).suspends;
 END
 PUB FN functionSignature__intrinsic_container_borrow?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL
@@ -638,12 +630,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN copy;
 }
 END
-PUB FN functionSignature__heap_return_alloc?(self: FunctionSignature) RETURNS !Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (TRY (functionSignature__return_alloc(rtoc_self_view)) == :heap);
-}
+PUB FN functionSignature__heap_return_alloc?(self: FunctionSignature) RETURNS !Bool ->
+    RETURN (TRY (functionSignature__return_alloc(self)) == :heap);
 END
 PUB FN functionSignature__frame_return_alloc?(self: FunctionSignature) RETURNS !Bool
   REQUIRES self: LOCAL

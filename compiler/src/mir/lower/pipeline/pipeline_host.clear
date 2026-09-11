@@ -583,7 +583,8 @@ PUB FN pipelineHost__lower_dispatch_plan(MUTABLE self: PipelineHost, MUTABLE pla
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (pipelineHost__lower_execution_plan(&rtoc_self_view, plan.execution, &plan));
+    MUTABLE rtoc_plan_execution = plan.execution;
+    RETURN TRY (pipelineHost__lower_execution_plan(&rtoc_self_view, rtoc_plan_execution, &plan));
 }
 END
 PUB FN pipelineHost__lower_execution_plan(MUTABLE self: PipelineHost, execution: PipelineExecutionKind, MUTABLE plan: PipelineOperationPlan) RETURNS !?PipelineLoweringResult

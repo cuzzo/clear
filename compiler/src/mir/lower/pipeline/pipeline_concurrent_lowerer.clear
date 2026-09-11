@@ -137,7 +137,8 @@ PRIVATE FN pipelineConcurrentLowerer__concurrent_plan(MUTABLE self: PipelineConc
   RETURN PipelineConcurrentPlan{ source_kind: UNWRAP (COPY source_kind), terminal_kind: COPY terminal_kind, lhs: COPY lhs, real_lhs: COPY real_lhs, smooth_node: COPY smooth_node, conc_op: COPY conc_op, inner: COPY inner, binding_name: COPY binding_name, shard_context: COPY pipelineConcurrentLowerer__shard_context(self, conc_op), bc_expression: COPY pipelineConcurrentLowerer__bc_expression_for(self, terminal_kind, inner), list_each_mutates_placeholder: pipelineConcurrentLowerer__list_each_mutates_placeholder?(self, UNWRAP (source_kind), terminal_kind, inner) };
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_plan(MUTABLE self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
-  RETURN TRY (pipelineConcurrentLowerer__lower_source_plan(&self, plan.source_kind, &plan));
+  MUTABLE rtoc_plan_source_kind = plan.source_kind;
+  RETURN UNWRAP (TRY (pipelineConcurrentLowerer__lower_source_plan(&self, rtoc_plan_source_kind, &plan)));
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_source_plan(MUTABLE self: PipelineConcurrentLowerer, source_kind: PipelineConcurrentSourceKind, MUTABLE plan: PipelineConcurrentPlan) RETURNS !?PipelineConcurrentResult ->
   IF (source_kind == PipelineConcurrentSourceKind.ShardEach) THEN
@@ -447,7 +448,8 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_bounded_each(self: Pipeli
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE work = %() USE(MUTABLE plan, self) -> {
-  rtoc_lambda_result_14 = TRY (pipelineConcurrentLowerer__lower_bc_terminal_plan(self, plan.terminal_kind, &plan));
+  MUTABLE rtoc_plan_terminal_kind = plan.terminal_kind;
+  rtoc_lambda_result_14 = TRY (pipelineConcurrentLowerer__lower_bc_terminal_plan(self, rtoc_plan_terminal_kind, &plan));
   rtoc_lambda_result_14
   };
   RETURN pipelineConcurrentLowerer__lower_with_optional_binding(self, plan.binding_name, "it", work);
@@ -538,7 +540,8 @@ PRIVATE FN pipelineConcurrentLowerer__lower_stream_terminal_plan(MUTABLE self: P
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_list_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
   MUTABLE work = %() USE(MUTABLE plan, self) -> {
-  rtoc_lambda_result_15 = TRY (pipelineConcurrentLowerer__lower_list_terminal_plan(self, plan.terminal_kind, &plan));
+  MUTABLE rtoc_plan_terminal_kind = plan.terminal_kind;
+  rtoc_lambda_result_15 = TRY (pipelineConcurrentLowerer__lower_list_terminal_plan(self, rtoc_plan_terminal_kind, &plan));
   rtoc_lambda_result_15
   };
   RETURN pipelineConcurrentLowerer__lower_with_optional_binding(self, plan.binding_name, "__item", work);
