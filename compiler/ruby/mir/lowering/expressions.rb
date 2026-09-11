@@ -380,7 +380,7 @@ module MIRLoweringExpressions
     when :TRY
       plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
       unless plan && plan.operation == TenseOperationKind::Try
-        raise "TRY lowering requires its annotation-produced TenseOperationPlan"
+        raise "TRY lowering requires its annotation-produced TenseOperationPlan#{tense_plan_site(node)}"
       end
       if plan.backend_form == TenseBackendForm::ZigTry
         MIR::TryExpr.new(strip_try(right))
@@ -396,10 +396,22 @@ module MIRLoweringExpressions
   end
 
   sig { params(node: AST::Locatable, operation: TenseOperationKind, backend: TenseBackendForm).returns(TenseOperationPlan) }
+  # A missing stamp is a compiler bug; naming the site is the difference
+  # between a work list and a needle in a linked program.
+  sig { params(node: T.untyped).returns(String) }
+  def tense_plan_site(node)
+    tok = node.respond_to?(:token) ? node.token : nil
+    return '' unless tok
+
+    " (line #{tok[:line]}, col #{tok[:column]}#{$CLEAR_PROBE_UNIT ? ", unit #{$CLEAR_PROBE_UNIT}" : ''})"
+  rescue StandardError
+    ''
+  end
+
   def require_tense_operation_plan!(node, operation, backend)
     plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
     unless plan && plan.operation == operation && plan.backend_form == backend
-      Kernel.raise "#{operation.serialize} lowering requires its annotation-produced TenseOperationPlan"
+      Kernel.raise "#{operation.serialize} lowering requires its annotation-produced TenseOperationPlan#{tense_plan_site(node)}"
     end
     plan
   end

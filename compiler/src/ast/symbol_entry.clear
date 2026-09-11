@@ -1710,7 +1710,7 @@ PUB FN symbolEntryRegInput__set_container_borrow_mut(MUTABLE value: SymbolEntryR
 END
 PUB FN symbolEntryRegInput__set_mutable_mut(MUTABLE value: SymbolEntryRegInput, new_value: ?Bool) RETURNS Void ->
   PARTIAL MATCH value START
-    SymbolEntryRegInput.VarDecl AS MUTABLE item -> item.mutable = COPY new_value;,
+    SymbolEntryRegInput.VarDecl AS MUTABLE item -> item.mutable = (new_value OR_ELSE FALSE);,
     SymbolEntryRegInput.DestructureTarget AS MUTABLE item -> item.mutable = COPY new_value;,
     DEFAULT -> RETURN;
   END
