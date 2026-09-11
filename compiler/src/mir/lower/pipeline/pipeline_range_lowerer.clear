@@ -212,7 +212,7 @@ PUB FN pipelineRangeLowerer__unwrap_range_chain(self: PipelineRangeLowerer, MUTA
     MUTABLE stages: []Locatable = List[];
     MUTABLE cursor: Locatable = COPY node;
     WHILE (IF cursor IS_A BinaryOp AS binary_op THEN binaryOp__smooth?(binary_op) ELSE FALSE END) DO
-      MUTABLE rhs = aST__node_right(cursor);
+      MUTABLE rhs:? = aST__node_right(cursor);
       IF aST__pipeline_fusible_stage?( UNWRAP (rhs)) THEN
         stages = ([rhs] + stages);
         cursor = locatable__left(cursor);
