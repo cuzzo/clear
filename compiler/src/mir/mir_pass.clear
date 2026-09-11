@@ -130,12 +130,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 END
 PRIVATE FN mIRPass__pre_mark_bg_resource_captures_mut(MUTABLE self: MIRPass, fn_value: FunctionDef, facts: FrozenCleanupFacts) RETURNS ![]Locatable ->
     aST__each_bg_block(COPY fn_value.body, %(bg_value: BgNode) USE(facts) -> {
-    MUTABLE resource_captures = (IF selectOp__capture_analysis( CAST(bg_value AS SelectOp)) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_1:? = (selectOp__capture_analysis( CAST(bg_value AS SelectOp)));
-    COPY rtoc_local_receiver_1.resource_captures }
-      ELSE
-        NIL
-      END);
+    MUTABLE resource_captures: ?[Set]String = NIL;
+    IF selectOp__capture_analysis( CAST(bg_value AS SelectOp)) EXISTS AS rtoc_analysis THEN
+      resource_captures = COPY rtoc_analysis.resource_captures;
+    END
     IF !((IF resource_captures != NIL THEN
         (resource_captures).any?()
       ELSE
@@ -143,8 +141,8 @@ PRIVATE FN mIRPass__pre_mark_bg_resource_captures_mut(MUTABLE self: MIRPass, fn_
       END)) THEN
         RETURN;
     END
-    FOR _ IN resource_captures DO
-    frozenCleanupFacts__with_live_entry_for(facts, _, %(entry: CleanupEntry) -> {
+    FOR _ IN (resource_captures OR_ELSE Set[]) DO
+    frozenCleanupFacts__with_live_entry_for(facts, Name{ StringValue: COPY _ }, %(MUTABLE entry: CleanupEntry) -> {
       cleanupEntry__mark_moved_guard_mut(&entry);
       rubyToClearVoid__mir_pass()
     });
@@ -153,33 +151,34 @@ PRIVATE FN mIRPass__pre_mark_bg_resource_captures_mut(MUTABLE self: MIRPass, fn_
     });
     RETURN COPY fn_value.body;
 END
-PRIVATE FN mIRPass__transform_body(MUTABLE self: MIRPass, stmts: []Locatable, ctx: WalkCtx) RETURNS ![]Any@multiowned
+PRIVATE FN mIRPass__transform_body(MUTABLE self: MIRPass, stmts: []Locatable, ctx: WalkCtx) RETURNS ![]Locatable
   EFFECTS REENTRANT ->
     MUTABLE result = List[];
     MUTABLE cleanup_facts = COPY ctx.cleanup_facts;
     FOR MUTABLE rtoc_mutable_block_param_2 IN stmts DO
     TRY (mIRPass__recurse_branches_mut(&self, &rtoc_mutable_block_param_2, ctx));
     IF rtoc_mutable_block_param_2 IS_A ReturnNode AS return_node THEN
-        mIRPass__insert_return_mut(&self, result, return_node, cleanup_facts, self.current_transform_fn);
+        MUTABLE rtoc_transform_fn: ?FunctionDef = COPY self.current_transform_fn;
+        mIRPass__insert_return_mut(&self, result, return_node, cleanup_facts, rtoc_transform_fn);
     END
     TRY (mIRPass__stamp_reassign_cleanup_mut(&self, rtoc_mutable_block_param_2, cleanup_facts));
     TRY (mIRPass__stamp_match_as_cleanup_mut(&self, rtoc_mutable_block_param_2, cleanup_facts));
     TRY (mIRPass__stamp_while_bind_cleanup_mut(&self, rtoc_mutable_block_param_2, cleanup_facts));
     mIRPass__stamp_if_bind_cleanup_mut(&self, rtoc_mutable_block_param_2, cleanup_facts);
     &result.append(COPY rtoc_mutable_block_param_2);
-    IF (IF rtoc_mutable_block_param_2 IS_A BindExpr AS bind_expr THEN bind_expr.reassign_cleanup ELSE FALSE END) THEN
-        &result.append(ReassignCleanup{ token: rtoc_mutable_block_param_2.token(), name: COPY CAST(rtoc_mutable_block_param_2.name() AS String), alloc: rtoc_mutable_block_param_2.reassign_cleanup.alloc_mut(), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
+    IF rtoc_mutable_block_param_2 IS_A BindExpr AS rtoc_reassign_bind THEN
+      IF rtoc_reassign_bind.reassign_cleanup EXISTS THEN
+          &result.append(ReassignCleanup{ token: COPY rtoc_reassign_bind.token, name: COPY COPY rtoc_reassign_bind.name, alloc: COPY UNWRAP (rtoc_reassign_bind.reassign_cleanup).alloc, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
+      END
     END
-    IF (IF rtoc_mutable_block_param_2 IS_A Assignment AS assignment THEN assignment.field_pre_cleanup ELSE FALSE END) THEN
-        MUTABLE target = rtoc_mutable_block_param_2.name();
-        MUTABLE target_name: ?String = IF (target IS_A GetField AND TRUE) THEN
-          CAST(target.target.name() AS String)
-        ELSE
-          NIL
-        END;
-        IF target_name EXISTS AS target_name_value THEN
-          &result.append(FieldCleanup{ token: rtoc_mutable_block_param_2.token(), target_name: COPY target_name_value, field: target.field, alloc: rtoc_mutable_block_param_2.field_pre_cleanup, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
+    IF rtoc_mutable_block_param_2 IS_A Assignment AS rtoc_field_assign THEN
+      IF rtoc_field_assign.field_pre_cleanup EXISTS AS rtoc_field_alloc THEN
+        IF rtoc_field_assign.name IS_A GetField AS rtoc_field_target THEN
+          IF aST__root_identifier(rtoc_field_target.target) EXISTS AS rtoc_target_ident THEN
+            &result.append(FieldCleanup{ token: COPY rtoc_field_assign.token, target_name: COPY rtoc_target_ident.name, field: COPY rtoc_field_target.field, alloc: COPY rtoc_field_alloc, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
+          END
         END
+      END
     END
     TRY (mIRPass__mark_consumed_cleanup_guards_mut(&self, rtoc_mutable_block_param_2, cleanup_facts));
     END
@@ -233,11 +232,10 @@ PRIVATE FN mIRPass__recurse_expr_body_mut(MUTABLE self: MIRPass, MUTABLE val: ?L
     END
 END
 PRIVATE FN mIRPass__bg_inner_facts(self: MIRPass, bg_node: BgNode, facts: FrozenCleanupFacts) RETURNS FrozenCleanupFacts ->
-    MUTABLE captures = (IF bgNode__capture_analysis(bg_node) != NIL THEN
-      (bgNode__capture_analysis(bg_node)).captures()
-    ELSE
-      NIL
-    END);
+    MUTABLE captures: ?{String}Type = NIL;
+    IF bgNode__capture_analysis(bg_node) EXISTS AS rtoc_analysis THEN
+      captures = COPY rtoc_analysis.captures;
+    END
     IF !((IF captures != NIL THEN
       (captures).any?()
     ELSE
@@ -245,7 +243,7 @@ PRIVATE FN mIRPass__bg_inner_facts(self: MIRPass, bg_node: BgNode, facts: Frozen
     END)) THEN
       RETURN COPY facts;
     END
-    RETURN frozenCleanupFacts__without_names(facts, captures.keys() |> SELECT _.toString());
+    RETURN frozenCleanupFacts__without_names(facts, UNWRAP (captures).keys() |> SELECT NamesItem{ StringValue: COPY _ });
 END
 PRIVATE FN mIRPass__mark_consumed_cleanup_guards_mut(MUTABLE self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !?[Set]String ->
     IF stmt IS_A ReturnNode AS return_node THEN
@@ -319,7 +317,7 @@ PRIVATE FN mIRPass__walk_consumed(self: MIRPass, node: ?Locatable, MUTABLE names
           MUTABLE root: ?Identifier = aST__root_identifier(Locatable{ GetField: COPY get_field_mutable });
           IF root EXISTS AS root_value THEN
             MUTABLE root_value_mutable = COPY root_value;
-            frozenCleanupFacts__with_live_entry_for_node(facts, Name{ StringValue: COPY root_value_mutable.name }, Locatable{ Identifier: COPY root_value_mutable }, %(entry: CleanupEntry) USE(MUTABLE names, root_value_mutable) -> {
+            frozenCleanupFacts__with_live_entry_for_node(facts, Name{ StringValue: COPY root_value_mutable.name }, Locatable{ Identifier: COPY root_value_mutable }, %(MUTABLE entry: CleanupEntry) USE(MUTABLE names, root_value_mutable) -> {
     cleanupEntry__mark_moved_guard_mut(&entry);
     &names.insert(COPY root_value_mutable.name);
     rubyToClearVoid__mir_pass()
@@ -330,15 +328,15 @@ PRIVATE FN mIRPass__walk_consumed(self: MIRPass, node: ?Locatable, MUTABLE names
         END
       ELSE_IF node_value_mutable IS_A MoveNode AS move_node THEN
         MUTABLE move_node_mutable = COPY move_node;
-        IF move_node_mutable.value IS_A Identifier THEN
-          TRY (mIRPass__add_if_consumed(self, move_node_mutable.value, &names, facts, aST__moved?(move_node_mutable.value)));
+        IF move_node_mutable.value IS_A Identifier AS rtoc_moved_ident THEN
+          TRY (mIRPass__add_if_consumed(self, rtoc_moved_ident, &names, facts, aST__moved?(move_node_mutable.value)));
         ELSE
           TRY (mIRPass__walk_consumed(self, move_node_mutable.value, &names, facts));
         END
       ELSE_IF (node_value_mutable IS_A FuncCall) OR (node_value_mutable IS_A MethodCall) THEN
         TRY (mIRPass__consume_call_args(self, castLocatableToNode__mir_pass(node_value_mutable), &names, facts));
-        IF node_value_mutable IS_A MethodCall THEN
-          TRY (mIRPass__walk_consumed(self, node_value_mutable.object, &names, facts));
+        IF node_value_mutable IS_A MethodCall AS rtoc_method_call THEN
+          TRY (mIRPass__walk_consumed(self, rtoc_method_call.object, &names, facts));
         END
       ELSE_IF node_value_mutable IS_A BinaryOp AS binary_op THEN
         MUTABLE binary_op_mutable = COPY binary_op;
@@ -350,12 +348,7 @@ PRIVATE FN mIRPass__walk_consumed(self: MIRPass, node: ?Locatable, MUTABLE names
         TRY (mIRPass__walk_consumed(self, expr, &names, facts));
       ELSE_IF node_value_mutable IS_A ReturnNode AS return_node THEN
         MUTABLE return_node_mutable = COPY return_node;
-        MUTABLE expr = IF return_node_mutable IS_A Assert THEN
-          return_node_mutable.condition
-        ELSE
-          return_node_mutable.value
-        END;
-        TRY (mIRPass__walk_consumed(self, expr, &names, facts));
+        TRY (mIRPass__walk_consumed(self, return_node_mutable.value, &names, facts));
       END
     ELSE
       RETURN;
@@ -532,7 +525,7 @@ END
 PRIVATE FN mIRPass__stamp_while_bind_cleanup_mut(MUTABLE self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS !Void ->
     IF stmt IS_A WhileBindLoop AS while_bind_loop THEN
       MUTABLE while_bind_loop_mutable = COPY while_bind_loop;
-      frozenCleanupFacts__with_live_entry_for(facts, while_bind_loop_mutable.binding_name, %(entry: CleanupEntry) USE(MUTABLE while_bind_loop_mutable, self) -> {
+      frozenCleanupFacts__with_live_entry_for(facts, while_bind_loop_mutable.binding_name, %(MUTABLE entry: CleanupEntry) USE(MUTABLE while_bind_loop_mutable, self) -> {
     MUTABLE cond_type:? = TRY (type__from_node_mut(while_bind_loop_mutable.condition, "while-bind allocation marker"));
     MUTABLE item_type_branch_value: ?Type = NIL;
         IF TRY (type__stream_step?( UNWRAP (cond_type))) THEN

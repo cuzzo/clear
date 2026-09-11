@@ -7503,7 +7503,7 @@ PUB STRUCT ReassignCleanup {
 PUB STRUCT FieldCleanup {
   token: Token,
   target_name: ?String,
-  field: ?Locatable@boxed,
+  field: ?String,
   alloc: ?String@symbol,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
