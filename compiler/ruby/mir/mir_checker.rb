@@ -1544,6 +1544,9 @@ class MIRChecker
 
     ret_type = sig.return_type
     return true if ret_type.resource?
+    # A primitive result cannot BE the allocation: `Set.insert` allocates into
+    # its receiver and answers a Bool, so nothing is leaked by discarding it.
+    return false if ret_type.primitive?
     return false unless sig.emits_allocating?
     return true if sig.heap_return_alloc?
     metadata = allocator_metadata_for(node)

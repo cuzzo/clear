@@ -860,7 +860,7 @@ pub const CheatLib = struct {
         // The caller's items are already owned values (the same contract
         // makeList has); insert() takes that ownership and frees whichever
         // duplicate loses.
-        for (items) |item| try set.insert(allocator, item);
+        for (items) |item| _ = try set.insert(allocator, item);
         return set;
     }
 

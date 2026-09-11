@@ -1374,8 +1374,12 @@ BUILTIN_TYPE_BINDINGS = T.let([
 ].freeze, T::Array[StdLibTypeBinding])
 
 SET_METHODS = T.let({
+  # Answers whether the value was NEWLY added, the way Rust's HashSet::insert,
+  # Kotlin's MutableSet.add and Ruby's Set#add? do. Statement position ignores
+  # it; the "first time through" idiom reads it.
   "insert" => {
     arity: 1, tag: :set_method, allocates: true,
+    return_type: :Bool,
     zig: "try {0}.insert({alloc}, {1})",
     bc: true,
     alloc: :receiver_storage,
@@ -1394,7 +1398,6 @@ SET_METHODS = T.let({
         error_fn.call(node, "Set.insert: argument type #{arg_type} does not match set element type #{elem.resolved}")
       end
     },
-    return_type: :Void,
     is_method: true,
   },
   "contains?" => {

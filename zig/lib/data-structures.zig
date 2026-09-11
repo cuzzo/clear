@@ -2577,21 +2577,25 @@ pub fn bind(comptime deps: type) type {
                 return result;
             }
 
-            pub fn insert(self: *Self, alloc: std.mem.Allocator, value: T) !void {
+            /// Returns true when the value was NEWLY added, the way Rust's
+            /// HashSet::insert, Kotlin's MutableSet.add and Java's Set.add do.
+            /// A duplicate is freed here, so the caller must not use it after.
+            pub fn insert(self: *Self, alloc: std.mem.Allocator, value: T) !bool {
                 if (is_string) {
                     if (self.inner.contains(value)) {
                         alloc.free(value);
-                    } else {
-                        try self.inner.put(alloc, value, {});
-                    }
-                } else {
-                    if (self.inner.contains(value)) {
-                        var discarded = value;
-                        if (comptime needsCleanup(T)) cleanup(T, alloc, &discarded);
-                        return;
+                        return false;
                     }
                     try self.inner.put(alloc, value, {});
+                    return true;
                 }
+                if (self.inner.contains(value)) {
+                    var discarded = value;
+                    if (comptime needsCleanup(T)) cleanup(T, alloc, &discarded);
+                    return false;
+                }
+                try self.inner.put(alloc, value, {});
+                return true;
             }
 
             pub fn contains(self: *const Self, value: T) bool {
@@ -2613,9 +2617,9 @@ pub fn bind(comptime deps: type) type {
                     const value = entry.key_ptr.*;
                     if (other.inner.contains(value)) continue;
                     if (is_string) {
-                        try out.insert(alloc, try alloc.dupe(u8, value));
+                        _ = try out.insert(alloc, try alloc.dupe(u8, value));
                     } else {
-                        try out.insert(alloc, value);
+                        _ = try out.insert(alloc, value);
                     }
                 }
                 return out;
@@ -2641,9 +2645,9 @@ pub fn bind(comptime deps: type) type {
                     const value = entry.key_ptr.*;
                     if (self.inner.contains(value)) continue;
                     if (is_string) {
-                        try self.insert(alloc, try alloc.dupe(u8, value));
+                        _ = try self.insert(alloc, try alloc.dupe(u8, value));
                     } else {
-                        try self.insert(alloc, value);
+                        _ = try self.insert(alloc, value);
                     }
                 }
             }

@@ -268,6 +268,8 @@ class PipelineSetIndexLowerer < T::Struct
     else
       MIR::CallableContract.no_ownership(args.length)
     end
+    # insert answers whether the value was newly added; DISTINCT does not read
+    # that, and Zig rejects an ignored non-void result.
     MIR::ExprStmt.new(
       MIR::MethodCall.new(
         MIR::Ident.new("dist_set"),
@@ -276,7 +278,7 @@ class PipelineSetIndexLowerer < T::Struct
         true,
         contract,
       ),
-      nil,
+      true,
     )
   end
 

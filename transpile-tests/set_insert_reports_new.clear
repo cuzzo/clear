@@ -1,0 +1,15 @@
+# `Set.insert` answers whether the value was NEWLY added -- Rust's
+# HashSet::insert, Kotlin's MutableSet.add, Ruby's Set#add?. Without it the
+# "first time through" idiom needs a separate contains? probe.
+FN main() RETURNS Void ->
+  MUTABLE seen: [Set]String = Set[];
+  IF &seen.insert("a") THEN print("a-new"); END
+  IF !(&seen.insert("a")) THEN print("a-again"); END
+  &seen.insert("b");
+  print(seen.length().toString());
+
+  MUTABLE nums: [Set]Int64 = Set[];
+  IF &nums.insert(7_i64) THEN print("7-new"); END
+  IF &nums.insert(7_i64) THEN print("unreachable"); ELSE print("7-again"); END
+  print(nums.length().toString());
+END

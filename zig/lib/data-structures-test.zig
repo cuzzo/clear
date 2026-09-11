@@ -27,7 +27,7 @@ test "Set(Rc(T)) uses handle identity and releases removed keys" {
     defer set.deinit(allocator);
 
     const item = try CheatLib.rcCreate(u64, allocator, 7);
-    try set.insert(allocator, CheatLib.rcRetain(u64, item));
+    _ = try set.insert(allocator, CheatLib.rcRetain(u64, item));
     try std.testing.expect(set.contains(item));
     try std.testing.expectEqual(@as(usize, 2), item.ctrl.strong);
 
@@ -44,7 +44,7 @@ test "Set.initCapacity reserves buckets without inserting values" {
 
     try std.testing.expectEqual(@as(usize, 0), set.inner.count());
     try std.testing.expect(set.inner.capacity() >= 32);
-    try set.insert(allocator, 7);
+    _ = try set.insert(allocator, 7);
     try std.testing.expect(set.contains(7));
 }
 
@@ -448,9 +448,9 @@ test "owned-string Set still frees duplicates and elements at deinit" {
     var set: CheatLib.Set([]const u8) = .{};
     defer set.deinit(allocator);
 
-    try set.insert(allocator, try allocator.dupe(u8, "one"));
-    try set.insert(allocator, try allocator.dupe(u8, "one")); // dup: freed
-    try set.insert(allocator, try allocator.dupe(u8, "two"));
+    _ = try set.insert(allocator, try allocator.dupe(u8, "one"));
+    _ = try set.insert(allocator, try allocator.dupe(u8, "one")); // dup: freed
+    _ = try set.insert(allocator, try allocator.dupe(u8, "two"));
     try std.testing.expectEqual(@as(i64, 2), set.length());
 
     set.remove(allocator, "one"); // freed
