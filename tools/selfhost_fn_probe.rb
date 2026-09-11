@@ -234,6 +234,9 @@ module SelfhostFnProbe
           # EXTERN FN declarations repeat across files too, so dedupe on
           # whatever a declaration names, not just on struct/union/enum.
           name = d[/\A(?:PUB |EXTERN )*(?:STRUCT|UNION|ENUM|FN) ([\w?!]+)/, 1]
+          impl_owner = d[/\AIMPLEMENTATION ([\w?!]+)/, 1]
+          next if impl_owner
+          next if name && inherent_owners(cache).include?(name)
           next if name && !seen.add?(name)
 
           # The package has fields typed by EXTERN structs, so it needs the
@@ -298,6 +301,39 @@ module SelfhostFnProbe
     "\n# --- module scope from #{rel(target.file)} ---\n" + decls.join
   end
 
+  # An IMPLEMENTATION block carries no visibility modifier, so its inherent
+  # METHODs are not reachable across the package boundary the probe puts
+  # between the target and the types package. The target's OWN file declares
+  # them, so repeat those blocks beside it -- otherwise every call on such a
+  # method reports an undefined `__inherent_*` dispatcher the source defines.
+  def own_implementations(target, cache)
+    cache[target.file] ||= dissect(target.file)
+    decls = cache[target.file][1]
+    own = decls.select { |d| d.start_with?('IMPLEMENTATION') }
+    return '' if own.empty?
+
+    # An inherent METHOD may only be added to a type declared in the same file,
+    # so the owning STRUCT has to come along. Those pairs are excluded from the
+    # shared types package for exactly this reason.
+    owners = own.filter_map { |d| d[/\AIMPLEMENTATION ([\w?!]+)/, 1] }
+    structs = decls.select { |d| owners.any? { |o| d =~ /\A(?:PUB |PRIVATE )?STRUCT #{Regexp.escape(o)}\b/ } }
+    "\n# --- inherent METHODs from #{rel(target.file)} ---\n" + structs.join + own.join
+  end
+
+  # The names of types whose METHODs live in an IMPLEMENTATION in the same
+  # file: file-local by the language's rule, so the shared package must not
+  # declare them.
+  def inherent_owners(cache)
+    @inherent_owners ||= all_files.each_with_object(Set.new) do |rel_path, set|
+      path = File.join(SRC, rel_path)
+      cache[path] ||= dissect(path)
+      cache[path][1].each do |d|
+        name = d[/\AIMPLEMENTATION ([\w?!]+)/, 1]
+        set << name if name
+      end
+    end
+  end
+
   def probe_source(target, _group, cache, pkg_name)
     idx = fn_index(cache)
     safe = "probe__#{target.name.delete('?').delete('!')}"
@@ -328,6 +364,7 @@ module SelfhostFnProbe
     body = body.gsub(/(?<![\w.])#{Regexp.escape(target.name)}\(/, "#{safe}(")
 
     head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n), "\n", extern_decls(cache),
+            own_implementations(target, cache),
             module_consts(target), "\n# --- stand-ins for what it calls ---\n", stubs.join,
             "\n# --- #{rel(target.file)} : #{target.name} ---\n"].join
     @probe_offset = head.lines.length
