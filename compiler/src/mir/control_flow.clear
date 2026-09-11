@@ -1797,7 +1797,8 @@ PUB FN borrowState__conflicts_with?(self: BorrowState, name: String, kind: Strin
   RETURN ((kind == :mutable) OR borrowState__mutable?(self, name));
 END
 PUB FN borrowState__add(self: BorrowState, name: String, kind: String@symbol) RETURNS BorrowState ->
-  MUTABLE updated = {name: (((self.borrows[name] OR_ELSE List[])) + [kind])}.keys() |> REDUCE(COPY self.borrows) { acc[_] = COPY ({name: (((self.borrows[name] OR_ELSE List[])) + [kind])}[_] OR_ELSE panic("missing hash key")); acc };
+  MUTABLE updated: {String}[]String@symbol = COPY self.borrows;
+  updated[COPY name] = ((COPY self.borrows[name] OR_ELSE List[]) + [kind]);
   RETURN BorrowState{ borrows: COPY updated };
 END
 PUB FN borrowChecker__check(fn_node: FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS ![]String ->
@@ -1875,9 +1876,9 @@ PRIVATE FN borrowChecker__check_stmt(MUTABLE self: BorrowChecker, stmt: Locatabl
       IF borrowState__empty?(state) THEN
         RETURN;
       END
-      MUTABLE inner = move_node_mutable.value;
-      IF inner IS_A Identifier THEN
-        borrowChecker__check_borrowed_move(&self, CAST(locatable__name(inner) AS String), move_node_mutable.token, state);
+      MUTABLE rtoc_move_token = COPY move_node_mutable.token;
+      IF move_node_mutable.value IS_A Identifier AS rtoc_moved_ident THEN
+        borrowChecker__check_borrowed_move(&self, COPY rtoc_moved_ident.name, rtoc_move_token, state);
       END
     ELSE_IF (stmt IS_A FuncCall) OR (stmt IS_A MethodCall) THEN
       IF borrowState__empty?(state) THEN
@@ -1886,13 +1887,12 @@ PRIVATE FN borrowChecker__check_stmt(MUTABLE self: BorrowChecker, stmt: Locatabl
       TRY (borrowChecker__check_explicit_moves(&self, stmt, UNWRAP (locatable__token(stmt)), state));
     ELSE_IF (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
       IF !(borrowState__empty?(state)) THEN
-        FOR _ IN (IF locatable__capture_analysis(stmt) != NIL THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_30:? = (locatable__capture_analysis(stmt));
-        COPY UNWRAP (rtoc_local_receiver_30).resource_captures }
-        ELSE
-          NIL
-        END) DO
-        borrowChecker__check_borrowed_move(&self, _, locatable__token(stmt), state);
+        MUTABLE rtoc_resource_captures: [Set]String = Set[];
+        IF locatable__capture_analysis(stmt) EXISTS AS rtoc_capture_analysis THEN
+          rtoc_resource_captures = COPY rtoc_capture_analysis.resource_captures;
+        END
+        FOR _ IN rtoc_resource_captures DO
+        borrowChecker__check_borrowed_move(&self, _, UNWRAP (locatable__token(stmt)), state);
         END
       END
       FOR _ IN (aST__child_bodies(stmt)) DO
