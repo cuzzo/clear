@@ -614,9 +614,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             cleanupEntry__suppress_cleanup_mut( UNWRAP (entry));
           END
       ELSE_IF (!(df_entry.has_moved_guard) AND cleanupEntry__has_moved_guard?( UNWRAP (entry))) THEN
-          cleanupEntry__clear_moved_guard_mut( UNWRAP (&entry));
+          cleanupEntry__clear_moved_guard_mut( UNWRAP (entry));
       ELSE_IF (df_entry.has_moved_guard AND !(cleanupEntry__has_moved_guard?( UNWRAP (entry)))) THEN
-          cleanupEntry__mark_moved_guard_mut( UNWRAP (&entry));
+          cleanupEntry__mark_moved_guard_mut( UNWRAP (entry));
       END
     rtoc_idx = rtoc_idx + 1;
     END
