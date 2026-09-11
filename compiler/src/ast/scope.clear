@@ -14,8 +14,8 @@ PUB STRUCT Scope {
   types: {String@symbol}ScopeTypeEntry
 }
 
-UNION ScopeMutabilityInput { BoolValue: Bool, TokenMultiowned: Token@multiowned, Token: Token }
-STRUCT ScopeTypeEntry {
+PUB UNION ScopeMutabilityInput { BoolValue: Bool, TokenMultiowned: Token@multiowned, Token: Token }
+PUB STRUCT ScopeTypeEntry {
   schema: SchemaValue
 }
 STRUCT ScopeBindings {

@@ -1,6 +1,6 @@
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
-STRUCT FunctionContext {
+PUB STRUCT FunctionContext {
   alloc_count: Int64,
   conditional_depth: Int64,
   frame_count: Int64,
@@ -16,7 +16,7 @@ STRUCT FunctionContext {
   uses_rt: Bool
 }
 
-UNION FunctionContextLifetimeSource { StringValue: String, SymbolValue: String@symbol }
+PUB UNION FunctionContextLifetimeSource { StringValue: String, SymbolValue: String@symbol }
 FN functionContext__set_return_type(MUTABLE self: FunctionContext, val: ?TypeTypeInput) RETURNS !Void ->
     self.return_type = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_1: ?Type = NIL;
     IF (val == NIL) THEN

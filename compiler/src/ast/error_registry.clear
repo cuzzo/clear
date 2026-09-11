@@ -11,7 +11,7 @@ PUB STRUCT ErrorTypeEntry {
   id: Int64,
   first_site: ?Token
 }
-UNION ErrorTypeConflictValue { SymbolValue: String@symbol, TokenMultiowned: Token@multiowned, BoolValue: Bool, Token: Token }
+PUB UNION ErrorTypeConflictValue { SymbolValue: String@symbol, TokenMultiowned: Token@multiowned, BoolValue: Bool, Token: Token }
 PUB FN ruby_constant_error_kinds() RETURNS [6]String@symbol ->
   RETURN CAST([:Transient, :Input, :System, :NotFound, :Permission, :Canceled] AS [6]String@symbol);
 END

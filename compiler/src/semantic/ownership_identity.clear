@@ -2,7 +2,7 @@ REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
 REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172"
 PUB UNION Path { StringValue: String, SymbolValue: String@symbol, PlaceId: PlaceId }
 # Ruby module OwnershipIdentity
-STRUCT BindingId {
+PUB STRUCT BindingId {
   name: String,
   binding_id: Int64
 }

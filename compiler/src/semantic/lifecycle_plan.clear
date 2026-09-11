@@ -18,7 +18,7 @@ FN regexReplaceFirst__lifecycle_plan(subject: String, pattern: String, replaceme
 END
 
 # Ruby module Semantic
-STRUCT LinearResourceFacts {
+PUB STRUCT LinearResourceFacts {
   known: {String}Bool,
   linear: {String}Bool
 }
@@ -301,7 +301,7 @@ PRIVATE FN lifecyclePlanner__mutable_owned_string_binding?(type_info: Type, node
     NIL
   END));
 END
-STRUCT LifecycleRegistry {
+PUB STRUCT LifecycleRegistry {
   binding_plans: {Int64}LifecyclePlan,
   plans: {String}LifecyclePlan
 }

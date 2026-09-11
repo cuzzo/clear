@@ -71,7 +71,7 @@ UNION Root { Emittable: Emittable, ArrayValue: []Emittable }
 UNION RtName { StringValue: String, SymbolValue: String@symbol, Emittable: Emittable }
 UNION MIRLoweringSchema { StructSchemaMultiowned: StructSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, InlineStructVariantMultiowned: InlineStructVariant@multiowned, StructSchema: StructSchema, InlineStructVariant: InlineStructVariant }
 UNION MIRLoweringValue { StringValue: String, SymbolValue: String@symbol, Type: Type, Float64Value: Float64, Int64Value: Int64 }
-STRUCT MIRLowering {
+PUB STRUCT MIRLowering {
   active_lifecycle_registry: ?LifecycleRegistry@multiowned,
   state: MIRLoweringState,
   # Ruby holds the function whose kept-liveness is being computed, its memoized

@@ -1,7 +1,7 @@
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
 REQUIRE "pkg:rtoc_73656d616e7469632f6f776e6572736869705f6964656e746974792e636c656172"
 REQUIRE "pkg:rtoc_6173742f6c657865722e636c656172"
-STRUCT OwnershipGraph {
+PUB STRUCT OwnershipGraph {
   children: {PlaceId}[Set]PlaceId,
   completed_nodes: {PlaceId}OwnershipNode,
   edges: []Edge,
@@ -11,7 +11,7 @@ STRUCT OwnershipGraph {
   scope_depth: Int64
 }
 
-STRUCT LightweightSnapshot {
+PUB STRUCT LightweightSnapshot {
   states: {PlaceId}String@symbol,
   move_lines: {PlaceId}Int64,
   move_cols: {PlaceId}Int64,

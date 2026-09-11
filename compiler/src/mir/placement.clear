@@ -1,7 +1,7 @@
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172"
 # Ruby module MIR
 # Ruby module MIR::Placement
-STRUCT BindingFact {
+PUB STRUCT BindingFact {
   name: String,
   type_info: Type,
   storage: String@symbol,

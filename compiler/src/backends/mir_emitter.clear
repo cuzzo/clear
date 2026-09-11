@@ -21,7 +21,7 @@ FN regexReplaceAll__mir_emitter(subject: String, pattern: String, replacement: S
   RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
 END
 UNION MIREmitterPlan { FsmIoBody: FsmIoBody, FsmB1Body: FsmB1Body, FsmGenericBody: FsmGenericBody }
-STRUCT MIREmitter {
+PUB STRUCT MIREmitter {
   deep_copy_counter: Int64,
   discard_counter: Int64,
   flow_alias_name: ?String,

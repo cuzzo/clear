@@ -381,7 +381,7 @@ PRIVATE FN typeShape__structural_expression(self: TypeShape) RETURNS TypeExpress
   END
   RETURN structural;
 END
-STRUCT TypeFsmForEachDescriptor {
+PUB STRUCT TypeFsmForEachDescriptor {
   kind: String@symbol,
   var_zig_type: String,
   init_method: ?String,
@@ -415,7 +415,7 @@ PUB FN castTypeListToTypeTypeInputList(values: []Type) RETURNS []TypeTypeInput -
 END
 PUB UNION TypeConstructionInput { FunctionType: FunctionType, Type: Type, SymbolValue: String@symbol, StringValue: String, TypeExpression: TypeExpression }
 UNION TypeRawParseInput { FunctionType: FunctionType, SymbolValue: String@symbol, StringValue: String }
-STRUCT ObservablePublishSpec {
+PUB STRUCT ObservablePublishSpec {
   publish_method: String,
   expr: String@symbol,
   gate: String@symbol
@@ -4612,7 +4612,7 @@ PUB FN type__new(raw_input: TypeConstructionInput, ownership: ?String@symbol = N
   TRY (type__initialize(&self, raw_input, ownership, sync, layout, location, collection, shard_count, stripe_count, observable, observable_terminal, auto));
   RETURN self;
 END
-STRUCT BinaryOpResult {
+PUB STRUCT BinaryOpResult {
   type: ?Type,
   left_coercion: ?String@symbol,
   right_coercion: ?String@symbol,
