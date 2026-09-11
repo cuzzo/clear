@@ -8728,7 +8728,7 @@ PRIVATE FN mIRLowering__call_type_owned_return?(MUTABLE self: MIRLowering, ti_in
         RETURN TRUE;
       END
     END
-    RETURN ((((((TRY (type__ownership_bearing?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&self))) OR type__indirect?( UNWRAP (ti))) OR type__collection?( UNWRAP (ti))) OR TRY (type__any_rc?( UNWRAP (ti)))) OR type__any_sync?( UNWRAP (ti))) OR type__resource(ti)) OR TRY (type__recursive_cleanup_shape(ti, mIRLowering__mir_schema_lookup(&self))));
+    RETURN ((((((TRY (type__ownership_bearing?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&self))) OR type__indirect?( UNWRAP (ti))) OR type__collection?( UNWRAP (ti))) OR TRY (type__any_rc?( UNWRAP (ti)))) OR type__any_sync?( UNWRAP (ti))) OR type__resource?(ti)) OR TRY (type__recursive_cleanup_shape?(ti, mIRLowering__mir_schema_lookup(&self))));
 END
 PRIVATE FN mIRLowering__call_owned_return_from_args?(MUTABLE self: MIRLowering, MUTABLE node: CallNode, sig_obj: ?FunctionSignature) RETURNS !?Bool ->
     IF sig_obj EXISTS AS sig_obj_value THEN
@@ -13258,7 +13258,7 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
           ELSE
             RETURN kept_orelse;
           END
-        ELSE_IF ((IF field_node IS_A CopyNode AS copy_node THEN ((expected_ft != NIL) AND type__collection?(UNWRAP (expected_ft))) ELSE FALSE END) AND !(TRY (type__any_rc(expected_ft)))) THEN
+        ELSE_IF ((IF field_node IS_A CopyNode AS copy_node THEN ((expected_ft != NIL) AND type__collection?(UNWRAP (expected_ft))) ELSE FALSE END) AND !(TRY (type__any_rc?(expected_ft)))) THEN
           RETURN TRY (mIRLowering__hoist_alloc(&self, Emittable{ DeepCopy: COPY DeepCopy{ source: COPY TRY (mIRLowering__lower(&self, aST__node_value(field_node))), zig_type: COPY TRY (type__zig_type(expected_ft)), elem_type: NIL, strategy: :full_value, alloc: COPY field_sink_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(expected_ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, &field_node, TRUE));
         ELSE
           MUTABLE field_value = TRY (mIRLowering__materialize_owned_sink_value(&self, TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(field_node))), field_node, field_sink_alloc, field_type_input));
@@ -17211,7 +17211,7 @@ PRIVATE FN mIRLowering__heap_carry_return_value(MUTABLE self: MIRLowering, node:
     IF TRY (mIRLowering__return_transfers_heap_binding?(&self, UNWRAP (node.value))) THEN
       RETURN COPY value;
     END
-    IF (TRY (mIRLowering__mir_allocates?(&self, value)) OR ((IF value IS_A Call AS call THEN call__owned_return(call) ELSE FALSE END))) THEN
+    IF (TRY (mIRLowering__mir_allocates?(&self, value)) OR ((IF value IS_A Call AS call THEN call__owned_return?(call) ELSE FALSE END))) THEN
       RETURN COPY value;
     END
     MUTABLE ret_type: ?Type = TRY (type__from_node_mut(node.value, "heap carry return placement"));
