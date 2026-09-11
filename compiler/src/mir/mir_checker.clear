@@ -3121,7 +3121,7 @@ PRIVATE FN mIRChecker__check_stmt_for_unhoisted(MUTABLE self: MIRChecker, node: 
     ELSE_IF node IS_A DiscardOwned AS discard_owned THEN
       MUTABLE discard_owned_mutable = COPY discard_owned;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&self, discardOwned__expr(discard_owned_mutable), "DiscardOwned expression"));
-    ELSE_IF node? IS_A IfBindStmt AS if_bind_stmt THEN
+    ELSE_IF node IS_A IfBindStmt AS if_bind_stmt THEN
       MUTABLE if_bind_stmt_mutable = COPY if_bind_stmt;
       IF !((if_bind_stmt_mutable.bindings).empty?()) THEN
             MUTABLE rtoc_idx = 0;
