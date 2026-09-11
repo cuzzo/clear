@@ -117,7 +117,7 @@ END
 PUB FN mIRLoweringOwnershipScanner__moved_arg_root(self: MIRLoweringOwnershipScanner, arg: Locatable) RETURNS ?String ->
   MUTABLE node = COPY arg;
   IF node IS_A MoveNode AS move_node THEN
-    MUTABLE move_node = move_node.value;
+    node = CAST(move_node.value AS Locatable);
   END
   IF node IS_A Identifier AS identifier THEN
     RETURN COPY identifier__name(identifier);

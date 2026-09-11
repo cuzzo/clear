@@ -1620,7 +1620,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE node = COPY ast_node;
     IF node IS_A MoveNode AS move_node THEN
-      MUTABLE move_node = move_node.value;
+      node = CAST(move_node.value AS Locatable);
     END
     IF (IF node IS_A Identifier AS identifier THEN aST__moved?(ast_node) ELSE FALSE END) THEN
       RETURN (TRY (mIRLowering__placement_for_node(&rtoc_self_view, node)) == :heap);
@@ -3367,7 +3367,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE params:? = aST__node_params( CAST(sig AS Locatable));
-    IF (TRUE AND (params |> ANY (TRUE AND _.takes()))) THEN
+    IF ((params OR_ELSE List[]) |> ANY (_.takes == TRUE)) THEN
       RETURN TRUE;
     END
     RETURN (TRUE AND TRY (functionSignature__takes_ownership?(&sig)));
@@ -3480,7 +3480,7 @@ FN mIRLowering__visible_owned_operand_value?(MUTABLE self: MIRLowering, ast_valu
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ast_value = COPY ast_value_input;
     IF ast_value IS_A MoveNode AS move_node THEN
-      MUTABLE move_node = move_node.value;
+      ast_value = CAST(move_node.value AS Locatable);
     END
     RETURN !(!(((((IF ast_value IS_A Identifier AS identifier THEN value_mir IS_A Ident ELSE FALSE END) AND (CAST(emittable__name(value_mir) AS String) == mapped)) AND !(TRY (mIRLowering__borrowed_ownership_ast?(&rtoc_self_view, ast_value)))))));
 }
@@ -3996,17 +3996,11 @@ FN mIRLowering__append_lowered_items_mut(MUTABLE self: MIRLowering, MUTABLE targ
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF lowered EXISTS AS lowered_value THEN
-      MUTABLE nodes = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_102: ?MIRLoweringLoweredMir = NIL;
-      IF lowered_value IS_A []Emittable THEN
-        rtoc_ternary_value_102 = lowered_value;
-      ELSE
-        rtoc_ternary_value_102 = [lowered_value];
-      END
-      rtoc_ternary_value_102? };
+      MUTABLE nodes = loweredMir__nodes(lowered_value);
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < nodes.length() DO
       IF (rtoc_idx.zero?() AND (target.line != NIL)) THEN
-            &target.items.append(Emittable{ Comment: COPY Comment{ text: "CLR:${(target.line)?.toString()}", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+            &target.items.append(Emittable{ Comment: COPY Comment{ text: "CLR:${(target.line OR_ELSE 0).toString()}", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
       END
       &target.items.append(COPY nodes[rtoc_idx]);
     rtoc_idx = rtoc_idx + 1;
@@ -4190,15 +4184,19 @@ PRIVATE FN mIRLowering__node_store_binding_name(self: MIRLowering, zig_type: Str
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE encoded = (zig_type.each_char() |> SELECT {
-    MUTABLE alpha = ((((_ >= "A") AND (_ <= "Z"))) OR (((_ >= "a") AND (_ <= "z"))));
-    MUTABLE digit = ((_ >= "0") AND (_ <= "9"));
-    (IF ((alpha OR digit) OR (_ == "_")) THEN
-        _
+    MUTABLE encoded = "";
+    MUTABLE char_idx = 0;
+    WHILE char_idx < zig_type.length() DO
+      MUTABLE ch = zig_type.charAt(char_idx);
+      MUTABLE alpha = ((((ch >= "A") AND (ch <= "Z"))) OR (((ch >= "a") AND (ch <= "z"))));
+      MUTABLE digit = ((ch >= "0") AND (ch <= "9"));
+      IF ((alpha OR digit) OR (ch == "_")) THEN
+        encoded = "${encoded}${ch}";
       ELSE
-        "_"
-      END)
-    }).join("");
+        encoded = "${encoded}_";
+      END
+      char_idx = char_idx + 1;
+    END
     IF shared_value THEN
       RETURN "__shared_node_guard_${encoded}";
     ELSE
@@ -4283,13 +4281,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF !(sym) THEN
         RETURN NIL;
       END
-      MUTABLE decl:? = IF TRUE THEN
-        sym.reg
-      ELSE
-        NIL
-      END;
-      MUTABLE auth = ((((TRUE AND (aST__node__symbol( CAST(decl AS Locatable)) EXISTS)) AND decl.symbol)) OR sym);
-      MUTABLE storage = auth.storage();
+      MUTABLE auth: SymbolEntry = COPY sym;
+      IF sym.reg EXISTS AS decl THEN
+        IF aST__node__symbol(castSymbolEntryRegInputToLocatable(decl)) EXISTS AS decl_symbol THEN
+          auth = COPY decl_symbol;
+        END
+      END
       IF symbolEntry__heap_storage?(auth) THEN
         RETURN :heap;
       ELSE
@@ -4306,46 +4303,47 @@ PRIVATE FN mIRLowering__placement_for_node(MUTABLE self: MIRLowering, node_input
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE node = COPY node_input;
     IF node IS_A MoveNode AS move_node THEN
-      MUTABLE move_node = move_node.value;
+      node = COPY CAST(move_node.value AS Locatable);
     END
-    MUTABLE root = (mIRLowering__root_receiver_node(rtoc_self_view, node) OR_ELSE node);
-    IF root IS_A Identifier THEN
-      MUTABLE alias_alloc: ?String@symbol = COPY (IF mIRLowering__capability_state(&rtoc_self_view).with_alias_alloc_map != NIL THEN
-        (mIRLowering__capability_state(&rtoc_self_view).with_alias_alloc_map)[CAST(root.name() AS String)]
-      ELSE
-        NIL
-      END);
+    MUTABLE root: ?Identifier = mIRLowering__root_receiver_node(rtoc_self_view, node);
+    IF root EXISTS AS root_value THEN
+      MUTABLE alias_alloc: ?String@symbol = NIL;
+      IF mIRLowering__capability_state(&rtoc_self_view).with_alias_alloc_map EXISTS AS alias_alloc_map THEN
+        alias_alloc = COPY alias_alloc_map[CAST(root_value.name AS String)];
+      END
       IF alias_alloc EXISTS AS alias_alloc_value THEN
         RETURN alias_alloc_value;
       END
-      IF mIRLowering__current_function_collection_param?(&rtoc_self_view, root.name()) THEN
+      IF mIRLowering__current_function_collection_param?(&rtoc_self_view, root_value.name) THEN
         RETURN :heap;
       END
-      MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(&rtoc_self_view))))[CAST(root.name() AS String)];
+      MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(&rtoc_self_view))))[CAST(root_value.name AS String)];
       IF entry EXISTS AS entry_value THEN
-        IF cleanupEntry__alloc(entry_value) THEN
-        RETURN cleanupEntry__alloc(entry);
-      END
-      END
-    END
-    IF root IS_A Identifier THEN
-      MUTABLE sym = root.symbol;
-      MUTABLE lifetime_sources: []Any = List[];
-      IF sym != NIL THEN
-        lifetime_sources = COPY TRY (symbolEntry__lifetime_sources(sym));
-      END
-      IF !((lifetime_sources.length() == 0)) THEN
-        IF lifetime_sources |> ANY _.heap_storage?() THEN
-          RETURN :heap;
+        IF !(cleanupEntry__alloc(entry_value).empty?()) THEN
+          RETURN symbol(cleanupEntry__alloc(entry_value));
         END
-        RETURN :frame;
+      END
+      IF root_value.symbol EXISTS AS sym THEN
+        MUTABLE lifetime_sources = TRY (symbolEntry__lifetime_sources(sym));
+        IF !((lifetime_sources.length() == 0)) THEN
+          IF lifetime_sources |> ANY symbolEntry__heap_storage?(_) THEN
+            RETURN :heap;
+          END
+          RETURN :frame;
+        END
       END
     END
-    IF (mIRLowering__symbol_storage_for_node(rtoc_self_view, root) OR_ELSE mIRLowering__function_state(&rtoc_self_view).current_decl_alloc) != NIL THEN
-    RETURN ((mIRLowering__symbol_storage_for_node(rtoc_self_view, root) OR_ELSE mIRLowering__function_state(&rtoc_self_view).current_decl_alloc))?;
-    ELSE
-    RETURN :frame;
+    MUTABLE node_storage: ?String@symbol = NIL;
+    IF root EXISTS AS storage_root THEN
+      node_storage = mIRLowering__symbol_storage_for_node(rtoc_self_view, Locatable{ Identifier: COPY storage_root });
     END
+    IF node_storage EXISTS AS node_storage_value THEN
+      RETURN node_storage_value;
+    END
+    IF mIRLowering__function_state(&rtoc_self_view).current_decl_alloc EXISTS AS decl_alloc THEN
+      RETURN decl_alloc;
+    END
+    RETURN :frame;
 }
 END
 PRIVATE FN mIRLowering__alloc_expr(self: MIRLowering, kind: String@symbol, ignored_rt_name: ?RtName = NIL) RETURNS String@symbol
@@ -5809,7 +5807,7 @@ PRIVATE FN mIRLowering__owned_sink_source_node(self: MIRLowering, ast_node: Loca
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE node = COPY ast_node;
     IF node IS_A MoveNode AS move_node THEN
-      MUTABLE move_node = move_node.value;
+      node = CAST(move_node.value AS Locatable);
     END
     RETURN node;
 }
@@ -10553,7 +10551,7 @@ PRIVATE FN mIRLowering__ast_expr_produces_heap?(MUTABLE self: MIRLowering, expr:
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE node = COPY expr;
     IF node IS_A MoveNode AS move_node THEN
-      MUTABLE move_node = move_node.value;
+      node = CAST(move_node.value AS Locatable);
     END
     IF (IF node IS_A BinaryOp AS binary_op THEN (binary_op.op == symbol("OR_ELSE")) ELSE FALSE END) THEN
       MUTABLE node: ?Locatable@boxed = locatable__left(node);
