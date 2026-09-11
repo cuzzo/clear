@@ -431,7 +431,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE
       0
     END;
-    MUTABLE rtoc_each_items_7 = node__args(node);
+    MUTABLE rtoc_each_items_7:? = node__args(node);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_7.length() DO
       MUTABLE param: ?Any = COPY params[(rtoc_idx + param_offset)];
