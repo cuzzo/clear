@@ -602,6 +602,9 @@ module Annotator
         elem_sync = type.elem_sync
         parts << "elem #{Type.ownership_surface_name_for(elem_ownership)}" if elem_ownership
         parts << "elem #{Type.sync_surface_name_for(elem_sync)}" if elem_sync
+        # Layout is a capability too: without it an indirect `T` and a direct
+        # `T` both print `T` and a return mismatch reads as "expected T, got T".
+        parts << "@boxed" if type.layout == :indirect
 
         parts.join(" ")
       end
