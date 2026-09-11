@@ -609,9 +609,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF !(df_entry.needs_cleanup) THEN
           IF ownershipDataflow__preserve_guard_after_full_move?(&rtoc_self_view, UNWRAP (var), UNWRAP (entry), decision_facts, ambiguous_names) THEN
-            cleanupEntry__mark_moved_guard_mut( UNWRAP (&entry));
+            cleanupEntry__mark_moved_guard_mut( UNWRAP (entry));
           ELSE
-            cleanupEntry__suppress_cleanup_mut( UNWRAP (&entry));
+            cleanupEntry__suppress_cleanup_mut( UNWRAP (entry));
           END
       ELSE_IF (!(df_entry.has_moved_guard) AND cleanupEntry__has_moved_guard?( UNWRAP (entry))) THEN
           cleanupEntry__clear_moved_guard_mut( UNWRAP (&entry));

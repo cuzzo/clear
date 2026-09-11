@@ -1491,7 +1491,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (mIRLowering__place_string_value_for_heap_destination(&rtoc_self_view, Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, ast_node));
     END
     IF type__error_union?( UNWRAP ((TRY (type__from_node_mut(ast_node, "string destination placement"))))) THEN
-      mir = TryExpr{ expr: Emittable{ TryExpr: COPY mir }, lowered_node_id: NIL, ownership_consumption: NIL };
+      mir = TryExpr{ expr: Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, lowered_node_id: NIL, ownership_consumption: NIL };
     END
     RETURN Emittable{ DupeSlice: COPY DupeSlice{ source: Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, alloc: COPY dest_alloc, lowered_node_id: NIL, ownership_consumption: NIL } };
 }
@@ -2552,7 +2552,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         IF owner_cleanup EXISTS AS owner_cleanup_value THEN
           MUTABLE owner_cleanup_value_mutable = COPY owner_cleanup_value;
           MUTABLE rtoc_mutable_receiver_51: ?CleanupEntry@multiowned = mIRLoweringReturnValue__cleanup_entry(owner_cleanup_value_mutable);
-          cleanupEntry__mark_moved_guard_mut( UNWRAP (&rtoc_mutable_receiver_51));
+          cleanupEntry__mark_moved_guard_mut( UNWRAP (rtoc_mutable_receiver_51));
           &state.guarded_cleanup_names.insert(name);
           state.parent?.guarded_cleanup_names.insert(name);
           guarded = TRUE;
@@ -4800,7 +4800,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE data: ?MIRLoweringUnionVariantPayload = COPY facts[rtoc_idx]?.data;
       IF (data == NIL) THEN
           &cleanup_arms.append(UnionMatchArm{ variant: UNWRAP (COPY emittable__name( CAST(UNWRAP (facts[rtoc_idx]) AS Emittable))), payload: NIL, body: List[], pointer_payload: FALSE });
-          &clone_arms.append(UnionMatchArm{ variant: UNWRAP (COPY emittable__name( CAST(CAST(CAST(CAST(UNWRAP (facts[rtoc_idx]) AS Emittable) AS Emittable) AS Emittable) AS Emittable))), payload: NIL, body: [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ StructInit: COPY StructInit{ zig_type: NIL, fields: [CAST({:name: emittable__name(UNWRAP (facts[rtoc_idx])), :value: Lit{ value: "void{}", lowered_node_id: NIL, ownership_consumption: NIL }} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], pointer_payload: FALSE });
+          &clone_arms.append(UnionMatchArm{ variant: UNWRAP (COPY emittable__name( CAST(CAST(CAST(CAST(CAST(UNWRAP (facts[rtoc_idx]) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable))), payload: NIL, body: [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ StructInit: COPY StructInit{ zig_type: NIL, fields: [CAST({:name: emittable__name(UNWRAP (facts[rtoc_idx])), :value: Lit{ value: "void{}", lowered_node_id: NIL, ownership_consumption: NIL }} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], pointer_payload: FALSE });
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -6200,12 +6200,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
           MUTABLE node_name = COPY CAST(emittable__name(UNWRAP (body[rtoc_idx_n1])) AS String);
           MUTABLE rendered_name = COPY (rename_map[node_name] OR_ELSE node_name);
-          IF !(((node_name == emittable__name( CAST(CAST(CAST(CAST(CAST(UNWRAP (facts[rtoc_idx]) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable))) OR (rendered_name == emittable__name(UNWRAP (facts[rtoc_idx]))))) THEN
+          IF !(((node_name == emittable__name( CAST(CAST(CAST(CAST(CAST(CAST(UNWRAP (facts[rtoc_idx]) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable))) OR (rendered_name == emittable__name(UNWRAP (facts[rtoc_idx]))))) THEN
               rtoc_idx_n1 = rtoc_idx_n1 + 1;
         CONTINUE;
           END
           MUTABLE rtoc_mutable_receiver_197:? = emittable__cleanup_entry(UNWRAP (body[rtoc_idx_n1]));
-          cleanupEntry__mark_moved_guard_mut( UNWRAP (&rtoc_mutable_receiver_197));
+          cleanupEntry__mark_moved_guard_mut( UNWRAP (rtoc_mutable_receiver_197));
           MUTABLE rtoc_key_1: String = COPY UNWRAP (facts[rtoc_idx]).name;
           guarded_cleanup_names[rtoc_key_1] = TRUE;
         rtoc_idx_n1 = rtoc_idx_n1 + 1;
@@ -12909,7 +12909,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE branch_index: Int64 = 0;
     WHILE (branch_index < n) DO
       MUTABLE branch: DoBranch = COPY UNWRAP (branches[branch_index]);
-      MUTABLE ctx_type = "__DoBranchCtx${mIRLoweringGeneratedId__to_s( CAST(CAST(CAST(CAST(CAST(id AS MIRLoweringGeneratedId) AS MIRLoweringGeneratedId) AS MIRLoweringGeneratedId) AS MIRLoweringGeneratedId) AS MIRLoweringGeneratedId))}_${mIRLoweringGeneratedId__to_s(branch_index)}";
+      MUTABLE ctx_type = "__DoBranchCtx${mIRLoweringGeneratedId__to_s( CAST(CAST(CAST(CAST(CAST(CAST(id AS MIRLoweringGeneratedId) AS MIRLoweringGeneratedId) AS MIRLoweringGeneratedId) AS MIRLoweringGeneratedId) AS MIRLoweringGeneratedId) AS MIRLoweringGeneratedId))}_${mIRLoweringGeneratedId__to_s(branch_index)}";
       MUTABLE ctx_var = "__do${id.toString()}_ctx${branch_index.toString()}";
       MUTABLE branch_analysis: ?CaptureAnalysis = COPY branch.capture_analysis;
       MUTABLE pinned: Bool = pinMode__pinned?(branch.pinned);
@@ -13984,7 +13984,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE subject: Emittable = CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(node.left))) AS Emittable);
       RETURN Emittable{ MIRBinOp: COPY MIRBinOp{ op: "==", left: Emittable{ Call: COPY TRY (mIRLowering__active_tag_call(&rtoc_self_view, subject)) }, right: Emittable{ EnumTag: COPY EnumTag{ variant: UNWRAP (COPY node.runtime_variant_name) } }, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    RETURN Emittable{ TypeEq: COPY TypeEq{ left: COPY TRY (mIRLowering__lower_type_value_expr(&rtoc_self_view, CAST(CAST(CAST(CAST(CAST(castLocatableToNode__auto_inference(node.left) AS Node) AS Node) AS Node) AS Node) AS Node))), right: COPY TRY (mIRLowering__lower_type_value_expr(&rtoc_self_view, node.right)), lowered_node_id: NIL, ownership_consumption: NIL } };
+    RETURN Emittable{ TypeEq: COPY TypeEq{ left: COPY TRY (mIRLowering__lower_type_value_expr(&rtoc_self_view, CAST(CAST(CAST(CAST(CAST(CAST(castLocatableToNode__auto_inference(node.left) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node))), right: COPY TRY (mIRLowering__lower_type_value_expr(&rtoc_self_view, node.right)), lowered_node_id: NIL, ownership_consumption: NIL } };
 }
 END
 PRIVATE FN mIRLowering__lower_type_value_expr(MUTABLE self: MIRLowering, node: Node) RETURNS !Emittable
@@ -16288,7 +16288,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       transfer_name = mIRLowering__zig_safe_name(rtoc_self_view, raw_name);
       IF entry EXISTS AS entry_value THEN
         IF cleanupEntry__needs_cleanup?(entry_value) THEN
-        cleanupEntry__mark_moved_guard_mut( UNWRAP (&entry));
+        cleanupEntry__mark_moved_guard_mut( UNWRAP (entry));
         MUTABLE rtoc_index_receiver_595 = mIRLowering__function_state(&rtoc_self_view).guarded_cleanup_names;
         rtoc_index_receiver_595[transfer_name] = TRUE;
       END
@@ -18824,7 +18824,7 @@ PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, MUTABLE node
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE special_result: ?Stmt = TRY (mIRLowering__special_assignment_result(&rtoc_self_view, &node));
     IF special_result EXISTS AS special_result_value THEN
-      RETURN castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(UNWRAP (castStmtToEmittable(special_result_value))) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable));
+      RETURN castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(UNWRAP (castStmtToEmittable(special_result_value))) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable));
     END
     MUTABLE plan = TRY (mIRLowering__assignment_target_plan(&rtoc_self_view, node));
     MUTABLE kept_value: ?Emittable = TRY (mIRLowering__kept_assignment_field_value(&rtoc_self_view, node));
@@ -22770,7 +22770,7 @@ END
 PUB FN castStmtListToEmittableList(values: []Stmt) RETURNS []Emittable ->
   MUTABLE out: []Emittable = List[];
   FOR value IN values DO
-    &out.append(castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(value) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable)));
+    &out.append(castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(value) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable)));
   END
   RETURN out;
 END
