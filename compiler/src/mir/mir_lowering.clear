@@ -8236,7 +8236,7 @@ PRIVATE FN mIRLowering__finalize_call_result(MUTABLE self: MIRLowering, MUTABLE 
       END
     END
     TRY (mIRLowering__attach_explicit_move_consumption_mut(&self, &call, ast_args, mir_args, "call explicit move", contract));
-    IF !((TRUE AND ((MATCH OR_ELSE FALSE) node START CallNode.FuncCall AS item -> item.heap_dupe_result, CallNode.MethodCall AS item -> item.heap_dupe_result END))) THEN
+    IF !((TRUE AND (MATCH node START CallNode.FuncCall AS item -> item.heap_dupe_result, CallNode.MethodCall AS item -> item.heap_dupe_result END))) THEN
       RETURN Emittable{ Call: COPY call };
     END
     IF owned_return THEN
