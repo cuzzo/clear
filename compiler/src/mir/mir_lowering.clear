@@ -2555,7 +2555,7 @@ FN mIRLowering__append_ownership_transfer_targets_for_surface_node_mut(MUTABLE s
     IF (fact != NIL) THEN
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < fact.operands.length() DO
-      IF (fact.operands[rtoc_idx]?.(borrowed OR_ELSE FALSE) OR ((fact.operands[rtoc_idx]?.name) == NIL)) THEN
+      IF (fact.operands[rtoc_idx]?.borrowed OR ((fact.operands[rtoc_idx]?.name) == NIL)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -2578,7 +2578,7 @@ FN mIRLowering__append_ownership_transfer_targets_for_surface_node_mut(MUTABLE s
     IF contract EXISTS AS contract_value THEN
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < contract_value.operands.length() DO
-      IF (contract_value.operands[rtoc_idx]?.(borrowed OR_ELSE FALSE) OR ((contract_value.operands[rtoc_idx]?.name) == NIL)) THEN
+      IF (contract_value.operands[rtoc_idx]?.borrowed OR ((contract_value.operands[rtoc_idx]?.name) == NIL)) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -6451,7 +6451,7 @@ PRIVATE FN mIRLowering__replace_mir_expr_child_mut(MUTABLE self: MIRLowering, MU
     IF old_child.equal?(new_child) THEN
       RETURN;
     END
-    IF !(((emittable__mir?(parent) != NIL) AND (emittable__mir OR_ELSE FALSE)?(parent))) THEN
+    IF !(((emittable__mir?(parent) != NIL) AND emittable__mir?(parent))) THEN
       RETURN;
     END
     IF FALSE THEN
@@ -7322,7 +7322,7 @@ PRIVATE FN mIRLowering__function_param_zig_type(MUTABLE self: MIRLowering, param
         RETURN handle;
       END
     END
-    IF ((param.(takes OR_ELSE FALSE) AND TRY (type__any_rc?(type_info))) AND type__collection?(type_info)) THEN
+    IF ((param.takes AND TRY (type__any_rc?(type_info))) AND type__collection?(type_info)) THEN
       RETURN COPY "*const ${base_zig}";
     END
     IF ((((is_user_struct OR polymorphic_generic_struct) OR type__collection?(type_info)) OR type__canonical_stream?(type_info)) OR atomic_sync) THEN
@@ -7382,7 +7382,7 @@ PRIVATE FN mIRLowering__runtime_frame_prologue(MUTABLE self: MIRLowering, node: 
     MUTABLE bare_ret = (TRY (type__success_type( TRY (ret_type_obj))) OR ret_type_obj);
     MUTABLE returns_value_type = ((((type__void?(bare_ret) OR type__primitive?(bare_ret)) OR bare_ret.resource?()) OR (TRY (mIRLowering__enum_schemas(&self))).contains?(bare_ret.resolved())) OR (TRY (mIRLowering__union_schemas(&self))).contains?(bare_ret.resolved()));
     MUTABLE returns_string = TRY (type__string?(bare_ret));
-    MUTABLE heap_carry_return = !(!(((TRUE AND node.(heap_carry_return OR_ELSE FALSE)))));
+    MUTABLE heap_carry_return = !(!(((TRUE AND node.heap_carry_return))));
     MUTABLE has_frame_bindings =   IF node.cleanup_bindings THEN
       node.cleanup_bindings |> ANY _._1.frame?()
     ELSE
@@ -7719,7 +7719,7 @@ PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input:
       END
       RETURN COPY arg;
     END
-    IF ((((((callee_param != NIL) AND callee_param.(takes OR_ELSE FALSE)) AND TRY (type__any_rc?(ti))) AND !(TRY (type__any_rc?(callee_param_type)))) AND !(type__generic_type_parameter?(callee_param_type))) AND (callee_param.carrier_contract != :monomorphic)) THEN
+    IF ((((((callee_param != NIL) AND callee_param.takes) AND TRY (type__any_rc?(ti))) AND !(TRY (type__any_rc?(callee_param_type)))) AND !(type__generic_type_parameter?(callee_param_type))) AND (callee_param.carrier_contract != :monomorphic)) THEN
       MUTABLE sink_alloc = TRY (mIRLowering__allocator_for_takes_param_mut(&self, callee_param));
       MUTABLE payload = TRY (mIRLowering__rc_payload_value(self, arg, UNWRAP (ti)));
       MUTABLE materialized = DeepCopy{ source: COPY payload, zig_type: COPY TRY (type__zig_type(callee_param_type)), elem_type: NIL, strategy: :full_value, alloc: COPY sink_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(callee_param_type))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
@@ -7758,7 +7758,7 @@ PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input:
     IF TRY (mIRLowering__borrowed_array_argument_required?(self, UNWRAP (ti), a, callee_param_type)) THEN
       RETURN Emittable{ ItemsAccess: COPY ItemsAccess{ expr: COPY arg, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (((callee_param != NIL) AND callee_param.(mutable OR_ELSE FALSE)) AND symbolEntry__always_mutable_sync?(type__sync( UNWRAP (ti)))) THEN
+    IF (((callee_param != NIL) AND callee_param.mutable) AND symbolEntry__always_mutable_sync?(type__sync( UNWRAP (ti)))) THEN
       RETURN Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ FieldGet: COPY FieldGet{ object: COPY arg, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     IF (((with_alias_pointer_shaped?(a) AND (callee_param != NIL)) AND !(callee_param.mutable)) AND !(type__needs_pointer_passing?(callee_param_type))) THEN
@@ -7770,7 +7770,7 @@ PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input:
     IF arg_already_pointer_shaped?(a) THEN
       RETURN COPY arg;
     END
-    IF (((callee_param != NIL) AND callee_param.(mutable OR_ELSE FALSE)) AND (aST__root_identifier(a) == NIL)) THEN
+    IF (((callee_param != NIL) AND callee_param.mutable) AND (aST__root_identifier(a) == NIL)) THEN
       MUTABLE arg = TRY (mIRLowering__materialize_mutable_call_temporary(&self, &arg, &a));
     END
     RETURN Emittable{ AddressOf: COPY AddressOf{ expr: COPY arg, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -8236,7 +8236,7 @@ PRIVATE FN mIRLowering__finalize_call_result(MUTABLE self: MIRLowering, MUTABLE 
       END
     END
     TRY (mIRLowering__attach_explicit_move_consumption_mut(&self, &call, ast_args, mir_args, "call explicit move", contract));
-    IF !((TRUE AND ((MATCH OR_ELSE FALSE) node START CallNode.FuncCall AS item -> item.heap_dupe_result, CallNode.MethodCall AS item -> item.heap_dupe_result END))) THEN
+    IF !((TRUE AND (MATCH node START CallNode.FuncCall AS item -> item.heap_dupe_result, CallNode.MethodCall AS item -> item.heap_dupe_result END))) THEN
       RETURN Emittable{ Call: COPY call };
     END
     IF owned_return THEN
@@ -8314,7 +8314,7 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
       MUTABLE zig_pattern_value_mutable = COPY zig_pattern_value;
       RETURN TRY (mIRLowering__lower_intrinsic(&self, Node{ FuncCall: COPY node }));
     END
-    IF (TRUE AND node.(extern_call OR_ELSE FALSE)) THEN
+    IF (TRUE AND node.extern_call) THEN
       RETURN TRY (mIRLowering__lower_extern_call(&self, &node));
     END
     MUTABLE callee_sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(self, CAST(node.name AS MIRLoweringName)));
@@ -8339,7 +8339,7 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
     ELSE
       mod_prefix = "";
     END
-    IF (TRUE AND node.(fn_var_call OR_ELSE FALSE)) THEN
+    IF (TRUE AND node.fn_var_call) THEN
       all_args = ([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL } }] + args_mir);
       MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(&self, functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature)), node.args, &args_mir));
       RETURN Emittable{ Call: COPY Call{ callee: "try ${node.name}", args: COPY all_args, try_wrap: FALSE, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FuncCall: COPY node })), callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
@@ -12824,7 +12824,7 @@ PRIVATE FN mIRLowering__index_access_plan(MUTABLE self: MIRLowering, node: GetIn
     MUTABLE target_node = COPY node.target;
     MUTABLE target_ast: Locatable = target_node;
     MUTABLE implicit_safe_nav = ((aST__node_safe_nav_chain(target_node) EXISTS) AND (locatable__safe_nav_chain(target_node) == TRUE));
-    MUTABLE explicit_safe_nav = (target_node IS_A OptionalUnwrap AND (locatable__safe_navigation OR_ELSE FALSE)?(target_node));
+    MUTABLE explicit_safe_nav = (target_node IS_A OptionalUnwrap AND locatable__safe_navigation?(target_node));
     MUTABLE optional = (explicit_safe_nav OR implicit_safe_nav);
     MUTABLE source_ast_branch_value: ?Locatable = NIL;
     IF explicit_safe_nav THEN
