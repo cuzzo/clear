@@ -3305,7 +3305,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN NIL;
 }
 END
-FN mIRLowering__ownership_contract_for_node(self: MIRLowering, node: ?Emittable) RETURNS ?OwnershipContract@multiowned
+FN mIRLowering__ownership_contract_for_node(self: MIRLowering, node: ?Emittable) RETURNS !?OwnershipContract@multiowned
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
@@ -4987,14 +4987,14 @@ PRIVATE FN mIRLowering__lower_require(MUTABLE self: MIRLowering, node: RequireNo
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE importer: ?ModuleImporter = COPY mIRLowering__program_state(rtoc_self_view).importer;
-    MUTABLE pkg_inline = (((node.kind == :package) AND (TRUE)) AND (moduleImporter__stdlib_package?(UNWRAP (importer), node.path) != NIL));
+    MUTABLE pkg_inline = (((node.kind == :package) AND (TRUE)) AND moduleImporter__stdlib_package?(UNWRAP (importer), node.path));
     IF ((node.kind == :package) AND !(pkg_inline)) THEN
-      MUTABLE import_name = (node.namespace OR node.path);
+      MUTABLE import_name = (IF node.namespace.empty?() THEN COPY node.path ELSE COPY node.namespace END);
       IF ((importer != NIL) AND TRUE) THEN
         import_name = moduleImporter__owning_package_name(importer, import_name);
       END
       MUTABLE zig_import_name = mIRLowering__zig_module_alias(rtoc_self_view, import_name);
-      IF !(mIRLowering__program_state(rtoc_self_view).emitted_require_modules.add?("pkg-import:${import_name}")) THEN
+      IF !(&rtoc_self_view.state.program.emitted_require_modules.insert("pkg-import:${import_name}")) THEN
         RETURN List[];
       END
       MUTABLE items: []Emittable = [Emittable{ Import: COPY Import{ alias_name: COPY zig_import_name, module_path: "${import_name}.zig", member: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
@@ -5017,7 +5017,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((vis == :pub)) THEN
             CONTINUE;
     END
-    IF !(mIRLowering__program_state(rtoc_self_view).emitted_import_type_aliases.add?(CAST(rtoc_key AS String))) THEN
+    IF !(&rtoc_self_view.state.program.emitted_import_type_aliases.insert(CAST(rtoc_key AS String))) THEN
             CONTINUE;
     END
     &items.append(Emittable{ TypeAlias: COPY TypeAlias{ name: COPY CAST(rtoc_key AS String), target: "${alias_target}.${rtoc_key}", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
@@ -5071,7 +5071,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
         END
         MUTABLE module_key = (UNWRAP (mod)).object_id();
-        IF !(mIRLowering__program_state(rtoc_self_view).emitted_require_modules.add?(CAST(module_key AS String))) THEN
+        IF !(&rtoc_self_view.state.program.emitted_require_modules.insert(CAST(module_key AS String))) THEN
           RETURN List[];
         END
         RETURN (dependency_items + TRY (mIRLowering__imported_module_extern_items(&rtoc_self_view, mod?)) + TRY (mIRLowering__visible_type_items(rtoc_self_view, mod?, same_dir)) + [Emittable{ ModuleNamespace: COPY ModuleNamespace{ name: mIRLowering__zig_module_alias(rtoc_self_view, node.namespace), items: COPY namespace_items, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
@@ -8468,7 +8468,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN Emittable{ CExternFnDecl: COPY CExternFnDecl{ name: CAST((source.symbol OR node.name) AS String), params: params, return_type: TRY (type__zig_type(TRY (externFnDecl__annotation_return_type(node)))), library: source.dependency, callconv: source.callconv, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     MUTABLE mod: ?String = COPY node.from_module;
-    IF mIRLowering__program_state(rtoc_self_view).emitted_extern_modules.add?(mod) THEN
+    IF &rtoc_self_view.state.program.emitted_extern_modules.insert(mod) THEN
       MUTABLE mod_parts = mod.split(".");
       MUTABLE root_module = mod_parts.first();
       MUTABLE tail_modules = mod_parts |> SKIP 1;
@@ -8509,7 +8509,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE mod_parts = mod_value.split(".");
       MUTABLE mod_alias = mIRLowering__zig_module_alias(rtoc_self_view, mod_value);
       MUTABLE items: []Emittable = List[];
-      IF mIRLowering__program_state(rtoc_self_view).emitted_extern_modules.add?(mod_value) THEN
+      IF &rtoc_self_view.state.program.emitted_extern_modules.insert(mod_value) THEN
         MUTABLE root_module = COPY UNWRAP (mod_parts.first());
         MUTABLE tail_modules = mod_parts |> SKIP 1;
         MUTABLE member_chain = IF tail_modules.empty?() THEN
@@ -8525,7 +8525,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         &items.append(Emittable{ Import: COPY Import{ alias_name: COPY mod_alias, module_path: COPY module_path, member: member_chain, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
       END
-      IF mIRLowering__program_state(rtoc_self_view).emitted_import_type_aliases.add?(CAST(node.name AS String)) THEN
+      IF &rtoc_self_view.state.program.emitted_import_type_aliases.insert(CAST(node.name AS String)) THEN
         MUTABLE zig_rhs: String = "";
         IF node.as_type EXISTS AS as_type_value THEN
           zig_rhs = "${mod_alias}.${as_type_value}";

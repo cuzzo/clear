@@ -829,7 +829,7 @@ PRIVATE FN emit__register_owned_suspend_result_cleanups_mut(segment_specs: []Fsm
   CONTINUE;
     END
     MUTABLE name = COPY CAST(desc.result_var AS String);
-    IF !(seen.add?(name)) THEN
+    IF !(&seen.insert(name)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
