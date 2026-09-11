@@ -969,6 +969,20 @@ class Type
   private_class_method :project_inline_collection
 
   # ruby-to-clear: effects reentrant
+  # The surface name plus the capabilities that live beside the resolved
+  # symbol. Without them an `@symbol` String and a plain one both print
+  # `String`, and a mismatch between the two reads as "expected X, got X".
+  sig { params(t: Type).returns(String) }
+  def self.surface_with_capabilities(t)
+    parts = [surface_name_type(t)]
+    ownership = t.ownership_surface_name
+    sync = t.sync_surface_name
+    parts << ownership if ownership
+    parts << sync if sync
+    parts << "@boxed" if t.layout == :indirect
+    parts.join(" ")
+  end
+
   # ruby-to-clear: fallible
   sig { params(t: Type).returns(String) }
   def self.surface_name_type(t)
@@ -2429,9 +2443,9 @@ class Type
     ft = function_type
     return resolved.to_s unless ft
 
-    params = ft.params.map { |p| p.type.to_s }.join(", ")
+    params = ft.params.map { |p| Type.surface_with_capabilities(p.type) }.join(", ")
     suffix = ft.reentrant ? " EFFECTS REENTRANT" : ""
-    "FN(#{params}) -> #{ft.return_type}#{suffix}"
+    "FN(#{params}) -> #{Type.surface_with_capabilities(ft.return_type)}#{suffix}"
   end
 
   sig { returns(Symbol) }

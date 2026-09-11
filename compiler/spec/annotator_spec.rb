@@ -4726,6 +4726,22 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "lambda stored in a capability-typed function field" do
+    let(:code) {
+      <<~FLUX
+        STRUCT Holder { make: FN() -> String@symbol }
+        FN tag() RETURNS String@symbol -> RETURN :stub; END
+        FN build() RETURNS !Holder ->
+          RETURN Holder{ make: %() -> tag() };
+        END
+      FLUX
+    }
+
+    it "keeps the body's capability on the inferred lambda return" do
+      expect { ast }.not_to raise_error
+    end
+  end
+
   describe "pipeline over an Any-element collection" do
     # `Any@list` passes the array gate but names no element type. Reading the
     # missing element crashed the annotator instead of reporting the pipeline.

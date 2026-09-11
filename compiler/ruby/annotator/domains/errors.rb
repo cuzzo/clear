@@ -589,12 +589,8 @@ module Annotator
       def type_display(type)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
-        parts = [Type.surface_name_type(type)]
+        parts = [Type.surface_with_capabilities(type)]
 
-        ownership = type.ownership_surface_name
-        sync = type.sync_surface_name
-        parts << ownership if ownership
-        parts << sync if sync
         # A collection carries its capabilities on the ELEMENT, so without
         # these two a `[]T@multiowned` and a `[]T` both print `[]T` and the
         # mismatch reads as "expected []T, but returned []T".
@@ -602,9 +598,6 @@ module Annotator
         elem_sync = type.elem_sync
         parts << "elem #{Type.ownership_surface_name_for(elem_ownership)}" if elem_ownership
         parts << "elem #{Type.sync_surface_name_for(elem_sync)}" if elem_sync
-        # Layout is a capability too: without it an indirect `T` and a direct
-        # `T` both print `T` and a return mismatch reads as "expected T, got T".
-        parts << "@boxed" if type.layout == :indirect
 
         parts.join(" ")
       end

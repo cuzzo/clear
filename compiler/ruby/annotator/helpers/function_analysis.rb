@@ -263,7 +263,7 @@ module FunctionAnalysis
   end
   private :collect_routine_returns
 
-  sig { params(params: T::Array[AST::Param], return_type: Symbol).returns(FunctionSignature) }
+  sig { params(params: T::Array[AST::Param], return_type: T.any(Symbol, Type)).returns(FunctionSignature) }
   def build_lambda_signature(params, return_type)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     normalized_params = params.map do |param|
@@ -318,7 +318,16 @@ module FunctionAnalysis
       pop_function_context!
     end
 
-    stamp_type!(node, build_lambda_signature(node.params, T.cast(return_type, Symbol)))
+    # `resolved_type` hands back the bare symbol, so an expression body that
+    # yields `String@symbol` described a `String` lambda -- and a field
+    # declared `FN() -> String@symbol` then rejected it with both sides
+    # printing the same name. The body already carries its capabilities.
+    inferred = T.let(T.cast(return_type, Symbol), T.any(Symbol, Type))
+    unless node.body.is_a?(Array)
+      body_type = T.unsafe(node.body).full_type!(context: "lambda body")
+      inferred = body_type if body_type.is_a?(Type) && body_type.resolved == return_type
+    end
+    stamp_type!(node, build_lambda_signature(node.params, inferred))
   end
 
   sig { params(node: AST::FunctionDef).returns(T.nilable(FunctionContext)) }
