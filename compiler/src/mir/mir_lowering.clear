@@ -4068,11 +4068,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     replacements[:Self] = typeExpression__of( TypeExpressionKind{ NamedTypeExpression: COPY NamedTypeExpression{ name: :T, arguments: List[] } });
     MUTABLE expression = typeExpressionTree__transform(requirement.return_type.shape.expression, %(candidate: TypeExpression) USE(replacements) -> {
     MUTABLE candidate_kind = candidate.kind;
-    IF ((candidate_kind IS_A NamedTypeExpression AND candidate_kind.arguments.empty?()) AND replacements.contains?(candidate_kind.name())) THEN
-      RETURN UNWRAP (replacements[candidate_kind.name()]);
-    ELSE
-      RETURN candidate;
+    IF candidate_kind IS_A NamedTypeExpression AS named_kind THEN
+      IF (named_kind.arguments.empty?() AND replacements.contains?(named_kind.name)) THEN
+        RETURN UNWRAP (replacements[named_kind.name]);
+      END
     END
+    RETURN candidate;
     NIL
     });
     MUTABLE result = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY expression }));
@@ -4375,12 +4376,18 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         receiver = (receiver OR_ELSE UNWRAP (locatable__args( UNWRAP (node))).first());
       END
       MUTABLE root: ?Identifier = mIRLowering__root_receiver_node(rtoc_self_view, receiver);
-      MUTABLE selected: Locatable = CAST(((IF root != NIL THEN root ELSE receiver END) OR node) AS Locatable);
-      MUTABLE selected_type = TRY (type__from_node_mut(selected, "allocator receiver"));
+      MUTABLE selected: ?Locatable = COPY node;
+      IF receiver EXISTS AS receiver_value THEN
+        selected = COPY receiver_value;
+      END
+      IF root EXISTS AS root_value THEN
+        selected = Locatable{ Identifier: COPY root_value };
+      END
+      MUTABLE selected_type:? = TRY (type__from_node_mut(UNWRAP (selected), "allocator receiver"));
       IF TRY (type__node_reference?( UNWRAP (selected_type))) THEN
         RETURN :heap;
       END
-      RETURN TRY (mIRLowering__placement_for_node(&rtoc_self_view, selected));
+      RETURN TRY (mIRLowering__placement_for_node(&rtoc_self_view, UNWRAP (selected)));
     ELSE_IF (alloc_sym == :node_storage) THEN
       IF mIRLowering__function_state(&rtoc_self_view).current_decl_alloc != NIL THEN
     RETURN (mIRLowering__function_state(&rtoc_self_view).current_decl_alloc)?;
@@ -4533,21 +4540,21 @@ PRIVATE FN mIRLowering__lower_drop(MUTABLE self: MIRLowering, node: Drop) RETURN
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE safe = mIRLowering__zig_safe_name(rtoc_self_view, node.name);
-    MUTABLE entry: ?PassStateValue = COPY node.cleanup_entry;
-    MUTABLE plan = cleanupEntry__lifecycle_plan(entry);
-    IF !((IF plan != NIL THEN
-      lifecyclePlan__needs_drop?(plan)
-    ELSE
-      NIL
-    END)) THEN
-      panic("MIR::Drop lacks annotation lifecycle plan for {}");
+    IF node.cleanup_entry EXISTS AS entry THEN
+      MUTABLE plan: ?LifecyclePlan = cleanupEntry__lifecycle_plan(entry);
+      IF !((IF plan EXISTS AS plan_value THEN
+        lifecyclePlan__needs_drop?(plan_value)
+      ELSE
+        FALSE
+      END)) THEN
+        panic("MIR::Drop lacks annotation lifecycle plan for {}");
+      END
+      IF cleanupEntry__has_moved_guard?(entry) THEN
+        rtoc_self_view.state.function_state.guarded_cleanup_names[safe] = TRUE;
+      END
+      RETURN Cleanup{ name: COPY safe, cleanup_entry: KEEP entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
-    MUTABLE has_guard = cleanupEntry__has_moved_guard?(CAST(entry AS CleanupEntry));
-    IF has_guard THEN
-      MUTABLE rtoc_index_receiver_125 = mIRLowering__function_state(&rtoc_self_view).guarded_cleanup_names;
-      rtoc_index_receiver_125[safe] = TRUE;
-    END
-    RETURN Cleanup{ name: COPY safe, cleanup_entry: UNWRAP (node.cleanup_entry), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    panic("MIR::Drop lacks annotation lifecycle plan for {}");
 }
 END
 PRIVATE FN mIRLowering__lower_enum_def(MUTABLE self: MIRLowering, node: EnumDef) RETURNS MIREnumDef
