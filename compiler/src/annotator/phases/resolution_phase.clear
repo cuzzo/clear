@@ -2073,9 +2073,6 @@ END
 FN castTypeToTypeTypeInput__resolution_phase(value: Type) RETURNS TypeTypeInput ->
   RETURN TypeTypeInput{ Type: COPY value };
 END
-FN castTypeToTypeTypeInput__resolution_phase(value: Type) RETURNS TypeTypeInput ->
-  RETURN TypeTypeInput{ Type: COPY value };
-END
 FN castTypeTypeInputToTypeConstructionInput__resolution_phase(value: TypeTypeInput) RETURNS TypeConstructionInput ->
   PARTIAL MATCH value START
     TypeTypeInput.FunctionType AS cast_payload -> RETURN TypeConstructionInput{ FunctionType: COPY cast_payload };,

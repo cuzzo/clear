@@ -2,7 +2,6 @@ REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
 # Ruby module Annotator
 # Ruby module Annotator::Phases
-PUB UNION TypeDeclaration { StructDef: StructDef, ExternStructDecl: ExternStructDecl, EnumDef: EnumDef, UnionDef: UnionDef, ProtocolDef: ProtocolDef }
 PUB STRUCT ErrorTypeRegistration {
   kind: String@symbol,
   type_name: String,
