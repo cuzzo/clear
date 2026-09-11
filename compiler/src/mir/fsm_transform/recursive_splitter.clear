@@ -82,12 +82,12 @@ PUB FN builder__reserve_lock_index(MUTABLE self: Builder) RETURNS Int64 ->
     self.next_lock_index = (self.next_lock_index + 1);
     RETURN idx;
 END
-PUB FN builder__fill(MUTABLE self: Builder, idx: Int64, stmts: []SegmentStmt, tail: SegmentTail) RETURNS Int64 ->
+PUB FN builder__fill(MUTABLE self: Builder, idx: Int64, stmts: []SegmentBodyItem, tail: SegmentTail) RETURNS Int64 ->
     self.segments[idx] = Segment{ index: COPY idx, stmts: stmts, tail: tail };
     builder__stamp_overrides(&self, idx);
     RETURN COPY idx;
 END
-PUB FN builder__push(MUTABLE self: Builder, stmts: []SegmentStmt, tail: SegmentTail) RETURNS Int64 ->
+PUB FN builder__push(MUTABLE self: Builder, stmts: []SegmentBodyItem, tail: SegmentTail) RETURNS Int64 ->
     MUTABLE idx = builder__reserve_index(&self);
     builder__fill(&self, idx, stmts, tail);
     RETURN idx;
@@ -161,7 +161,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int
     rtoc_scan = (rtoc_scan + 1);
   END
   IF (pivot_idx == NIL) THEN
-    RETURN builder__push(&builder, stmts, SegmentTail{ Goto: COPY Goto{ target_index: COPY after_idx } });
+    RETURN builder__push(&builder, fsmRecursiveSplitter__as_body(stmts), SegmentTail{ Goto: COPY Goto{ target_index: COPY after_idx } });
   END
   MUTABLE rtoc_pivot_at: Int64 = pivot_idx;
   MUTABLE pre: []SegmentStmt = List[];
@@ -188,7 +188,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int
     IF pre.empty?() THEN
       RETURN pivot_entry;
     ELSE
-      RETURN builder__push(&builder, pre, SegmentTail{ Goto: COPY Goto{ target_index: pivot_entry } });
+      RETURN builder__push(&builder, fsmRecursiveSplitter__as_body(pre), SegmentTail{ Goto: COPY Goto{ target_index: pivot_entry } });
     END
   END
 END
@@ -198,7 +198,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_suspend_with_pre(susp_tail: SuspendTail, p
     panic("Unhandled suspend kind {}");
   END
   MUTABLE tail = suspendTail__with_next_index(susp_tail, after_idx);
-  builder__fill(&builder, idx, pre_value, tail);
+  builder__fill(&builder, idx, fsmRecursiveSplitter__as_body(pre_value), tail);
   RETURN idx;
 END
 PRIVATE FN fsmRecursiveSplitter__stmt_introduces_split?(stmt: ?SegmentStmt) RETURNS !Bool ->
@@ -424,7 +424,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
   }).reverse()[_] OR_ELSE panic("missing hash key"));
       ruby_array_concat_Emittable__recursive_splitter(release_stmts, TRY (fsmRecursiveSplitter__lock_release_stmts(ctx_id, UNWRAP (lock_indices[i]), CAST((UNWRAP (_[:lock_field_ref])) AS String), CAST((UNWRAP (_[:unlock_method])) AS String))));
       };
-      builder__fill(&builder, release_idx, release_stmts, SegmentTail{ Goto: COPY Goto{ target_index: COPY after_idx } });
+      builder__fill(&builder, release_idx, fsmRecursiveSplitter__as_mir_body(release_stmts), SegmentTail{ Goto: COPY Goto{ target_index: COPY after_idx } });
       RETURN UNWRAP (cap_indices.first());
     ELSE
       panic("WITH split without runtime");
@@ -1159,4 +1159,21 @@ FN ruby_union_scalar_equal_SegmentSlot_String_symbol(value: SegmentSlot, expecte
     RETURN equality_payload == expected;
   END
   FALSE;
+END
+
+# A segment body carries AST and MIR statements alike; the splitter produces
+# both, so each list widens at the point it becomes a segment body.
+PRIVATE FN fsmRecursiveSplitter__as_body(items: []SegmentStmt) RETURNS []SegmentBodyItem ->
+  MUTABLE out: []SegmentBodyItem = List[];
+  FOR _ IN items DO
+    &out.append(SegmentBodyItem{ Locatable: castSegmentStmtToLocatable(COPY _) });
+  END
+  RETURN out;
+END
+PRIVATE FN fsmRecursiveSplitter__as_mir_body(items: []Emittable) RETURNS []SegmentBodyItem ->
+  MUTABLE out: []SegmentBodyItem = List[];
+  FOR _ IN items DO
+    &out.append(SegmentBodyItem{ Emittable: COPY _ });
+  END
+  RETURN out;
 END

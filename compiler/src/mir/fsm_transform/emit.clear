@@ -480,10 +480,10 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE mir_stmts: []Emittable = List[];
   MUTABLE ast_stmts: []Locatable = List[];
   FOR _ IN UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).stmts DO
-  IF _ IS_A Emittable THEN
-      &mir_stmts.append(COPY _);
-  ELSE
-      &ast_stmts.append(COPY CAST(_ AS Locatable));
+  IF _ IS_A SegmentBodyItem.Emittable AS mir_stmt THEN
+      &mir_stmts.append(COPY mir_stmt);
+  ELSE_IF _ IS_A SegmentBodyItem.Locatable AS ast_stmt THEN
+      &ast_stmts.append(COPY ast_stmt);
   END
   END
   (  IF (ast_stmts.length() == 0) THEN

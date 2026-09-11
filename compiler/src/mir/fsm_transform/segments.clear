@@ -1,3 +1,4 @@
+REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172" AS mir
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
 REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
@@ -105,7 +106,7 @@ PUB FN goto__kind(self: Goto) RETURNS String@symbol ->
   RETURN :goto;
 END
 PUB STRUCT CondBranch {
-  cond_ast: Emittable,
+  cond_ast: Locatable,
   then_index: Int64,
   else_index: Int64
 }
@@ -113,9 +114,10 @@ PUB STRUCT CondBranch {
 PUB FN condBranch__kind(self: CondBranch) RETURNS String@symbol ->
   RETURN :cond_branch;
 END
+PUB UNION SegmentBodyItem { Locatable: Locatable, Emittable: Emittable }
 PUB STRUCT Segment {
   index: Int64,
-  stmts: []Emittable,
+  stmts: []SegmentBodyItem,
   tail: SegmentTail
 }
 PUB UNION SegmentTail { Done: Done, IoSuspend: IoSuspend, NextSuspend: NextSuspend, LockSuspend: LockSuspend, LoopBack: LoopBack, Goto: Goto, CondBranch: CondBranch }
@@ -148,17 +150,17 @@ PUB FN segments__split(body_input: []Locatable, lowering: Any) RETURNS !?SplitRe
     RETURN NIL;
   END
   MUTABLE segments: []Segment = List[];
-  MUTABLE current_stmts: []Locatable = List[];
+  MUTABLE current_stmts: []SegmentBodyItem = List[];
   FOR _ IN body DO
   MUTABLE suspend: ?SegmentTail = TRY (segments__classify_suspend(_));
   IF suspend EXISTS AS suspend_value THEN
       &segments.append(Segment{ index: segments.length(), stmts: current_stmts, tail: suspend_value });
       current_stmts = List[];
   ELSE
-      &current_stmts.append(COPY _);
+      &current_stmts.append(SegmentBodyItem{ Locatable: COPY _ });
   END
   END
-  &segments.append(Segment{ index: segments.length(), stmts: current_stmts, tail: Done{ _: NIL } });
+  &segments.append(Segment{ index: segments.length(), stmts: current_stmts, tail: SegmentTail{ Done: Done{ _: NIL } } });
   RETURN SplitResult{ segments: COPY segments };
 END
 PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitResult ->
@@ -240,7 +242,7 @@ PRIVATE FN segments__split_while_loop_next(body: []Locatable) RETURNS !?SplitRes
         END
         MUTABLE cond_node: ?Locatable = segments__loop_condition_for(loop_node);
         IF cond_node EXISTS AS cond_node_value THEN
-          MUTABLE segments = [Segment{ index: 0, stmts: pre, tail: Goto{ target_index: 1 } }, Segment{ index: 1, stmts: List[], tail: CondBranch{ cond_ast: cond_node_value, then_index: 2, else_index: 4 } }, Segment{ index: 2, stmts: loop_pre, tail: sus_tail }, Segment{ index: 3, stmts: loop_post, tail: LoopBack{ target_index: 1 } }, Segment{ index: 4, stmts: post, tail: Done{ _: NIL } }];
+          MUTABLE segments = [Segment{ index: 0, stmts: segments__as_body(pre), tail: SegmentTail{ Goto: Goto{ target_index: 1 } } }, Segment{ index: 1, stmts: List[], tail: SegmentTail{ CondBranch: CondBranch{ cond_ast: cond_node_value, then_index: 2, else_index: 4 } } }, Segment{ index: 2, stmts: segments__as_body(loop_pre), tail: UNWRAP (sus_tail) }, Segment{ index: 3, stmts: segments__as_body(loop_post), tail: SegmentTail{ LoopBack: LoopBack{ target_index: 1 } } }, Segment{ index: 4, stmts: segments__as_body(post), tail: SegmentTail{ Done: Done{ _: NIL } } }];
           RETURN SplitResult{ segments: COPY segments };
         ELSE
           RETURN NIL;
@@ -590,4 +592,13 @@ FN castOptionalAssignmentNameToOptionalString(value: ?AssignmentName) RETURNS ?S
     END
   END
   RETURN NIL;
+END
+
+# Slices of the source body are AST nodes; a segment body is the wider union.
+PRIVATE FN segments__as_body(items: []Locatable) RETURNS []SegmentBodyItem ->
+  MUTABLE out: []SegmentBodyItem = List[];
+  FOR _ IN items DO
+    &out.append(SegmentBodyItem{ Locatable: COPY _ });
+  END
+  RETURN out;
 END
