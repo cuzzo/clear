@@ -42,7 +42,11 @@ RSpec.describe TypeExpressionParser do
     expect(TypeExpressionPrinter.legacy(expression("HashMap<Int64>"))).to eq("HashMap<Int64>")
     expect(TypeExpressionPrinter.legacy(expression("HashMap<String, Int64>"))).to eq("HashMap<String, Int64>")
     expect(TypeExpressionPrinter.legacy(expression("HashMap<String,Int64>"))).to eq("HashMap<String,Int64>")
-    expect(TypeExpressionPrinter.legacy(expression("HashMap<Page<(A)>, Int64>"))).to eq("HashMap<Page<(A)>, Int64>")
+    # Grouping parens carry no meaning of their own, so the parser drops them
+    # and the printer spells the canonical form. Keeping them made `(A)` a type
+    # NAME, which is how an optional collection's `?(HashMap<K,V>)` lost its
+    # map shape everywhere it was nested inside another type.
+    expect(TypeExpressionPrinter.legacy(expression("HashMap<Page<(A)>, Int64>"))).to eq("HashMap<Page<A>, Int64>")
     expect(described_class.send(:top_level_argument_separator, "HashMap<Page<A>>")).to eq(",")
   end
 

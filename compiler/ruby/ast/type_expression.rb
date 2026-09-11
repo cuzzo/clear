@@ -530,6 +530,12 @@ class TypeExpressionParser
     normalized = source.strip
     raise ArgumentError, "empty type expression" if normalized.empty?
 
+    # `?(HashMap<K,V>)` and friends group their inner type so the printer can
+    # spell an optional collection unambiguously. Any position may see the
+    # grouped form -- a list item most of all -- so the grouping comes off here
+    # rather than at the one caller that noticed it first.
+    return parse_source(normalized[1..-2].to_s) if grouped_type?(normalized)
+
     prefixed = parse_prefixed_source(normalized)
     return prefixed unless prefixed.nil?
 

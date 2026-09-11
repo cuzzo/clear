@@ -1,0 +1,21 @@
+# A map whose value is an optional map: the printer groups the inner type as
+# `?(HashMap<K,V>)`, and every reader has to see through the grouping.
+FN main() RETURNS Void ->
+  MUTABLE outer: {Int64}?{String}Int64 = {};
+  MUTABLE inner: {String}Int64 = {};
+  inner["a"] = 1;
+  inner["b"] = 2;
+  outer[0] = COPY inner;
+  outer[1] = NIL;
+
+  MUTABLE seen = 0;
+  FOR slot IN outer.values() DO
+    IF slot EXISTS AS present THEN
+      MUTABLE copied: {String}Int64 = COPY present;
+      FOR k IN copied.keys() DO
+        seen = (seen + (copied[k] OR_ELSE 0));
+      END
+    END
+  END
+  print("values sum ${seen.toString()}");
+END
