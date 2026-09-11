@@ -2347,7 +2347,7 @@ PRIVATE FN mIRChecker__verify_allocator_metadata_contracts_mut(MUTABLE self: MIR
       MUTABLE rtoc_bound_2671 = alloc_metadata;
       MUTABLE requires_target_alloc = inlineAllocMetadata__requires_target_alloc?(rtoc_bound_2671);
       IF !(allocs.contains?(target)) THEN
-          IF param_names.contains?((target OR_ELSE "")) THEN
+          IF param_names.contains?(target) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
@@ -2360,7 +2360,7 @@ PRIVATE FN mIRChecker__verify_allocator_metadata_contracts_mut(MUTABLE self: MIR
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE container_alloc = ((UNWRAP (allocs[target])).first()).alloc;
+      MUTABLE container_alloc = (UNWRAP ((UNWRAP (allocs[target])).first())).alloc;
       MUTABLE rtoc_bound_2688 = alloc_metadata;
       IF inlineAllocMetadata__primary(rtoc_bound_2688) THEN
           MUTABLE rtoc_bound_2690 = alloc_metadata;
