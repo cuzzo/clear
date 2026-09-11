@@ -3141,7 +3141,7 @@ PRIVATE FN mIRChecker__check_stmt_for_unhoisted(MUTABLE self: MIRChecker, node: 
       TRY (mIRChecker__check_stmts_for_unhoisted(&self, _.body));
       END
       RETURN;
-    ELSE_IF node? IS_A WhileStmt AS while_stmt THEN
+    ELSE_IF node IS_A WhileStmt AS while_stmt THEN
       MUTABLE while_stmt_mutable = COPY while_stmt;
       IF (while_stmt_mutable.capture AND ((mIRChecker__binder_capture_cleanup?(self, TRY (whileStmt__body(while_stmt_mutable)), CAST(while_stmt_mutable.capture AS String)) OR TRY (mIRChecker__block_expr_transfers_result?(self, while_stmt_mutable.cond))))) THEN
         TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&self, while_stmt_mutable.cond, "While capture"));
