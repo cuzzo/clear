@@ -503,8 +503,8 @@ FN castLocatableToWalkNode(value: Locatable) RETURNS WalkNode ->
 END
 FN castTokenValueToWalkNode(value: TokenValue) RETURNS WalkNode ->
   PARTIAL MATCH value START
-    TokenValue.Str AS cast_payload -> RETURN WalkNode{ StringValue: COPY cast_payload };,
-    TokenValue.Float AS cast_payload -> RETURN WalkNode{ Float64Value: COPY cast_payload };,
+    TokenValue.StringValue AS cast_payload -> RETURN WalkNode{ StringValue: COPY cast_payload };,
+    TokenValue.Float64Value AS cast_payload -> RETURN WalkNode{ Float64Value: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to WalkNode");
   END
   panic("Invalid cast to WalkNode");

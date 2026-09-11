@@ -214,6 +214,18 @@ end
 puts
 stub_failed = lowering.count { |r| r['stub_failed'] }
 passes = lowering.group_by { |r| r['pass'] }.transform_values(&:length).sort
+units = ProbeUnitSurvives::FAILED
+timing = ProbeUnitSurvives::TIMING
+puts
+puts "units that failed to compile: #{units.length}"
+units.first(25).each { |u| puts format('  %-50s %s', u['unit'].to_s.sub("#{GEN}/", ''), u['message'].lines.first.to_s.strip[0, 110]) }
+puts
+total_s = timing.sum { |t| t['seconds'] }
+puts "slowest units (of #{total_s.round}s across #{timing.length} units):"
+timing.sort_by { |t| -t['seconds'] }.first(10).each do |t|
+  puts format('  %7.1fs  %5.1f%%  %s', t['seconds'], 100.0 * t['seconds'] / [total_s, 1].max, t['unit'].to_s.sub("#{GEN}/", ''))
+end
+puts
 puts "stage 2b failures by lowering pass: #{passes.inspect}"
 puts "stage 2b unlowered functions: #{lowering.length} (#{stub_failed} could not even stub)"
 lowering.group_by { |r| r['message'][0, 80] }.sort_by { |_m, g| -g.length }.first(10).each do |m, g|
@@ -232,5 +244,5 @@ if zig_out
   end
 end
 
-File.write(out_json, JSON.pretty_generate({ 'annotate' => records, 'lower' => lowering })) if out_json
+File.write(out_json, JSON.pretty_generate({ 'annotate' => records, 'lower' => lowering, 'units' => units, 'timing' => timing })) if out_json
 exit(records.empty? && lowering.empty? && first_error.nil? ? 0 : 1)
