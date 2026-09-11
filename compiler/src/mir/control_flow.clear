@@ -48,7 +48,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &rtoc_self_view.successors.append(block);
     END
     IF !(block.predecessors.contains?(rtoc_self_view)) THEN
-      &block.predecessors.append(rtoc_self_view);
+      &block.predecessors.append(KEEP rtoc_self_view);
     END
 }
 END
@@ -341,7 +341,7 @@ PUB FN ownershipSnapshot__entry_for(self: OwnershipSnapshot, name: String) RETUR
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE place = placeid.from_path(Path{ StringValue: COPY name });
+    MUTABLE place = placeId__from_path(Path{ StringValue: COPY name });
     IF rtoc_self_view.entries[place] != NIL THEN
     RETURN COPY (rtoc_self_view.entries[place])?;
     ELSE
@@ -393,29 +393,23 @@ PUB FN ownershipDataflow__state_from_names(state: {String}OwnerEntry) RETURNS !{
   MUTABLE entries: {PlaceId}OwnerEntry = {};
   state.keys() |> EACH {
   MUTABLE entry: OwnerEntry = (state[_] OR_ELSE CAST(panic("missing hash key") AS OwnerEntry));
-  entries[placeid.from_path(Path{ StringValue: COPY _ })] = COPY entry;
+  entries[placeId__from_path(Path{ StringValue: COPY _ })] = COPY entry;
   };
   RETURN entries;
 END
 PUB FN ownershipDataflow__place_for_binding_node(name: String, node: Node) RETURNS PlaceId ->
   MUTABLE sym:? = aST__node__symbol( UNWRAP (castNodeToLocatable(node)));
-  MUTABLE symbol = IF sym IS_A SymbolEntry THEN
-    sym
-  ELSE
-    NIL
-  END;
-  RETURN placeid.from_symbol(name, symbol);
+  RETURN placeId__from_symbol(Path{ StringValue: COPY name }, sym);
 END
 PUB FN ownershipDataflow__resolve_state_place(state: {PlaceId}OwnerEntry, place: Place) RETURNS PlaceId ->
-  MUTABLE candidate = placeid.from_path(castPlaceToPath(place));
+  MUTABLE candidate = placeId__from_path(castPlaceToPath(place));
   IF state[candidate] THEN
     RETURN candidate;
   END
-  IF state.keys() |> FIND (_.path == candidate.path) != NIL THEN
-  RETURN (state.keys() |> FIND (_.path == candidate.path))?;
-  ELSE
-  RETURN candidate;
+  IF (state.keys() |> FIND (_.path == candidate.path)) EXISTS AS found THEN
+    RETURN COPY found;
   END
+  RETURN candidate;
 END
 PUB FN ownershipDataflow__lookup_state_entry(state: {PlaceId}OwnerEntry, place: Place) RETURNS ?OwnerEntry ->
   RETURN COPY state[ownershipDataflow__resolve_state_place(state, place)];
@@ -518,9 +512,17 @@ PUB FN ownershipDataflow__insert_ordered_worklist_mut(MUTABLE self: OwnershipDat
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE rank = (order_index[block.id] OR_ELSE worklist.length());
-    MUTABLE idx = worklist.indexOf();
-    IF idx THEN
-      worklist[idx] = [block];
+    MUTABLE idx: ?Int64 = NIL;
+    MUTABLE scan = 0;
+    WHILE (scan < worklist.length()) DO
+      IF ((order_index[UNWRAP (worklist[scan]).id] OR_ELSE worklist.length()) > rank) THEN
+        idx = scan;
+        BREAK;
+      END
+      scan = (scan + 1);
+    END
+    IF idx EXISTS AS idx_value THEN
+      &worklist.insertAt(idx_value, COPY block);
     ELSE
       &worklist.append(COPY block);
     END
@@ -817,7 +819,7 @@ PRIVATE FN ownershipDataflow__set_state_entry_mut(MUTABLE self: OwnershipDataflo
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    state[placeid.from_path(castPlaceToPath(place))] = COPY entry;
+    state[placeId__from_path(castPlaceToPath(place))] = COPY entry;
     NIL;
 }
 END
@@ -854,7 +856,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF (IF _ IS_A MatchStatement AS match_statement THEN match_statement.takes ELSE FALSE END) THEN
           MUTABLE expr:? = locatable__expr(_);
           IF expr IS_A Identifier THEN
-            &match_takes_vars.insert(COPY CAST(expr.name() AS String));
+            &match_takes_vars.insert(COPY CAST(locatable__name(UNWRAP (expr)) AS String));
           END
     END
     IF (frame.loop_depth.positive?() AND ((_ IS_A VarDecl OR _ IS_A BindExpr))) THEN
@@ -1011,17 +1013,16 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((TRUE AND TRY (ownershipDataflow__ownership_tracked_type?(rtoc_self_view, ti, is_heap)))) THEN
       RETURN NIL;
     END
-    MUTABLE allocator = IF ti THEN
-      ((((type__provenance_alloc(ti))) OR (IF is_heap THEN
+    MUTABLE allocator: String@symbol = IF is_heap THEN
       :heap
     ELSE
       :frame
-    END)))
-    ELSE
-      :frame
     END;
+    IF type__provenance_alloc(ti) EXISTS AS provenance_alloc THEN
+      allocator = provenance_alloc;
+    END
     MUTABLE needs = IF ti THEN
-      ((ti.needs_explicit_cleanup?(allocator, rtoc_self_view.schema_lookup) OR_ELSE FALSE))
+      ((type__needs_explicit_cleanup?(ti, allocator, rtoc_self_view.schema_lookup) OR_ELSE FALSE))
     ELSE
       FALSE
     END;
@@ -1039,13 +1040,17 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN !((((((type__primitive?(ti) OR TRY (type__string?(ti))) OR type__any?(ti)) OR type__void?(ti)) OR ((TRY (type__any_rc?(ti)) AND !(is_atomic_ptr))))));
 }
 END
-PUB FN ownershipDataflow__resource_captures(self: OwnershipDataflow, node: Locatable) RETURNS ![]String
+PUB FN ownershipDataflow__resource_captures(self: OwnershipDataflow, node: Locatable) RETURNS ![Set]String
   REQUIRES self: LOCAL
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE analysis:? = aST__node_capture_analysis(node);
-    RETURN (analysis.resource_captures() OR_ELSE List[]);
+    IF analysis EXISTS AS analysis_value THEN
+      RETURN COPY analysis_value.resource_captures;
+    END
+    MUTABLE rtoc_empty_captures: [Set]String = Set[];
+    RETURN rtoc_empty_captures;
 }
 END
 PRIVATE FN ownershipDataflow__transfer_stmt(MUTABLE self: OwnershipDataflow, stmt: Locatable, MUTABLE state: {PlaceId}OwnerEntry) RETURNS !{PlaceId}OwnerEntry
@@ -1384,15 +1389,15 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN consumed;
 }
 END
-PRIVATE FN ownershipDataflow__collect_bg_body_gives(self: OwnershipDataflow, bg_node: BgNode) RETURNS ![]String
+PRIVATE FN ownershipDataflow__collect_bg_body_gives(self: OwnershipDataflow, bg_node: BgNode) RETURNS ![Set]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN (((IF bgNode__capture_analysis(bg_node) != NIL THEN
-      UNWRAP (bgNode__capture_analysis(bg_node)).move_mark_names
-    ELSE
-      NIL
-    END) |> SELECT COPY _) OR_ELSE List[]);
+    IF bgNode__capture_analysis(bg_node) EXISTS AS analysis_value THEN
+      RETURN COPY analysis_value.move_mark_names;
+    END
+    MUTABLE rtoc_empty_gives: [Set]String = Set[];
+    RETURN rtoc_empty_gives;
 }
 END
 PRIVATE FN ownershipDataflow__copy_type?(self: OwnershipDataflow, ident: Identifier) RETURNS !Bool
@@ -1537,22 +1542,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE for_each_mutable = COPY for_each;
       TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, for_each_mutable.collection, state));
     ELSE_IF (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
-      MUTABLE captures = (IF locatable__capture_analysis(stmt) != NIL THEN
-        (locatable__capture_analysis(stmt)).captures()
-      ELSE
-        NIL
-      END);
-      MUTABLE resource_captures = ( { MUTABLE rtoc_pipe_src = ((IF locatable__capture_analysis(stmt) != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_20 = (locatable__capture_analysis(stmt));
-      COPY rtoc_local_receiver_20.resource_captures }
-      ELSE
-        NIL
-      END) OR_ELSE List[]); rtoc_pipe_src |> DISTINCT _ } );
-      FOR _ IN ((captures OR_ELSE {})).keys() DO
+      MUTABLE captures: {String}Type = {};
+      MUTABLE resource_captures: [Set]String = Set[];
+      IF locatable__capture_analysis(stmt) EXISTS AS analysis_value THEN
+        captures = COPY analysis_value.captures;
+        resource_captures = COPY analysis_value.resource_captures;
+      END
+      FOR _ IN captures.keys() DO
     IF resource_captures.contains?(_) THEN
       CONTINUE;
     END
-    useAfterMoveChecker__check_identifier_read(&rtoc_self_view, CAST(_ AS String), state, locatable__token(stmt));
+    useAfterMoveChecker__check_identifier_read(&rtoc_self_view, CAST(_ AS String), state, UNWRAP (locatable__token(stmt)));
       END
     END
 }
