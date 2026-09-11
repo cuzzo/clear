@@ -240,7 +240,7 @@ PRIVATE FN programMIRFinalizer__indexed_assignment_lowers_through_runtime?(node:
   IF !(node.name IS_A GetIndex) THEN
     RETURN FALSE;
   END
-  MUTABLE target = locatable__target(node.name);
+  MUTABLE target = locatable__target( castAssignmentNameToLocatable__type_analysis_session(node.name));
   IF !(target IS_A Locatable) THEN
     RETURN FALSE;
   END

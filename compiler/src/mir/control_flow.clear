@@ -1009,7 +1009,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE allocator = IF ti THEN
-      ((((ti.provenance_alloc())) OR (IF is_heap THEN
+      ((((type__provenance_alloc(ti))) OR (IF is_heap THEN
       :heap
     ELSE
       :frame
@@ -1357,7 +1357,7 @@ PRIVATE FN ownershipDataflow__collect_bg_capture_places_in_args(self: OwnershipD
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE consumed: []PlaceId = List[];
-    MUTABLE args = (locatable__args(stmt) OR_ELSE List[]);
+    MUTABLE args = (locatable__args( CAST(stmt AS Locatable)) OR_ELSE List[]);
     FOR _ IN args DO
     TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, _, FALSE, %(expr: Locatable) USE(MUTABLE consumed, state, rtoc_self_view) -> {
     IF !((expr IS_A BgBlock OR expr IS_A BgStreamBlock)) THEN

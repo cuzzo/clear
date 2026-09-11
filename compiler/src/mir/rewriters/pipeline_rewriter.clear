@@ -1261,7 +1261,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       res.symbol = sym_value;
       res.storage = symbolEntry__storage(sym_value);
     ELSE
-      res.storage = locatable__storage(smooth_node);
+      res.storage = locatable__storage( Locatable{ BinaryOp: smooth_node });
     END
     RETURN res;
 }
