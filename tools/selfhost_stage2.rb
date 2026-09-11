@@ -48,6 +48,17 @@ source << <<~CLEAR
   END
 CLEAR
 
+# The importer keeps an incremental module cache keyed on each unit's
+# transitive source digests, but only when these are set -- `./clear` sets
+# them, this harness did not, so every round recompiled all 177 units and took
+# 15 minutes. Keyed on compiler CONTENT: a mirror swap rewrites every mtime.
+if ENV['CLEAR_MODULE_CACHE_DIR'].to_s.empty?
+  require 'digest'
+  ruby_src = Dir.glob(File.join(ROOT, 'compiler', 'ruby', '**', '*.rb')).sort
+  ENV['CLEAR_MODULE_CACHE_DIR'] = File.join(ROOT, 'tmp', 'stage2-modcache')
+  ENV['CLEAR_MODULE_CACHE_KEY'] = Digest::SHA256.hexdigest(ruby_src.map { |f| File.read(f) }.join)
+end
+
 ENV['CLEAR_PROBE_ERROR_CAP'] = (limit || 5000).to_s
 require_relative 'probe_multi_error'
 require_relative '../compiler/ruby/compiler/compiler_frontend'
