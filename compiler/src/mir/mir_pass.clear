@@ -638,7 +638,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       WHILE rtoc_idx < if_bind_mutable.bindings.length() DO
       MUTABLE entry:? = if_bind_mutable.bindings[rtoc_idx]?.mir_binding_entry;
       IF !((IF entry != NIL THEN
-            entry.needs_cleanup?()
+            cleanupEntry__needs_cleanup?(entry)
           ELSE
             NIL
           END)) THEN

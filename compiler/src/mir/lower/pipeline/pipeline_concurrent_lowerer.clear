@@ -229,7 +229,7 @@ PUB FN pipelineConcurrentLowerer__lower_sharded_each(self: PipelineConcurrentLow
   ELSE
     setup = [Let{ name: COPY "__sh_each_val", init: COPY source_mir, mutable: TRUE, annotation: NIL, suppression: "_ = &__sh_each_val;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: COPY "__sh_each_src", init: Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: "__sh_each_val", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }];
   END
-  MUTABLE helper = IF lhs_type.pool?() THEN
+  MUTABLE helper = IF type__pool?(lhs_type) THEN
     :concurrentShardedPoolEachInPlace
   ELSE
     :concurrentShardedListEachInPlace

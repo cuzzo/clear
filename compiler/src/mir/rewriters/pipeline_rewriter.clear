@@ -67,7 +67,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         NIL
       END) != NIL THEN (IF var_decl_mutable.symbol != NIL THEN
-        symbolEntry__storage(var_decl_mutable.symbol)
+        symbolEntry__storage( UNWRAP (var_decl_mutable.symbol))
       ELSE
         NIL
       END) ELSE var_decl_mutable.storage() END);
@@ -435,7 +435,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_8, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })) }, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_8 START Locatable.Identifier AS rtoc_union_writeback_8_item -> found_ident = COPY rtoc_union_writeback_8_item;, END
       NIL;
-      guard = Assert{ token: COPY token, condition: Locatable{ Identifier: found_ident }, message: "MIN/MAX applied to empty list", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+      guard = Assert{ token: COPY token, condition: Locatable{ Identifier: found_ident }, message: AssertMessage{ StringValue: "MIN/MAX applied to empty list" }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       MUTABLE rtoc_union_writeback_9: Locatable = Locatable{ Assert: COPY guard };
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_9, SyntheticTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_9 START Locatable.Assert AS rtoc_union_writeback_9_item -> guard = COPY rtoc_union_writeback_9_item;, END
@@ -938,7 +938,7 @@ PRIVATE FN pipelineRewriter__select_stage_value_type(self: PipelineRewriter, sta
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE expression = COPY stage.expression;
-    IF (((((stage.effect_mode == :fallible) OR (stage.effect_mode == :fallible_optional))) AND TRUE) AND expression.error_union_type()) THEN
+    IF (((((stage.effect_mode == :fallible) OR (stage.effect_mode == :fallible_optional))) AND TRUE) AND locatable__error_union_type(expression)) THEN
       RETURN TRY (type__new(expression.error_union_type()));
     END
     RETURN &expression.full_type_mut("SELECT stage value");
@@ -1283,7 +1283,7 @@ PRIVATE FN pipelineRewriter__patch_chain_source_mut(MUTABLE self: PipelineRewrit
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE cursor: BinaryOp = COPY node;
-    WHILE (cursor.left IS_A BinaryOp AND cursor.left.smooth?()) DO
+    WHILE (cursor.left IS_A BinaryOp AND locatable__smooth?(cursor.left)) DO
       cursor = COPY castLocatableToBinaryOp__pipeline_rewriter(cursor.left);
     END
     cursor.left = COPY new_source;

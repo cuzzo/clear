@@ -468,7 +468,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE initial_capture = COPY UNWRAP (prefix).initial_capture;
     MUTABLE item_used = UNWRAP (prefix).item_used;
     MUTABLE body_mir = TRY (runtimeHost__range_visit_pipeline_body_mir(rtoc_self_view.host, each_op.body, item_var));
-    MUTABLE body_uses_initial = (((item_var == initial_capture)) AND rtoc_self_view.host.range_ast_stmts_use_placeholder?(each_op.body));
+    MUTABLE body_uses_initial = (((item_var == initial_capture)) AND runtimeHost__range_ast_stmts_use_placeholder?(rtoc_self_view.host, each_op.body));
     item_used = (item_used OR body_uses_initial);
     MUTABLE capture_name: String = "";
     IF item_used THEN

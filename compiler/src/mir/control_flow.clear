@@ -240,7 +240,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       RETURN NIL;
   ELSE
       IF ((cfg.can_fail_fns != NIL) AND TRY (functionCFG__stmt_can_fail?( castNodeToLocatable__resolution_phase(stmts[rtoc_idx]?), (cfg.can_fail_fns)?))) THEN
-        basicBlock__add_successor(&current_block, COPY cfg.exit_block);
+        basicBlock__add_successor(&current_block, UNWRAP (COPY cfg.exit_block));
         MUTABLE next_block = functionCFG__new_block(&cfg);
         basicBlock__add_successor(&current_block, &next_block);
         &next_block.stmts.append(COPY stmts[rtoc_idx]?);
@@ -614,8 +614,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             cleanupEntry__suppress_cleanup_mut(&entry);
           END
       ELSE_IF (!(df_entry.has_moved_guard) AND cleanupEntry__has_moved_guard?( UNWRAP (entry))) THEN
-          cleanupEntry__clear_moved_guard_mut(&entry);
-      ELSE_IF (df_entry.has_moved_guard AND !(cleanupEntry__has_moved_guard?(entry))) THEN
+          cleanupEntry__clear_moved_guard_mut( UNWRAP (&entry));
+      ELSE_IF (df_entry.has_moved_guard AND !(cleanupEntry__has_moved_guard?( UNWRAP (entry)))) THEN
           cleanupEntry__mark_moved_guard_mut(&entry);
       END
     rtoc_idx = rtoc_idx + 1;
@@ -849,7 +849,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE frame = UNWRAP (&stack.pop());
       FOR _ IN frame.body DO
     IF (IF _ IS_A MatchStatement AS match_statement THEN match_statement.takes ELSE FALSE END) THEN
-          MUTABLE expr = _.expr();
+          MUTABLE expr = locatable__expr(_);
           IF expr IS_A Identifier THEN
             &match_takes_vars.insert(COPY CAST(expr.name() AS String));
           END
@@ -1082,7 +1082,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF stmt IS_A MoveNode AS move_node THEN
       MUTABLE inner = move_node.value;
       IF inner IS_A Identifier THEN
-        MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(inner.name() AS String), inner);
+        MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(inner) AS String), inner);
         IF ownershipDataflow__state_entry(rtoc_self_view, state, place) THEN
           ownershipDataflow__mark_moved_mut(&rtoc_self_view, &state, place);
         END
@@ -1224,7 +1224,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF node_value_mutable IS_A MoveNode AS move_node THEN
         MUTABLE inner = move_node.value;
         IF inner IS_A Identifier THEN
-          MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(inner.name() AS String), inner);
+          MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(inner) AS String), inner);
           IF ownershipDataflow__state_entry(rtoc_self_view, step.state, place) THEN
             &step.consumed.insert(COPY place);
           END
@@ -1343,7 +1343,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF type__shared?( UNWRAP (ti)) THEN
         RETURN;
       END
-      MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(source.name() AS String), source);
+      MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(source) AS String), source);
       IF ownershipDataflow__state_entry(rtoc_self_view, step.state, place) THEN
         &step.consumed.insert(COPY place);
       END
@@ -1612,7 +1612,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, binary_op_mutable.left, state));
         TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, binary_op_mutable.right, state));
       ELSE_IF (node_value_mutable IS_A UnaryOp) THEN
-        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, node_value_mutable.right(), state));
+        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, locatable__right(node_value_mutable), state));
       ELSE_IF node_value_mutable IS_A FuncCall AS func_call THEN
         MUTABLE func_call_mutable = COPY func_call;
         TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, CallNode{ FuncCall: COPY func_call_mutable }, state));
@@ -1997,7 +1997,7 @@ PUB FN loopFrameAnalysis__key_allocates_frame?(expr: Locatable, fn_nodes: {Strin
       found = TRUE;
   END
   MUTABLE ti = TRY (aST__full_type_mut(node));
-  IF (ti.needs_cleanup?() AND (TRY (type__cleanup_allocator(ti)) == :frame)) THEN
+  IF (type__needs_cleanup?(ti) AND (TRY (type__cleanup_allocator(ti)) == :frame)) THEN
       found = TRUE;
   END
   rubyToClearVoid__control_flow()
@@ -2158,7 +2158,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       MUTABLE inner = move_node_mutable.value;
       IF inner IS_A Identifier THEN
-        borrowChecker__check_borrowed_move(&rtoc_self_view, CAST(inner.name() AS String), move_node_mutable.token, state);
+        borrowChecker__check_borrowed_move(&rtoc_self_view, CAST(locatable__name(inner) AS String), move_node_mutable.token, state);
       END
     ELSE_IF (stmt IS_A FuncCall) OR (stmt IS_A MethodCall) THEN
       IF borrowState__empty?(state) THEN

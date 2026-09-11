@@ -3139,7 +3139,7 @@ FN rtocChildrenOfWalkNodeExternStructDecl(v: ExternStructDecl) RETURNS []WalkNod
     &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
   IF v.close_method EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   IF v.as_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
@@ -3867,7 +3867,7 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
     &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   IF v.implementation_owner EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   &out.append(WalkNode{ SymbolValue: COPY v.source_name });
   RETURN out;
@@ -4026,7 +4026,7 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
     &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   IF v.implementation_owner EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   &out.append(WalkNode{ SymbolValue: COPY v.source_name });
   RETURN out;
