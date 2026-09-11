@@ -9616,14 +9616,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE callee_param: ?Param = callee_param_branch_value;
     MUTABLE takes = mIRLowering__call_arg_consumes_ownership?(&rtoc_self_view, ast_arg, callee_param);
-    MUTABLE callee_param_type = ((((callee_param != NIL) AND callee_param.type)) OR TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })));
+    MUTABLE callee_param_type: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+    IF callee_param EXISTS AS callee_param_value THEN
+      callee_param_type = COPY callee_param_value.type;
+    END
     MUTABLE copy_to_owning = ((((IF ast_arg IS_A CopyNode AS copy_node THEN type__collection?(callee_param_type) ELSE FALSE END) AND TRY (type__collection_value?( UNWRAP (ti))))) == TRUE);
-    MUTABLE copy_source = IF copy_to_owning THEN
+    MUTABLE copy_source:? = IF copy_to_owning THEN
       castLocatableToCopyNode(ast_arg).value
     ELSE
       NIL
     END;
-    RETURN CallArgFacts{ ast_arg: COPY ast_arg, copy_source: COPY copy_source, type_info: COPY ti, callee_sig: callee_sig, callee_param: COPY callee_param, callee_param_type: COPY callee_param_type, takes: takes, copy_to_owning: copy_to_owning, arg_alloc: COPY IF takes THEN
+    RETURN CallArgFacts{ ast_arg: COPY ast_arg, copy_source: COPY copy_source, type_info: COPY UNWRAP (ti), callee_sig: callee_sig, callee_param: COPY callee_param, callee_param_type: COPY callee_param_type, takes: takes, copy_to_owning: copy_to_owning, arg_alloc: COPY IF takes THEN
       TRY (mIRLowering__allocator_for_takes_param_mut(&rtoc_self_view, callee_param))
     ELSE
       :heap
@@ -9831,9 +9834,6 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE unwrapped: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(raw));
     IF unwrapped EXISTS AS unwrapped_value THEN
       RETURN KEEP unwrapped_value;
-    END
-    IF ((raw != NIL) AND (raw IS_A FunctionDef)) THEN
-      RETURN TRY (functionSignature__from_function_def(raw));
     END
     RETURN NIL;
 }
@@ -10258,16 +10258,17 @@ PRIVATE FN mIRLowering__lower_tense_navigation_method(MUTABLE self: MIRLowering,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN mIRLowering__lower_tense_navigation(&rtoc_self_view, &node, navigation, %(receiver: String) USE(MUTABLE navigation, node, MUTABLE rtoc_self_view) -> {
+    RETURN mIRLowering__lower_tense_navigation(&rtoc_self_view, Locatable{ MethodCall: COPY node }, navigation, %(receiver: String) USE(MUTABLE navigation, node, MUTABLE rtoc_self_view) -> {
     MUTABLE synthetic_receiver = Identifier{ token: COPY navigation.token, name: COPY receiver, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
     TRY (aST__stamp_synthetic_type_mut(Locatable{ Identifier: COPY synthetic_receiver }, CAST(SyntheticTypeInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ TenseNavigation: COPY navigation })) } AS Type), "synthetic tense navigation receiver"));
     MUTABLE synthetic = COPY node;
     synthetic.object = Locatable{ Identifier: COPY synthetic_receiver };
-    MUTABLE plan: ?TenseOperationPlan = COPY CAST(node.tense_plan AS ?TenseOperationPlan);
-    IF !(plan) THEN
+    MUTABLE plan_opt: ?TenseOperationPlan = COPY CAST(node.tense_plan AS ?TenseOperationPlan);
+    IF plan_opt == NIL THEN
         panic("tense navigation method lowering requires its annotation plan");
     END
-    TRY (aST__stamp_synthetic_type_mut(&synthetic, SyntheticTypeInput{ Type: COPY TRY (tenseEnvelope__payload_type((TRY (tenseEnvelope__from_type(plan.result_type))))) }, "synthetic tense navigation method result"));
+    MUTABLE plan: TenseOperationPlan = COPY UNWRAP (plan_opt);
+    TRY (aST__stamp_synthetic_type_mut(Locatable{ MethodCall: COPY synthetic }, TRY (tenseEnvelope__payload_type((TRY (tenseEnvelope__from_type(plan.result_type))))), "synthetic tense navigation method result"));
     TRY (mIRLowering__lower_method_call(&rtoc_self_view, &synthetic))
     });
 }
