@@ -462,7 +462,7 @@ PUB FN mIRChecker__verify_structural_ownership_contracts_mut(MUTABLE self: MIRCh
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          &self.errors.append(TRY (mIRChecker__error(self, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY consumed[rtoc_idx_2]? }, "structural ownership sink consumes :${(mark).alloc} binding '${consumed[rtoc_idx_2]?}' into :${sink_alloc OR_ELSE ""} sink; owned transfer allocator is incoherent")));
+          &self.errors.append(TRY (mIRChecker__error(self, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: COPY UNWRAP (consumed[rtoc_idx_2]) }, "structural ownership sink consumes :${(mark).alloc.toString()} binding '${UNWRAP (consumed[rtoc_idx_2])}' into :${sink_alloc.toString()} sink; owned transfer allocator is incoherent")));
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
@@ -494,7 +494,7 @@ PUB FN mIRChecker__verify_ownership_consumption_operands_mut(MUTABLE self: MIRCh
               rtoc_idx_2 = rtoc_idx_2 + 1;
         CONTINUE;
           END
-          &self.errors.append(TRY (mIRChecker__error(self, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, Name{ StringValue: COPY (rtoc_each_items_13[rtoc_idx_2].name OR_ELSE (UNWRAP (fact)).source) }, "ownership-consuming MIR node tries to consume borrowed operand from ${UNWRAP (rtoc_each_items_13[rtoc_idx_2]).source}")));
+          &self.errors.append(TRY (mIRChecker__error(self, :OWNERSHIP_CONSUMPTION_BORROWED_OPERAND, Name{ StringValue: COPY (UNWRAP (rtoc_each_items_13[rtoc_idx_2]).name OR_ELSE fact.source) }, "ownership-consuming MIR node tries to consume borrowed operand from ${UNWRAP (rtoc_each_items_13[rtoc_idx_2]).source}")));
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END
     rtoc_idx = rtoc_idx + 1;
@@ -2241,7 +2241,7 @@ PRIVATE FN mIRChecker__verify_allocator_closed_set_mut(MUTABLE self: MIRChecker,
       END
       MUTABLE rtoc_label = mIRChecker__allocator_metadata_label(self, rtoc_source);
       FOR rtoc_alloc_key IN (metadata).slots.keys() DO
-        MUTABLE alloc: String@symbol = COPY (metadata).slots[rtoc_alloc_key];
+        MUTABLE alloc: String@symbol = COPY UNWRAP ((metadata).slots[rtoc_alloc_key]);
         MUTABLE alloc_key = symbol(rtoc_alloc_key);
         IF (valid_allocators |> ANY (_ == alloc)) THEN
         CONTINUE;
@@ -2413,7 +2413,7 @@ PRIVATE FN mIRChecker__verify_cross_frame_param_alloc_mut(MUTABLE self: MIRCheck
     CONTINUE;
       END
       FOR rtoc_alloc_key IN (metadata).slots.keys() DO
-        MUTABLE alloc_sym: String@symbol = COPY (metadata).slots[rtoc_alloc_key];
+        MUTABLE alloc_sym: String@symbol = COPY UNWRAP ((metadata).slots[rtoc_alloc_key]);
         MUTABLE alloc_key = symbol(rtoc_alloc_key);
         IF !((alloc_sym == :frame)) THEN
         CONTINUE;
@@ -2582,7 +2582,7 @@ PRIVATE FN mIRChecker__verify_ownership_contract_operands_mut(MUTABLE self: MIRC
     CONTINUE;
       END
       IF !(transfers.contains?(name)) THEN
-          &self.errors.append(TRY (mIRChecker__error(self, :OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, ruby_wrap_optional_String_Name(name), "${label} consumes '${(name OR_ELSE "")}' but no MIR::TransferMark exists for that binding")));
+          &self.errors.append(TRY (mIRChecker__error(self, :OWNERSHIP_CONTRACT_WITHOUT_TRANSFER, ruby_wrap_optional_String_Name(name), "${label} consumes '${name}' but no MIR::TransferMark exists for that binding")));
       END
     rtoc_idx = rtoc_idx + 1;
     END
@@ -3163,8 +3163,8 @@ PRIVATE FN mIRChecker__check_stmt_for_unhoisted(MUTABLE self: MIRChecker, node: 
       MUTABLE batch_window_flush_mutable = COPY batch_window_flush;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&self, batch_window_flush_mutable.value_expr, "BatchWindow value"));
     ELSE
-      MUTABLE owned_sources = (TRY (emittable__owned_position_source_exprs(UNWRAP (node))) OR_ELSE List[]) |> DISTINCT _;
-      FOR _ IN TRY (emittable__child_exprs(UNWRAP (node))) DO
+      MUTABLE owned_sources = (TRY (emittable__owned_position_source_exprs(node)) OR_ELSE List[]) |> DISTINCT _;
+      FOR _ IN TRY (emittable__child_exprs(node)) DO
       TRY (mIRChecker__check_expr_sources_for_unhoisted(&self, _, "expression", owned_sources.contains?(_)));
       END
     END
