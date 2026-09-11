@@ -79,9 +79,9 @@ PUB FN fieldAccessPlan__value(self: FieldAccessPlan) RETURNS Emittable ->
 END
 PRIVATE FN fieldAccessPlan__value_for(self: FieldAccessPlan, root: Emittable) RETURNS Emittable ->
   MUTABLE result =   IF fieldAccessPlan__union_payload?(self) THEN
-    UnionVariantGet{ object: COPY root, variant: COPY self.field, zig_type: COPY UNWRAP (self.union_payload_zig), lowered_node_id: NIL, ownership_consumption: NIL }
+    Emittable{ UnionVariantGet: COPY UnionVariantGet{ object: COPY root, variant: COPY self.field, zig_type: COPY UNWRAP (self.union_payload_zig), lowered_node_id: NIL, ownership_consumption: NIL } }
   ELSE
-    FieldGet{ object: COPY fieldAccessPlan__field_root(self, root), field: COPY self.field, lowered_node_id: NIL, ownership_consumption: NIL }
+    Emittable{ FieldGet: COPY FieldGet{ object: COPY fieldAccessPlan__field_root(self, root), field: COPY self.field, lowered_node_id: NIL, ownership_consumption: NIL } }
   END;
   IF self.indirect THEN
     RETURN Emittable{ Deref: COPY Deref{ expr: COPY result, lowered_node_id: NIL, ownership_consumption: NIL } };

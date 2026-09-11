@@ -288,7 +288,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         pipelineRewriter__patch_chain_source_mut(&rtoc_self_view, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
-    MUTABLE is_fold = ((((terminal == NIL) OR (((terminal?) != NIL) AND ((terminal) IS_A EachOp))) OR aST__pipeline_terminal_fold(terminal)) OR aST__pipeline_list_terminal?(terminal));
+    MUTABLE is_fold = ((((terminal == NIL) OR (((terminal?) != NIL) AND ((terminal) IS_A EachOp))) OR aST__pipeline_terminal_fold(terminal)) OR aST__pipeline_list_terminal(terminal));
     IF ((stages.length() > 0) OR ((is_fold AND (terminal != NIL)))) THEN
       IF is_fold THEN
         RETURN TRY (pipelineRewriter__fuse_pipeline(&rtoc_self_view, &node, &real_source, stages, &terminal));
@@ -315,7 +315,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE needs_try = type__error_union?((TRY (type__new( TypeConstructionInput{ Type: TRY (aST__full_type_mut(source)) }))));
     IF (IF rhs IS_A FuncCall AS func_call THEN !(result_is_error) ELSE FALSE END) THEN
       IF needs_try THEN
-        lhs_node = UnaryOp{ token: COPY locatable__token(rhs), op: :TRY, right: COPY source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+        lhs_node = UnaryOp{ token: UNWRAP (COPY locatable__token(rhs)), op: :TRY, right: COPY source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       ELSE
         lhs_node = COPY source;
       END
