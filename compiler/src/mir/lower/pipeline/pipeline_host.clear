@@ -432,7 +432,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE substituted = TRY (pipelineHost__substitute_placeholders(&rtoc_self_view, node));
     MUTABLE mir_node = TRY (pipelineLoweringBridge__lower_node(&rtoc_self_view.lowering_bridge, substituted));
-    RETURN PipelineHostReturnValue{ StringValue: COPY UNWRAP (TRY (pipelineLoweringBridge__emit_mir(rtoc_self_view.lowering_bridge, mir_node))) };
+    RETURN PipelineHostReturnValue{ StringValue: COPY UNWRAP (TRY (pipelineLoweringBridge__emit_mir(&rtoc_self_view.lowering_bridge, mir_node))) };
 }
 END
 PUB FN pipelineHost__visit_mir(MUTABLE self: PipelineHost, node: Locatable) RETURNS !Emittable

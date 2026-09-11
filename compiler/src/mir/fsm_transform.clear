@@ -27,7 +27,7 @@ PUB UNION PromotedDeclInput { Emittable: Emittable, ArrayValue: []PromotedDeclLi
 PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?TransformValue, MUTABLE lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
   MUTABLE block_source = COPY bg_block;
   MUTABLE suspend_points = (bgBlockInput__fsm_suspend_points(block_source) OR_ELSE List[]);
-  MUTABLE need_conservative = TRY (fsmTransform__body_needs_conservative?(locatable__body( CAST(block_source AS Locatable))));
+  MUTABLE need_conservative = TRY (fsmTransform__body_needs_conservative?( UNWRAP (locatable__body( CAST(block_source AS Locatable)))));
   MUTABLE all_locals = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_2: ?[]PromotedLocalFact = NIL;
   IF need_conservative THEN
     rtoc_ternary_value_2 = TRY (fsmTransform__collect_body_locals(block_source.body()));

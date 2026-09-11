@@ -1364,13 +1364,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN;
     END
     FOR _ IN (TRY (ownershipDataflow__resource_captures(rtoc_self_view, expr))) DO
-      MUTABLE place = ownershipDataflow__resolve_state_place(state, _);
+      MUTABLE place = ownershipDataflow__resolve_state_place(state, Place{ StringValue: _ });
       IF state[place] THEN
           &consumed.append(place);
       END
     END
     FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(rtoc_self_view, castLocatableToBgNode__control_flow(expr)))) DO
-      MUTABLE place = ownershipDataflow__resolve_state_place(state, _);
+      MUTABLE place = ownershipDataflow__resolve_state_place(state, Place{ StringValue: _ });
       IF state[place] THEN
           &consumed.append(place);
       END
