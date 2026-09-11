@@ -129,7 +129,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   &extra_field_names.insert(COPY _.name);
   END
   promoted_field_decls = promoted_field_decls |> WHERE !(extra_field_names.contains?(_.name));
-  MUTABLE ctx_struct = FsmGenericCtxStruct{ type_name: COPY ctx.ctx_type, promise_zig: COPY ctx.promise_zig, capture_fields: COPY ctx.capture_fields, extra_field_decls: extra_field_decls, promoted_field_decls: promoted_field_decls, member_fns: UNWRAP (member_fns), dispatch: dispatch, destroy_actions: destroy_actions };
+  MUTABLE ctx_struct = FsmGenericCtxStruct{ type_name: COPY ctx.ctx_type, promise_zig: COPY ctx.promise_zig, capture_fields: COPY ctx.capture_fields, extra_field_decls: extra_field_decls, promoted_field_decls: promoted_field_decls, member_fns: member_fns, dispatch: dispatch, destroy_actions: destroy_actions };
   MUTABLE spawn_setup = TRY (emit__build_spawn_setup(ctx));
   MUTABLE fsm_body = FsmGenericBody{ blk_label: COPY ctx.blk_label, ctx_struct: ctx_struct, spawn_setup: spawn_setup, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
   RETURN FsmLoweringResult{ body: FsmBody{ FsmGenericBody: COPY fsm_body }, structure: COPY TRY (emit__build_fsm_structure(ctx, segment_specs, destroy_actions, id)) };
@@ -140,7 +140,7 @@ PRIVATE FN emit__build_fsm_structure(ctx: FsmEmitContext, segment_specs: []FsmSe
   MUTABLE capture_names = captured.keys() |> SELECT _.toString();
   MUTABLE captures = capture_names |> SELECT:? (IF !(cleanup_names.contains?(_)) THEN NIL ELSE FsmCaptureFact{ name: COPY _, cleanup_at: :finalize } END) |> WHERE _ != NIL;
   MUTABLE steps = segment_specs |> SELECT FsmStepFact{ index: _.index, reads: COPY _.facts.ctx_reads, cleanups: List[] };
-  MUTABLE structure = FsmStructure{ captures: UNWRAP (captures), state_fields: List[], steps: steps, finalize_cleanups: cleanup_names, ctx_id: COPY id, result_aliases_finalized: NIL, lowered_node_id: NIL, ownership_consumption: NIL, facts: FsmStructureFacts{ required_move_guards: List[], move_guard_writes: List[], ownership_facts: List[], destroy_actions: List[] }, owned_result_required: NIL };
+  MUTABLE structure = FsmStructure{ captures: captures |> SELECT UNWRAP (_), state_fields: List[], steps: steps, finalize_cleanups: cleanup_names, ctx_id: COPY id, result_aliases_finalized: NIL, lowered_node_id: NIL, ownership_consumption: NIL, facts: FsmStructureFacts{ required_move_guards: List[], move_guard_writes: List[], ownership_facts: List[], destroy_actions: List[] }, owned_result_required: NIL };
   TRY (fsmStructure__set_required_move_guards(&structure, (segment_specs |> UNNEST _.facts.required_move_guards) |> DISTINCT _ |> SELECT COPY _));
   TRY (fsmStructure__set_move_guard_writes(&structure, (segment_specs |> UNNEST _.facts.move_guard_writes) |> DISTINCT _ |> SELECT COPY _));
   TRY (fsmStructure__set_ownership_facts(&structure, TRY (emit__unique_fsm_ownership_facts(segment_specs |> UNNEST _.facts.ownership_facts))));
@@ -255,7 +255,19 @@ PUB FN emit__normalized_ctx_field_name(name: String, id: Int64) RETURNS String -
   RETURN name.deletePrefix("__ctx_${id.toString()}.");
 END
 PRIVATE FN emit__collect_result_names(nodes: []Emittable, id: Int64) RETURNS ![]String ->
-  RETURN CAST(((nodes |> SELECT:? (IF !(_ IS_A [Set]Any) THEN NIL ELSE (IF !(emit__ctx_inner_result_target?(_.target, id)) THEN NIL ELSE emit__result_source_name(_.value(), id) END) END) |> WHERE _ != NIL) |> DISTINCT _) AS []String);
+  MUTABLE names: []String = List[];
+  FOR rtoc_node IN nodes DO
+    IF rtoc_node IS_A Set AS rtoc_set THEN
+      IF emit__ctx_inner_result_target?(rtoc_set.target, id) THEN
+        IF emit__result_source_name(rtoc_set.value, id) EXISTS AS rtoc_name THEN
+          IF !(names.contains?(rtoc_name)) THEN
+            &names.append(COPY rtoc_name);
+          END
+        END
+      END
+    END
+  END
+  RETURN names;
 END
 PRIVATE FN emit__fsm_fact_guard_name(name: String) RETURNS String ->
   IF emit__fsm_ctx_name?(name) THEN
@@ -721,17 +733,20 @@ PRIVATE FN emit__rewrite_promoted_fsm_node(MUTABLE node: PromotableFsmValue, pro
   IF node IS_A []Emittable AS array THEN
     MUTABLE array_mutable = COPY array;
     RETURN PromotableFsmValue{ ArrayValue: COPY array_mutable |> SELECT castPromotableFsmValueToEmittable(emit__rewrite_promoted_fsm_node(PromotableFsmValue{ Emittable: COPY _ }, promoted_names, id)) };
-  ELSE_IF (node IS_A Let) THEN
-    MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(node.name() AS String), promoted_names);
-    MUTABLE rewritten_init: Emittable = castPromotableFsmValueToEmittable(emit__rewrite_promoted_fsm_node(node.init, promoted_names, id));
+  ELSE_IF (IF node IS_A Emittable AS rtoc_inner THEN rtoc_inner IS_A Let ELSE FALSE END) THEN
+    MUTABLE rtoc_let: Let = Let{ name: COPY "", init: Emittable{ VoidLiteral: COPY VoidLiteral{ lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    PARTIAL MATCH castPromotableFsmValueToEmittable(node) START Emittable.Let AS rtoc_let_payload -> rtoc_let = COPY rtoc_let_payload;, END
+    MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(COPY rtoc_let.name, promoted_names);
+    MUTABLE rewritten_init: Emittable = castPromotableFsmValueToEmittable(emit__rewrite_promoted_fsm_node(PromotableFsmValue{ Emittable: COPY rtoc_let.init }, promoted_names, id));
     IF promoted_name EXISTS AS promoted_name_value THEN
       RETURN PromotableFsmValue{ Emittable: COPY CAST(Set{ target: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, promoted_name_value) }, value: COPY rewritten_init, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
     END
-    node.init = rewritten_init;
-    RETURN COPY node;
-  ELSE_IF (node IS_A Ident) THEN
-    MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(node.name() AS String), promoted_names);
-    IF promoted_name EXISTS AS promoted_name_value THEN
+    rtoc_let.init = rewritten_init;
+    RETURN PromotableFsmValue{ Emittable: Emittable{ Let: COPY rtoc_let } };
+  ELSE_IF (IF node IS_A Emittable AS rtoc_ident_inner THEN rtoc_ident_inner IS_A Ident ELSE FALSE END) THEN
+    MUTABLE rtoc_ident: Ident = Ident{ name: COPY "", lowered_node_id: NIL, ownership_consumption: NIL };
+    PARTIAL MATCH castPromotableFsmValueToEmittable(node) START Emittable.Ident AS rtoc_ident_payload -> rtoc_ident = COPY rtoc_ident_payload;, END
+    IF emit__promoted_fsm_field_name(COPY rtoc_ident.name, promoted_names) EXISTS AS promoted_name_value THEN
       RETURN PromotableFsmValue{ Emittable: Emittable{ FieldGet: COPY emit__fsm_ctx_field(id, promoted_name_value) } };
     END
     RETURN COPY node;
