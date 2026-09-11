@@ -117,7 +117,7 @@ PUB FN builder__new() RETURNS Builder@multiowned ->
   RETURN self @multiowned;
 END
 PUB FN fsmRecursiveSplitter__split(body: []Locatable, MUTABLE lowering: MIRLowering, ctx: ?{String@symbol}?TransformValue = NIL) RETURNS !?SegmentList ->
-  IF TRY (fsmRecursiveSplitter__contains_unsupported?( CAST(COPY body AS ?Body))) THEN
+  IF TRY (fsmRecursiveSplitter__contains_unsupported?( CAST(CAST(COPY body AS ?Body) AS ?[]Locatable))) THEN
     RETURN NIL;
   END
   MUTABLE builder = builder__new();
