@@ -284,7 +284,15 @@ PRIVATE FN emit__decimal_digits?(value: String) RETURNS Bool ->
   IF (value.length() == 0) THEN
     RETURN FALSE;
   END
-  RETURN value.each_char() |> ALL ((_ >= "0") AND (_ <= "9"));
+  MUTABLE digit_idx = 0;
+  WHILE digit_idx < value.length() DO
+    MUTABLE ch = value.charAt(digit_idx);
+    IF !(((ch >= "0") AND (ch <= "9"))) THEN
+      RETURN FALSE;
+    END
+    digit_idx = digit_idx + 1;
+  END
+  RETURN TRUE;
 END
 PRIVATE FN emit__collect_ctx_field_reads(nodes: []Emittable, id: Int64) RETURNS ![]String ->
   RETURN (nodes |> SELECT:? emit__ctx_field_name(_, id) |> WHERE _ != NIL).compact() |> DISTINCT _ |> SELECT COPY _;

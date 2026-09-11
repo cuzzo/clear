@@ -865,7 +865,19 @@ PRIVATE FN pipelineConcurrentLowerer__callback_expression(self: PipelineConcurre
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__numeric_label_id(self: PipelineConcurrentLowerer, MUTABLE label: String) RETURNS !Int64 ->
-  RETURN TRY ((&label.delete("^0-9")).toInt());
+  MUTABLE digits = "";
+  MUTABLE label_idx = 0;
+  WHILE label_idx < label.length() DO
+    MUTABLE ch = label.charAt(label_idx);
+    IF ((ch >= "0") AND (ch <= "9")) THEN
+      digits = "${digits}${ch}";
+    END
+    label_idx = label_idx + 1;
+  END
+  IF digits.empty?() THEN
+    RETURN 0;
+  END
+  RETURN TRY (digits.toInt());
 END
 PRIVATE FN pipelineConcurrentLowerer__callback_record(self: PipelineConcurrentLowerer, id: Int64, ctx_name: String, fields: []FieldDef, fn_value: FnDef, specs: []CaptureSpec) RETURNS !PipelineConcurrentCallback ->
   MUTABLE callback_fields = (fields + [Emittable{ FieldDef: COPY FieldDef{ name: "alloc", zig_type: "std.mem.Allocator", default: NIL, lowered_node_id: NIL, ownership_consumption: NIL, boxed_capture: NIL } }]);

@@ -290,18 +290,21 @@ PUB STRUCT OwnerEntry {
   needs_cleanup: Bool
 }
 
-PUB FN ownerEntry__equals?(self: OwnerEntry, other: Any) RETURNS Bool EFFECTS REENTRANT ->
-  RETURN PARTIAL MATCH other START
-    OwnerEntry -> (self.state == other.state()),
-    Symbol -> (self.state == other),
-    DEFAULT -> FALSE
-  END;
+PUB FN ownerEntry__equals?(self: OwnerEntry, other: OwnerEntry) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN (self.state == other.state);
 END
-FN ownerEntry__eql?(self: OwnerEntry, other: Any) RETURNS Bool ->
+FN ownerEntry__eql?(self: OwnerEntry, other: OwnerEntry) RETURNS Bool ->
   ownerEntry__equals?(self, other);
 END
 PUB FN ownerEntry__hash(self: OwnerEntry) RETURNS Int64 EFFECTS REENTRANT ->
-  RETURN self.state.hash();
+  MUTABLE key = CAST(self.state AS String);
+  MUTABLE acc: Int64 = 0;
+  MUTABLE hash_idx = 0;
+  WHILE hash_idx < key.length() DO
+    acc = ((acc * 31) + byteAt(key, hash_idx));
+    hash_idx = hash_idx + 1;
+  END
+  RETURN acc;
 END
 PUB STRUCT DataflowStep {
   state: {PlaceId}OwnerEntry,
@@ -644,11 +647,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(entry) THEN
         RETURN;
     END
-    IF entry.none?() THEN
+    IF cleanupEntry__none?(UNWRAP (entry)) THEN
         RETURN;
     END
-    MUTABLE name = COPY CAST(node.name AS String);
-    &pairs.append(CleanupEntryPair{ place: COPY ownershipDataflow__place_for_binding_node(name, node), name: COPY name, entry: entry });
+    MUTABLE name = COPY CAST(UNWRAP (locatable__name(node)) AS String);
+    &pairs.append(CleanupEntryPair{ place: COPY ownershipDataflow__place_for_binding_node(name, castLocatableToNode(node)), name: COPY name, entry: entry });
     &seen.insert(aST__node_identity(entry));
     rubyToClearVoid__control_flow()
     });
