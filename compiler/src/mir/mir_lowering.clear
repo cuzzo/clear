@@ -5251,7 +5251,7 @@ PRIVATE FN mIRLowering__imported_bc_helper_fns(self: MIRLowering, mod_value: Com
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN items |> SELECT:? (IF !(_ IS_A FnDef) THEN NIL ELSE _ END) |> WHERE _ != NIL |> SELECT UNWRAP (_);
+    RETURN items |> SELECT:? (IF _ IS_A FnDef AS fn_def THEN COPY fn_def ELSE NIL END) |> WHERE _ != NIL |> SELECT UNWRAP (_);
 }
 END
 PUB FN mIRLowering__task_config_variant(self: MIRLowering, stack_size: ?String@symbol, computed_tier: ?String@symbol) RETURNS String
@@ -5289,7 +5289,7 @@ PRIVATE FN mIRLowering__profile_dispatch_id(self: MIRLowering, dispatch: MIRLowe
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN PARTIAL MATCH dispatch START
-      PinMode.SymbolValue AS rtoc_dispatch_sym -> (IF (rtoc_dispatch_sym == :parallel) THEN 2 ELSE (IF (rtoc_dispatch_sym == :shared) THEN 3 ELSE 1 END) END),
+      MIRLoweringBackgroundDispatch.SymbolValue AS rtoc_dispatch_sym -> (IF (rtoc_dispatch_sym == :parallel) THEN 2 ELSE (IF (rtoc_dispatch_sym == :shared) THEN 3 ELSE 1 END) END),
       DEFAULT -> 1
     END;
 }
@@ -5298,7 +5298,7 @@ PRIVATE FN mIRLowering__bg_profile_site_comment(self: MIRLowering, site_id: Int6
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN "// CLEAR_PROFILE_TASK_SITE id=${site_id.toString()} kind=BG line=${line.toString()} column=${col.toString()} dispatch=${dispatch} form=${form}";
+    RETURN "// CLEAR_PROFILE_TASK_SITE id=${site_id.toString()} kind=BG line=${line.toString()} column=${col.toString()} dispatch=${CAST(dispatch AS String)} form=${form}";
 }
 END
 PRIVATE FN mIRLowering__lower_struct_pattern(MUTABLE self: MIRLowering, subject: Ident, pat: StructPattern) RETURNS !Tuple<[]Emittable, []Let>
@@ -5435,20 +5435,20 @@ PRIVATE FN mIRLowering__lower_direct_length(MUTABLE self: MIRLowering, node: Nod
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE recv_ast = IF node IS_A MethodCall THEN
+    MUTABLE recv_ast:? = IF node IS_A MethodCall THEN
       node__object(node)
     ELSE
-      node__args(node).first()
+      (node__args(node) OR_ELSE List[]).first()
     END;
     IF !(recv_ast) THEN
       RETURN NIL;
     END
-    MUTABLE recv_ti = TRY (type__from_node_mut(recv_ast, "direct length"));
-    MUTABLE ti = TRY (type__new(TypeConstructionInput{ Type: COPY recv_ti }));
+    MUTABLE recv_ti:? = TRY (type__from_node_mut(recv_ast, "direct length"));
+    MUTABLE ti = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (recv_ti) }));
     IF TRY (type__direct_indexable_collection?(ti)) THEN
       RETURN NIL;
     END
-    MUTABLE recv = TRY (mIRLowering__rc_payload_value(rtoc_self_view, CAST(TRY (mIRLowering__lower(&rtoc_self_view, &recv_ast)) AS Emittable), UNWRAP (recv_ti)));
+    MUTABLE recv = TRY (mIRLowering__rc_payload_value(rtoc_self_view, CAST(TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt(recv_ast))) AS Emittable), UNWRAP (recv_ti)));
     IF TRY (mIRLowering__mir_allocates?(&rtoc_self_view, &recv)) THEN
       recv = TRY (mIRLowering__hoist_alloc(&rtoc_self_view, &recv, &recv_ast));
     END
@@ -5495,12 +5495,12 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     RETURN out;
 }
 END
-PRIVATE FN mIRLowering__strip_try(self: MIRLowering, mir_node: Emittable) RETURNS Emittable
+PRIVATE FN mIRLowering__strip_try(self: MIRLowering, mir_node: Emittable) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF emittable__responds_to_without_try?(mir_node) THEN
-      RETURN mir_node.without_try();
+      RETURN TRY (emittable__without_try(mir_node));
     ELSE
       RETURN COPY mir_node;
     END
@@ -5578,15 +5578,13 @@ FN mIRLowering__lower_defer_stmt(MUTABLE self: MIRLowering, MUTABLE node: DeferS
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList( CAST(node AS []Locatable)).body));
+    MUTABLE body = TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(node.body)));
     TRY (mIRLowering__reject_fallible_defer_body_mut(&rtoc_self_view, node, body));
-    RETURN MIRDeferStmt{ body: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_167: ?Emittable = NIL;
+    MUTABLE defer_body: DeferBody = DeferBody{ Emittable: Emittable{ ScopeBlock: COPY ScopeBlock{ body: COPY body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } } };
     IF (body.length() == 1) THEN
-      rtoc_ternary_value_167 = UNWRAP (body.first());
-    ELSE
-      rtoc_ternary_value_167 = ScopeBlock{ body: body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      defer_body = DeferBody{ Emittable: COPY UNWRAP (body.first()) };
     END
-    rtoc_ternary_value_167? }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN MIRDeferStmt{ body: COPY defer_body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
 FN mIRLowering__reject_fallible_defer_body_mut(MUTABLE self: MIRLowering, node: DeferStmt, body: []Emittable) RETURNS !Void
