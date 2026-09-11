@@ -371,7 +371,7 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
     RETURN FsmTail{ FsmTailCondJump: COPY FsmTailCondJump{ condition: condition, then_step: cond_branch.then_index, else_step: cond_branch.else_index } };
   ELSE_IF tail IS_A IoSuspend AS io_suspend THEN
     IF desc EXISTS AS desc_value THEN
-      MUTABLE explicit_next = io_suspend.next_index;
+      MUTABLE explicit_next:? = io_suspend.next_index;
       MUTABLE target_step = explicit_next;
       MUTABLE desc_tail = desc_value.tail;
       IF desc_tail IS_A FsmTailYield AS rtoc_fsm_tail_yield THEN
@@ -719,7 +719,7 @@ PRIVATE FN emit__rewrite_promoted_fsm_node(MUTABLE node: PromotableFsmValue, pro
     RETURN COPY node;
   END
   IF node IS_A Emittable THEN
-    emit__rewrite_promoted_fsm_struct_fields_mut(castPromotableFsmValueToEmittable(&node), promoted_names, id);
+    emit__rewrite_promoted_fsm_struct_fields_mut(castPromotableFsmValueToEmittable(node), promoted_names, id);
   END
   RETURN COPY node;
 END
@@ -894,7 +894,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   END
   rtoc_map_results_37 } );
   MUTABLE pointer_captures = COPY ctx.pointer_captures;
-  MUTABLE err =   IF with_node.lock_error_clause THEN
+  MUTABLE err:? =   IF with_node.lock_error_clause THEN
     TRY (mIRLowering__emit_fsm_lock_error_arm_split( &lowering_api, UNWRAP (with_node.lock_error_clause), id, with_node, capture_map, pointer_captures, bg_rt))
   ELSE
     mIRLowering__default_fsm_lock_error_arm_split(lowering_api, id)
@@ -918,7 +918,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   IF (err.exit_kind == :done) THEN
     rtoc_ternary_value_42 = Done{ _: NIL };
   ELSE
-    rtoc_ternary_value_42 = Goto{ target_index: after_idx };
+    rtoc_ternary_value_42 = Goto{ target_index: UNWRAP (after_idx)};
   END
   rtoc_ternary_value_42? };
   MUTABLE has_step_work = (!((spec.prologue_stmts.length() == 0)) OR !((spec.body_stmts.length() == 0)));

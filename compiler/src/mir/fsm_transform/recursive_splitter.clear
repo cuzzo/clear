@@ -195,7 +195,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int
     pivot_ast_branch_value = NIL;
   END
   MUTABLE pivot_ast: ?SegmentStmt = pivot_ast_branch_value;
-  MUTABLE sus = IF pivot_ast != NIL THEN
+  MUTABLE sus:? = IF pivot_ast != NIL THEN
     segments__classify_suspend(castSegmentStmtToLocatable(pivot_ast))
   ELSE
     NIL
@@ -231,7 +231,7 @@ PRIVATE FN fsmRecursiveSplitter__stmt_introduces_split?(stmt: ?SegmentStmt) RETU
       IF !(stmt_value IS_A Struct) THEN
         RETURN FALSE;
       END
-      RETURN (TRY (aST__child_bodies(castSegmentStmtToLocatable(stmt_value)))) |> ANY TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt(_) }));
+      RETURN (aST__child_bodies(castSegmentStmtToLocatable(stmt_value))) |> ANY TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt( castLocatableToNode__auto_inference(_)) }));
     END
   ELSE
     RETURN FALSE;
@@ -252,7 +252,7 @@ PRIVATE FN fsmRecursiveSplitter__contains_suspend_anywhere?(stmts: ?Stmts) RETUR
           rtoc_idx = rtoc_idx + 1;
   CONTINUE;
         END
-        IF (TRY (aST__child_bodies(stmts[rtoc_idx]))) |> ANY TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt(_) })) THEN
+        IF (aST__child_bodies(stmts[rtoc_idx])) |> ANY TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt(_) })) THEN
           RETURN TRUE;
         END
     END

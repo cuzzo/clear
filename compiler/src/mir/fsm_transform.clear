@@ -178,10 +178,10 @@ PRIVATE FN fsmTransform__foreach_local_entry(node: ForEach) RETURNS !?PromotedLo
   RETURN PromotedLocalFact{ name: COPY CAST(node.var_name AS String), type_zig: COPY elem_zig, is_suspend_result: FALSE };
 END
 PRIVATE FN fsmTransform__body_needs_conservative?(stmts: []Locatable) RETURNS !Bool EFFECTS REENTRANT ->
-  RETURN stmts |> ANY (IF _ IS_A WithBlock THEN TRUE ELSE (TRY (aST__child_bodies(_))) |> ANY (TRY (fsmTransform__contains_suspend_anywhere?(_)) OR TRY (fsmTransform__body_needs_conservative?(_))) END);
+  RETURN stmts |> ANY (IF _ IS_A WithBlock THEN TRUE ELSE (aST__child_bodies(_)) |> ANY (TRY (fsmTransform__contains_suspend_anywhere?(_)) OR TRY (fsmTransform__body_needs_conservative?(_))) END);
 END
 PRIVATE FN fsmTransform__contains_suspend_anywhere?(stmts: []Locatable) RETURNS !Bool EFFECTS REENTRANT ->
-  RETURN stmts |> ANY (IF segments__classify_suspend(_) THEN TRUE ELSE (IF _ IS_A WithBlock THEN TRUE ELSE (TRY (aST__child_bodies(_))) |> ANY TRY (fsmTransform__contains_suspend_anywhere?(_)) END) END);
+  RETURN stmts |> ANY (IF segments__classify_suspend(_) THEN TRUE ELSE (IF _ IS_A WithBlock THEN TRUE ELSE (aST__child_bodies(_)) |> ANY TRY (fsmTransform__contains_suspend_anywhere?(_)) END) END);
 END
 PRIVATE FN fsmTransform__suspend_value?(value: Locatable) RETURNS !Bool ->
   IF value IS_A NextExpr AS next_expr THEN

@@ -166,7 +166,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE name = COPY compilerRegexCapture(match?, 1);
+      MUTABLE name = COPY compilerRegexCapture(match, 1);
       MUTABLE rhs = compilerRegexCapture(match?, 2).trim();
       rtoc_self_view.aliases[name] = rhs;
     rtoc_idx = rtoc_idx + 1;
@@ -197,7 +197,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
                   rtoc_idx = rtoc_idx + 1;
             CONTINUE;
               END
-              MUTABLE field_type: ?String = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match?, 2), :field));
+              MUTABLE field_type: ?String = TRY (translator__map_type(&rtoc_self_view, compilerRegexCapture(match, 2), :field));
               IF (field_type == NIL) THEN
                   rtoc_idx = rtoc_idx + 1;
             CONTINUE;

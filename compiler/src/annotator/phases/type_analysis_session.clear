@@ -228,7 +228,7 @@ PUB FN typeAnalysisSession__function_node_for(MUTABLE self: TypeAnalysisSession,
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN CAST(COPY TRY (functionRegistry__fetch(typeAnalysisSession__semantic_function_registry(&rtoc_self_view), name)) AS ?FunctionDef);
+    RETURN CAST(COPY functionRegistry__fetch(typeAnalysisSession__semantic_function_registry(&rtoc_self_view), name) AS ?FunctionDef);
 }
 END
 PUB FN typeAnalysisSession__register_function_node_mut(MUTABLE self: TypeAnalysisSession, node: FunctionDef) RETURNS !FunctionDef
@@ -3325,7 +3325,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (typeAnalysisSession__validate_tail_call_mut(&rtoc_self_view, node, body_scan));
       END
       IF ((node.reentrance_kind == :reentrant_thunk) AND !(node.tail_call)) THEN
-        MUTABLE plan: ?Plan = TRY (recursiveSplitter__split(node.body, node.name));
+        MUTABLE plan: ?Plan = recursiveSplitter__split(node.body, node.name);
         IF plan EXISTS AS plan_value THEN
           node.thunk_plan = plan_value;
         ELSE
@@ -9029,7 +9029,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE suggestion_reason: []String = ( { MUTABLE rtoc_empty_list_203: []String = List[]; rtoc_empty_list_203 } );
     IF typeAnalysisSession__thunk_all_self_calls_in_tail_position?(rtoc_self_view, fn_node, body_facts) THEN
       suggestion_reason = ["EFFECTS REENTRANT:TAIL_CALL", "all self-calls are in tail position; TCO turns this into a self-`jmp` loop with depth=1"];
-    ELSE_IF TRY (recursiveSplitter__split(fn_node.body, fn_node.name)) THEN
+    ELSE_IF recursiveSplitter__split(fn_node.body, fn_node.name) THEN
       suggestion_reason = ["EFFECTS REENTRANT:THUNK", "the body matches the simple-recurrence shape; heap CPS keeps the fiber stack at depth=1"];
     END
     IF (suggestion_reason.length() == 0) THEN
@@ -16163,8 +16163,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE
         indices = [node.index];
       END
-      IF (indices.length() != TRY (type__rank( target_type_info))) THEN
-        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetIndex: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_INDEX_ARITY }, [], CAST({:expected: TRY (type__rank( target_type_info)), :got: indices.length()} AS {String@symbol}Any)));
+      IF (indices.length() != type__rank( target_type_info)) THEN
+        TRY (typeAnalysisSession__error_mut(&rtoc_self_view, DiagnosticAnchor{ Locatable: Locatable{ GetIndex: COPY node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_INDEX_ARITY }, [], CAST({:expected: type__rank( target_type_info), :got: indices.length()} AS {String@symbol}Any)));
       END
       FOR _ IN indices DO
     MUTABLE rtoc_mutable_block_param_397 = COPY _;

@@ -625,7 +625,7 @@ PUB FN pipelineRangeLowerer__sum_fold_plan(self: PipelineRangeLowerer, prefix: P
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE acc_zig = runtimeHost__range_transpile_type(rtoc_self_view.host, PipelineTypeInput{ StringValue: COPY type__to_s((TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY smooth_node })))) });
     MUTABLE expr_mir = TRY (pipelineRangeLowerer__numeric_fold_expr_typed(rtoc_self_view, UNWRAP (&fold_op.expression), prefix.item_var, acc_zig));
-    RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.acc, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(acc_zig)), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, right: COPY expr_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], post_loop_stmts: ( { MUTABLE rtoc_empty_list_18: []Emittable = List[]; rtoc_empty_list_18 } ), result_expr: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } } };
+    RETURN PipelineRangeFoldPlan{ acc_init_stmts: [Emittable{ Let: COPY Let{ name: COPY names.acc, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new( TypeConstructionInput{ StringValue: acc_zig })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }], loop_acc_stmts: [Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } }, right: COPY expr_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], post_loop_stmts: ( { MUTABLE rtoc_empty_list_18: []Emittable = List[]; rtoc_empty_list_18 } ), result_expr: Emittable{ Ident: COPY Ident{ name: COPY names.acc, lowered_node_id: NIL, ownership_consumption: NIL } } };
 }
 END
 PUB FN pipelineRangeLowerer__average_fold_plan(self: PipelineRangeLowerer, prefix: PipelineLazyRangePrefix, MUTABLE fold_op: AverageOp, names: PipelineRangeFoldNames) RETURNS !PipelineRangeFoldPlan
@@ -778,7 +778,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       callable_contract_branch_value = TRY (callableContract__no_ownership(arg.length()));
     END
     MUTABLE callable_contract: CallableContract = callable_contract_branch_value?;
-    MUTABLE call = ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: inner_recv, method: COPY spec.publish_method, args: COPY arg, try_wrap: FALSE, callable_contract: COPY callable_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    MUTABLE call = ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ FieldGet: inner_recv }, method: COPY spec.publish_method, args: COPY arg, try_wrap: FALSE, callable_contract: COPY callable_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     MUTABLE publish = PARTIAL MATCH spec.gate START
       :always -> [call],
       :pred -> {
@@ -840,7 +840,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
           RETURN CAST(( { MUTABLE rtoc_empty_list_32: []Emittable = List[]; rtoc_empty_list_32 } ) AS []Emittable);
         END
         entry = cleanupEntry__with_alloc( UNWRAP (entry), :heap);
-        cleanupEntry__mark_moved_guard_mut( &entry);
+        cleanupEntry__mark_moved_guard_mut( UNWRAP (&entry));
         RETURN CAST([Emittable{ AllocMark: COPY AllocMark{ name: COPY item_var, alloc: :heap, type_info: COPY elem_t_value_mutable, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Cleanup: COPY Cleanup{ name: COPY item_var, cleanup_entry: UNWRAP (entry), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
       ELSE
         RETURN CAST(( { MUTABLE rtoc_empty_list_31: []Emittable = List[]; rtoc_empty_list_31 } ) AS []Emittable);

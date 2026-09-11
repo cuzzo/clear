@@ -1644,7 +1644,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             IF (child_alloc_value == owner_alloc) THEN
               RETURN;
             END
-            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: UNWRAP (COPY emittable__name(rtoc_expr_node)) }, "owned child is :${child_alloc_value} but aggregate owner is :${UNWRAP (owner_alloc)}; nested ownership placement is implicit/incoherent")));
+            &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :AGGREGATE_CHILD_ALLOC_MISMATCH, Name{ StringValue: UNWRAP (COPY emittable__name(rtoc_expr_node)) }, "owned child is :${child_alloc_value} but aggregate owner is :${owner_alloc}; nested ownership placement is implicit/incoherent")));
           ELSE
             RETURN;
           END
@@ -2889,7 +2889,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     IF ((TRY (functionSignature__params(sig))).length() < (contract).checked_arg_count) THEN
-      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MIR_CALL_NO_CONTRACT, Name{ StringValue: COPY label }, "${node_kind} callable contract covers ${(TRY (functionSignature__params(sig))).length().toString()} params but callsite has ${(UNWRAP (contract)).checked_arg_count.toString()} args")));
+      &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :MIR_CALL_NO_CONTRACT, Name{ StringValue: COPY label }, "${node_kind} callable contract covers ${(TRY (functionSignature__params(sig))).length().toString()} params but callsite has ${contract.checked_arg_count.toString()} args")));
     END
     IF (TRY (mIRChecker__function_signature_takes_ownership?(rtoc_self_view, sig, (contract).checked_arg_count)) AND !(ownership.covers_consuming_params)) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY label }, "${node_kind} target declares TAKES/consuming params but concrete consumed bindings are absent")));
@@ -3595,7 +3595,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((node != NIL)) THEN
       RETURN;
     END
-    IF node? IS_A Let AS let THEN
+    IF node IS_A Let AS let THEN
       MUTABLE let_mutable = COPY let;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&rtoc_self_view, let_mutable.init, "Let initializer"));
     ELSE_IF node? IS_A ReassignWithCleanup AS reassign_with_cleanup THEN

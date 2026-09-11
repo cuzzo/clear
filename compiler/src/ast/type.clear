@@ -3624,7 +3624,7 @@ PUB FN type__parallel_boundary_forbidden_reason(self: Type, schema_lookup: ?FN(S
   IF (rtoc_each_item_11 == NIL) THEN
     CONTINUE;
   END
-  IF rtoc_each_item_11? IS_A InlineStructVariant AS inline_struct_variant THEN
+  IF rtoc_each_item_11 IS_A InlineStructVariant AS inline_struct_variant THEN
             FOR rtoc_each_item_12 IN inline_struct_variant.fields.values() DO
     MUTABLE inline_reason: ?String@symbol = TRY (type__parallel_boundary_forbidden_reason((TRY (type__from_input(rtoc_each_item_12))), schema_lookup_value, next_seen));
     IF inline_reason EXISTS AS inline_reason_value THEN

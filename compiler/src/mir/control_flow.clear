@@ -222,7 +222,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       current_block = after_block;
   ELSE_IF (stmts[rtoc_idx]? IS_A ReturnNode) OR (stmts[rtoc_idx]? IS_A Raise) THEN
       &current_block.stmts.append(COPY stmts[rtoc_idx]?);
-      basicBlock__add_successor(&current_block, COPY cfg.exit_block);
+      basicBlock__add_successor(&current_block, UNWRAP (COPY cfg.exit_block));
       RETURN NIL;
   ELSE_IF (stmts[rtoc_idx]? IS_A BreakNode) THEN
       &current_block.stmts.append(COPY stmts[rtoc_idx]?);
@@ -239,7 +239,7 @@ PRIVATE FN functionCFG__build_body(stmts_input: []Node, current_block_input: Bas
       END
       RETURN NIL;
   ELSE
-      IF ((cfg.can_fail_fns != NIL) AND TRY (functionCFG__stmt_can_fail?(stmts[rtoc_idx]?, (cfg.can_fail_fns)?))) THEN
+      IF ((cfg.can_fail_fns != NIL) AND TRY (functionCFG__stmt_can_fail?( castNodeToLocatable__resolution_phase(stmts[rtoc_idx]?), (cfg.can_fail_fns)?))) THEN
         basicBlock__add_successor(&current_block, COPY cfg.exit_block);
         MUTABLE next_block = functionCFG__new_block(&cfg);
         basicBlock__add_successor(&current_block, &next_block);
@@ -395,7 +395,7 @@ PUB FN ownershipDataflow__state_from_names(state: {String}OwnerEntry) RETURNS !{
   RETURN entries;
 END
 PUB FN ownershipDataflow__place_for_binding_node(name: String, node: Node) RETURNS PlaceId ->
-  MUTABLE sym = aST__node__symbol(castNodeToLocatable(node));
+  MUTABLE sym:? = aST__node__symbol( UNWRAP (castNodeToLocatable(node)));
   MUTABLE symbol = IF sym IS_A SymbolEntry THEN
     sym
   ELSE
@@ -444,7 +444,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     rtoc_self_view.block_out[_.id] = NIL;
     END
     rtoc_self_view.block_in[(COPY rtoc_self_view.cfg.entry).id] = TRY (ownershipDataflow__init_entry_state(&rtoc_self_view));
-    MUTABLE order_index = TRY (ownershipDataflow__reverse_postorder_index(rtoc_self_view));
+    MUTABLE order_index:? = TRY (ownershipDataflow__reverse_postorder_index(rtoc_self_view));
     MUTABLE worklist: []BasicBlock@multiowned = rtoc_self_view.cfg.blocks |> ORDER_BY (order_index[_.id] OR_ELSE rtoc_self_view.cfg.blocks.length());
     MUTABLE in_worklist = {};
     FOR _ IN worklist DO
@@ -591,7 +591,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < rtoc_each_items_11.length() DO
       MUTABLE var = COPY emittable__name(UNWRAP (rtoc_each_items_11[rtoc_idx]));
       MUTABLE entry = COPY KEEP rtoc_each_items_11[rtoc_idx]?.entry;
-      IF !(cleanupEntry__needs_cleanup?(entry)) THEN
+      IF !(cleanupEntry__needs_cleanup?( UNWRAP (entry))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -613,7 +613,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           ELSE
             cleanupEntry__suppress_cleanup_mut(&entry);
           END
-      ELSE_IF (!(df_entry.has_moved_guard) AND cleanupEntry__has_moved_guard?(entry)) THEN
+      ELSE_IF (!(df_entry.has_moved_guard) AND cleanupEntry__has_moved_guard?( UNWRAP (entry))) THEN
           cleanupEntry__clear_moved_guard_mut(&entry);
       ELSE_IF (df_entry.has_moved_guard AND !(cleanupEntry__has_moved_guard?(entry))) THEN
           cleanupEntry__mark_moved_guard_mut(&entry);
@@ -696,7 +696,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF ownershipDataflow__declares_name?(rtoc_self_view, stmts[rtoc_idx]?, var) THEN
           RETURN (stmts.substr(((rtoc_idx + 1)), (stmts.length() - ((rtoc_idx + 1))))).to_a() |> ANY TRY (ownershipDataflow__stmt_moves_name?(rtoc_self_view, _, var));
       END
-      MUTABLE nested = (TRY (aST__child_bodies(stmts[rtoc_idx]?))).flatten();
+      MUTABLE nested = (aST__child_bodies(stmts[rtoc_idx]?)).flatten();
       IF (!(nested.empty?()) AND TRY (ownershipDataflow__linear_scope_decl_always_moves?(rtoc_self_view, nested, var))) THEN
           RETURN TRUE;
       END
@@ -865,7 +865,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         ELSE
           0
         END));
-    FOR _ IN (TRY (aST__child_bodies(_))) DO
+    FOR _ IN (aST__child_bodies(_)) DO
     &stack.append(CleanupDecisionFrame{ body: COPY _, loop_depth: child_depth });
     END
       END
@@ -895,8 +895,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE needs = TRY (type__needs_explicit_cleanup?(ti, :heap, rtoc_self_view.schema_lookup));
-      ownershipDataflow__set_state_entry_mut(&rtoc_self_view, &state, Place{ PlaceId: COPY ownershipDataflow__place_for_binding_node(name, rtoc_self_view.fn_node.params[rtoc_idx]?) }, OwnerEntry{ state: COPY :owned, allocator: :heap, needs_cleanup: needs });
+      MUTABLE needs = TRY (type__needs_explicit_cleanup?( UNWRAP (ti), :heap, rtoc_self_view.schema_lookup));
+      ownershipDataflow__set_state_entry_mut(&rtoc_self_view, &state, Place{ PlaceId: COPY ownershipDataflow__place_for_binding_node( UNWRAP (name), rtoc_self_view.fn_node.params[rtoc_idx]?) }, OwnerEntry{ state: COPY :owned, allocator: :heap, needs_cleanup: needs });
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN state;
@@ -984,7 +984,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN existing_value_mutable;
       END
       MUTABLE moved_entry = OwnerEntry{ state: COPY :moved, allocator: COPY existing_value_mutable.allocator, needs_cleanup: existing_value_mutable.needs_cleanup };
-      ownershipDataflow__set_state_entry_mut(&rtoc_self_view, &state, resolved, moved_entry);
+      ownershipDataflow__set_state_entry_mut(&rtoc_self_view, &state, Place{ PlaceId: resolved }, moved_entry);
       RETURN moved_entry;
     ELSE
       RETURN NIL;
@@ -1041,7 +1041,7 @@ PUB FN ownershipDataflow__resource_captures(self: OwnershipDataflow, node: Locat
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE analysis = aST__node_capture_analysis(node);
+    MUTABLE analysis:? = aST__node_capture_analysis(node);
     RETURN (analysis.resource_captures() OR_ELSE List[]);
 }
 END
@@ -1050,7 +1050,7 @@ PRIVATE FN ownershipDataflow__transfer_stmt(MUTABLE self: OwnershipDataflow, stm
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF stmt IS_A VarDecl AS var_decl THEN
-      MUTABLE plan = var_decl.ownership_transport_plan;
+      MUTABLE plan:? = var_decl.ownership_transport_plan;
       IF !((plan IS_A OwnershipTransportPlan AND (plan.action != :move))) THEN
         FOR _ IN (TRY (ownershipDataflow__collect_binding_move_places(rtoc_self_view, var_decl.value, state))) DO
         ownershipDataflow__mark_moved_mut(&rtoc_self_view, &state, _);
@@ -1058,7 +1058,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       TRY (ownershipDataflow__update_declared_owner_mut(&rtoc_self_view, &state, CAST(var_decl.name AS String), Locatable{ VarDecl: COPY var_decl }));
     ELSE_IF stmt IS_A BindExpr AS bind_expr THEN
-      MUTABLE plan = bind_expr.ownership_transport_plan;
+      MUTABLE plan:? = bind_expr.ownership_transport_plan;
       IF !((plan IS_A OwnershipTransportPlan AND (plan.action != :move))) THEN
         FOR _ IN (TRY (ownershipDataflow__collect_binding_move_places(rtoc_self_view, bind_expr.value, state))) DO
         ownershipDataflow__mark_moved_mut(&rtoc_self_view, &state, _);
@@ -1100,13 +1100,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   
     ELSE_IF (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
       FOR _ IN (TRY (ownershipDataflow__resource_captures(rtoc_self_view, stmt))) DO
-    MUTABLE capture_place = ownershipDataflow__resolve_state_place(state, _);
+    MUTABLE capture_place = ownershipDataflow__resolve_state_place(state, Place{ StringValue: _ });
     IF ownershipDataflow__state_entry(rtoc_self_view, state, capture_place) THEN
           ownershipDataflow__mark_moved_mut(&rtoc_self_view, &state, capture_place);
     END
       END
       FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(rtoc_self_view, castLocatableToBgNode__control_flow(stmt)))) DO
-    MUTABLE give_place = ownershipDataflow__resolve_state_place(state, _);
+    MUTABLE give_place = ownershipDataflow__resolve_state_place(state, Place{ StringValue: _ });
     IF ownershipDataflow__state_entry(rtoc_self_view, state, give_place) THEN
           ownershipDataflow__mark_moved_mut(&rtoc_self_view, &state, give_place);
     END
@@ -1164,9 +1164,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE entry: ?OwnerEntry = TRY (ownershipDataflow__make_owner_entry(rtoc_self_view, node));
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
-      ownershipDataflow__set_state_entry_mut(&rtoc_self_view, &state, place, entry_value_mutable);
+      ownershipDataflow__set_state_entry_mut(&rtoc_self_view, &state, Place{ PlaceId: place }, entry_value_mutable);
     ELSE
-      ownershipDataflow__delete_state_entry_mut(&rtoc_self_view, &state, place);
+      ownershipDataflow__delete_state_entry_mut(&rtoc_self_view, &state, Place{ PlaceId: place });
     END
     NIL;
 }
@@ -1193,8 +1193,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       MUTABLE node_value_mutable = COPY node_value;
       IF node_value_mutable IS_A Identifier AS identifier THEN
         MUTABLE identifier_mutable = COPY identifier;
-        MUTABLE place = ownershipDataflow__place_for_binding_node(identifier__name(identifier_mutable), identifier_mutable);
-        IF !(ownershipDataflow__state_entry(rtoc_self_view, step.state, place)) THEN
+        MUTABLE place = ownershipDataflow__place_for_binding_node(identifier__name(identifier_mutable), Node{ Identifier: identifier_mutable });
+        IF !(ownershipDataflow__state_entry(rtoc_self_view, step.state, Place{ PlaceId: place })) THEN
           RETURN;
         END
         IF TRY (ownershipDataflow__copy_type?(rtoc_self_view, identifier_mutable)) THEN
@@ -1241,13 +1241,13 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, capability_wrap.value, &step));
       ELSE_IF (node_value_mutable IS_A BgBlock) OR (node_value_mutable IS_A BgStreamBlock) THEN
         FOR _ IN (TRY (ownershipDataflow__resource_captures(rtoc_self_view, node_value_mutable))) DO
-    MUTABLE capture_place = ownershipDataflow__resolve_state_place(step.state, _);
+    MUTABLE capture_place = ownershipDataflow__resolve_state_place(step.state, Place{ StringValue: _ });
     IF ownershipDataflow__state_entry(rtoc_self_view, step.state, capture_place) THEN
             &step.consumed.insert(COPY capture_place);
     END
         END
         FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(rtoc_self_view, castLocatableToBgNode__control_flow(node_value_mutable)))) DO
-    MUTABLE give_place = ownershipDataflow__resolve_state_place(step.state, _);
+    MUTABLE give_place = ownershipDataflow__resolve_state_place(step.state, Place{ StringValue: _ });
     IF ownershipDataflow__state_entry(rtoc_self_view, step.state, give_place) THEN
             &step.consumed.insert(COPY give_place);
     END
@@ -1270,7 +1270,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN;
     END
     MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(n) AS String), castLocatableToNode(n));
-    IF !(ownershipDataflow__state_entry(rtoc_self_view, step.state, place)) THEN
+    IF !(ownershipDataflow__state_entry(rtoc_self_view, step.state, Place{ PlaceId: place })) THEN
         RETURN;
     END
     IF TRY (ownershipDataflow__copy_type?(rtoc_self_view, castLocatableToIdentifier__control_flow(n))) THEN
@@ -1293,8 +1293,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE root: ?Identifier = aST__root_identifier(Locatable{ GetField: COPY node });
     IF root EXISTS AS root_value THEN
-      MUTABLE place = ownershipDataflow__place_for_binding_node(root_value.name, root_value);
-      IF ownershipDataflow__state_entry(rtoc_self_view, step.state, place) THEN
+      MUTABLE place = ownershipDataflow__place_for_binding_node(root_value.name, Node{ Identifier: root_value });
+      IF ownershipDataflow__state_entry(rtoc_self_view, step.state, Place{ PlaceId: place }) THEN
         &step.consumed.insert(COPY place);
       END
       NIL;
@@ -1339,7 +1339,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN;
     END
     IF source IS_A Identifier THEN
-      MUTABLE ti = TRY (type__from_node_mut(source, "share transfer"));
+      MUTABLE ti:? = TRY (type__from_node_mut(source, "share transfer"));
       IF type__shared?( UNWRAP (ti)) THEN
         RETURN;
       END
@@ -1414,7 +1414,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       IF aST__container_borrow?(Locatable{ GetField: COPY get_field_mutable }) THEN
         RETURN FALSE;
       END
-      MUTABLE ti = TRY (aST__full_type_mut(get_field_mutable));
+      MUTABLE ti = TRY (aST__full_type_mut( Locatable{ GetField: get_field_mutable }));
       RETURN type__indirect_type?(CAST(ti AS Type));
     ELSE
       RETURN FALSE;
@@ -1676,7 +1676,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF source IS_A CopyNode THEN
       TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, source.value(), state));
     ELSE_IF source IS_A Identifier AS source_narrowed THEN
-      MUTABLE ti = TRY (type__from_node_mut(source, "share read"));
+      MUTABLE ti:? = TRY (type__from_node_mut(source, "share read"));
       IF type__shared?( UNWRAP (ti)) THEN
         useAfterMoveChecker__check_identifier_node_read(&rtoc_self_view, source_narrowed, state);
       END
@@ -1748,7 +1748,7 @@ PUB FN loopFrameAnalysis__walk_stmts_mut(stmts: []Locatable, schema_lookup: ?FN(
   END
 END
 PUB FN loopFrameAnalysis__walk_stmt_mut(stmt: ?Stmt, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, fn_nodes: {String}FunctionDef) RETURNS !Void ->
-  MUTABLE child_bodies = TRY (aST__child_bodies(castOptionalStmtToLocatable(stmt)));
+  MUTABLE child_bodies = aST__child_bodies(castOptionalStmtToLocatable(stmt));
   FOR _ IN child_bodies DO
   TRY (loopFrameAnalysis__walk_stmts_mut(_, schema_lookup, fn_nodes));
   END
@@ -1940,7 +1940,7 @@ END
 PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Bool ->
   IF loop_node IS_A WhileBindLoop AS while_bind_loop THEN
     MUTABLE cond_t = TRY (aST__full_type_mut(while_bind_loop.condition));
-    MUTABLE inner = TRY (type__wrapped_type(cond_t));
+    MUTABLE inner:? = TRY (type__wrapped_type(cond_t));
     IF !(inner IS_A Type) THEN
       RETURN FALSE;
     END
@@ -2176,11 +2176,11 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         borrowChecker__check_borrowed_move(&rtoc_self_view, _, locatable__token(stmt), state);
         END
       END
-      FOR _ IN (TRY (aST__child_bodies(stmt))) DO
+      FOR _ IN (aST__child_bodies(stmt)) DO
       TRY (borrowChecker__check_stmts(&rtoc_self_view, _, state));
       END
     ELSE
-      FOR _ IN (TRY (aST__child_bodies(stmt))) DO
+      FOR _ IN (aST__child_bodies(stmt)) DO
       TRY (borrowChecker__check_stmts(&rtoc_self_view, _, state));
       END
     END
@@ -2253,7 +2253,7 @@ PRIVATE FN borrowChecker__check_borrowed_move(MUTABLE self: BorrowChecker, name:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE borrow_kind = borrowState__kind_for(state, name);
+    MUTABLE borrow_kind:? = borrowState__kind_for(state, name);
     IF !(borrow_kind) THEN
       RETURN;
     END

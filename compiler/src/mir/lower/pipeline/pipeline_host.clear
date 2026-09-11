@@ -540,7 +540,7 @@ PUB FN pipelineHost__concurrent_async_stream_select?(MUTABLE self: PipelineHost,
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE concurrent = COPY node.right;
     IF concurrent IS_A ConcurrentOp AS concurrent_op THEN
-      MUTABLE select = concurrent_op.op;
+      MUTABLE select:? = concurrent_op.op;
       IF !(select IS_A SelectOp) THEN
         RETURN FALSE;
       END
@@ -605,13 +605,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (execution == PipelineExecutionKind.MaterializedList) THEN
       RETURN (IF TRY (pipelineListLowerer__lower(rtoc_self_view.list_lowerer, plan.site, castLocatableToPipelineListTerminalOp(plan.rhs))) EXISTS AS rtoc_wrap_605 THEN PipelineLoweringResult{ MIRBlockExpr: COPY rtoc_wrap_605 } ELSE NIL END);
     ELSE_IF (execution == PipelineExecutionKind.SetDistinct) THEN
-      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_distinct(rtoc_self_view, plan.site, castLocatableToDistinctOp(&plan.rhs))) };
+      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_distinct(rtoc_self_view, &plan.site, castLocatableToDistinctOp(plan.rhs))) };
     ELSE_IF (execution == PipelineExecutionKind.BatchWindow) THEN
-      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_batch_window(rtoc_self_view, plan.site, castLocatableToBatchWindowOp(plan.rhs))) };
+      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_batch_window(rtoc_self_view, &plan.site, castLocatableToBatchWindowOp(plan.rhs))) };
     ELSE_IF (execution == PipelineExecutionKind.SetIndex) THEN
-      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_index(rtoc_self_view, plan.site, castLocatableToIndexOp(plan.rhs).expression)) };
+      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_index(rtoc_self_view, &plan.site, UNWRAP (castLocatableToIndexOp(plan.rhs).expression))) };
     ELSE_IF (execution == PipelineExecutionKind.Each) THEN
-      RETURN castOptionalPipelineEachResultToOptionalPipelineLoweringResult(TRY (pipelineHost__lower_each(rtoc_self_view, plan.site, castLocatableToEachOp__pipeline_host(plan.rhs))));
+      RETURN castOptionalPipelineEachResultToOptionalPipelineLoweringResult(TRY (pipelineHost__lower_each(rtoc_self_view, &plan.site, castLocatableToEachOp__pipeline_host(plan.rhs))));
     ELSE_IF (execution == PipelineExecutionKind.Concurrent) THEN
       RETURN castPipelineConcurrentResultToOptionalPipelineLoweringResult(TRY (pipelineHost__lower_concurrent(&rtoc_self_view, plan.site, castLocatableToConcurrentOp__pipeline_host(plan.rhs))));
     ELSE
@@ -685,7 +685,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE next_contract = callableContract__new((TRY (callableContract__no_ownership(0))).signature, TRY (ownershipContract__consume_operands([ownershipOperandFact__owned_binding(promise_name, promise_type, "stream SELECT awaits selector promise", :heap)])), 0);
       MUTABLE next_call = MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY promise_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "next", args: ( { MUTABLE rtoc_empty_list_28: []Any = List[]; rtoc_empty_list_28 } ), try_wrap: !(asyncResultShape__boxes_fallible_payload?(async_shape)), callable_contract: COPY next_contract, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
       IF asyncResultShape__boxes_fallible_payload?(async_shape) THEN
-        selector = Emittable{ AsyncPayloadTake: COPY AsyncPayloadTake{ source: Emittable{ TryExpr: COPY TryExpr{ expr: Emittable{ MIRMethodCall: COPY next_call }, lowered_node_id: NIL, ownership_consumption: NIL } }, result_type: COPY TRY (type__new(castTypeToTypeConstructionInput__pipeline_host(async_shape.payload_type))) } };
+        selector = Emittable{ AsyncPayloadTake: COPY AsyncPayloadTake{ source: Emittable{ TryExpr: COPY TryExpr{ expr: Emittable{ MIRMethodCall: COPY next_call }, lowered_node_id: NIL, ownership_consumption: NIL } }, result_type: COPY TRY (type__new(castTypeToTypeConstructionInput__pipeline_host( PipelineHostTypeInput{ Type: async_shape.payload_type }))) } };
       ELSE
         selector = Emittable{ MIRMethodCall: COPY next_call };
       END

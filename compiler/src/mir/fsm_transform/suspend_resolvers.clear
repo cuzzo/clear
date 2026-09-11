@@ -34,7 +34,7 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
   IF em != NIL THEN
     finish_block = COPY em.fsm_finish_block;
   END
-  MUTABLE finish_value = (IF em != NIL THEN
+  MUTABLE finish_value:? = (IF em != NIL THEN
     em.fsm_finish_value
   ELSE
     NIL
@@ -94,20 +94,20 @@ END
 PRIVATE FN suspendResolvers__resolve_next(MUTABLE next_tail: NextSuspend, ctx: FsmEmitContext, MUTABLE lowering: MIRLowering, susp_idx: Int64) RETURNS !SuspendDescriptor ->
   MUTABLE id = ctx.id;
   MUTABLE sp_field = "sp_${susp_idx.toString()}";
-  MUTABLE promise_expr_mir = TRY (mIRLowering__lower( &lowering, castLocatableToMIRLoweringLowerableStmt(&next_tail.promise_ast)));
+  MUTABLE promise_expr_mir:? = TRY (mIRLowering__lower( &lowering, castLocatableToMIRLoweringLowerableStmt( UNWRAP (next_tail.promise_ast))));
   MUTABLE ctx_ident = Ident{ name: "__ctx_${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
-  MUTABLE setup_stmts = [Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY promise_expr_mir, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
+  MUTABLE setup_stmts = [Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, value: UNWRAP (COPY promise_expr_mir), needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
   MUTABLE captured_promise_guard_name: ?String = NIL;
   MUTABLE captured_names = ctx.captured.keys() |> SELECT _.toString();
-  MUTABLE promise_root = (aST__root_identifier(UNWRAP (next_tail.promise_ast)));
+  MUTABLE promise_root:? = (aST__root_identifier(UNWRAP (next_tail.promise_ast)));
   IF (promise_root AND captured_names.contains?(CAST(promise_root.name() AS String))) THEN
     captured_promise_guard_name = "${promise_root.name()}_moved";
     &setup_stmts.append(Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: UNWRAP (COPY captured_promise_guard_name), lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
   END
   MUTABLE register_expr = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: COPY sp_field, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "wg", lowered_node_id: NIL, ownership_consumption: NIL } }, method: "registerFsmWaiter", args: [CAST(FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: "task", lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-  MUTABLE tail = FsmTailRegisterYield{ next_step: NIL, register_expr: register_expr, yield_reason: "WaitForLock" };
+  MUTABLE tail = FsmTailRegisterYield{ next_step: NIL, register_expr: Emittable{ MIRMethodCall: register_expr }, yield_reason: "WaitForLock" };
   MUTABLE result_var: ?String = COPY next_tail.result_var;
-  MUTABLE promise_ft = TRY (type__from_node_mut(next_tail.promise_ast, "FSM NEXT tail promise"));
+  MUTABLE promise_ft:? = TRY (type__from_node_mut(next_tail.promise_ast, "FSM NEXT tail promise"));
   MUTABLE sp_zig = TRY (type__zig_type((TRY (type__new(castTypeToTypeConstructionInput__suspend_resolvers( UNWRAP (promise_ft)))))));
   MUTABLE inner_type_info: ?Type = NIL;
   MUTABLE promise_type = TRY (type__new(castTypeToTypeConstructionInput__suspend_resolvers( UNWRAP (promise_ft))));

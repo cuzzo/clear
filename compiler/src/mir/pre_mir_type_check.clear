@@ -3059,7 +3059,7 @@ FN rtocChildrenOfWalkNodeExternFnDecl(v: ExternFnDecl) RETURNS []WalkNode ->
     &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
   END
   IF v.owner_type EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   FOR rtoc_arr_child IN v.owner_type_params DO
     &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
@@ -3133,7 +3133,7 @@ FN rtocChildrenOfWalkNodeExternStructDecl(v: ExternStructDecl) RETURNS []WalkNod
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
   &out.append(WalkNode{ StringValue: COPY v.name });
   IF v.from_module EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   FOR rtoc_arr_child IN v.type_params DO
     &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
@@ -3703,7 +3703,7 @@ FN rtocChildrenOfWalkNodeFuncCall(v: FuncCall) RETURNS []WalkNode ->
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
   IF v.protocol_name EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   IF v.protocol_operation EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
@@ -3738,7 +3738,7 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   END
   &out.append(WalkNode{ BoolValue: COPY v.explicit_return_type });
   FOR rtoc_arr_child IN v.type_params DO
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_arr_child)});
   END
   &out.append(WalkNode{ BoolValue: COPY v.tail_call });
   # requires: ?{String}[Set]String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
@@ -3864,7 +3864,7 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   END
   &out.append(WalkNode{ ArrayValue: COPY v.fsm_suspend_points });
   IF v.conformance_protocol EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   IF v.implementation_owner EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
@@ -3897,7 +3897,7 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
   END
   &out.append(WalkNode{ BoolValue: COPY v.explicit_return_type });
   FOR rtoc_arr_child IN v.type_params DO
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_arr_child)});
   END
   &out.append(WalkNode{ BoolValue: COPY v.tail_call });
   # requires: ?{String}[Set]String@symbol holds no Locatable -- Ruby's walk stops at its leaves.
@@ -4023,7 +4023,7 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
   END
   &out.append(WalkNode{ ArrayValue: COPY v.fsm_suspend_points });
   IF v.conformance_protocol EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   IF v.implementation_owner EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
@@ -4240,7 +4240,7 @@ END
 FN rtocChildrenOfWalkNodeIdentifier(v: Identifier) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ SymbolValue: COPY v.name });
+  &out.append(WalkNode{ SymbolValue: symbol(COPY v.name)});
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -6561,7 +6561,7 @@ END
 FN rtocChildrenOfWalkNodeProtocolRequirement(v: ProtocolRequirement) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ SymbolValue: COPY v.name });
+  &out.append(WalkNode{ SymbolValue: symbol(COPY v.name)});
   &out.append(WalkNode{ TypeMultiowned: COPY v.return_type });
   &out.append(WalkNode{ BoolValue: COPY v.is_method });
   IF v.effects_decl EXISTS AS rtoc_opt_child THEN
@@ -7962,7 +7962,7 @@ END
 FN rtocChildrenOfWalkNodeStructLit(v: StructLit) RETURNS []WalkNode ->
   MUTABLE out: []WalkNode = [];
   &out.append(WalkNode{ TokenMultiowned: COPY v.token });
-  &out.append(WalkNode{ SymbolValue: COPY v.name });
+  &out.append(WalkNode{ SymbolValue: symbol(COPY v.name)});
   IF v.storage EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
@@ -8979,7 +8979,7 @@ FN rtocChildrenOfWalkNodeToken(v: Token) RETURNS []WalkNode ->
     &out.append(castTokenValueToWalkNode(COPY rtoc_opt_child));
   END
   IF v.file EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   RETURN out;
 END
@@ -8990,7 +8990,7 @@ FN rtocChildrenOfWalkNodeTokenMultiowned(v: Token) RETURNS []WalkNode ->
     &out.append(castTokenValueToWalkNode(COPY rtoc_opt_child));
   END
   IF v.file EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   RETURN out;
 END
@@ -9065,7 +9065,7 @@ FN rtocChildrenOfWalkNodeUnionDef(v: UnionDef) RETURNS []WalkNode ->
   &out.append(WalkNode{ StringValue: COPY v.name });
   &out.append(WalkNode{ SymbolValue: COPY v.visibility });
   FOR rtoc_arr_child IN v.type_params DO
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_arr_child)});
   END
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
