@@ -17900,7 +17900,7 @@ FN castAnnotationTypeShapeToTypeConstructionInput(value: AnnotationTypeShape) RE
   END
   panic("Invalid cast to TypeConstructionInput");
 END
-FN castAssignmentNameToLocatable__type_analysis_session(value: AssignmentName) RETURNS Locatable ->
+PUB FN castAssignmentNameToLocatable__type_analysis_session(value: AssignmentName) RETURNS Locatable ->
   PARTIAL MATCH value START
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
@@ -18344,7 +18344,7 @@ FN castLocatableToGetField__type_analysis_session(value: Locatable) RETURNS GetF
   END
   RETURN panic("Invalid cast to GetField");
 END
-FN castLocatableToIdentifier__type_analysis_session(value: Locatable) RETURNS Identifier ->
+PUB FN castLocatableToIdentifier__type_analysis_session(value: Locatable) RETURNS Identifier ->
   IF value IS_A Identifier AS cast_payload THEN
     RETURN cast_payload;
   END

@@ -1920,7 +1920,7 @@ FN castLocatableToNode__resolution_phase(value: Locatable) RETURNS Node ->
   END
   panic("Invalid cast to Node");
 END
-FN castNodeToLocatable__resolution_phase(value: Node) RETURNS Locatable ->
+PUB FN castNodeToLocatable__resolution_phase(value: Node) RETURNS Locatable ->
   PARTIAL MATCH value START
     Node.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
     Node.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,

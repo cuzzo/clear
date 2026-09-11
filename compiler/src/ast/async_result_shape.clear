@@ -18,10 +18,10 @@ PUB FN asyncResultShape__promise_list_item(promise_list_type: Type) RETURNS !Asy
   MUTABLE item_expression = UNWRAP (typeExpressionTree__linear_item_envelope(payload.shape.expression));
   RETURN TRY (asyncResultShape__promise(TRY (type__from_child_expression(item_expression))));
 END
-FN asyncResultShape__promise?(self: AsyncResultShape) RETURNS Bool ->
+PUB FN asyncResultShape__promise?(self: AsyncResultShape) RETURNS Bool ->
   RETURN ((self.kind == :promise) OR asyncResultShape__shared_promise?(self));
 END
-FN asyncResultShape__shared_promise?(self: AsyncResultShape) RETURNS Bool ->
+PUB FN asyncResultShape__shared_promise?(self: AsyncResultShape) RETURNS Bool ->
   RETURN (self.kind == :shared_promise);
 END
 PUB FN asyncResultShape__boxes_fallible_payload?(self: AsyncResultShape) RETURNS Bool ->

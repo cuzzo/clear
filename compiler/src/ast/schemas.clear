@@ -254,7 +254,7 @@ PUB FN inlineStructVariant__set_deinit_entries(MUTABLE self: InlineStructVariant
     self.deinit_entries = COPY entries;
     RETURN entries;
 END
-FN inlineStructVariant__equals?(self: InlineStructVariant, other: InlineStructVariant) RETURNS Bool
+PUB FN inlineStructVariant__equals?(self: InlineStructVariant, other: InlineStructVariant) RETURNS Bool
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
