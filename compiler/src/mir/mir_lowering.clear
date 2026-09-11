@@ -10330,8 +10330,16 @@ PRIVATE FN mIRLowering__user_protocol_receiver_type_arg(MUTABLE self: MIRLowerin
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE root: ?Identifier = aST__root_identifier(receiver);
-    MUTABLE polymorphic_type = ((root != NIL) AND ((mIRLowering__capability_state(&rtoc_self_view).polymorphic_alias_type_map != NIL) AND ((mIRLowering__capability_state(&rtoc_self_view).polymorphic_alias_type_map)?)[root.name]));
-    RETURN (polymorphic_type OR TRY (mIRLowering__generic_type_arg_zig(rtoc_self_view, TypeTypeInput{ Type: COPY receiver_type })));
+    MUTABLE polymorphic_type: ?String = NIL;
+    IF root EXISTS AS root_value THEN
+      IF mIRLowering__capability_state(&rtoc_self_view).polymorphic_alias_type_map EXISTS AS alias_type_map THEN
+        polymorphic_type = COPY alias_type_map[CAST(root_value.name AS String)];
+      END
+    END
+    IF polymorphic_type EXISTS AS polymorphic_type_value THEN
+      RETURN COPY polymorphic_type_value;
+    END
+    RETURN TRY (mIRLowering__generic_type_arg_zig(rtoc_self_view, TypeTypeInput{ Type: COPY receiver_type }));
 }
 END
 PRIVATE FN mIRLowering__inject_protocol_map_allocator_args(MUTABLE self: MIRLowering, signature: ?FunctionSignature, ast_args: []Locatable, mir_args: []Emittable) RETURNS ![]Emittable
@@ -10469,8 +10477,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((fn != NIL)) THEN
       RETURN FALSE;
     END
-    MUTABLE fn_ret: !Type = functionDef__lowering_return_type( fn);
-    IF !(fn_ret.error_union?()) THEN
+    MUTABLE fn_ret: Type = TRY (functionDef__lowering_return_type(fn));
+    IF !(type__error_union?(fn_ret)) THEN
       RETURN FALSE;
     END
     RETURN !(TRY (mIRLowering__function_body_has_value_return?(rtoc_self_view, CAST(fn.body AS []Node))));
@@ -10599,7 +10607,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           END
           IF has_param_return THEN
             MUTABLE ret = TRY (type__success_type(functionSignature__return_type(sig_obj_value)));
-            IF (IF TRY (type__string?(ret)) != NIL THEN TRY (type__string?(ret)) ELSE TRY (type__recursive_cleanup_shape?(ret, mIRLowering__mir_schema_lookup(&rtoc_self_view))) END) THEN
+            IF (TRY (type__string?(ret)) OR TRY (type__recursive_cleanup_shape?(ret, mIRLowering__mir_schema_lookup(&rtoc_self_view)))) THEN
               RETURN TRUE;
             END
             RETURN FALSE;
@@ -10674,9 +10682,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE snav_ident = Identifier{ token: UNWRAP (COPY locatable__token(node.object)), name: COPY snav_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
     MUTABLE receiver_type = TRY (aST__full_type_mut(node.object));
     IF !(explicit) THEN
-      receiver_type = TRY (type__wrapped_type( receiver_type));
+      receiver_type = COPY UNWRAP (TRY (type__wrapped_type(receiver_type)));
     END
-    TRY (aST__stamp_synthetic_type_mut(Locatable{ Identifier: COPY snav_ident }, UNWRAP (receiver_type), "synthetic AST type"));
+    TRY (aST__stamp_synthetic_type_mut(Locatable{ Identifier: COPY snav_ident }, receiver_type, "synthetic AST type"));
     MUTABLE synthetic = COPY node;
     synthetic.object = Locatable{ Identifier: COPY snav_ident };
     MUTABLE call_mir = TRY (mIRLowering__lower_intrinsic(&rtoc_self_view, Node{ MethodCall: COPY synthetic }));
@@ -10684,7 +10692,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(type__optional?(result_type)) THEN
       result_type = TRY (type__optional_of(TypeTypeInput{ Type: COPY result_type }));
     END
-    MUTABLE result = IfOptional{ optional: COPY inner_mir, capture: COPY snav_var, then_expr: COPY call_mir, else_expr: COPY TRY (mIRLowering__optional_nil_mir(&rtoc_self_view, result_type)), lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+    MUTABLE result = IfOptional{ optional: COPY UNWRAP (inner_mir), capture: COPY snav_var, then_expr: COPY call_mir, else_expr: COPY TRY (mIRLowering__optional_nil_mir(&rtoc_self_view, result_type)), lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     result.result_type = result_type;
     RETURN result;
 }
@@ -10853,7 +10861,10 @@ PRIVATE FN mIRLowering__registry_call_args(self: MIRLowering, mir_args: []Emitta
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE facts_by_index = stdlib_facts.args.to_h(%(fact: StdlibCallArgFact) -> CAST(Tuple{fact.index, COPY fact} AS Tuple<Int64, StdlibCallArgFact>));
+    MUTABLE facts_by_index: {Int64}StdlibCallArgFact = {};
+    FOR fact IN stdlib_facts.args DO
+      facts_by_index[fact.index] = COPY fact;
+    END
     RETURN {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE rtoc_indexed_items_391: []Emittable = mir_args;
@@ -10861,7 +10872,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE rtoc_indexed_i_392 = 0;
     WHILE rtoc_indexed_i_392 < rtoc_indexed_items_391.length() DO
       &rtoc_indexed_output_393.append({
-    MUTABLE arg_fact = facts_by_index[rtoc_indexed_i_392];
+    MUTABLE arg_fact:? = facts_by_index[rtoc_indexed_i_392];
     RegistryCallArg{ expr: COPY UNWRAP (rtoc_indexed_items_391[rtoc_indexed_i_392]), coerce_type: COPY (IF arg_fact != NIL THEN
         arg_fact.coerce_type
       ELSE
