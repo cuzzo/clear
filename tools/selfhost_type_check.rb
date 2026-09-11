@@ -40,7 +40,20 @@ units.each do |name, members|
   # Transitively: a unit sees the PUB surface of everything its requires reach,
   # not just its direct ones.
   seen_pkgs = Set.new
-  queue = src.scan(/^REQUIRE "pkg:([A-Za-z0-9_]+)"/).flatten.uniq
+  # A unit requires its neighbours two ways: as a package, and as a plain
+  # relative path. Counting only the first makes the gate cry wolf.
+# PackageSource.merge STRIPS each member's REQUIREs, so the merged text has
+  # none to read -- the requires have to come from the member files themselves.
+  queue = []
+  members.each do |owner|
+    own = File.read(File.join(GEN, owner))
+    queue.concat(own.scan(/^REQUIRE "pkg:([A-Za-z0-9_]+)"/).flatten)
+    own.scan(/^REQUIRE "(?!pkg:)([^"]+)"/).flatten.each do |relpath|
+      cand = File.expand_path(File.join(File.dirname(File.join(GEN, owner)), relpath))
+      queue << ParserCompat.package_name(cand.sub("#{GEN}/", '')) if File.file?(cand)
+    end
+  end
+  queue.uniq!
   until queue.empty?
     dep = queue.shift
     next unless seen_pkgs.add?(dep)
@@ -54,6 +67,10 @@ units.each do |name, members|
         visible << m[3] if m[1] == 'PUB '
       end
       queue.concat(text.scan(/^REQUIRE "pkg:([A-Za-z0-9_]+)"/).flatten)
+      text.scan(/^REQUIRE "(?!pkg:)([^"]+)"/).flatten.each do |rp|
+        cand = File.expand_path(File.join(File.dirname(path), rp))
+        queue << ParserCompat.package_name(cand.sub("#{GEN}/", '')) if File.file?(cand)
+      end
     end
   end
   # Types as they appear in signatures: after `:` or `RETURNS`, stripped of

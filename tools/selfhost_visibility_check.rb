@@ -57,13 +57,41 @@ units.each do |name, members|
                                resolve_pkg: ->(n) { pkg_paths[n] })
   src = merged.source
   visible = src.scan(DEF).map { |_vis, fn| fn }.to_set
-  src.scan(/^REQUIRE "pkg:([A-Za-z0-9_]+)"/).flatten.uniq.each do |dep|
+  # Transitively: a unit sees the PUB surface of everything its requires reach.
+  # Without this the gate claims a call is unresolved whenever the exporter is
+  # one hop further away than a direct require -- the same error that made the
+  # type gate claim 116.
+  seen_pkgs = Set.new
+  # A unit requires its neighbours two ways: as a package, and as a plain
+  # relative path. Counting only the first makes the gate cry wolf.
+# PackageSource.merge STRIPS each member's REQUIREs, so the merged text has
+  # none to read -- the requires have to come from the member files themselves.
+  queue = []
+  members.each do |owner|
+    own = File.read(File.join(GEN, owner))
+    queue.concat(own.scan(/^REQUIRE "pkg:([A-Za-z0-9_]+)"/).flatten)
+    own.scan(/^REQUIRE "(?!pkg:)([^"]+)"/).flatten.each do |relpath|
+      cand = File.expand_path(File.join(File.dirname(File.join(GEN, owner)), relpath))
+      queue << ParserCompat.package_name(cand.sub("#{GEN}/", '')) if File.file?(cand)
+    end
+  end
+  queue.uniq!
+  until queue.empty?
+    dep = queue.shift
+    next unless seen_pkgs.add?(dep)
+
     pkg_paths[dep].to_s.split(',').each do |path|
       next unless File.file?(path)
 
-      File.readlines(path).each do |line|
+      text = File.read(path)
+      text.each_line do |line|
         d = DEF.match(line) or next
         visible << d[2] if d[1] == 'PUB '
+      end
+      queue.concat(text.scan(/^REQUIRE "pkg:([A-Za-z0-9_]+)"/).flatten)
+      text.scan(/^REQUIRE "(?!pkg:)([^"]+)"/).flatten.each do |rp|
+        cand = File.expand_path(File.join(File.dirname(path), rp))
+        queue << ParserCompat.package_name(cand.sub("#{GEN}/", '')) if File.file?(cand)
       end
     end
   end
