@@ -597,7 +597,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE expanded_specs: []FsmSegmentSpec = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segment_specs.length() DO
-  IF (segment_specs[rtoc_idx]?.tail) IS_A LockSuspend THEN
+  IF (segment_specs[rtoc_idx].tail) IS_A LockSuspend THEN
       MUTABLE out: ?ExpandedLockSegment = TRY (emit__expand_lock_segment(segment_specs[rtoc_idx]?, &ctx, capture_map, lowering, next_lock_segment_index));
       IF out EXISTS AS out_value THEN
         &expanded_specs.append(COPY out_value.lock_try_spec);
