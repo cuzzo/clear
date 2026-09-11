@@ -923,13 +923,13 @@ PRIVATE FN ownershipDataflow__transfer_stmt(MUTABLE self: OwnershipDataflow, stm
   
     ELSE_IF (stmt IS_A BgBlock) OR (stmt IS_A BgStreamBlock) THEN
       FOR _ IN (TRY (ownershipDataflow__resource_captures(self, stmt))) DO
-    MUTABLE capture_place = ownershipDataflow__resolve_state_place(state, Place{ StringValue: _ });
+    MUTABLE capture_place = ownershipDataflow__resolve_state_place(state, Place{ StringValue: COPY _ });
     IF ownershipDataflow__state_entry(self, state, capture_place) THEN
           ownershipDataflow__mark_moved_mut(&self, &state, capture_place);
     END
       END
       FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(self, castLocatableToBgNode__control_flow(stmt)))) DO
-    MUTABLE give_place = ownershipDataflow__resolve_state_place(state, Place{ StringValue: _ });
+    MUTABLE give_place = ownershipDataflow__resolve_state_place(state, Place{ StringValue: COPY _ });
     IF ownershipDataflow__state_entry(self, state, give_place) THEN
           ownershipDataflow__mark_moved_mut(&self, &state, give_place);
     END
@@ -1048,13 +1048,13 @@ PRIVATE FN ownershipDataflow__collect_ownership_transfers(self: OwnershipDataflo
         TRY (ownershipDataflow__collect_ownership_transfers(self, capability_wrap.value, &step));
       ELSE_IF (node_value_mutable IS_A BgBlock) OR (node_value_mutable IS_A BgStreamBlock) THEN
         FOR _ IN (TRY (ownershipDataflow__resource_captures(self, node_value_mutable))) DO
-    MUTABLE capture_place = ownershipDataflow__resolve_state_place(step.state, Place{ StringValue: _ });
+    MUTABLE capture_place = ownershipDataflow__resolve_state_place(step.state, Place{ StringValue: COPY _ });
     IF ownershipDataflow__state_entry(self, step.state, capture_place) THEN
             &step.consumed.insert(COPY capture_place);
     END
         END
         FOR _ IN (TRY (ownershipDataflow__collect_bg_body_gives(self, castLocatableToBgNode__control_flow(node_value_mutable)))) DO
-    MUTABLE give_place = ownershipDataflow__resolve_state_place(step.state, Place{ StringValue: _ });
+    MUTABLE give_place = ownershipDataflow__resolve_state_place(step.state, Place{ StringValue: COPY _ });
     IF ownershipDataflow__state_entry(self, step.state, give_place) THEN
             &step.consumed.insert(COPY give_place);
     END
@@ -1718,7 +1718,7 @@ PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {Str
     ELSE
       ctx.body_allocates_frame
     END;
-  (mIRLowering__set_shard_context(&dynamic_node, pipelineShardContext__with_frame_allocations(ctx, key_allocates_frame, body_allocates_frame)));
+  (mIRLowering__set_shard_context( CAST(&dynamic_node AS MIRLowering), pipelineShardContext__with_frame_allocations(ctx, key_allocates_frame, body_allocates_frame)));
   rubyToClearVoid__control_flow()
   });
 END
