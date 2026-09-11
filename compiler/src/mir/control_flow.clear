@@ -1083,7 +1083,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE inner = move_node.value;
       IF inner IS_A Identifier THEN
         MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(inner) AS String), castLocatableToNode__auto_inference(inner));
-        IF ownershipDataflow__state_entry(rtoc_self_view, state, place) THEN
+        IF ownershipDataflow__state_entry(rtoc_self_view, state, Place{ PlaceId: place }) THEN
           ownershipDataflow__mark_moved_mut(&rtoc_self_view, &state, place);
         END
       END
@@ -1225,7 +1225,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         MUTABLE inner = move_node.value;
         IF inner IS_A Identifier THEN
           MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(inner) AS String), castLocatableToNode__auto_inference(inner));
-          IF ownershipDataflow__state_entry(rtoc_self_view, step.state, place) THEN
+          IF ownershipDataflow__state_entry(rtoc_self_view, step.state, Place{ PlaceId: place }) THEN
             &step.consumed.insert(COPY place);
           END
         END
@@ -1344,7 +1344,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN;
       END
       MUTABLE place = ownershipDataflow__place_for_binding_node(CAST(locatable__name(source) AS String), castLocatableToNode__auto_inference(source));
-      IF ownershipDataflow__state_entry(rtoc_self_view, step.state, place) THEN
+      IF ownershipDataflow__state_entry(rtoc_self_view, step.state, Place{ PlaceId: place }) THEN
         &step.consumed.insert(COPY place);
       END
       RETURN;
