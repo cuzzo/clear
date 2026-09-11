@@ -621,7 +621,7 @@ module PipeAnalysis
   def analyze_window_op(node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     require_array_input!(node, "WINDOW")
-    item_type = node.left.full_type!(context: "pipeline left").element_type.resolved
+    item_type = pipeline_left_item_type(node)
 
     # Validate the size argument is numeric
     visit(node.right.size)
@@ -728,7 +728,7 @@ module PipeAnalysis
   def analyze_join_op(node)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     require_array_input!(node, "JOIN")
-    left_type = node.left.full_type!(context: "pipeline left").element_type.resolved
+    left_type = pipeline_left_item_type(node)
 
     # Visit and validate the right source
     visit(node.right.right_source)
@@ -736,7 +736,7 @@ module PipeAnalysis
     unless node.right.right_source.metatype == :array || rhs_type_info&.collection?
       error!(node.right.right_source, :JOIN_RIGHT_NEEDS_LIST, got: node.right.right_source.resolved_type)
     end
-    right_type = rhs_type_info.element_type.resolved
+    right_type = rhs_type_info.element_type&.resolved || :Any
 
     key_expr = node.right.key_expr
 
@@ -905,7 +905,7 @@ module PipeAnalysis
     # Optional inner binding: UNNEST _.arr AS $o  parses as UNNEST BIND_VAR(_.arr, $o)
     # because :pipe_expression uses parse_expression(1) which consumes AS at prec 2.
     require_array_input!(node, "UNNEST")
-    item_type = node.left.full_type!(context: "pipeline left").element_type.resolved
+    item_type = pipeline_left_item_type(node)
 
     # Detect inner binding: UNNEST expr AS @name -> expression is BIND_VAR(expr, @name)
     inner_bind_name = nil
@@ -2073,6 +2073,15 @@ module PipeAnalysis
     when :Float32 then :Float32
     else :Float64
     end
+  end
+
+  # `Any@list` passes the array gate but names no element, so `_` has no type
+  # of its own. Untyped is exactly what `Any` already means; crashing on the
+  # missing element is not.
+  sig { params(node: AST::BinaryOp).returns(Symbol) }
+  def pipeline_left_item_type(node)
+    T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
+    node.left.full_type!(context: "pipeline left").element_type&.resolved || :Any
   end
 
   sig { params(node: AST::BinaryOp, op_name: String, allow_range: T::Boolean, allow_stream: T::Boolean).returns(NilClass) }

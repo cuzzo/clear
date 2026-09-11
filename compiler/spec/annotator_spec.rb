@@ -4726,6 +4726,34 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "pipeline over an Any-element collection" do
+    # `Any@list` passes the array gate but names no element type. Reading the
+    # missing element crashed the annotator instead of reporting the pipeline.
+    %w[UNNEST WINDOW JOIN].each do |op|
+      it "handles #{op} instead of crashing on the missing element type" do
+        stage = case op
+        when "WINDOW" then "WINDOW(2) _.length()"
+        when "JOIN" then "JOIN(present) %(a, b) -> a == b"
+        else "UNNEST _"
+        end
+        src = <<~CLEAR
+          STRUCT Box { items: ?Any@list }
+          FN f(b: Box) RETURNS !Void ->
+            IF b.items EXISTS AS present THEN
+              out = present |> #{stage};
+            END
+            RETURN;
+          END
+        CLEAR
+        begin
+          run(src)
+        rescue CompilerError, ParserError
+          # A pipeline diagnostic is a fine outcome; a Ruby crash is not.
+        end
+      end
+    end
+  end
+
   describe "String interpolation" do
     it "annotates interpolated string without error and produces String type" do
       src = 'FN f() RETURNS !Void -> name = "World"; greeting: String = "Hello, ${name}!"; RETURN; END'
