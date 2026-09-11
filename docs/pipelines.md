@@ -185,7 +185,7 @@ pool
 | **ORDER_BY** | `list \|> ORDER_BY key` | `[]ElemType` | Sort by key expression |
 | **LIMIT** | `list \|> LIMIT n` | `[]ElemType` | First N elements |
 | **SKIP** | `list \|> SKIP n` | `[]ElemType` | Drop first N elements, return rest |
-| **DISTINCT** | `list \|> DISTINCT key` | `[]ElemType` | Unique by key (first occurrence wins) |
+| **DISTINCT** | `list \|> DISTINCT key` | `[Set]KeyType` | The set of distinct key values (`DISTINCT _` gives the distinct elements) |
 | **UNNEST** | `list \|> UNNEST expr` | `[]InnerType` | Flatten nested arrays (flatmap) |
 | **INDEX** | `list \|> INDEX key` | `{Key}[]ElemType` | Group into a map by key |
 

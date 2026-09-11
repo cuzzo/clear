@@ -80,6 +80,15 @@ STRUCT MIRLowering {
 UNION MIRLoweringOwnershipFact { OwnedCreate: OwnedCreate, OwnedDestroy: OwnedDestroy, OwnedTransfer: OwnedTransfer, OwnedBorrow: OwnedBorrow, OwnedStore: OwnedStore, OwnedReturn: OwnedReturn }
 UNION MIRLoweringTransferMark { TransferMark: TransferMark, MoveMark: MoveMark }
 UNION MIRLoweringLoweredMir { Emittable: Emittable, ArrayValue: []Emittable }
+# Ruby writes `Array(packet.mir)`: one node or many, always read back as a list.
+PUB FN loweredMir__nodes(value: MIRLoweringLoweredMir) RETURNS []Emittable ->
+  PARTIAL MATCH value START
+    MIRLoweringLoweredMir.ArrayValue AS item -> RETURN COPY item;,
+    MIRLoweringLoweredMir.Emittable AS item -> RETURN [COPY item];,
+    DEFAULT -> RETURN List[];
+  END
+  RETURN List[];
+END
 UNION MIRLoweringLowerableMarker { Drop: Drop, AllocMark: AllocMark, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup }
 UNION MIRLoweringLowerableStmt { ASTProgram: Program, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecovery: TenseRecovery, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKind: TenseOperationKind, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, AllocMark: AllocMark, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
 UNION MIRLoweringBackgroundDispatch { SymbolValue: String@symbol, BoolValue: Bool }
@@ -921,7 +930,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF dest_alloc EXISTS AS dest_alloc_value THEN
       MUTABLE dest_alloc_value_mutable = COPY dest_alloc_value;
       MUTABLE ti = TRY (mIRLowering__destination_type( &rtoc_self_view, ast_node, dest_type));
-      IF ( UNWRAP (type__symbol?( UNWRAP (ti)) OR (((TRUE AND locatable__typed(ast_node)) AND ((type__symbol((TRY (type__from_node_mut( ast_node, "placement symbol probe")))) OR_ELSE FALSE)))))) THEN
+      IF ((type__symbol?(ti) OR (((TRUE AND TRY (locatable__typed?(ast_node))) AND ((type__symbol?(UNWRAP (TRY (type__from_node_mut( ast_node, "placement symbol probe")))))))))) THEN
         RETURN mIRLowering__destination_keep_plan(&rtoc_self_view, dest_alloc_value_mutable);
       END
       IF (placement__heap?(dest_alloc_value_mutable) AND TRY (mIRLowering__heap_indirect_destination?(&rtoc_self_view, mir, ast_node, CAST(ti AS Type)))) THEN
@@ -1924,7 +1933,7 @@ FN mIRLowering__finalize_lowered_body_construction_mut(MUTABLE self: MIRLowering
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE state = COPY construction.finalization_context;
-    mIRLowering__seed_cleanup_owner_index_mut(&rtoc_self_view, &state, construction.packets |> UNNEST ((_.pending |> WHERE _ != NIL) + (_.mir |> WHERE _ != NIL)));
+    mIRLowering__seed_cleanup_owner_index_mut(&rtoc_self_view, &state, construction.packets |> UNNEST (_.pending + loweredMir__nodes(_.mir)));
     FOR _ IN construction.packets DO
     TRY (mIRLowering__append_pending_packet_nodes_mut(&rtoc_self_view, &state, _));
     TRY (mIRLowering__append_lowered_statement_packet_mut(&rtoc_self_view, &state, _));
@@ -1972,10 +1981,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF existing THEN
       RETURN existing;
     END
-    MUTABLE next_id = mIRLowering__ownership_state(&rtoc_self_view).next_lowered_node_id;
+    MUTABLE next_id = rtoc_self_view.state.ownership.next_lowered_node_id;
     rtoc_self_view.state.ownership.next_lowered_node_id = (next_id + 1);
     MUTABLE assigned = LoweredNodeId{ value: next_id };
-    node.lowered_node_id = assigned;
+    emittable__set_lowered_node_id_mut(&node, assigned);
     RETURN assigned;
 }
 END
@@ -2054,11 +2063,11 @@ FN mIRLowering__append_lowered_statement_packet_mut(MUTABLE self: MIRLowering, M
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE packet_mir = COPY packet.mir;
-    MUTABLE packet_nodes: []MIRLoweringLoweredMir = List[];
+    MUTABLE packet_nodes: []Emittable = List[];
     IF packet_mir IS_A []Emittable AS array THEN
-      packet_nodes = array |> WHERE TRUE;
+      packet_nodes = COPY array;
     ELSE
-      packet_nodes = [packet_mir];
+      packet_nodes = CAST([CAST(packet_mir AS Emittable)] AS []Emittable);
     END
     MUTABLE mir_nodes = TRY (mIRLowering__normalize_allocating_mir_body(&rtoc_self_view, packet_nodes));
     TRY (mIRLowering__merge_body_mark_names_mut(&rtoc_self_view, &state, NodeRoot{ ArrayValue: COPY mir_nodes }));
@@ -2071,7 +2080,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     FOR MUTABLE rtoc_for_item_2076 IN mir_nodes DO
     TRY (mIRLowering__append_ownership_finalized_node_mut(&rtoc_self_view, &state, &rtoc_for_item_2076, mir_nodes, line, col));
     END
-    MUTABLE marks = mir_nodes |> UNNEST TRY (mIRLowering__ownership_transfers_for_node(&rtoc_self_view, &_, state));
+    MUTABLE marks = mir_nodes |> UNNEST TRY (mIRLowering__ownership_transfers_for_node(&rtoc_self_view, _, state));
     TRY (mIRLowering__append_transfer_marks_to_body_mut(&rtoc_self_view, &state, TRY (mIRLowering__dedupe_transfer_marks(&rtoc_self_view, marks)), line, col));
     NIL;
 }
@@ -2190,7 +2199,24 @@ FN mIRLowering__dedupe_transfer_marks(MUTABLE self: MIRLowering, marks: []Emitta
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN marks |> DISTINCT [emittable__variant_name(_), aST__node_name(castEmittableToLocatable__mir_lowering(_)), aST__node_target( castEmittableToLocatable__pipeline_batch_window_lowerer(_))];
+    MUTABLE seen: [Set]String = Set[];
+    MUTABLE deduped: []Emittable = List[];
+    FOR mark IN marks DO
+      MUTABLE mark_name: String = "";
+      IF aST__node_name(castEmittableToLocatable__mir_lowering(mark)) EXISTS AS named THEN
+        mark_name = COPY CAST(named AS String);
+      END
+      MUTABLE mark_target: String = "";
+      IF emittable__transfer_target(mark) EXISTS AS targeted THEN
+        mark_target = COPY CAST(targeted AS String);
+      END
+      MUTABLE key = "${emittable__variant_name(mark)}|${mark_name}|${mark_target}";
+      IF !(seen.contains?(key)) THEN
+        &seen.insert(COPY key);
+        &deduped.append(COPY mark);
+      END
+    END
+    RETURN deduped;
 }
 END
 FN mIRLowering__lowered_stmt_packet(MUTABLE self: MIRLowering, state: OwnershipFinalizationContext, MUTABLE stmt: MIRLoweringLowerableStmt) RETURNS !?LoweredStmtPacket
@@ -2800,8 +2826,11 @@ FN mIRLowering__ownership_transfer_contract_relevant?(MUTABLE self: MIRLowering,
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE source_expr = mIRLowering__ownership_contract_source_node(&rtoc_self_view, expr);
-    MUTABLE contract: !?OwnershipContract@multiowned = emittable__explicit_ownership_contract(source_expr);
-    RETURN (contract IS_A OwnershipContract@multiowned AND !((TRY (ownershipContract__owned_operand_names(contract))).empty?()));
+    MUTABLE contract: ?OwnershipContract@multiowned = TRY (emittable__explicit_ownership_contract(source_expr));
+    IF contract EXISTS AS contract_value THEN
+      RETURN !((TRY (ownershipContract__owned_operand_names(contract_value))).empty?());
+    END
+    RETURN FALSE;
 }
 END
 FN mIRLowering__ownership_transfer_only_target(MUTABLE self: MIRLowering, MUTABLE expr: Emittable) RETURNS OwnershipFactTarget
@@ -2870,8 +2899,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       &facts.append(MIRLoweringOwnershipFact{ OwnedDestroy: COPY OwnedDestroy{ name: COPY CAST(cleanup.name AS String), alloc: COPY cleanup.cleanup_entry.alloc, source: COPY mIRLowering__ownership_fact_source(&rtoc_self_view, Emittable{ Cleanup: COPY cleanup }), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     ELSE_IF node IS_A ErrCleanup AS err_cleanup THEN
       &facts.append(MIRLoweringOwnershipFact{ OwnedDestroy: COPY OwnedDestroy{ name: COPY CAST(err_cleanup.name AS String), alloc: COPY err_cleanup.cleanup_entry.alloc, source: COPY mIRLowering__ownership_fact_source(&rtoc_self_view, Emittable{ ErrCleanup: COPY err_cleanup }), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
-    ELSE_IF node IS_A MIRLoweringTransferMark AS mir_lowering_transfer_mark THEN
-      &facts.append(MIRLoweringOwnershipFact{ OwnedTransfer: COPY OwnedTransfer{ name: COPY CAST(mIRLoweringTransferMark__name(mir_lowering_transfer_mark) AS String), target: mir_lowering_transfer_mark.target, source: mIRLowering__ownership_fact_source(&rtoc_self_view, castMIRLoweringTransferMarkToEmittable(mir_lowering_transfer_mark)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+    ELSE_IF node IS_A TransferMark AS mir_lowering_transfer_mark THEN
+      &facts.append(MIRLoweringOwnershipFact{ OwnedTransfer: COPY OwnedTransfer{ name: COPY COPY mir_lowering_transfer_mark.name, target: mir_lowering_transfer_mark.target, source: mIRLowering__ownership_fact_source(&rtoc_self_view, Emittable{ TransferMark: COPY mir_lowering_transfer_mark }), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     END
     NIL;
 }
@@ -3137,7 +3166,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
 }
 END
-FN mIRLowering__ownership_transfers_for_node(MUTABLE self: MIRLowering, MUTABLE node: Emittable, state: OwnershipFinalizationContext) RETURNS ![]Emittable
+FN mIRLowering__ownership_transfers_for_node(MUTABLE self: MIRLowering, node: Emittable, state: OwnershipFinalizationContext) RETURNS ![]Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -3180,7 +3209,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (mIRLowering__append_ownership_transfer_targets_for_surface_node_mut(&rtoc_self_view, &operands, &surface_node, state));
     rubyToClearVoid__mir_lowering()
     }));
-    RETURN operands |> DISTINCT CAST(Tuple{_.name, _.target, _.target_alloc} AS Tuple<String, String@symbol, ?String@symbol>);
+    MUTABLE seen: [Set]String = Set[];
+    MUTABLE deduped: []OwnershipTransferTarget = List[];
+    FOR operand IN operands DO
+      MUTABLE key = "${operand.name}|${CAST(operand.target AS String)}|${(CAST(operand.target_alloc AS ?String) OR_ELSE "")}";
+      IF !(seen.contains?(key)) THEN
+        &seen.insert(COPY key);
+        &deduped.append(COPY operand);
+      END
+    END
+    RETURN deduped;
 }
 END
 FN mIRLowering__append_ownership_transfer_targets_for_surface_node_mut(MUTABLE self: MIRLowering, MUTABLE operands: []OwnershipTransferTarget, MUTABLE surface_node: Emittable, state: OwnershipFinalizationContext) RETURNS !Void
