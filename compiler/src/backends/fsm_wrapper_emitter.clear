@@ -59,7 +59,7 @@ PRIVATE FN fsmWrapperEmitter__render_b1_ctx_struct(s: FsmB1CtxStruct, MUTABLE mi
   &parts.append("");
   &parts.append(fsmWrapperEmitter__render_b1_resume_fn(s.run_body.ctx_id));
   &parts.append("");
-  &parts.append(TRY (fsmWrapperEmitter__render_destroy_task(s.run_body.ctx_id, ( { MUTABLE rtoc_empty_list_1: []FsmDestroyAction = List[]; rtoc_empty_list_1 } ), &mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_destroy_task(s.run_body.ctx_id, List[], &mir_emitter)));
   &parts.append("    };");
   RETURN parts.join("\n");
 END
@@ -134,7 +134,7 @@ PRIVATE FN fsmWrapperEmitter__render_ctx_struct(s: FsmCtxStruct, MUTABLE mir_emi
   &parts.append("");
   &parts.append(fsmWrapperEmitter__indent_block(TRY (fsmWrapperEmitter__render_dispatch(s.resume_fn)), 8));
   &parts.append("");
-  &parts.append(TRY (fsmWrapperEmitter__render_destroy_task(s.resume_fn.ctx_id, ( { MUTABLE rtoc_empty_list_3: []FsmDestroyAction = List[]; rtoc_empty_list_3 } ), &mir_emitter)));
+  &parts.append(TRY (fsmWrapperEmitter__render_destroy_task(s.resume_fn.ctx_id, List[], &mir_emitter)));
   &parts.append("    };");
   RETURN parts.join("\n");
 END
@@ -405,7 +405,7 @@ PRIVATE FN fsmWrapperEmitter__render_body_items(stmts: []Emittable, MUTABLE mir_
   END
   MUTABLE rendered = TRY (mIREmitter__emit_statements(&mir_emitter, stmts));
   IF (rendered.length() == 0) THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_8: []String = List[]; rtoc_empty_list_8 } ) AS []String);
+    RETURN CAST(List[] AS []String);
   ELSE
     RETURN CAST([rendered] AS []String);
   END

@@ -480,7 +480,7 @@ PUB FN ownershipDataflow__reverse_postorder_index(self: OwnershipDataflow) RETUR
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE visited: [Set]Int64 = Set[];
-    MUTABLE order: []BasicBlock@multiowned = ( { MUTABLE rtoc_empty_list_5: []BasicBlock@multiowned = List[]; rtoc_empty_list_5 } );
+    MUTABLE order: []BasicBlock@multiowned = List[];
     MUTABLE visit: ?Any@multiowned = NIL;
     visit = %(block) USE(MUTABLE order, visit, MUTABLE visited) -> {
     IF visited.contains?(block.id) THEN
@@ -634,7 +634,7 @@ PUB FN ownershipDataflow__cleanup_entry_pairs(self: OwnershipDataflow, fn_node: 
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE pairs: []CleanupEntryPair = ( { MUTABLE rtoc_empty_list_12: []CleanupEntryPair = List[]; rtoc_empty_list_12 } );
+    MUTABLE pairs: []CleanupEntryPair = List[];
     MUTABLE seen: [Set]Int64 = Set[];
     aST__each_locatable_list(fn_node.body, FALSE, %(node: Locatable) USE(MUTABLE pairs, MUTABLE seen, rtoc_self_view) -> {
     IF !((node IS_A VarDecl OR ((IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :assign) ELSE FALSE END)))) THEN
@@ -1180,7 +1180,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, node_value, &step));
       RETURN step.consumed |> SELECT COPY _;
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_15: []PlaceId = List[]; rtoc_empty_list_15 } ) AS []PlaceId);
+      RETURN CAST(List[] AS []PlaceId);
     END
 }
 END
@@ -1312,7 +1312,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       TRY (ownershipDataflow__collect_explicit_in(rtoc_self_view, node_value, &step));
       RETURN step.consumed |> SELECT COPY _;
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_16: []PlaceId = List[]; rtoc_empty_list_16 } ) AS []PlaceId);
+      RETURN CAST(List[] AS []PlaceId);
     END
 }
 END
@@ -1356,7 +1356,7 @@ PRIVATE FN ownershipDataflow__collect_bg_capture_places_in_args(self: OwnershipD
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE consumed: []PlaceId = ( { MUTABLE rtoc_empty_list_17: []PlaceId = List[]; rtoc_empty_list_17 } );
+    MUTABLE consumed: []PlaceId = List[];
     MUTABLE args = (stmt.args() OR_ELSE List[]);
     FOR _ IN args DO
     TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, _, FALSE, %(expr: Locatable) USE(MUTABLE consumed, state, rtoc_self_view) -> {
@@ -1832,7 +1832,7 @@ PUB FN loopFrameAnalysis__each_loop_local_locatable(root: Locatable, local_names
   NIL;
 END
 PUB FN loopFrameAnalysis__loop_local_children(node: Locatable) RETURNS ![]Locatable ->
-  MUTABLE children: []Locatable = ( { MUTABLE rtoc_empty_list_27: []Locatable = List[]; rtoc_empty_list_27 } );
+  MUTABLE children: []Locatable = List[];
   children = locatable__child_nodes(node);
   RETURN children;
 END

@@ -177,7 +177,7 @@ PRIVATE FN translator__translate_structs(MUTABLE self: Translator) RETURNS ![]St
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE output: []String = ( { MUTABLE rtoc_empty_list_10: []String = List[]; rtoc_empty_list_10 } );
+    MUTABLE output: []String = List[];
     {
     MUTABLE rtoc_value_block_marker = 0;
     rtoc_scan_scanner_11 = compilerRegexScanner(rtoc_self_view.zig_source);
@@ -188,7 +188,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
               CONTINUE;
           END
           MUTABLE clear_name = translator__clear_type_name(&rtoc_self_view, c_name);
-          MUTABLE fields: []String = ( { MUTABLE rtoc_empty_list_12: []String = List[]; rtoc_empty_list_12 } );
+          MUTABLE fields: []String = List[];
           MUTABLE rtoc_each_items_13 = (CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 2) AS String)).split("\n");
           MUTABLE rtoc_idx = 0;
           WHILE rtoc_idx < rtoc_each_items_13.length() DO
@@ -233,7 +233,7 @@ PRIVATE FN translator__translate_functions(MUTABLE self: Translator) RETURNS ![]
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE output: []String = ( { MUTABLE rtoc_empty_list_14: []String = List[]; rtoc_empty_list_14 } );
+    MUTABLE output: []String = List[];
     MUTABLE rtoc_each_items_15 = rtoc_self_view.zig_source.split("\n");
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_15.length() DO
@@ -253,7 +253,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     CONTINUE;
       END
       MUTABLE raw_param_parts = TRY (translator__split_top_level(rtoc_self_view, raw_params));
-      MUTABLE params: []CHeaderImporterParam = ( { MUTABLE rtoc_empty_list_16: []CHeaderImporterParam = List[]; rtoc_empty_list_16 } );
+      MUTABLE params: []CHeaderImporterParam = List[];
       MUTABLE valid_params: Bool = TRUE;
       MUTABLE rtoc_idx_n1 = 0;
       WHILE rtoc_idx_n1 < raw_param_parts.length() DO
@@ -485,7 +485,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE match: ?CompilerRegexScanner = compilerRegexMatchData(raw, compilerRegexCompile("^\\?\\*const fn \\((.*)\\) callconv\\(\\.c\\) (.+)$"));
     IF match EXISTS AS match_value THEN
       MUTABLE raw_params = TRY (translator__split_top_level(rtoc_self_view, compilerRegexCapture(match_value, 1)));
-      MUTABLE params: []String = ( { MUTABLE rtoc_empty_list_17: []String = List[]; rtoc_empty_list_17 } );
+      MUTABLE params: []String = List[];
       FOR _ IN raw_params DO
     MUTABLE type = compilerRegexReplaceFirst(_, compilerRegexCompile("^[A-Za-z_]\\w*:\\s*"), "");
     MUTABLE mapped: ?String = TRY (translator__map_type(&rtoc_self_view, type, :param));
@@ -524,7 +524,7 @@ PRIVATE FN translator__alias_chain(self: Translator, raw: String) RETURNS ![]Str
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE seen: {String}Bool = {};
     MUTABLE current = COPY raw;
-    MUTABLE chain: []String = ( { MUTABLE rtoc_empty_list_18: []String = List[]; rtoc_empty_list_18 } );
+    MUTABLE chain: []String = List[];
     WHILE (rtoc_self_view.aliases.contains?(current) AND !(seen[current])) DO
       seen[current] = TRUE;
       current = COPY UNWRAP (rtoc_self_view.aliases[current]);
@@ -558,7 +558,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF existing EXISTS AS existing_value THEN
       RETURN COPY existing_value;
     END
-    MUTABLE words: []String = ( { MUTABLE rtoc_empty_list_19: []String = List[]; rtoc_empty_list_19 } );
+    MUTABLE words: []String = List[];
     MUTABLE rtoc_each_items_20 = (compilerRegexReplaceFirst(c_name, compilerRegexCompile("^struct_"), "")).split("_");
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_20.length() DO
@@ -581,11 +581,11 @@ PRIVATE FN translator__split_top_level(self: Translator, text: String) RETURNS !
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF ((text.trim().length() == 0) OR (text.trim() == "void")) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_21: []String = List[]; rtoc_empty_list_21 } ) AS []String);
+      RETURN CAST(List[] AS []String);
     END
     MUTABLE depth = 0;
     MUTABLE start = 0;
-    MUTABLE parts: []String = ( { MUTABLE rtoc_empty_list_22: []String = List[]; rtoc_empty_list_22 } );
+    MUTABLE parts: []String = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < text.length() DO
       IF (["(", "[", "{"]).contains?(text.substr(rtoc_idx, 1)) THEN

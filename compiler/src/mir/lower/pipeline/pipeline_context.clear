@@ -488,7 +488,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE new_arms: ?[]WithMatchArm = NIL;
     IF arms EXISTS AS arms_value THEN
       MUTABLE arms_value_mutable = COPY arms_value;
-      MUTABLE rewritten_arms: []WithMatchArm = ( { MUTABLE rtoc_empty_list_1: []WithMatchArm = List[]; rtoc_empty_list_1 } );
+      MUTABLE rewritten_arms: []WithMatchArm = List[];
       MUTABLE arm_index = 0;
       WHILE (arm_index < arms_value_mutable.length()) DO
         MUTABLE arm = UNWRAP (arms_value_mutable[arm_index]);
@@ -529,7 +529,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_body(MUTABLE self: PipelinePl
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE result: []Locatable = ( { MUTABLE rtoc_empty_list_2: []Locatable = List[]; rtoc_empty_list_2 } );
+    MUTABLE result: []Locatable = List[];
     MUTABLE index = 0;
     WHILE (index < body.length()) DO
       &result.append(TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, UNWRAP (body[index]))));
@@ -626,7 +626,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_block_expr(MUTABLE self: Pipe
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE body: []Locatable = COPY node.body;
-    MUTABLE new_body: []Locatable = ( { MUTABLE rtoc_empty_list_3: []Locatable = List[]; rtoc_empty_list_3 } );
+    MUTABLE new_body: []Locatable = List[];
     MUTABLE index = 0;
     WHILE (index < body.length()) DO
       &new_body.append(TRY (pipelinePlaceholderRewriter__substitute(&rtoc_self_view, UNWRAP (body[index]))));

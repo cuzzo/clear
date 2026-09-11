@@ -154,7 +154,7 @@ PUB FN fsmRecursiveSplitter__split(body: []Locatable, MUTABLE lowering: MIRLower
   MUTABLE entry: ?Int64 = TRY (fsmRecursiveSplitter__emit_stmts_or_nil(body, done_idx, &builder, &lowering, (ctx OR_ELSE {})));
   IF entry EXISTS AS entry_value THEN
     MUTABLE entry_value_mutable = COPY entry_value;
-    builder__fill(&builder, done_idx, ( { MUTABLE rtoc_empty_list_4: []SegmentStmt = List[]; rtoc_empty_list_4 } ), SegmentTail{ Done: COPY Done{ _: NIL } });
+    builder__fill(&builder, done_idx, List[], SegmentTail{ Done: COPY Done{ _: NIL } });
     MUTABLE finalized = TRY (builder__finalize(builder));
     MUTABLE pre_renumber_overrides = COPY finalized.alias_overrides_by_index;
     MUTABLE segments, mapping = fsmRecursiveSplitter__renumber_with_entry(finalized.segments, entry_value_mutable);
@@ -330,7 +330,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_suspend(susp_tail: SuspendTail, after_idx:
     panic("Unhandled suspend kind {}");
   END
   MUTABLE tail = susp_tail.with_next_index(after_idx);
-  builder__fill(&builder, idx, ( { MUTABLE rtoc_empty_list_5: []SegmentStmt = List[]; rtoc_empty_list_5 } ), tail);
+  builder__fill(&builder, idx, List[], tail);
   RETURN idx;
 END
 PRIVATE FN fsmRecursiveSplitter__emit_while_fragment(while_stmt: SplitterWhileStmt, after_idx: Int64, builder: Builder, lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
@@ -363,7 +363,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
     IF bg_rt_raw? IS_A String AS string THEN
       MUTABLE string_mutable = COPY string;
       MUTABLE bg_rt: String = CAST(string_mutable AS String);
-      MUTABLE caps_meta: []{String@symbol}FsmCapMetadataValue = ( { MUTABLE rtoc_empty_list_6: []{String@symbol}FsmCapMetadataValue = List[]; rtoc_empty_list_6 } );
+      MUTABLE caps_meta: []{String@symbol}FsmCapMetadataValue = List[];
       FOR _ IN caps DO
   MUTABLE m = TRY (mIRLowering__fsm_cap_metadata(lowering, _, with_stmt, ctx_id, captured));
   IF (m == NIL) THEN
@@ -401,10 +401,10 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
             post_acquire = cs_entry;
           END
     MUTABLE prior = COPY UNWRAP (caps.substr(0, (rtoc_idx - 0)));
-    builder__fill(&builder, UNWRAP (cap_indices[rtoc_idx]), ( { MUTABLE rtoc_empty_list_15: []SegmentStmt = List[]; rtoc_empty_list_15 } ), SegmentTail{ LockSuspend: COPY LockSuspend{ with_node: with_stmt, cap: LockCap{ CapabilityTransition: COPY caps[rtoc_idx]? }, prior_caps: COPY prior, post_acquire_idx: post_acquire, next_index: COPY after_idx, lock_index: COPY UNWRAP (lock_indices[rtoc_idx]), prior_lock_indices: COPY (lock_indices.substr(0, (rtoc_idx - 0)) OR_ELSE List[]) } });
+    builder__fill(&builder, UNWRAP (cap_indices[rtoc_idx]), List[], SegmentTail{ LockSuspend: COPY LockSuspend{ with_node: with_stmt, cap: LockCap{ CapabilityTransition: COPY caps[rtoc_idx]? }, prior_caps: COPY prior, post_acquire_idx: post_acquire, next_index: COPY after_idx, lock_index: COPY UNWRAP (lock_indices[rtoc_idx]), prior_lock_indices: COPY (lock_indices.substr(0, (rtoc_idx - 0)) OR_ELSE List[]) } });
   rtoc_idx = rtoc_idx + 1;
       END
-      MUTABLE release_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } );
+      MUTABLE release_stmts: []Emittable = List[];
       ({
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_17: []{String@symbol}FsmCapMetadataValue = caps_meta;
@@ -439,7 +439,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
   END
 END
 PRIVATE FN fsmRecursiveSplitter__lock_release_stmts(ctx_id: Int64, lock_index: Int64, lock_field_ref: String, unlock_method: String) RETURNS ![]Emittable ->
-  RETURN CAST([Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${lock_index.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY lock_field_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, method: COPY unlock_method, args: ( { MUTABLE rtoc_empty_list_21: []Any = List[]; rtoc_empty_list_21 } ), try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
+  RETURN CAST([Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${lock_index.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY lock_field_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, method: COPY unlock_method, args: List[], try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
 END
 PRIVATE FN fsmRecursiveSplitter__renumber_with_entry(segments: []Segment, entry: Int64) RETURNS Tuple<[]Segment, {Int64}Int64> ->
   MUTABLE mapping = {entry: 0};

@@ -14,12 +14,12 @@ PUB STRUCT MergedPackage {
 PUB FN packageSource__merge(member_paths: []String, resolve_pkg: FN(String) -> ?ResolvePkgReturn) RETURNS !MergedPackage ->
   MUTABLE members = member_paths |> SELECT expand(_);
   MUTABLE member_set = members |> DISTINCT _;
-  MUTABLE external_requires: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
+  MUTABLE external_requires: []String = List[];
   MUTABLE seen_requires: [Set]Tuple<String, ?String> = Set[];
-  MUTABLE bodies: []String = ( { MUTABLE rtoc_empty_list_2: []String = List[]; rtoc_empty_list_2 } );
+  MUTABLE bodies: []String = List[];
   FOR _ IN members DO
   MUTABLE dir = dirname(_);
-  MUTABLE body_lines: []String = ( { MUTABLE rtoc_empty_list_3: []String = List[]; rtoc_empty_list_3 } );
+  MUTABLE body_lines: []String = List[];
   MUTABLE rtoc_each_items_4 = (TRY (read(_))).split("\n");
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_4.length() DO
@@ -66,7 +66,7 @@ PUB FN packageSource__merge(member_paths: []String, resolve_pkg: FN(String) -> ?
 END
 PUB FN packageSource__dedupe_generated_functions(source: String) RETURNS String ->
   MUTABLE seen: {String}String = {};
-  MUTABLE out: []String = ( { MUTABLE rtoc_empty_list_5: []String = List[]; rtoc_empty_list_5 } );
+  MUTABLE out: []String = List[];
   MUTABLE lines = source.split("\n");
   MUTABLE i = 0;
   MUTABLE seen_extern: [Set]String = Set[];
@@ -128,13 +128,13 @@ PUB FN packageSource__resolve_require_targets(target: String, member_dir: String
       ELSE_IF resolved_value IS_A []String AS resolved_list THEN
         list = COPY resolved_list;
       END
-      MUTABLE expanded: []String = ( { MUTABLE rtoc_empty_list_6: []String = List[]; rtoc_empty_list_6 } );
+      MUTABLE expanded: []String = List[];
       FOR _ IN list DO
       &expanded.append(expand(_.trim()));
       END
       RETURN expanded;
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_7: []String = List[]; rtoc_empty_list_7 } ) AS []String);
+      RETURN CAST(List[] AS []String);
     END
   END
   RETURN CAST([expand(target, member_dir)] AS []String);

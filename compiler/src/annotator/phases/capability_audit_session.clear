@@ -1768,7 +1768,7 @@ PRIVATE FN capabilityAuditSession__auto_rank_candidates(self: CapabilityAuditSes
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF (FALSE OR ops.empty?()) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_3: []AutoCandidate = List[]; rtoc_empty_list_3 } ) AS []AutoCandidate);
+      RETURN CAST(List[] AS []AutoCandidate);
     END
     MUTABLE agg: {String@symbol}AutoCandidateStat = {};
     MUTABLE rtoc_idx = 0;
@@ -1903,7 +1903,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF auto_tok EXISTS AS auto_tok_value THEN
       RETURN CAST([TRY (fix__new(TRY (capabilityAuditSession__fix_description(rtoc_self_view, :REPLACE_AUTO_WITH_INFERRED, CAST({:type: DiagnosticKwValue{ StringValue: COPY type_str }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, auto_tok_value.line, auto_tok_value.column, "Auto".codepointCount()), type_str)], :auto))] AS []Fix);
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_4: []Fix = List[]; rtoc_empty_list_4 } ) AS []Fix);
+      RETURN CAST(List[] AS []Fix);
     END
 }
 END
@@ -2100,7 +2100,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE
         union_name = "Result";
       END
-      MUTABLE variant_parts: []String = ( { MUTABLE rtoc_empty_list_5: []String = List[]; rtoc_empty_list_5 } );
+      MUTABLE variant_parts: []String = List[];
       MUTABLE i: Int64 = 0;
       WHILE (i < observed_strs.length()) DO
         &variant_parts.append("Variant${i.toString()}: ${UNWRAP (observed_strs[i])}");
@@ -2748,7 +2748,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN edits;
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_18: []Edit = List[]; rtoc_empty_list_18 } ) AS []Edit);
+      RETURN CAST(List[] AS []Edit);
     END
 }
 END
@@ -3652,12 +3652,12 @@ PRIVATE FN capabilityAuditSession__effects_clause_edits(self: CapabilityAuditSes
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE span: ?EffectSpan = COPY fn_node.effects_span;
     IF !(span) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_24: []Edit = List[]; rtoc_empty_list_24 } ) AS []Edit);
+      RETURN CAST(List[] AS []Edit);
     END
     MUTABLE s = span.start_token;
     MUTABLE e = span.end_token;
     IF (s.line != e.line) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_25: []Edit = List[]; rtoc_empty_list_25 } ) AS []Edit);
+      RETURN CAST(List[] AS []Edit);
     END
     MUTABLE end_col = (e.column + (CAST(e.value AS String)).codepointCount());
     RETURN CAST([edit__new(span__new(NIL, s.line, s.column, (end_col - s.column)), replacement)] AS []Edit);
@@ -3906,7 +3906,7 @@ PRIVATE FN capabilityAuditSession__build_lock_graph(self: CapabilityAuditSession
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE adj: {String@symbol}[Set]String@symbol = {};
     MUTABLE nodes: [Set]String@symbol = Set[];
-    MUTABLE live: []LockEdge = ( { MUTABLE rtoc_empty_list_29: []LockEdge = List[]; rtoc_empty_list_29 } );
+    MUTABLE live: []LockEdge = List[];
     FOR rtoc_each_22 IN capabilityAuditSession__phase_audit_inputs(rtoc_self_view).lock_analysis.direct_edges.keys() DO
     MUTABLE edges: []LockEdge = (capabilityAuditSession__phase_audit_inputs(rtoc_self_view).lock_analysis.direct_edges[rtoc_each_22] OR_ELSE CAST(panic("missing hash key") AS []LockEdge));
     MUTABLE rtoc_idx = 0;
@@ -3948,7 +3948,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     };
     MUTABLE visited: [Set]String@symbol = Set[];
-    MUTABLE finish_order: []String@symbol = ( { MUTABLE rtoc_empty_list_32: []String@symbol = List[]; rtoc_empty_list_32 } );
+    MUTABLE finish_order: []String@symbol = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < nodes.length() DO
       IF visited.contains?(nodes[rtoc_idx]) THEN
@@ -3979,7 +3979,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE assigned: [Set]String@symbol = Set[];
-    MUTABLE sccs: [][]String@symbol = ( { MUTABLE rtoc_empty_list_33: [][]String@symbol = List[]; rtoc_empty_list_33 } );
+    MUTABLE sccs: [][]String@symbol = List[];
     MUTABLE rtoc_reverse_items_34: []String@symbol = finish_order;
     MUTABLE rtoc_reverse_i_35 = rtoc_reverse_items_34.length() - 1;
     WHILE rtoc_reverse_i_35 >= 0 DO
@@ -3987,7 +3987,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         rtoc_reverse_i_35 = rtoc_reverse_i_35 - 1;
     CONTINUE;
       END
-      MUTABLE component: []String@symbol = ( { MUTABLE rtoc_empty_list_36: []String@symbol = List[]; rtoc_empty_list_36 } );
+      MUTABLE component: []String@symbol = List[];
       MUTABLE stack: []String@symbol = [(rtoc_reverse_items_34[rtoc_reverse_i_35])?];
       WHILE !((stack.length() == 0)) DO
           MUTABLE node = symbol(UNWRAP (&stack.pop()));

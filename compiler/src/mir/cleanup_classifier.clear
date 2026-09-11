@@ -363,7 +363,7 @@ PUB FN cleanupClassifier__params_for_call(call: FuncCall) RETURNS ![]Param ->
   IF sig EXISTS AS sig_value THEN
     RETURN TRY (functionSignature__params(sig_value));
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_2: []Param = List[]; rtoc_empty_list_2 } ) AS []Param);
+    RETURN CAST(List[] AS []Param);
   END
 END
 PUB FN cleanupClassifier__params_for_method_call(call: MethodCall) RETURNS ![]Param ->
@@ -371,7 +371,7 @@ PUB FN cleanupClassifier__params_for_method_call(call: MethodCall) RETURNS ![]Pa
   IF sig EXISTS AS sig_value THEN
     RETURN TRY (functionSignature__params(sig_value));
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_3: []Param = List[]; rtoc_empty_list_3 } ) AS []Param);
+    RETURN CAST(List[] AS []Param);
   END
 END
 PUB FN cleanupClassifier__stamp_field_pre_cleanups_mut(MUTABLE body: []Locatable, facts: FrozenCleanupFacts, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL, lifecycle_registry: ?LifecycleRegistry = NIL) RETURNS !Void ->

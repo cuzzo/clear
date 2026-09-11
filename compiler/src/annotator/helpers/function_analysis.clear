@@ -101,9 +101,9 @@ PUB FN callArityPlan__exact?(self: CallArityPlan) RETURNS Bool ->
 END
 PUB FN callArityPlan__injectable_defaults(self: CallArityPlan) RETURNS ![]Param ->
   IF !((self.given_args < self.max_args)) THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_1: []Param = List[]; rtoc_empty_list_1 } ) AS []Param);
+    RETURN CAST(List[] AS []Param);
   END
-  MUTABLE defaults: []Param = ( { MUTABLE rtoc_empty_list_2: []Param = List[]; rtoc_empty_list_2 } );
+  MUTABLE defaults: []Param = List[];
   MUTABLE index = self.given_args;
   WHILE (index < self.max_args) DO
     MUTABLE param = COPY UNWRAP (self.params[index]);

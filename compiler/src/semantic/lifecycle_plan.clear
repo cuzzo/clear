@@ -57,7 +57,7 @@ PUB FN linearResourceFacts__build_types(roots: []Type, schema_lookup: FN(String@
     IF seed THEN
       seeds[key] = TRUE;
     END
-    MUTABLE dependency_keys: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
+    MUTABLE dependency_keys: []String = List[];
     FOR _ IN dependencies DO
   MUTABLE dependency_key = linearResourceFacts__fact_key(CAST(COPY _ AS Type));
   &dependency_keys.append(dependency_key);
@@ -153,7 +153,7 @@ PRIVATE FN linearResourceFacts__resource_seed_and_dependencies(type_info: Type, 
   IF schema? IS_A ResourceSchema AS resource_schema THEN
     RETURN CAST(Tuple{TRUE, List[]} AS Tuple<Bool, []Type>);
   END
-  MUTABLE dependencies: []Type = ( { MUTABLE rtoc_empty_list_3: []Type = List[]; rtoc_empty_list_3 } );
+  MUTABLE dependencies: []Type = List[];
   IF schema? IS_A StructSchema AS struct_schema THEN
     FOR rtoc_each_key IN struct_schema.fields.keys() DO
   MUTABLE field: StructField = COPY UNWRAP (struct_schema.fields[rtoc_each_key]);

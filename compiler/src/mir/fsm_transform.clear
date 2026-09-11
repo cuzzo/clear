@@ -70,7 +70,7 @@ PUB FN fsmTransform__coerce_context_fields(raw: ?ContextFieldInput) RETURNS ![]C
     END
     panic("FSM context fields must be MIR::ContextFieldDecl values, got {}");
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_3: []ContextFieldDecl = List[]; rtoc_empty_list_3 } ) AS []ContextFieldDecl);
+    RETURN CAST(List[] AS []ContextFieldDecl);
   END
 END
 PUB FN fsmTransform__coerce_context_field(raw: Raw) RETURNS ![]ContextFieldDecl EFFECTS REENTRANT ->
@@ -101,7 +101,7 @@ PUB FN fsmTransform__coerce_context_inits(raw: ?ContextInitInput) RETURNS ![]Str
     END
     panic("FSM context inits must be MIR::StructInitField values, got {}");
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_6: []StructInitField = List[]; rtoc_empty_list_6 } ) AS []StructInitField);
+    RETURN CAST(List[] AS []StructInitField);
   END
 END
 PUB FN fsmTransform__coerce_promoted_decls(raw: ?PromotedDeclInput) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -117,11 +117,11 @@ PUB FN fsmTransform__coerce_promoted_decls(raw: ?PromotedDeclInput) RETURNS ![]E
     END
     panic("FSM promoted decls must be MIR::Emittable values, got {}");
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_7: []Emittable = List[]; rtoc_empty_list_7 } ) AS []Emittable);
+    RETURN CAST(List[] AS []Emittable);
   END
 END
 PRIVATE FN fsmTransform__collect_body_locals(stmts: []Locatable) RETURNS ![]PromotedLocalFact ->
-  MUTABLE out: []PromotedLocalFact = ( { MUTABLE rtoc_empty_list_8: []PromotedLocalFact = List[]; rtoc_empty_list_8 } );
+  MUTABLE out: []PromotedLocalFact = List[];
   MUTABLE seen: {String}Bool = {};
   aST__each_locatable_list(stmts, FALSE, %(MUTABLE node: Locatable) USE(MUTABLE out, MUTABLE seen) -> {
   MUTABLE entry: ?PromotedLocalFact = TRY (fsmTransform__local_entry_for_node(node));

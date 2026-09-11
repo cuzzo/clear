@@ -29,7 +29,7 @@ PUB FN functionSignature__intrinsic_call_validation_signature(self: FunctionSign
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE specs = TRY (functionSignature__intrinsic_arg_specs(rtoc_self_view));
-    MUTABLE validation_params: []Param = ( { MUTABLE rtoc_empty_list_2: []Param = List[]; rtoc_empty_list_2 } );
+    MUTABLE validation_params: []Param = List[];
     MUTABLE index: Int64 = 0;
     WHILE (index < specs.length()) DO
       MUTABLE arg_spec = COPY UNWRAP (specs[index]);
@@ -37,7 +37,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &validation_params.append(Param{ name: (arg_spec.name OR_ELSE "arg${index.toString()}"), type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: COPY arg_spec.type })), required: TRUE, mutable: ( { MUTABLE rtoc_optional_or_source_3: ?Bool = arg_spec.mutable; MUTABLE rtoc_optional_or_result_4: ?Bool = NIL; IF rtoc_optional_or_source_3 != NIL THEN rtoc_optional_or_result_4 = COPY rtoc_optional_or_source_3; ELSE rtoc_optional_or_result_4 = ((contract_param != NIL) AND (contract_param.mutable == TRUE)); END rtoc_optional_or_result_4 } ), takes: ( { MUTABLE rtoc_optional_or_source_5: ?Bool = arg_spec.takes; MUTABLE rtoc_optional_or_result_6: ?Bool = NIL; IF rtoc_optional_or_source_5 != NIL THEN rtoc_optional_or_result_6 = COPY rtoc_optional_or_source_5; ELSE rtoc_optional_or_result_6 = ((contract_param != NIL) AND (contract_param.takes == TRUE)); END rtoc_optional_or_result_6 } ), default: NIL, comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: :polymorphic });
       index = (index + 1);
     END
-    RETURN TRY (functionSignature__new(validation_params, TypeTypeInput{ Type: COPY functionSignature__return_type(rtoc_self_view) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_7: []String@symbol = List[]; rtoc_empty_list_7 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_8: []String@symbol = List[]; rtoc_empty_list_8 } ), NIL, ( { MUTABLE rtoc_empty_list_9: []String@symbol = List[]; rtoc_empty_list_9 } ), TRUE, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, TRY (functionSignature__return_def(rtoc_self_view))));
+    RETURN TRY (functionSignature__new(validation_params, TypeTypeInput{ Type: COPY functionSignature__return_type(rtoc_self_view) }, NIL, NIL, List[], {}, FALSE, FALSE, NIL, NIL, NIL, List[], NIL, List[], TRUE, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, NIL, TRY (functionSignature__return_def(rtoc_self_view))));
 }
 END
 PUB FN functionSignature__import_copy(self: FunctionSignature, module_alias: ?String) RETURNS !FunctionSignature@multiowned

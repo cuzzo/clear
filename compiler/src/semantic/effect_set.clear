@@ -97,7 +97,7 @@ PUB FN effectSet__to_a(self: EffectSet) RETURNS ![]String@symbol
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE ordered: []String@symbol = ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } );
+    MUTABLE ordered: []String@symbol = List[];
     FOR _ IN effect_order DO
     IF rtoc_self_view.effects.contains?(_) THEN
       &ordered.append(COPY _);

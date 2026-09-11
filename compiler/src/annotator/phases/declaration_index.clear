@@ -20,14 +20,14 @@ PUB STRUCT DeclarationIndex {
   error_type_registrations: []ErrorTypeRegistration
 }
 PUB FN declarationIndexer__index(program: Program) RETURNS !DeclarationIndex ->
-  MUTABLE imports: []RequireNode = ( { MUTABLE rtoc_empty_list_1: []RequireNode = List[]; rtoc_empty_list_1 } );
-  MUTABLE type_declarations: []TypeDeclaration = ( { MUTABLE rtoc_empty_list_2: []TypeDeclaration = List[]; rtoc_empty_list_2 } );
-  MUTABLE function_declarations: []FunctionDef = ( { MUTABLE rtoc_empty_list_3: []FunctionDef = List[]; rtoc_empty_list_3 } );
-  MUTABLE extern_function_declarations: []ExternFnDecl = ( { MUTABLE rtoc_empty_list_4: []ExternFnDecl = List[]; rtoc_empty_list_4 } );
-  MUTABLE implementation_declarations: []ImplementationDef = ( { MUTABLE rtoc_empty_list_5: []ImplementationDef = List[]; rtoc_empty_list_5 } );
-  MUTABLE conformance_declarations: []ConformanceDef = ( { MUTABLE rtoc_empty_list_6: []ConformanceDef = List[]; rtoc_empty_list_6 } );
-  MUTABLE union_method_declarations: []UnionDef = ( { MUTABLE rtoc_empty_list_7: []UnionDef = List[]; rtoc_empty_list_7 } );
-  MUTABLE body_statements: []Locatable = ( { MUTABLE rtoc_empty_list_8: []Locatable = List[]; rtoc_empty_list_8 } );
+  MUTABLE imports: []RequireNode = List[];
+  MUTABLE type_declarations: []TypeDeclaration = List[];
+  MUTABLE function_declarations: []FunctionDef = List[];
+  MUTABLE extern_function_declarations: []ExternFnDecl = List[];
+  MUTABLE implementation_declarations: []ImplementationDef = List[];
+  MUTABLE conformance_declarations: []ConformanceDef = List[];
+  MUTABLE union_method_declarations: []UnionDef = List[];
+  MUTABLE body_statements: []Locatable = List[];
   MUTABLE error_type_registrations = TRY (declarationIndexer__collect_error_type_registrations(program));
   FOR _ IN program.statements DO
   IF _ IS_A RequireNode AS require_node THEN
@@ -65,7 +65,7 @@ PRIVATE FN declarationIndexer__union_methods?(node: UnionDef) RETURNS Bool ->
   RETURN (!(FALSE) AND !(methods.empty?()));
 END
 PRIVATE FN declarationIndexer__collect_error_type_registrations(program: Program) RETURNS ![]ErrorTypeRegistration ->
-  MUTABLE registrations: []ErrorTypeRegistration = ( { MUTABLE rtoc_empty_list_9: []ErrorTypeRegistration = List[]; rtoc_empty_list_9 } );
+  MUTABLE registrations: []ErrorTypeRegistration = List[];
   aST__each_locatable(Locatable{ Program: COPY program }, TRUE, %(node: Locatable) USE(MUTABLE registrations) -> {
   IF node IS_A Raise AS raise THEN
       IF raise.kind EXISTS AS kind THEN

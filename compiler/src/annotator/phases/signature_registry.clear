@@ -5,7 +5,7 @@ REQUIRE "pkg:rtoc_6173742f706172616d2e636c656172" AS param
 # Ruby module Annotator
 # Ruby module Annotator::Phases
 PUB FN signatureRegistry__function_signature(node: FunctionDef, return_lifetime: ?String) RETURNS !FunctionSignature@multiowned ->
-  RETURN TRY (functionSignature__new(node.params |> SELECT signatureRegistry__function_param(_), castTypeToTypeTypeInput__signature_registry(TRY (functionDef__annotation_return_type(node))), ruby_wrap_optional_String_FunctionSignatureLifetimeInput(return_lifetime), node.visibility, node.type_params |> SELECT symbol(_), TRY (signatureRegistry__generic_bounds(node.generic_params)), ((node.reentrance_kind == :reentrant) OR (node.effects_decl == :reentrant)), FALSE, NIL, NIL, NIL, node.type_params |> SELECT symbol(_), NIL, ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } ), FALSE, NIL, NIL, NIL, NIL, NIL, NIL, NIL, node.requires));
+  RETURN TRY (functionSignature__new(node.params |> SELECT signatureRegistry__function_param(_), castTypeToTypeTypeInput__signature_registry(TRY (functionDef__annotation_return_type(node))), ruby_wrap_optional_String_FunctionSignatureLifetimeInput(return_lifetime), node.visibility, node.type_params |> SELECT symbol(_), TRY (signatureRegistry__generic_bounds(node.generic_params)), ((node.reentrance_kind == :reentrant) OR (node.effects_decl == :reentrant)), FALSE, NIL, NIL, NIL, node.type_params |> SELECT symbol(_), NIL, List[], FALSE, NIL, NIL, NIL, NIL, NIL, NIL, NIL, node.requires));
 END
 PRIVATE FN signatureRegistry__generic_bounds(params: []GenericParamDecl) RETURNS !{String@symbol}[]Type@multiowned ->
   MUTABLE rtoc_tuple_return_2 = params |> REDUCE({}) {
@@ -27,7 +27,7 @@ END
 PRIVATE FN signatureRegistry__extern_lifetime_paths(node: ExternFnDecl) RETURNS ![]FunctionSignatureLifetimeSource ->
   MUTABLE lifetime_opt: ?ClearParserReturnLifetime = COPY node.return_lifetime;
   IF (lifetime_opt == NIL) THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_5: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_5 } ) AS []FunctionSignatureLifetimeSource);
+    RETURN CAST(List[] AS []FunctionSignatureLifetimeSource);
   END
   MUTABLE lifetime: ClearParserReturnLifetime = COPY lifetime_opt;
   IF lifetime IS_A String@symbol AS lifetime_symbol THEN
@@ -35,7 +35,7 @@ PRIVATE FN signatureRegistry__extern_lifetime_paths(node: ExternFnDecl) RETURNS 
       RETURN CAST([FunctionSignatureLifetimeSource{ SymbolValue: :wildcard }] AS []FunctionSignatureLifetimeSource);
     END
   END
-  MUTABLE paths: []FunctionSignatureLifetimeSource = ( { MUTABLE rtoc_empty_list_6: []FunctionSignatureLifetimeSource = List[]; rtoc_empty_list_6 } );
+  MUTABLE paths: []FunctionSignatureLifetimeSource = List[];
   MUTABLE rtoc_each_items_7 = (CAST(lifetime AS []Locatable));
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_7.length() DO

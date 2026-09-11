@@ -11,7 +11,7 @@ PUB FN unionPayloadCompatibility__unique_variant(expected_type: Type, actual_typ
       compared_actual_branch_value = COPY actual_type;
     END
     MUTABLE compared_actual: Type = compared_actual_branch_value?;
-    MUTABLE matches: []String@symbol = ( { MUTABLE rtoc_empty_list_1: []String@symbol = List[]; rtoc_empty_list_1 } );
+    MUTABLE matches: []String@symbol = List[];
     MUTABLE rtoc_each_items_2 = union_schema.variants.keys();
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_2.length() DO

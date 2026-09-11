@@ -90,7 +90,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   rtoc_idx = rtoc_idx + 1;
   END
   MUTABLE body_fn_names_by_index: {Int64}String = {};
-  MUTABLE member_fns = segment_specs |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE body: []FsmBodyItem = ( { MUTABLE rtoc_empty_list_1: []FsmBodyItem = List[]; rtoc_empty_list_1 } ); { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.prologue_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE incoming_bind: ?[]FsmBodyItem = COPY bind_for_index[_.index]; { MUTABLE rtoc_value_block_marker = 0; MUTABLE fn_name: ?String = COPY _.fn_name; { MUTABLE rtoc_value_block_marker = 0; IF incoming_bind EXISTS AS incoming_bind_value THEN
+  MUTABLE member_fns = segment_specs |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE body: []FsmBodyItem = List[]; { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.prologue_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE incoming_bind: ?[]FsmBodyItem = COPY bind_for_index[_.index]; { MUTABLE rtoc_value_block_marker = 0; MUTABLE fn_name: ?String = COPY _.fn_name; { MUTABLE rtoc_value_block_marker = 0; IF incoming_bind EXISTS AS incoming_bind_value THEN
     fn_name = (fn_name OR_ELSE "runSeg${_.index.toString()}");
     body = ruby_array_concat_FsmBodyItem(body, CAST(incoming_bind_value AS []FsmBodyItem));
   END (IF (fn_name == NIL) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; body_fn_names_by_index[_.index] = fn_name; { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.body_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE d: ?SuspendDescriptor = COPY _.descriptor;
@@ -138,7 +138,7 @@ PRIVATE FN emit__build_fsm_structure(ctx: FsmEmitContext, segment_specs: []FsmSe
   MUTABLE captured = COPY ctx.captured;
   MUTABLE capture_names = captured.keys() |> SELECT _.toString();
   MUTABLE captures = capture_names |> SELECT:? (IF !(cleanup_names.contains?(_)) THEN NIL ELSE FsmCaptureFact{ name: COPY _, cleanup_at: :finalize } END) |> WHERE _ != NIL;
-  MUTABLE steps = segment_specs |> SELECT FsmStepFact{ index: _.index, reads: COPY _.facts.ctx_reads, cleanups: ( { MUTABLE rtoc_empty_list_2: []String = List[]; rtoc_empty_list_2 } ) };
+  MUTABLE steps = segment_specs |> SELECT FsmStepFact{ index: _.index, reads: COPY _.facts.ctx_reads, cleanups: List[] };
   MUTABLE structure = FsmStructure{ captures: UNWRAP (captures), state_fields: List[], steps: steps, finalize_cleanups: cleanup_names, ctx_id: COPY id, result_aliases_finalized: NIL, lowered_node_id: NIL, ownership_consumption: NIL, facts: FsmStructureFacts{ required_move_guards: List[], move_guard_writes: List[], ownership_facts: List[], destroy_actions: List[] }, owned_result_required: NIL };
   TRY (fsmStructure__set_required_move_guards(&structure, (segment_specs |> UNNEST _.facts.required_move_guards) |> DISTINCT _ |> SELECT COPY _));
   TRY (fsmStructure__set_move_guard_writes(&structure, (segment_specs |> UNNEST _.facts.move_guard_writes) |> DISTINCT _ |> SELECT COPY _));
@@ -193,7 +193,7 @@ PRIVATE FN emit__build_fsm_segment_facts(spec: FsmSegmentSpec, id: Int64, cleanu
   RETURN FsmSegmentFacts{ ctx_reads: COPY TRY (emit__collect_ctx_field_reads(nodes, id)), required_move_guards: COPY TRY (emit__collect_required_move_guards(nodes, id, cleanup_names)), move_guard_writes: COPY TRY (emit__collect_move_guard_writes(nodes, id)), result_names: COPY result_names, ownership_facts: COPY TRY (emit__unique_fsm_ownership_facts((structured_facts + result_facts))) };
 END
 PRIVATE FN emit__fsm_segment_fact_roots(spec: FsmSegmentSpec) RETURNS ![]Emittable ->
-  MUTABLE roots: []Emittable = ( { MUTABLE rtoc_empty_list_6: []Emittable = List[]; rtoc_empty_list_6 } );
+  MUTABLE roots: []Emittable = List[];
   roots = ruby_array_concat_Emittable__emit(roots, TRY (emit__fsm_body_mir_nodes(spec.prologue_stmts)));
   roots = ruby_array_concat_Emittable__emit(roots, { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_7: ?[]Emittable = NIL; IF (spec.structure_stmts.length() == 0) THEN rtoc_ternary_value_7 = TRY (emit__fsm_body_mir_nodes(spec.body_stmts)); ELSE rtoc_ternary_value_7 = spec.structure_stmts; END rtoc_ternary_value_7? });
   MUTABLE descriptor: ?SuspendDescriptor = COPY spec.descriptor;
@@ -219,7 +219,7 @@ PRIVATE FN emit__mir_nodes_reference_ident?(nodes: []Emittable, name: String) RE
   RETURN (TRY (mIR__nodes(NodeRoot{ ArrayValue: COPY nodes }))).grep(MIR.Ident) |> ANY (_.name() == name);
 END
 PRIVATE FN emit__prior_lock_release_stmts(ctx_id: Int64, lock_index: Int64, lock_ref: String, unlock_method: String) RETURNS ![]Emittable ->
-  RETURN CAST([Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${lock_index.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY lock_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, method: COPY unlock_method, args: ( { MUTABLE rtoc_empty_list_9: []Any = List[]; rtoc_empty_list_9 } ), try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
+  RETURN CAST([Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${lock_index.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY lock_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, method: COPY unlock_method, args: List[], try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
 END
 PUB FN emit__unique_fsm_ownership_facts(facts: []FsmOwnershipFact) RETURNS ![]FsmOwnershipFact ->
   RETURN facts |> DISTINCT CAST(Tuple{_.name, _.target, _.target_alloc, _.move_guarded} AS Tuple<String, String@symbol, ?String@symbol, Bool>);
@@ -290,7 +290,7 @@ PRIVATE FN emit__collect_ctx_field_reads(nodes: []Emittable, id: Int64) RETURNS 
   RETURN (nodes |> SELECT:? emit__ctx_field_name(_, id) |> WHERE _ != NIL).compact() |> DISTINCT _ |> SELECT COPY _;
 END
 PRIVATE FN emit__collect_fsm_nodes(roots: []Emittable) RETURNS ![]Emittable ->
-  MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_10: []Emittable = List[]; rtoc_empty_list_10 } );
+  MUTABLE out: []Emittable = List[];
   TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY roots }, %(node: Emittable) USE(MUTABLE out) -> {
   &out.append(COPY node);
   rubyToClearVoid__emit()
@@ -443,7 +443,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   })(segment_nodes);
   MUTABLE owned_result_guards = TRY (emit__fsm_owned_result_guards(segment_nodes, lowering));
   MUTABLE seg_result_facts: {Int64}[]FsmResultTransferFact = {};
-  MUTABLE seg_mir_codes: [][]Emittable = ( { MUTABLE rtoc_empty_list_14: [][]Emittable = List[]; rtoc_empty_list_14 } );
+  MUTABLE seg_mir_codes: [][]Emittable = List[];
   MUTABLE rtoc_indexed_result_15 = {
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_16: []Segment = segment_nodes;
@@ -451,8 +451,8 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE rtoc_indexed_i_17 = 0;
   WHILE rtoc_indexed_i_17 < rtoc_indexed_items_16.length() DO
     &rtoc_indexed_output_20.append({
-  MUTABLE mir_stmts: []Emittable = ( { MUTABLE rtoc_empty_list_18: []Emittable = List[]; rtoc_empty_list_18 } );
-  MUTABLE ast_stmts: []Locatable = ( { MUTABLE rtoc_empty_list_19: []Locatable = List[]; rtoc_empty_list_19 } );
+  MUTABLE mir_stmts: []Emittable = List[];
+  MUTABLE ast_stmts: []Locatable = List[];
   FOR _ IN UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).stmts DO
   IF _ IS_A Emittable THEN
       &mir_stmts.append(COPY _);
@@ -545,7 +545,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE prologue: ?[]FsmBodyItem =   IF (rtoc_indexed_i_23 == 0) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
-    parts = ( { MUTABLE rtoc_empty_list_27: []FsmBodyItem = List[]; rtoc_empty_list_27 } );
+    parts = List[];
     IF arena_init_stmt THEN
       &parts.append(emit__fsm_body_mir_item(Emittable{ Set: COPY arena_init_stmt }));
   END
@@ -567,7 +567,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   END
   END
   MUTABLE prologue_stmts = (prologue OR_ELSE List[]);
-  MUTABLE rt_roots: []Emittable = ( { MUTABLE rtoc_empty_list_30: []Emittable = List[]; rtoc_empty_list_30 } );
+  MUTABLE rt_roots: []Emittable = List[];
   ruby_array_concat_Emittable__emit(rt_roots, TRY (emit__fsm_body_mir_nodes(body_stmts)));
   ruby_array_concat_Emittable__emit(rt_roots, TRY (emit__fsm_body_mir_nodes(prologue_stmts)));
   ruby_array_concat_Emittable__emit(rt_roots, CAST((descriptor?.setup_stmts OR_ELSE List[]) AS []Emittable));
@@ -584,9 +584,9 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   END
   MUTABLE segment_specs = rtoc_indexed_result_21?;
   TRY (emit__register_owned_suspend_result_cleanups_mut(segment_specs, &ctx, id));
-  MUTABLE lock_extra_fields: []ContextFieldDecl = ( { MUTABLE rtoc_empty_list_32: []ContextFieldDecl = List[]; rtoc_empty_list_32 } );
+  MUTABLE lock_extra_fields: []ContextFieldDecl = List[];
   MUTABLE next_lock_segment_index = segment_specs.length();
-  MUTABLE expanded_specs: []FsmSegmentSpec = ( { MUTABLE rtoc_empty_list_33: []FsmSegmentSpec = List[]; rtoc_empty_list_33 } );
+  MUTABLE expanded_specs: []FsmSegmentSpec = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segment_specs.length() DO
   IF (segment_specs[rtoc_idx]?.tail) IS_A LockSuspend THEN
@@ -661,7 +661,7 @@ PRIVATE FN emit__build_recursive_capture_map(ctx: FsmEmitContext, segments: []Se
 END
 PRIVATE FN emit__register_recursive_destroy_actions_mut(MUTABLE ctx: FsmEmitContext) RETURNS !Void ->
   MUTABLE id = ctx.id;
-  ctx.destroy_actions = ( { MUTABLE rtoc_empty_list_34: []FsmDestroyAction = List[]; rtoc_empty_list_34 } );
+  ctx.destroy_actions = List[];
   FOR rtoc_each_key IN ctx.captured.keys() DO
   MUTABLE ignored_1: Type = COPY UNWRAP (ctx.captured[rtoc_each_key]);
   MUTABLE close_plan: ?ResourceClosePlan = COPY ctx.capture_close_plans[rtoc_each_key];
@@ -927,11 +927,11 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   ELSE
     NIL
   END, suppress_runtime_ref: spec.suppress_runtime_ref, err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
-  MUTABLE woken_spec = FsmSegmentSpec{ index: woken_idx, body_stmts: ( { MUTABLE rtoc_empty_list_43: []FsmBodyItem = List[]; rtoc_empty_list_43 } ), tail: SegmentTail{ FsmTailWokenCheck: COPY FsmTailWokenCheck{ ok_step: try_success_idx, error_step: retry_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
-  MUTABLE retry_spec = FsmSegmentSpec{ index: retry_idx, body_stmts: ( { MUTABLE rtoc_empty_list_44: []FsmBodyItem = List[]; rtoc_empty_list_44 } ), tail: SegmentTail{ FsmTailRetryOrError: COPY FsmTailRetryOrError{ retries: COPY meta[:retries], retry_step: spec.index, fail_step: fail_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
-  MUTABLE fail_spec = FsmSegmentSpec{ index: fail_idx, body_stmts: ( { MUTABLE rtoc_empty_list_45: []FsmBodyItem = List[]; rtoc_empty_list_45 } ), pre_body_stmts: COPY fail_body_stmts, tail: COPY fail_tail, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
+  MUTABLE woken_spec = FsmSegmentSpec{ index: woken_idx, body_stmts: List[], tail: SegmentTail{ FsmTailWokenCheck: COPY FsmTailWokenCheck{ ok_step: try_success_idx, error_step: retry_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
+  MUTABLE retry_spec = FsmSegmentSpec{ index: retry_idx, body_stmts: List[], tail: SegmentTail{ FsmTailRetryOrError: COPY FsmTailRetryOrError{ retries: COPY meta[:retries], retry_step: spec.index, fail_step: fail_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
+  MUTABLE fail_spec = FsmSegmentSpec{ index: fail_idx, body_stmts: List[], pre_body_stmts: COPY fail_body_stmts, tail: COPY fail_tail, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
   MUTABLE held_set_stmt = Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${cap_idx}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-  MUTABLE held_set_spec = FsmSegmentSpec{ index: held_set_idx, body_stmts: ( { MUTABLE rtoc_empty_list_46: []FsmBodyItem = List[]; rtoc_empty_list_46 } ), pre_body_stmts: [Emittable{ Set: COPY held_set_stmt }], tail: SegmentTail{ Goto: COPY Goto{ target_index: tail.post_acquire_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
+  MUTABLE held_set_spec = FsmSegmentSpec{ index: held_set_idx, body_stmts: List[], pre_body_stmts: [Emittable{ Set: COPY held_set_stmt }], tail: SegmentTail{ Goto: COPY Goto{ target_index: tail.post_acquire_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
   MUTABLE extra_fields = [emit__ctx_field_decl("lock_waiter", "CheatHeader.WaiterNode", Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }), emit__ctx_field_decl("__lock_held_${cap_idx}", "bool", Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } })];
   IF (meta[:retries] > 0) THEN
     &extra_fields.append(emit__ctx_field_decl("retry_count", "u32", Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }));
@@ -1039,11 +1039,11 @@ PRIVATE FN emit__build_spawn_setup(ctx: FsmEmitContext) RETURNS !FsmSpawnSetup -
   MUTABLE alloc_expr =   IF is_local_dispatch THEN
     {
   MUTABLE rtoc_value_block_marker = 0;
-  sched = MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY ctx.rt_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "getSched", args: ( { MUTABLE rtoc_empty_list_51: []Any = List[]; rtoc_empty_list_51 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+  sched = MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY ctx.rt_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "getSched", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
   FieldGet{ object: Emittable{ MIRMethodCall: COPY sched }, field: "allocator", lowered_node_id: NIL, ownership_consumption: NIL }
   }
   ELSE
-    MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY ctx.rt_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "heapAlloc", args: ( { MUTABLE rtoc_empty_list_52: []Any = List[]; rtoc_empty_list_52 } ), try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL }
+    MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY ctx.rt_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "heapAlloc", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL }
   END;
   MUTABLE capture_inits = ctx.capture_inits |> WHERE !(((CAST(_.name AS String) == "inner") OR (CAST(_.name AS String) == "alloc")));
   MUTABLE ctx_init_fields = ([StructInitField{ name: :task, value: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL }, StructInitField{ name: :rt, value: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL }, StructInitField{ name: :inner, value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY ctx.promise_var, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL }, StructInitField{ name: :alloc, value: Emittable{ Ident: COPY Ident{ name: COPY ctx.alloc_var, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL }] + capture_inits);

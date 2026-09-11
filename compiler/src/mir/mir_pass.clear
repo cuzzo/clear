@@ -718,7 +718,7 @@ PRIVATE FN mIRPass__collect_return_escapes(self: MIRPass, ret_node: ReturnNode, 
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     IF !(ret_node.value) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_8: []String = List[]; rtoc_empty_list_8 } ) AS []String);
+      RETURN CAST(List[] AS []String);
     END
     MUTABLE ids = TRY (mIRPass__collect_escaping_ids(rtoc_self_view, ret_node.value));
     RETURN CAST(((((ids |> WHERE {
@@ -751,10 +751,10 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       ELSE_IF (node_value IS_A FuncCall) OR (node_value IS_A MethodCall) THEN
         RETURN (locatable__args(node_value) |> WHERE _.was_moved) |> UNNEST TRY (mIRPass__collect_escaping_ids(rtoc_self_view, _));
       ELSE
-        RETURN CAST(( { MUTABLE rtoc_empty_list_10: []Identifier = List[]; rtoc_empty_list_10 } ) AS []Identifier);
+        RETURN CAST(List[] AS []Identifier);
       END
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_11: []Identifier = List[]; rtoc_empty_list_11 } ) AS []Identifier);
+      RETURN CAST(List[] AS []Identifier);
     END
 }
 END

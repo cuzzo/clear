@@ -109,7 +109,7 @@ PRIVATE FN liveness__compute_cyclic_segments(segments: []Segment) RETURNS ![Set]
 END
 PRIVATE FN liveness__tail_targets(seg: Segment) RETURNS ![]Int64 ->
   IF (seg.tail IS_A Done) THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_2: []Int64 = List[]; rtoc_empty_list_2 } ) AS []Int64);
+    RETURN CAST(List[] AS []Int64);
   ELSE_IF (seg.tail IS_A Goto) OR (seg.tail IS_A LoopBack) THEN
     RETURN CAST([seg.tail.target_index] AS []Int64);
   ELSE_IF (seg.tail IS_A CondBranch) THEN
@@ -120,7 +120,7 @@ PRIVATE FN liveness__tail_targets(seg: Segment) RETURNS ![]Int64 ->
     IF segments__suspend_tail?(seg.tail) THEN
       RETURN CAST([(seg.index + 1)] AS []Int64);
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_3: []Int64 = List[]; rtoc_empty_list_3 } ) AS []Int64);
+      RETURN CAST(List[] AS []Int64);
     END
   END
 END
@@ -220,7 +220,7 @@ PRIVATE FN liveness__collect_uses(stmt: Any, into: ?[Set]String) RETURNS Void ->
 END
 PUB FN liveness__walk_idents(node: ?AstIdentWalkRoot, block: FN(String) -> Void) RETURNS Void ->
   IF node EXISTS AS node_value THEN
-    MUTABLE stack: []CollectValue = ( { MUTABLE rtoc_empty_list_5: []CollectValue = List[]; rtoc_empty_list_5 } );
+    MUTABLE stack: []CollectValue = List[];
     IF node_value IS_A []Node AS array THEN
       MUTABLE rtoc_reverse_items_6: []Node = array;
       MUTABLE rtoc_reverse_i_7 = rtoc_reverse_items_6.length() - 1;

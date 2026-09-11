@@ -100,7 +100,7 @@ FN diagnosticRegistry__named_template_args_complete?(template: String, kwargs: {
   RETURN TRUE;
 END
 FN diagnosticRegistry__named_template_keys(template: String) RETURNS ![]String@symbol ->
-  MUTABLE keys: []String@symbol = ( { MUTABLE rtoc_empty_list_2: []String@symbol = List[]; rtoc_empty_list_2 } );
+  MUTABLE keys: []String@symbol = List[];
   MUTABLE offset: Int64 = 0;
   WHILE TRUE DO
     MUTABLE start_index: ?Int64 = template.indexOf("%{", offset);

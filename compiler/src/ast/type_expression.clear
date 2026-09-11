@@ -401,7 +401,7 @@ PUB FN typeExpressionTree__tense_wrapper?(expression: TypeExpression) RETURNS Bo
   END;
 END
 PUB FN typeExpressionTree__each_node(expression: TypeExpression) RETURNS ![]TypeExpression ->
-  MUTABLE found: []TypeExpression = ( { MUTABLE rtoc_empty_list_1: []TypeExpression = List[]; rtoc_empty_list_1 } );
+  MUTABLE found: []TypeExpression = List[];
   MUTABLE pending: []TypeExpression = [expression];
   WHILE !((pending.length() == 0)) DO
     MUTABLE node = UNWRAP (&pending.pop());
@@ -736,7 +736,7 @@ PRIVATE FN typeExpressionParser__split_generic(source: String) RETURNS !?Generic
   END
 END
 PRIVATE FN typeExpressionParser__split_arguments(source: String) RETURNS ![]String ->
-  MUTABLE arguments: []String = ( { MUTABLE rtoc_empty_list_4: []String = List[]; rtoc_empty_list_4 } );
+  MUTABLE arguments: []String = List[];
   MUTABLE start: Int64 = 0;
   MUTABLE depth: Int64 = 0;
   MUTABLE rtoc_idx = 0;
@@ -1008,7 +1008,7 @@ PRIVATE FN typeExpressionPrinter__inline_linear_prefix(expression: LinearTypeExp
   RETURN "[${dimensions.join(", ")}]";
 END
 PRIVATE FN typeExpressionPrinter__capability_suffix(capabilities: TypeCapabilities, include_collection: Bool = TRUE) RETURNS String ->
-  MUTABLE parts: []String = ( { MUTABLE rtoc_empty_list_5: []String = List[]; rtoc_empty_list_5 } );
+  MUTABLE parts: []String = List[];
   MUTABLE ownership: ?String@symbol = COPY capabilities.ownership;
   IF ((ownership != NIL) AND (ownership != :affine)) THEN
     &parts.append(UNWRAP (typeCapabilities__ownership_surface_name_for(ownership)));

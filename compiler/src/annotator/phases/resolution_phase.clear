@@ -1098,7 +1098,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             END
           END
     MUTABLE scope = TRY (resolutionSession__current_scope(rtoc_self_view));
-          scope__declare_type(&scope, synthetic_name, SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(fields, ( { MUTABLE rtoc_empty_list_24: []String@symbol = List[]; rtoc_empty_list_24 } ), ( { MUTABLE rtoc_empty_list_25: []GenericParamDecl = List[]; rtoc_empty_list_25 } ), {}, {})) });
+          scope__declare_type(&scope, synthetic_name, SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(fields, List[], List[], {}, {})) });
         END
       END
     END
@@ -1126,7 +1126,7 @@ PRIVATE FN resolutionSession__clone_enum_schema(self: ResolutionSession, schema:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE variants: []String = ( { MUTABLE rtoc_empty_list_26: []String = List[]; rtoc_empty_list_26 } );
+    MUTABLE variants: []String = List[];
     FOR _ IN schema.variants DO
     &variants.append(COPY CAST(_ AS String));
     END
@@ -1137,7 +1137,7 @@ PRIVATE FN resolutionSession__clone_struct_schema(self: ResolutionSession, schem
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (structSchema__new(castStructFieldMapToSchemasStructSchemaFieldInputMap(TRY (resolutionSession__clone_struct_fields(rtoc_self_view, schema.fields))), COPY schema.type_params, ( { MUTABLE rtoc_empty_list_27: []GenericParamDecl = List[]; rtoc_empty_list_27 } ), TRY (resolutionSession__clone_struct_methods(rtoc_self_view, schema.methods)), {}, schema.visibility, schema.extern_module, schema.as_type));
+    RETURN TRY (structSchema__new(castStructFieldMapToSchemasStructSchemaFieldInputMap(TRY (resolutionSession__clone_struct_fields(rtoc_self_view, schema.fields))), COPY schema.type_params, List[], TRY (resolutionSession__clone_struct_methods(rtoc_self_view, schema.methods)), {}, schema.visibility, schema.extern_module, schema.as_type));
 }
 END
 PRIVATE FN resolutionSession__clone_resource_schema(self: ResolutionSession, schema: ResourceSchema) RETURNS !ResourceSchema@multiowned
@@ -1351,7 +1351,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       RETURN rtoc_empty_1342;
     END
     &seen.insert(COPY key);
-    MUTABLE nested: []Type = ( { MUTABLE rtoc_empty_list_31: []Type = List[]; rtoc_empty_list_31 } );
+    MUTABLE nested: []Type = List[];
     IF type__generic_instance?(type) THEN
       nested = ruby_array_concat_Type__resolution_phase(nested, TRY (type__generic_args(type)));
     END
@@ -1794,7 +1794,7 @@ PRIVATE FN resolutionSession__resolve_recursive_struct_layouts_mut(MUTABLE self:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE names = (structs |> SELECT symbol(_.name)) |> DISTINCT _;
-    MUTABLE edges: []RecursiveFieldEdge = ( { MUTABLE rtoc_empty_list_47: []RecursiveFieldEdge = List[]; rtoc_empty_list_47 } );
+    MUTABLE edges: []RecursiveFieldEdge = List[];
     FOR rtoc_struct IN structs DO
     rtoc_struct.field_decls.keys() |> EACH {
     MUTABLE field: StructField@multiowned = (rtoc_struct.field_decls[_] OR_ELSE CAST(panic("missing hash key") AS StructField@multiowned));
@@ -1831,7 +1831,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE source: ?String = resolutionSession__diagnostic_source_code(rtoc_self_view);
     IF source EXISTS AS source_value THEN
       MUTABLE choices = [["@node", "Store this edge in the compiler-managed graph slot map"], ["@boxed", "Make this a unique owned heap edge"], ["@multiowned", "Use local reference-counted shared identity"], ["@shared", "Use cross-execution atomic shared identity"], ["@link", "Make this a non-owning link to an independently owned node"]];
-      MUTABLE fixes: []Fix = ( { MUTABLE rtoc_empty_list_49: []Fix = List[]; rtoc_empty_list_49 } );
+      MUTABLE fixes: []Fix = List[];
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < edges.length() DO
       MUTABLE span: ?Span@multiowned = resolutionSession__recursive_field_suffix_span(rtoc_self_view, source_value, edges[rtoc_idx]?);
@@ -1849,7 +1849,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN fixes;
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_50: []Fix = List[]; rtoc_empty_list_50 } ) AS []Fix);
+      RETURN CAST(List[] AS []Fix);
     END
 }
 END
@@ -1950,9 +1950,9 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE index: Int64 = 0;
     MUTABLE indices: {String@symbol}Int64 = {};
     MUTABLE low: {String@symbol}Int64 = {};
-    MUTABLE stack: []String@symbol = ( { MUTABLE rtoc_empty_list_52: []String@symbol = List[]; rtoc_empty_list_52 } );
+    MUTABLE stack: []String@symbol = List[];
     MUTABLE on_stack: [Set]String@symbol = Set[];
-    MUTABLE result: [][Set]String@symbol = ( { MUTABLE rtoc_empty_list_53: [][Set]String@symbol = List[]; rtoc_empty_list_53 } );
+    MUTABLE result: [][Set]String@symbol = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < names.length() DO
       IF indices.contains?(UNWRAP (names[rtoc_idx])) THEN
@@ -1994,7 +1994,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       schema = SchemaValue{ ResourceSchemaMultiowned: COPY TRY (resourceSchema__new(close_plan, {}, castStructFieldMapToSchemasResourceSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), node.from_module, node.as_type, :package, {})) };
     ELSE
-      schema = SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(castStructFieldMapToSchemasStructSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), ( { MUTABLE rtoc_empty_list_55: []GenericParamDecl = List[]; rtoc_empty_list_55 } ), {}, {}, :package, node.from_module, node.as_type)) };
+      schema = SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(castStructFieldMapToSchemasStructSchemaFieldInputMap(node.field_decls), TRY (resolutionSession__type_params(rtoc_self_view, node.type_params)), List[], {}, {}, :package, node.from_module, node.as_type)) };
     END
     MUTABLE existing: ?ScopeTypeEntry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_56 = TRY (resolutionSession__current_scope(rtoc_self_view));
     TRY (scope__resolve_type_entry(rtoc_local_receiver_56, symbol(node.name))) };
@@ -2114,7 +2114,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE variant_data = (node.variants[_] OR_ELSE panic("missing hash key"));
     IF schemas__inline_struct?(castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(variant_data)) THEN
     MUTABLE synthetic_name = symbol("${node.name}_${_}");
-    TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, synthetic_name, SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(castStructFieldSymbolMapToSchemasStructSchemaFieldInputMap(schemasUnionSchemaVariantInput__field_struct_map(variant_data)), ( { MUTABLE rtoc_empty_list_60: []String@symbol = List[]; rtoc_empty_list_60 } ), ( { MUTABLE rtoc_empty_list_61: []GenericParamDecl = List[]; rtoc_empty_list_61 } ), {}, {})) }));
+    TRY (resolutionSession__declare_type_schema_mut(&rtoc_self_view, TypeDeclaration{ UnionDef: COPY node }, synthetic_name, SchemaValue{ StructSchemaMultiowned: COPY TRY (structSchema__new(castStructFieldSymbolMapToSchemasStructSchemaFieldInputMap(schemasUnionSchemaVariantInput__field_struct_map(variant_data)), List[], List[], {}, {})) }));
     MUTABLE entries = TRY (resolutionSession__inline_struct_deinit_entries(rtoc_self_view, UNWRAP (castSchemasUnionSchemaVariantInputToInlineStructVariant(variant_data))));
     IF (entries.length() > 0) THEN
         NIL;

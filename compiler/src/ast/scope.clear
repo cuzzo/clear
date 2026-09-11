@@ -417,7 +417,7 @@ PUB FN scope__visible_names(self: Scope) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_4: []String = List[]; rtoc_empty_list_4 } );
+    MUTABLE names: []String = List[];
     MUTABLE seen: [Set]String = Set[];
     TRY (scope__append_visible_names_mut(rtoc_self_view, &names, &seen));
     RETURN names;
@@ -542,7 +542,7 @@ PUB FN scope__get_path_to_root(self: Scope, node: Locatable) RETURNS ![]String@s
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE path: []String@symbol = ( { MUTABLE rtoc_empty_list_6: []String@symbol = List[]; rtoc_empty_list_6 } );
+    MUTABLE path: []String@symbol = List[];
     MUTABLE curr = COPY node;
     WHILE TRUE DO
       MUTABLE next_curr: ?Locatable = NIL;
@@ -558,7 +558,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       curr = UNWRAP (next_curr);
     END
     &path.append(symbol(castLocatableToIdentifier__scope(curr).name));
-    MUTABLE reversed: []String@symbol = ( { MUTABLE rtoc_empty_list_7: []String@symbol = List[]; rtoc_empty_list_7 } );
+    MUTABLE reversed: []String@symbol = List[];
     MUTABLE i = (path.length() - 1);
     WHILE (i >= 0) DO
       &reversed.append(symbol(UNWRAP (path[i])));

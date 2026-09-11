@@ -122,7 +122,7 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
   MUTABLE specs = captured.keys() |> SELECT {
   MUTABLE strat: ?Strategy = COPY strategies[_];
   (  IF promoted_names[_] THEN
-      CaptureSpec{ name: COPY _, field_type_zig: "[]const u8", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY (promoted_names[_] OR_ELSE ""), lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } ), cleanup_plan: COPY captureCleanupPlan__none() }
+      CaptureSpec{ name: COPY _, field_type_zig: "[]const u8", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY (promoted_names[_] OR_ELSE ""), lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: List[], cleanup_plan: COPY captureCleanupPlan__none() }
     ELSE_IF (((strat != NIL) AND (strat IS_A FreshHeapCopy)) AND (fresh_heap_alloc != NIL)) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
@@ -184,7 +184,7 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
     ELSE
       cleanup_plan = captureCleanupPlan__none();
     END
-    CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_11: []Emittable = List[]; rtoc_empty_list_11 } ), cleanup_plan: COPY cleanup_plan }
+    CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: List[], cleanup_plan: COPY cleanup_plan }
   }
     ELSE_IF pointer_captures.contains?(_) THEN
       {
@@ -196,16 +196,16 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
       rtoc_sym_is_param = symbolEntry__is_param(rtoc_param_sym);
     END
     (IF rtoc_sym_is_param THEN
-      CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_14: []Emittable = List[]; rtoc_empty_list_14 } ), cleanup_plan: COPY captureCleanupPlan__none() }
+      CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: List[], cleanup_plan: COPY captureCleanupPlan__none() }
     ELSE
-      CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(&${source_ref})", init_value_mir: Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_15: []Emittable = List[]; rtoc_empty_list_15 } ), cleanup_plan: COPY captureCleanupPlan__none() }
+      CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(&${source_ref})", init_value_mir: Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: List[], cleanup_plan: COPY captureCleanupPlan__none() }
     END)
   }
     ELSE
       {
     MUTABLE rtoc_value_block_marker = 0;
     source_ref = (source_overrides[_] OR_ELSE _);
-    CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } ), cleanup_plan: COPY captureCleanupPlan__none() }
+    CaptureSpec{ name: COPY _, field_type_zig: "@TypeOf(${source_ref})", init_value_mir: Emittable{ Ident: COPY Ident{ name: COPY source_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, setup_mir: List[], cleanup_plan: COPY captureCleanupPlan__none() }
   }
     END)
   };

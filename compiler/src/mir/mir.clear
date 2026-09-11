@@ -91,7 +91,7 @@ FN fnDef__explicit_ownership_contract(self: FnDef) RETURNS ?OwnershipContract@mu
   RETURN NIL;
 END
 FN fnDef__compact_child_exprs(self: FnDef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_1: []Emittable = List[]; rtoc_empty_list_1 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fnDef__append_child_expr(self, &children, _);
   END
@@ -175,7 +175,7 @@ FN param__explicit_ownership_contract(self: MIRParam) RETURNS ?OwnershipContract
   RETURN NIL;
 END
 FN param__compact_child_exprs(self: MIRParam, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_2: []Emittable = List[]; rtoc_empty_list_2 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   param__append_child_expr(self, &children, _);
   END
@@ -271,7 +271,7 @@ FN structDef__explicit_ownership_contract(self: MIRStructDef) RETURNS ?Ownership
   RETURN NIL;
 END
 FN structDef__compact_child_exprs(self: MIRStructDef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_3: []Emittable = List[]; rtoc_empty_list_3 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   structDef__append_child_expr(self, &children, _);
   END
@@ -340,7 +340,7 @@ FN fieldDef__explicit_ownership_contract(self: FieldDef) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN fieldDef__compact_child_exprs(self: FieldDef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_4: []Emittable = List[]; rtoc_empty_list_4 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fieldDef__append_child_expr(self, &children, _);
   END
@@ -429,7 +429,7 @@ FN enumDef__explicit_ownership_contract(self: MIREnumDef) RETURNS ?OwnershipCont
   RETURN NIL;
 END
 FN enumDef__compact_child_exprs(self: MIREnumDef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_5: []Emittable = List[]; rtoc_empty_list_5 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   enumDef__append_child_expr(self, &children, _);
   END
@@ -500,7 +500,7 @@ FN unionTypeDef__explicit_ownership_contract(self: UnionTypeDef) RETURNS ?Owners
   RETURN NIL;
 END
 FN unionTypeDef__compact_child_exprs(self: UnionTypeDef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_6: []Emittable = List[]; rtoc_empty_list_6 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   unionTypeDef__append_child_expr(self, &children, _);
   END
@@ -567,7 +567,7 @@ FN import__explicit_ownership_contract(self: Import) RETURNS ?OwnershipContract@
   RETURN NIL;
 END
 FN import__compact_child_exprs(self: Import, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_7: []Emittable = List[]; rtoc_empty_list_7 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   import__append_child_expr(self, &children, _);
   END
@@ -636,7 +636,7 @@ FN typeAlias__explicit_ownership_contract(self: TypeAlias) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN typeAlias__compact_child_exprs(self: TypeAlias, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   typeAlias__append_child_expr(self, &children, _);
   END
@@ -708,7 +708,7 @@ FN cExternFnDecl__explicit_ownership_contract(self: CExternFnDecl) RETURNS ?Owne
   RETURN NIL;
 END
 FN cExternFnDecl__compact_child_exprs(self: CExternFnDecl, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_9: []Emittable = List[]; rtoc_empty_list_9 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   cExternFnDecl__append_child_expr(self, &children, _);
   END
@@ -777,7 +777,7 @@ FN cExternStructDef__explicit_ownership_contract(self: CExternStructDef) RETURNS
   RETURN NIL;
 END
 FN cExternStructDef__compact_child_exprs(self: CExternStructDef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_10: []Emittable = List[]; rtoc_empty_list_10 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   cExternStructDef__append_child_expr(self, &children, _);
   END
@@ -842,7 +842,7 @@ FN moduleNamespace__explicit_ownership_contract(self: ModuleNamespace) RETURNS ?
   RETURN NIL;
 END
 FN moduleNamespace__compact_child_exprs(self: ModuleNamespace, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_11: []Emittable = List[]; rtoc_empty_list_11 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   moduleNamespace__append_child_expr(self, &children, _);
   END
@@ -917,7 +917,7 @@ FN testDef__explicit_ownership_contract(self: TestDef) RETURNS ?OwnershipContrac
   RETURN NIL;
 END
 FN testDef__compact_child_exprs(self: TestDef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_12: []Emittable = List[]; rtoc_empty_list_12 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   testDef__append_child_expr(self, &children, _);
   END
@@ -1009,7 +1009,7 @@ FN let__without_try(self: Let) RETURNS Emittable ->
   RETURN COPY self;
 END
 FN let__compact_child_exprs(self: Let, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_13: []Emittable = List[]; rtoc_empty_list_13 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   let__append_child_expr(self, &children, _);
   END
@@ -1075,7 +1075,7 @@ FN set__explicit_ownership_contract(self: Set) RETURNS ?OwnershipContract@multio
   RETURN NIL;
 END
 FN set__compact_child_exprs(self: Set, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_14: []Emittable = List[]; rtoc_empty_list_14 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   set__append_child_expr(self, &children, _);
   END
@@ -1156,7 +1156,7 @@ FN destructureTarget__explicit_ownership_contract(self: MIRDestructureTarget) RE
   RETURN NIL;
 END
 FN destructureTarget__compact_child_exprs(self: MIRDestructureTarget, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_15: []Emittable = List[]; rtoc_empty_list_15 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   destructureTarget__append_child_expr(self, &children, _);
   END
@@ -1221,7 +1221,7 @@ FN destructureSet__explicit_ownership_contract(self: DestructureSet) RETURNS ?Ow
   RETURN NIL;
 END
 FN destructureSet__compact_child_exprs(self: DestructureSet, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_16: []Emittable = List[]; rtoc_empty_list_16 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   destructureSet__append_child_expr(self, &children, _);
   END
@@ -1288,7 +1288,7 @@ FN reassignWithCleanup__explicit_ownership_contract(self: ReassignWithCleanup) R
   RETURN NIL;
 END
 FN reassignWithCleanup__compact_child_exprs(self: ReassignWithCleanup, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_17: []Emittable = List[]; rtoc_empty_list_17 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   reassignWithCleanup__append_child_expr(self, &children, _);
   END
@@ -1353,7 +1353,7 @@ FN resourceClose__explicit_ownership_contract(self: ResourceClose) RETURNS ?Owne
   RETURN NIL;
 END
 FN resourceClose__compact_child_exprs(self: ResourceClose, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_18: []Emittable = List[]; rtoc_empty_list_18 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   resourceClose__append_child_expr(self, &children, _);
   END
@@ -1423,7 +1423,7 @@ FN ifStmt__explicit_ownership_contract(self: IfStmt) RETURNS ?OwnershipContract@
   RETURN NIL;
 END
 FN ifStmt__compact_child_exprs(self: IfStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_19: []Emittable = List[]; rtoc_empty_list_19 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ifStmt__append_child_expr(self, &children, _);
   END
@@ -1505,7 +1505,7 @@ FN ifBindStmt__explicit_ownership_contract(self: IfBindStmt) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN ifBindStmt__compact_child_exprs(self: IfBindStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_20: []Emittable = List[]; rtoc_empty_list_20 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ifBindStmt__append_child_expr(self, &children, _);
   END
@@ -1576,7 +1576,7 @@ FN whileStmt__explicit_ownership_contract(self: WhileStmt) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN whileStmt__compact_child_exprs(self: WhileStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_21: []Emittable = List[]; rtoc_empty_list_21 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   whileStmt__append_child_expr(self, &children, _);
   END
@@ -1647,7 +1647,7 @@ FN forStmt__explicit_ownership_contract(self: ForStmt) RETURNS ?OwnershipContrac
   RETURN NIL;
 END
 FN forStmt__compact_child_exprs(self: ForStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_22: []Emittable = List[]; rtoc_empty_list_22 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   forStmt__append_child_expr(self, &children, _);
   END
@@ -1714,7 +1714,7 @@ FN scopeBlock__explicit_ownership_contract(self: ScopeBlock) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN scopeBlock__compact_child_exprs(self: ScopeBlock, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_23: []Emittable = List[]; rtoc_empty_list_23 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   scopeBlock__append_child_expr(self, &children, _);
   END
@@ -1751,7 +1751,7 @@ PUB STRUCT SwitchStmt {
 }
 
 FN switchStmt__child_exprs(self: SwitchStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
-  MUTABLE pattern_exprs: []Emittable = ( { MUTABLE rtoc_empty_list_24: []Emittable = List[]; rtoc_empty_list_24 } );
+  MUTABLE pattern_exprs: []Emittable = List[];
   FOR arm IN self.arms DO
     FOR pattern IN arm.patterns DO
       IF pattern IS_A Emittable AS pattern_expr THEN
@@ -1763,7 +1763,7 @@ FN switchStmt__child_exprs(self: SwitchStmt) RETURNS ![]Emittable EFFECTS REENTR
   RETURN TRY (switchStmt__compact_child_exprs(self, pattern_exprs));
 END
 FN switchStmt__body_slots(self: SwitchStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_25: []MIRBodySlot = List[]; rtoc_empty_list_25 } );
+  MUTABLE slots: []MIRBodySlot = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.arms.length() DO
   &slots.append(switchStmt__body_slot(self, symbol("arms_${rtoc_idx.toString()}"), UNWRAP (self.arms[rtoc_idx]).body));
@@ -1798,7 +1798,7 @@ FN switchStmt__explicit_ownership_contract(self: SwitchStmt) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN switchStmt__compact_child_exprs(self: SwitchStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_26: []Emittable = List[]; rtoc_empty_list_26 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   switchStmt__append_child_expr(self, &children, _);
   END
@@ -1837,7 +1837,7 @@ FN unionMatchStmt__child_exprs(self: UnionMatchStmt) RETURNS ![]Emittable EFFECT
   RETURN TRY (unionMatchStmt__compact_child_exprs(self, [CAST(self.subject AS Any)]));
 END
 FN unionMatchStmt__body_slots(self: UnionMatchStmt) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_27: []MIRBodySlot = List[]; rtoc_empty_list_27 } );
+  MUTABLE slots: []MIRBodySlot = List[];
   IF TRUE THEN
       MUTABLE rtoc_each_items_28 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
@@ -1875,7 +1875,7 @@ FN unionMatchStmt__explicit_ownership_contract(self: UnionMatchStmt) RETURNS ?Ow
   RETURN NIL;
 END
 FN unionMatchStmt__compact_child_exprs(self: UnionMatchStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_29: []Emittable = List[]; rtoc_empty_list_29 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   unionMatchStmt__append_child_expr(self, &children, _);
   END
@@ -1917,7 +1917,7 @@ FN ifChain__child_exprs(self: IfChain) RETURNS ![]Emittable EFFECTS REENTRANT ->
   RETURN TRY (ifChain__compact_child_exprs(self, conds));
 END
 FN ifChain__body_slots(self: IfChain) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_30: []MIRBodySlot = List[]; rtoc_empty_list_30 } );
+  MUTABLE slots: []MIRBodySlot = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.branches.length() DO
   &slots.append(ifChain__body_slot(self, symbol("branches_${rtoc_idx.toString()}"), UNWRAP (self.branches[rtoc_idx]).body));
@@ -1952,7 +1952,7 @@ FN ifChain__explicit_ownership_contract(self: IfChain) RETURNS ?OwnershipContrac
   RETURN NIL;
 END
 FN ifChain__compact_child_exprs(self: IfChain, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_31: []Emittable = List[]; rtoc_empty_list_31 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ifChain__append_child_expr(self, &children, _);
   END
@@ -2016,7 +2016,7 @@ FN returnStmt__explicit_ownership_contract(self: ReturnStmt) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN returnStmt__compact_child_exprs(self: ReturnStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_32: []Emittable = List[]; rtoc_empty_list_32 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   returnStmt__append_child_expr(self, &children, _);
   END
@@ -2081,7 +2081,7 @@ FN breakStmt__explicit_ownership_contract(self: BreakStmt) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN breakStmt__compact_child_exprs(self: BreakStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_33: []Emittable = List[]; rtoc_empty_list_33 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   breakStmt__append_child_expr(self, &children, _);
   END
@@ -2142,7 +2142,7 @@ FN breakExpr__explicit_ownership_contract(self: BreakExpr) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN breakExpr__compact_child_exprs(self: BreakExpr, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_34: []Emittable = List[]; rtoc_empty_list_34 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   breakExpr__append_child_expr(self, &children, _);
   END
@@ -2207,7 +2207,7 @@ FN continueStmt__explicit_ownership_contract(self: ContinueStmt) RETURNS ?Owners
   RETURN NIL;
 END
 FN continueStmt__compact_child_exprs(self: ContinueStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_35: []Emittable = List[]; rtoc_empty_list_35 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   continueStmt__append_child_expr(self, &children, _);
   END
@@ -2272,7 +2272,7 @@ FN panic__explicit_ownership_contract(self: Panic) RETURNS ?OwnershipContract@mu
   RETURN NIL;
 END
 FN panic__compact_child_exprs(self: Panic, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_36: []Emittable = List[]; rtoc_empty_list_36 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   panic__append_child_expr(self, &children, _);
   END
@@ -2337,7 +2337,7 @@ FN assertStmt__explicit_ownership_contract(self: AssertStmt) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN assertStmt__compact_child_exprs(self: AssertStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_37: []Emittable = List[]; rtoc_empty_list_37 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   assertStmt__append_child_expr(self, &children, _);
   END
@@ -2407,7 +2407,7 @@ FN assertRaisesCheck__explicit_ownership_contract(self: AssertRaisesCheck) RETUR
   RETURN NIL;
 END
 FN assertRaisesCheck__compact_child_exprs(self: AssertRaisesCheck, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_38: []Emittable = List[]; rtoc_empty_list_38 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   assertRaisesCheck__append_child_expr(self, &children, _);
   END
@@ -2472,7 +2472,7 @@ FN testPreamble__explicit_ownership_contract(self: TestPreamble) RETURNS ?Owners
   RETURN NIL;
 END
 FN testPreamble__compact_child_exprs(self: TestPreamble, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_39: []Emittable = List[]; rtoc_empty_list_39 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   testPreamble__append_child_expr(self, &children, _);
   END
@@ -2539,7 +2539,7 @@ FN debugOnly__explicit_ownership_contract(self: DebugOnly) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN debugOnly__compact_child_exprs(self: DebugOnly, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_40: []Emittable = List[]; rtoc_empty_list_40 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   debugOnly__append_child_expr(self, &children, _);
   END
@@ -2607,7 +2607,7 @@ FN sort__explicit_ownership_contract(self: Sort) RETURNS ?OwnershipContract@mult
   RETURN NIL;
 END
 FN sort__compact_child_exprs(self: Sort, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_41: []Emittable = List[]; rtoc_empty_list_41 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   sort__append_child_expr(self, &children, _);
   END
@@ -2671,7 +2671,7 @@ FN soaFieldAccess__explicit_ownership_contract(self: SoaFieldAccess) RETURNS ?Ow
   RETURN NIL;
 END
 FN soaFieldAccess__compact_child_exprs(self: SoaFieldAccess, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_42: []Emittable = List[]; rtoc_empty_list_42 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   soaFieldAccess__append_child_expr(self, &children, _);
   END
@@ -2738,7 +2738,7 @@ FN tryOrPanic__explicit_ownership_contract(self: TryOrPanic) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN tryOrPanic__compact_child_exprs(self: TryOrPanic, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_43: []Emittable = List[]; rtoc_empty_list_43 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   tryOrPanic__append_child_expr(self, &children, _);
   END
@@ -2807,7 +2807,7 @@ FN indexInsert__explicit_ownership_contract(self: IndexInsert) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN indexInsert__compact_child_exprs(self: IndexInsert, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_44: []Emittable = List[]; rtoc_empty_list_44 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   indexInsert__append_child_expr(self, &children, _);
   END
@@ -2877,7 +2877,7 @@ FN batchWindowPush__explicit_ownership_contract(self: BatchWindowPush) RETURNS ?
   RETURN NIL;
 END
 FN batchWindowPush__compact_child_exprs(self: BatchWindowPush, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_45: []Emittable = List[]; rtoc_empty_list_45 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   batchWindowPush__append_child_expr(self, &children, _);
   END
@@ -2945,7 +2945,7 @@ FN batchWindowFlush__explicit_ownership_contract(self: BatchWindowFlush) RETURNS
   RETURN NIL;
 END
 FN batchWindowFlush__compact_child_exprs(self: BatchWindowFlush, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_46: []Emittable = List[]; rtoc_empty_list_46 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   batchWindowFlush__append_child_expr(self, &children, _);
   END
@@ -3001,7 +3001,7 @@ FN deferStmt__body_slots(self: MIRDeferStmt) RETURNS ![]MIRBodySlot EFFECTS REEN
   IF self.body IS_A []Emittable THEN
     RETURN CAST([deferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body))] AS []MIRBodySlot);
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_47: []MIRBodySlot = List[]; rtoc_empty_list_47 } ) AS []MIRBodySlot);
+    RETURN CAST(List[] AS []MIRBodySlot);
   END
 END
 FN deferStmt__child_exprs(self: MIRDeferStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -3038,7 +3038,7 @@ FN deferStmt__explicit_ownership_contract(self: MIRDeferStmt) RETURNS ?Ownership
   RETURN NIL;
 END
 FN deferStmt__compact_child_exprs(self: MIRDeferStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_49: []Emittable = List[]; rtoc_empty_list_49 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   deferStmt__append_child_expr(self, &children, _);
   END
@@ -3078,7 +3078,7 @@ FN errDeferStmt__body_slots(self: ErrDeferStmt) RETURNS ![]MIRBodySlot EFFECTS R
   IF self.body IS_A []Emittable THEN
     RETURN CAST([errDeferStmt__body_slot(self, :body, castDeferBodyToEmittable(self.body))] AS []MIRBodySlot);
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_50: []MIRBodySlot = List[]; rtoc_empty_list_50 } ) AS []MIRBodySlot);
+    RETURN CAST(List[] AS []MIRBodySlot);
   END
 END
 FN errDeferStmt__child_exprs(self: ErrDeferStmt) RETURNS ![]Emittable EFFECTS REENTRANT ->
@@ -3115,7 +3115,7 @@ FN errDeferStmt__explicit_ownership_contract(self: ErrDeferStmt) RETURNS ?Owners
   RETURN NIL;
 END
 FN errDeferStmt__compact_child_exprs(self: ErrDeferStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_52: []Emittable = List[]; rtoc_empty_list_52 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   errDeferStmt__append_child_expr(self, &children, _);
   END
@@ -3187,7 +3187,7 @@ FN exprStmt__without_try(self: ExprStmt) RETURNS Emittable ->
   RETURN COPY self;
 END
 FN exprStmt__compact_child_exprs(self: ExprStmt, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_53: []Emittable = List[]; rtoc_empty_list_53 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   exprStmt__append_child_expr(self, &children, _);
   END
@@ -3256,7 +3256,7 @@ FN discardOwned__explicit_ownership_contract(self: DiscardOwned) RETURNS ?Owners
   RETURN NIL;
 END
 FN discardOwned__compact_child_exprs(self: DiscardOwned, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_54: []Emittable = List[]; rtoc_empty_list_54 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   discardOwned__append_child_expr(self, &children, _);
   END
@@ -3351,7 +3351,7 @@ FN bgBlock__body_slots(self: MIRBgBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRAN
   IF self.run_body THEN
     RETURN CAST([bgBlock__body_slot(self, :run_body, self.run_body)] AS []MIRBodySlot);
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_55: []MIRBodySlot = List[]; rtoc_empty_list_55 } ) AS []MIRBodySlot);
+    RETURN CAST(List[] AS []MIRBodySlot);
   END
 END
 FN bgBlock__ownership_effect(self: MIRBgBlock) RETURNS OwnershipEffect EFFECTS REENTRANT ->
@@ -3379,7 +3379,7 @@ FN bgBlock__explicit_ownership_contract(self: MIRBgBlock) RETURNS ?OwnershipCont
   RETURN NIL;
 END
 FN bgBlock__compact_child_exprs(self: MIRBgBlock, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_56: []Emittable = List[]; rtoc_empty_list_56 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   bgBlock__append_child_expr(self, &children, _);
   END
@@ -3455,7 +3455,7 @@ FN streamSpawn__explicit_ownership_contract(self: StreamSpawn) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN streamSpawn__compact_child_exprs(self: StreamSpawn, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_57: []Emittable = List[]; rtoc_empty_list_57 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   streamSpawn__append_child_expr(self, &children, _);
   END
@@ -3567,7 +3567,7 @@ FN fsmStructure__explicit_ownership_contract(self: FsmStructure) RETURNS ?Owners
   RETURN NIL;
 END
 FN fsmStructure__compact_child_exprs(self: FsmStructure, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_58: []Emittable = List[]; rtoc_empty_list_58 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fsmStructure__append_child_expr(self, &children, _);
   END
@@ -3631,7 +3631,7 @@ FN fsmIoBody__explicit_ownership_contract(self: FsmIoBody) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN fsmIoBody__compact_child_exprs(self: FsmIoBody, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_59: []Emittable = List[]; rtoc_empty_list_59 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fsmIoBody__append_child_expr(self, &children, _);
   END
@@ -3695,7 +3695,7 @@ FN streamYield__explicit_ownership_contract(self: StreamYield) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN streamYield__compact_child_exprs(self: StreamYield, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_60: []Emittable = List[]; rtoc_empty_list_60 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   streamYield__append_child_expr(self, &children, _);
   END
@@ -3762,7 +3762,7 @@ FN fsmB1Body__explicit_ownership_contract(self: FsmB1Body) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN fsmB1Body__compact_child_exprs(self: FsmB1Body, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_61: []Emittable = List[]; rtoc_empty_list_61 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fsmB1Body__append_child_expr(self, &children, _);
   END
@@ -3835,7 +3835,7 @@ FN fsmGenericBody__explicit_ownership_contract(self: FsmGenericBody) RETURNS ?Ow
   RETURN NIL;
 END
 FN fsmGenericBody__compact_child_exprs(self: FsmGenericBody, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_62: []Emittable = List[]; rtoc_empty_list_62 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fsmGenericBody__append_child_expr(self, &children, _);
   END
@@ -4050,7 +4050,7 @@ FN capabilityLockTarget__explicit_ownership_contract(self: CapabilityLockTarget)
   RETURN NIL;
 END
 FN capabilityLockTarget__compact_child_exprs(self: CapabilityLockTarget, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_63: []Emittable = List[]; rtoc_empty_list_63 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   capabilityLockTarget__append_child_expr(self, &children, _);
   END
@@ -4113,7 +4113,7 @@ FN capabilityLockAddress__explicit_ownership_contract(self: CapabilityLockAddres
   RETURN NIL;
 END
 FN capabilityLockAddress__compact_child_exprs(self: CapabilityLockAddress, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_64: []Emittable = List[]; rtoc_empty_list_64 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   capabilityLockAddress__append_child_expr(self, &children, _);
   END
@@ -4169,7 +4169,7 @@ FN sortedLockAcquire__body_slots(self: SortedLockAcquire) RETURNS ![]MIRBodySlot
   IF self.action THEN
     RETURN TRY (emittable__body_slots(self.action));
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_65: []MIRBodySlot = List[]; rtoc_empty_list_65 } ) AS []MIRBodySlot);
+    RETURN CAST(List[] AS []MIRBodySlot);
   END
 END
 FN sortedLockAcquire__mir?(self: SortedLockAcquire) RETURNS Bool ->
@@ -4196,7 +4196,7 @@ FN sortedLockAcquire__explicit_ownership_contract(self: SortedLockAcquire) RETUR
   RETURN NIL;
 END
 FN sortedLockAcquire__compact_child_exprs(self: SortedLockAcquire, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_66: []Emittable = List[]; rtoc_empty_list_66 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   sortedLockAcquire__append_child_expr(self, &children, _);
   END
@@ -4268,7 +4268,7 @@ FN fallibleLockBinding__explicit_ownership_contract(self: FallibleLockBinding) R
   RETURN NIL;
 END
 FN fallibleLockBinding__compact_child_exprs(self: FallibleLockBinding, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_67: []Emittable = List[]; rtoc_empty_list_67 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fallibleLockBinding__append_child_expr(self, &children, _);
   END
@@ -4329,7 +4329,7 @@ FN catchWrapper__has_default(self: CatchWrapper) RETURNS Bool ->
   RETURN (self.default_action == CatchDefaultAction.Body);
 END
 FN catchWrapper__body_slots(self: CatchWrapper) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_68: []MIRBodySlot = List[]; rtoc_empty_list_68 } );
+  MUTABLE slots: []MIRBodySlot = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.clauses.length() DO
   &slots.append(catchWrapper__body_slot(self, symbol("clauses_${rtoc_idx.toString()}"), UNWRAP (self.clauses[rtoc_idx]).body));
@@ -4366,7 +4366,7 @@ FN catchWrapper__explicit_ownership_contract(self: CatchWrapper) RETURNS ?Owners
   RETURN NIL;
 END
 FN catchWrapper__compact_child_exprs(self: CatchWrapper, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_69: []Emittable = List[]; rtoc_empty_list_69 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   catchWrapper__append_child_expr(self, &children, _);
   END
@@ -4434,7 +4434,7 @@ FN doBlock__set_boundary_facts(MUTABLE self: MIRDoBlock, value: []ExecutionBound
   RETURN COPY value;
 END
 FN doBlock__body_slots(self: MIRDoBlock) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_70: []MIRBodySlot = List[]; rtoc_empty_list_70 } );
+  MUTABLE slots: []MIRBodySlot = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < self.branch_bodies.length() DO
   &slots.append(doBlock__body_slot(self, symbol("branch_bodies_${rtoc_idx.toString()}"), self.branch_bodies[rtoc_idx]?));
@@ -4470,7 +4470,7 @@ FN doBlock__explicit_ownership_contract(self: MIRDoBlock) RETURNS ?OwnershipCont
   RETURN NIL;
 END
 FN doBlock__compact_child_exprs(self: MIRDoBlock, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_71: []Emittable = List[]; rtoc_empty_list_71 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   doBlock__append_child_expr(self, &children, _);
   END
@@ -4535,7 +4535,7 @@ FN noop__explicit_ownership_contract(self: Noop) RETURNS ?OwnershipContract@mult
   RETURN NIL;
 END
 FN noop__compact_child_exprs(self: Noop, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_72: []Emittable = List[]; rtoc_empty_list_72 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   noop__append_child_expr(self, &children, _);
   END
@@ -4600,7 +4600,7 @@ FN comment__explicit_ownership_contract(self: Comment) RETURNS ?OwnershipContrac
   RETURN NIL;
 END
 FN comment__compact_child_exprs(self: Comment, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_73: []Emittable = List[]; rtoc_empty_list_73 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   comment__append_child_expr(self, &children, _);
   END
@@ -4665,7 +4665,7 @@ FN suppress__explicit_ownership_contract(self: Suppress) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN suppress__compact_child_exprs(self: Suppress, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_74: []Emittable = List[]; rtoc_empty_list_74 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   suppress__append_child_expr(self, &children, _);
   END
@@ -4731,7 +4731,7 @@ FN pubConst__explicit_ownership_contract(self: PubConst) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN pubConst__compact_child_exprs(self: PubConst, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_75: []Emittable = List[]; rtoc_empty_list_75 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   pubConst__append_child_expr(self, &children, _);
   END
@@ -4798,7 +4798,7 @@ FN moduleVar__explicit_ownership_contract(self: ModuleVar) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN moduleVar__compact_child_exprs(self: ModuleVar, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_76: []Emittable = List[]; rtoc_empty_list_76 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   moduleVar__append_child_expr(self, &children, _);
   END
@@ -4863,7 +4863,7 @@ FN moduleConstFree__explicit_ownership_contract(self: ModuleConstFree) RETURNS ?
   RETURN NIL;
 END
 FN moduleConstFree__compact_child_exprs(self: ModuleConstFree, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_77: []Emittable = List[]; rtoc_empty_list_77 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   moduleConstFree__append_child_expr(self, &children, _);
   END
@@ -4930,7 +4930,7 @@ FN heapCreate__explicit_ownership_contract(self: HeapCreate) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN heapCreate__compact_child_exprs(self: HeapCreate, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_78: []Emittable = List[]; rtoc_empty_list_78 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   heapCreate__append_child_expr(self, &children, _);
   END
@@ -4996,7 +4996,7 @@ FN dupeSlice__explicit_ownership_contract(self: DupeSlice) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN dupeSlice__compact_child_exprs(self: DupeSlice, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_79: []Emittable = List[]; rtoc_empty_list_79 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   dupeSlice__append_child_expr(self, &children, _);
   END
@@ -5063,7 +5063,7 @@ FN allocSlice__explicit_ownership_contract(self: AllocSlice) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN allocSlice__compact_child_exprs(self: AllocSlice, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_80: []Emittable = List[]; rtoc_empty_list_80 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   allocSlice__append_child_expr(self, &children, _);
   END
@@ -5129,7 +5129,7 @@ FN freeSlice__explicit_ownership_contract(self: FreeSlice) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN freeSlice__compact_child_exprs(self: FreeSlice, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_81: []Emittable = List[]; rtoc_empty_list_81 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   freeSlice__append_child_expr(self, &children, _);
   END
@@ -5195,7 +5195,7 @@ FN destroyPtr__explicit_ownership_contract(self: DestroyPtr) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN destroyPtr__compact_child_exprs(self: DestroyPtr, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_82: []Emittable = List[]; rtoc_empty_list_82 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   destroyPtr__append_child_expr(self, &children, _);
   END
@@ -5261,7 +5261,7 @@ FN cleanup__explicit_ownership_contract(self: Cleanup) RETURNS ?OwnershipContrac
   RETURN NIL;
 END
 FN cleanup__compact_child_exprs(self: Cleanup, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_83: []Emittable = List[]; rtoc_empty_list_83 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   cleanup__append_child_expr(self, &children, _);
   END
@@ -5327,7 +5327,7 @@ FN errCleanup__explicit_ownership_contract(self: ErrCleanup) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN errCleanup__compact_child_exprs(self: ErrCleanup, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_84: []Emittable = List[]; rtoc_empty_list_84 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   errCleanup__append_child_expr(self, &children, _);
   END
@@ -5392,7 +5392,7 @@ FN moveMark__explicit_ownership_contract(self: MoveMark) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN moveMark__compact_child_exprs(self: MoveMark, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_85: []Emittable = List[]; rtoc_empty_list_85 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   moveMark__append_child_expr(self, &children, _);
   END
@@ -5470,7 +5470,7 @@ FN deepCopy__explicit_ownership_contract(self: DeepCopy) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN deepCopy__compact_child_exprs(self: DeepCopy, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_86: []Emittable = List[]; rtoc_empty_list_86 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   deepCopy__append_child_expr(self, &children, _);
   END
@@ -5538,7 +5538,7 @@ FN containerInit__explicit_ownership_contract(self: ContainerInit) RETURNS ?Owne
   RETURN NIL;
 END
 FN containerInit__compact_child_exprs(self: ContainerInit, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_87: []Emittable = List[]; rtoc_empty_list_87 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   containerInit__append_child_expr(self, &children, _);
   END
@@ -5613,7 +5613,7 @@ FN capWrap__explicit_ownership_contract(self: CapWrap) RETURNS ?OwnershipContrac
   RETURN NIL;
 END
 FN capWrap__compact_child_exprs(self: CapWrap, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_88: []Emittable = List[]; rtoc_empty_list_88 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   capWrap__append_child_expr(self, &children, _);
   END
@@ -5679,7 +5679,7 @@ FN sharePromote__explicit_ownership_contract(self: SharePromote) RETURNS ?Owners
   RETURN NIL;
 END
 FN sharePromote__compact_child_exprs(self: SharePromote, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_89: []Emittable = List[]; rtoc_empty_list_89 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   sharePromote__append_child_expr(self, &children, _);
   END
@@ -5743,7 +5743,7 @@ FN rcRetain__explicit_ownership_contract(self: RcRetain) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN rcRetain__compact_child_exprs(self: RcRetain, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_90: []Emittable = List[]; rtoc_empty_list_90 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   rcRetain__append_child_expr(self, &children, _);
   END
@@ -5805,7 +5805,7 @@ FN comptimeCarrierPayload__explicit_ownership_contract(self: ComptimeCarrierPayl
   RETURN NIL;
 END
 FN comptimeCarrierPayload__compact_child_exprs(self: ComptimeCarrierPayload, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_91: []Emittable = List[]; rtoc_empty_list_91 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   comptimeCarrierPayload__append_child_expr(self, &children, _);
   END
@@ -5869,7 +5869,7 @@ FN monomorphicKeep__explicit_ownership_contract(self: MonomorphicKeep) RETURNS ?
   RETURN NIL;
 END
 FN monomorphicKeep__compact_child_exprs(self: MonomorphicKeep, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_92: []Emittable = List[]; rtoc_empty_list_92 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   monomorphicKeep__append_child_expr(self, &children, _);
   END
@@ -5934,7 +5934,7 @@ FN rcRelease__explicit_ownership_contract(self: RcRelease) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN rcRelease__compact_child_exprs(self: RcRelease, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_93: []Emittable = List[]; rtoc_empty_list_93 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   rcRelease__append_child_expr(self, &children, _);
   END
@@ -5999,7 +5999,7 @@ FN rcDowngrade__explicit_ownership_contract(self: RcDowngrade) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN rcDowngrade__compact_child_exprs(self: RcDowngrade, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_94: []Emittable = List[]; rtoc_empty_list_94 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   rcDowngrade__append_child_expr(self, &children, _);
   END
@@ -6064,7 +6064,7 @@ FN weakUpgrade__explicit_ownership_contract(self: WeakUpgrade) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN weakUpgrade__compact_child_exprs(self: WeakUpgrade, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_95: []Emittable = List[]; rtoc_empty_list_95 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   weakUpgrade__append_child_expr(self, &children, _);
   END
@@ -6127,7 +6127,7 @@ FN allocatorRef__explicit_ownership_contract(self: AllocatorRef) RETURNS ?Owners
   RETURN NIL;
 END
 FN allocatorRef__compact_child_exprs(self: AllocatorRef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_96: []Emittable = List[]; rtoc_empty_list_96 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   allocatorRef__append_child_expr(self, &children, _);
   END
@@ -6196,7 +6196,7 @@ FN freezeExpr__explicit_ownership_contract(self: FreezeExpr) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN freezeExpr__compact_child_exprs(self: FreezeExpr, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_97: []Emittable = List[]; rtoc_empty_list_97 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   freezeExpr__append_child_expr(self, &children, _);
   END
@@ -6307,7 +6307,7 @@ FN makeList__explicit_ownership_contract(self: MakeList) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN makeList__compact_child_exprs(self: MakeList, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_98: []Emittable = List[]; rtoc_empty_list_98 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   makeList__append_child_expr(self, &children, _);
   END
@@ -6372,7 +6372,7 @@ FN frameSave__explicit_ownership_contract(self: FrameSave) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN frameSave__compact_child_exprs(self: FrameSave, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_99: []Emittable = List[]; rtoc_empty_list_99 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   frameSave__append_child_expr(self, &children, _);
   END
@@ -6437,7 +6437,7 @@ FN frameRestore__explicit_ownership_contract(self: FrameRestore) RETURNS ?Owners
   RETURN NIL;
 END
 FN frameRestore__compact_child_exprs(self: FrameRestore, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_100: []Emittable = List[]; rtoc_empty_list_100 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   frameRestore__append_child_expr(self, &children, _);
   END
@@ -6499,7 +6499,7 @@ FN capabilityUnwrap__explicit_ownership_contract(self: CapabilityUnwrap) RETURNS
   RETURN NIL;
 END
 FN capabilityUnwrap__compact_child_exprs(self: CapabilityUnwrap, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_101: []Emittable = List[]; rtoc_empty_list_101 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   capabilityUnwrap__append_child_expr(self, &children, _);
   END
@@ -6572,7 +6572,7 @@ FN snapshotRead__explicit_ownership_contract(self: SnapshotRead) RETURNS ?Owners
   RETURN NIL;
 END
 FN snapshotRead__compact_child_exprs(self: SnapshotRead, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_102: []Emittable = List[]; rtoc_empty_list_102 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   snapshotRead__append_child_expr(self, &children, _);
   END
@@ -6655,7 +6655,7 @@ FN snapshotTransaction__explicit_ownership_contract(self: SnapshotTransaction) R
   RETURN NIL;
 END
 FN snapshotTransaction__compact_child_exprs(self: SnapshotTransaction, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_103: []Emittable = List[]; rtoc_empty_list_103 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   snapshotTransaction__append_child_expr(self, &children, _);
   END
@@ -6736,7 +6736,7 @@ FN snapshotMultiTxn__explicit_ownership_contract(self: SnapshotMultiTxn) RETURNS
   RETURN NIL;
 END
 FN snapshotMultiTxn__compact_child_exprs(self: SnapshotMultiTxn, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_104: []Emittable = List[]; rtoc_empty_list_104 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   snapshotMultiTxn__append_child_expr(self, &children, _);
   END
@@ -6806,7 +6806,7 @@ FN polymorphicMutate__explicit_ownership_contract(self: PolymorphicMutate) RETUR
   RETURN NIL;
 END
 FN polymorphicMutate__compact_child_exprs(self: PolymorphicMutate, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_105: []Emittable = List[]; rtoc_empty_list_105 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   polymorphicMutate__append_child_expr(self, &children, _);
   END
@@ -6883,7 +6883,7 @@ FN polymorphicMutateFlow__explicit_ownership_contract(self: PolymorphicMutateFlo
   RETURN NIL;
 END
 FN polymorphicMutateFlow__compact_child_exprs(self: PolymorphicMutateFlow, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_106: []Emittable = List[]; rtoc_empty_list_106 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   polymorphicMutateFlow__append_child_expr(self, &children, _);
   END
@@ -6945,7 +6945,7 @@ FN polymorphicFlowSignal__explicit_ownership_contract(self: PolymorphicFlowSigna
   RETURN NIL;
 END
 FN polymorphicFlowSignal__compact_child_exprs(self: PolymorphicFlowSignal, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_107: []Emittable = List[]; rtoc_empty_list_107 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   polymorphicFlowSignal__append_child_expr(self, &children, _);
   END
@@ -6989,7 +6989,7 @@ FN withMatchDispatch__child_exprs(self: WithMatchDispatch) RETURNS ![]Emittable 
   RETURN TRY (withMatchDispatch__compact_child_exprs(self, [CAST(self.cell AS Any)]));
 END
 FN withMatchDispatch__body_slots(self: WithMatchDispatch) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
-  MUTABLE slots: []MIRBodySlot = ( { MUTABLE rtoc_empty_list_108: []MIRBodySlot = List[]; rtoc_empty_list_108 } );
+  MUTABLE slots: []MIRBodySlot = List[];
   IF TRUE THEN
       MUTABLE rtoc_each_items_109 = COPY self.arms;
       MUTABLE rtoc_idx = 0;
@@ -7024,7 +7024,7 @@ FN withMatchDispatch__explicit_ownership_contract(self: WithMatchDispatch) RETUR
   RETURN NIL;
 END
 FN withMatchDispatch__compact_child_exprs(self: WithMatchDispatch, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_110: []Emittable = List[]; rtoc_empty_list_110 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   withMatchDispatch__append_child_expr(self, &children, _);
   END
@@ -7104,7 +7104,7 @@ FN allocMark__explicit_ownership_contract(self: AllocMark) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN allocMark__compact_child_exprs(self: AllocMark, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_111: []Emittable = List[]; rtoc_empty_list_111 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   allocMark__append_child_expr(self, &children, _);
   END
@@ -7175,7 +7175,7 @@ FN ownedCreate__explicit_ownership_contract(self: OwnedCreate) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN ownedCreate__compact_child_exprs(self: OwnedCreate, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_112: []Emittable = List[]; rtoc_empty_list_112 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ownedCreate__append_child_expr(self, &children, _);
   END
@@ -7245,7 +7245,7 @@ FN ownedDestroy__explicit_ownership_contract(self: OwnedDestroy) RETURNS ?Owners
   RETURN NIL;
 END
 FN ownedDestroy__compact_child_exprs(self: OwnedDestroy, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_113: []Emittable = List[]; rtoc_empty_list_113 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ownedDestroy__append_child_expr(self, &children, _);
   END
@@ -7312,7 +7312,7 @@ FN ownedTransfer__explicit_ownership_contract(self: OwnedTransfer) RETURNS ?Owne
   RETURN NIL;
 END
 FN ownedTransfer__compact_child_exprs(self: OwnedTransfer, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_114: []Emittable = List[]; rtoc_empty_list_114 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ownedTransfer__append_child_expr(self, &children, _);
   END
@@ -7378,7 +7378,7 @@ FN ownedBorrow__explicit_ownership_contract(self: OwnedBorrow) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN ownedBorrow__compact_child_exprs(self: OwnedBorrow, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_115: []Emittable = List[]; rtoc_empty_list_115 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ownedBorrow__append_child_expr(self, &children, _);
   END
@@ -7449,7 +7449,7 @@ FN ownedStore__explicit_ownership_contract(self: OwnedStore) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN ownedStore__compact_child_exprs(self: OwnedStore, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_116: []Emittable = List[]; rtoc_empty_list_116 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ownedStore__append_child_expr(self, &children, _);
   END
@@ -7515,7 +7515,7 @@ FN ownedReturn__explicit_ownership_contract(self: OwnedReturn) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN ownedReturn__compact_child_exprs(self: OwnedReturn, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_117: []Emittable = List[]; rtoc_empty_list_117 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ownedReturn__append_child_expr(self, &children, _);
   END
@@ -7580,7 +7580,7 @@ FN returnMark__explicit_ownership_contract(self: ReturnMark) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN returnMark__compact_child_exprs(self: ReturnMark, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_118: []Emittable = List[]; rtoc_empty_list_118 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   returnMark__append_child_expr(self, &children, _);
   END
@@ -7650,7 +7650,7 @@ FN transferMark__explicit_ownership_contract(self: TransferMark) RETURNS ?Owners
   RETURN NIL;
 END
 FN transferMark__compact_child_exprs(self: TransferMark, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_119: []Emittable = List[]; rtoc_empty_list_119 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   transferMark__append_child_expr(self, &children, _);
   END
@@ -7719,7 +7719,7 @@ FN reassignMark__explicit_ownership_contract(self: ReassignMark) RETURNS ?Owners
   RETURN NIL;
 END
 FN reassignMark__compact_child_exprs(self: ReassignMark, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_120: []Emittable = List[]; rtoc_empty_list_120 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   reassignMark__append_child_expr(self, &children, _);
   END
@@ -7789,7 +7789,7 @@ FN fieldCleanupMark__explicit_ownership_contract(self: FieldCleanupMark) RETURNS
   RETURN NIL;
 END
 FN fieldCleanupMark__compact_child_exprs(self: FieldCleanupMark, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_121: []Emittable = List[]; rtoc_empty_list_121 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fieldCleanupMark__append_child_expr(self, &children, _);
   END
@@ -7895,7 +7895,7 @@ FN call__body_slots(self: Call) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   RETURN empty_body_slots;
 END
 FN call__compact_child_exprs(self: Call, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_122: []Emittable = List[]; rtoc_empty_list_122 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   call__append_child_expr(self, &children, _);
   END
@@ -7975,7 +7975,7 @@ FN runtimeCall__without_try(self: RuntimeCall) RETURNS Emittable ->
   RETURN COPY self;
 END
 FN runtimeCall__compact_child_exprs(self: RuntimeCall, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_124: []Emittable = List[]; rtoc_empty_list_124 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   runtimeCall__append_child_expr(self, &children, _);
   END
@@ -8046,7 +8046,7 @@ FN tailCall__without_try(self: TailCall) RETURNS Emittable ->
   RETURN COPY self;
 END
 FN tailCall__compact_child_exprs(self: TailCall, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_125: []Emittable = List[]; rtoc_empty_list_125 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   tailCall__append_child_expr(self, &children, _);
   END
@@ -8166,7 +8166,7 @@ FN methodCall__body_slots(self: MIRMethodCall) RETURNS ![]MIRBodySlot EFFECTS RE
   RETURN empty_body_slots;
 END
 FN methodCall__compact_child_exprs(self: MIRMethodCall, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_126: []Emittable = List[]; rtoc_empty_list_126 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   methodCall__append_child_expr(self, &children, _);
   END
@@ -8229,7 +8229,7 @@ FN fieldGet__explicit_ownership_contract(self: FieldGet) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN fieldGet__compact_child_exprs(self: FieldGet, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_127: []Emittable = List[]; rtoc_empty_list_127 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fieldGet__append_child_expr(self, &children, _);
   END
@@ -8292,7 +8292,7 @@ FN unionPayloadGet__explicit_ownership_contract(self: UnionPayloadGet) RETURNS ?
   RETURN NIL;
 END
 FN unionPayloadGet__compact_child_exprs(self: UnionPayloadGet, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_128: []Emittable = List[]; rtoc_empty_list_128 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   unionPayloadGet__append_child_expr(self, &children, _);
   END
@@ -8355,7 +8355,7 @@ FN indexGet__explicit_ownership_contract(self: IndexGet) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN indexGet__compact_child_exprs(self: IndexGet, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_129: []Emittable = List[]; rtoc_empty_list_129 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   indexGet__append_child_expr(self, &children, _);
   END
@@ -8420,7 +8420,7 @@ FN protocolCall__explicit_ownership_contract(self: ProtocolCall) RETURNS ?Owners
   RETURN NIL;
 END
 FN protocolCall__compact_child_exprs(self: ProtocolCall, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_130: []Emittable = List[]; rtoc_empty_list_130 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   protocolCall__append_child_expr(self, &children, _);
   END
@@ -8500,7 +8500,7 @@ FN binOp__explicit_ownership_contract(self: MIRBinOp) RETURNS ?OwnershipContract
   RETURN NIL;
 END
 FN binOp__compact_child_exprs(self: MIRBinOp, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_131: []Emittable = List[]; rtoc_empty_list_131 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   binOp__append_child_expr(self, &children, _);
   END
@@ -8576,7 +8576,7 @@ FN unaryOp__explicit_ownership_contract(self: MIRUnaryOp) RETURNS ?OwnershipCont
   RETURN NIL;
 END
 FN unaryOp__compact_child_exprs(self: MIRUnaryOp, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_132: []Emittable = List[]; rtoc_empty_list_132 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   unaryOp__append_child_expr(self, &children, _);
   END
@@ -8638,7 +8638,7 @@ FN fallibleOk__explicit_ownership_contract(self: FallibleOk) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN fallibleOk__compact_child_exprs(self: FallibleOk, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_133: []Emittable = List[]; rtoc_empty_list_133 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fallibleOk__append_child_expr(self, &children, _);
   END
@@ -8700,7 +8700,7 @@ FN futureReady__explicit_ownership_contract(self: FutureReady) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN futureReady__compact_child_exprs(self: FutureReady, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_134: []Emittable = List[]; rtoc_empty_list_134 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   futureReady__append_child_expr(self, &children, _);
   END
@@ -8763,7 +8763,7 @@ FN lit__explicit_ownership_contract(self: Lit) RETURNS ?OwnershipContract@multio
   RETURN NIL;
 END
 FN lit__compact_child_exprs(self: Lit, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_135: []Emittable = List[]; rtoc_empty_list_135 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   lit__append_child_expr(self, &children, _);
   END
@@ -8826,7 +8826,7 @@ FN symbolLit__explicit_ownership_contract(self: SymbolLit) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN symbolLit__compact_child_exprs(self: SymbolLit, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_136: []Emittable = List[]; rtoc_empty_list_136 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   symbolLit__append_child_expr(self, &children, _);
   END
@@ -8888,7 +8888,7 @@ FN voidLiteral__explicit_ownership_contract(self: VoidLiteral) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN voidLiteral__compact_child_exprs(self: VoidLiteral, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_137: []Emittable = List[]; rtoc_empty_list_137 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   voidLiteral__append_child_expr(self, &children, _);
   END
@@ -8950,7 +8950,7 @@ FN enumOrdinal__explicit_ownership_contract(self: EnumOrdinal) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN enumOrdinal__compact_child_exprs(self: EnumOrdinal, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_138: []Emittable = List[]; rtoc_empty_list_138 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   enumOrdinal__append_child_expr(self, &children, _);
   END
@@ -9013,7 +9013,7 @@ FN ident__explicit_ownership_contract(self: Ident) RETURNS ?OwnershipContract@mu
   RETURN NIL;
 END
 FN ident__compact_child_exprs(self: Ident, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_139: []Emittable = List[]; rtoc_empty_list_139 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ident__append_child_expr(self, &children, _);
   END
@@ -9079,7 +9079,7 @@ FN tupleLiteral__explicit_ownership_contract(self: TupleLiteral) RETURNS ?Owners
   RETURN NIL;
 END
 FN tupleLiteral__compact_child_exprs(self: TupleLiteral, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_141: []Emittable = List[]; rtoc_empty_list_141 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   tupleLiteral__append_child_expr(self, &children, _);
   END
@@ -9142,7 +9142,7 @@ FN fnRef__explicit_ownership_contract(self: FnRef) RETURNS ?OwnershipContract@mu
   RETURN NIL;
 END
 FN fnRef__compact_child_exprs(self: FnRef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_142: []Emittable = List[]; rtoc_empty_list_142 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   fnRef__append_child_expr(self, &children, _);
   END
@@ -9206,7 +9206,7 @@ FN lockAcquire__explicit_ownership_contract(self: LockAcquire) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN lockAcquire__compact_child_exprs(self: LockAcquire, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_143: []Emittable = List[]; rtoc_empty_list_143 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   lockAcquire__append_child_expr(self, &children, _);
   END
@@ -9271,7 +9271,7 @@ FN typeOf__explicit_ownership_contract(self: TypeOf) RETURNS ?OwnershipContract@
   RETURN NIL;
 END
 FN typeOf__compact_child_exprs(self: TypeOf, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_144: []Emittable = List[]; rtoc_empty_list_144 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   typeOf__append_child_expr(self, &children, _);
   END
@@ -9379,7 +9379,7 @@ FN typeEq__explicit_ownership_contract(self: TypeEq) RETURNS ?OwnershipContract@
   RETURN NIL;
 END
 FN typeEq__compact_child_exprs(self: TypeEq, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_145: []Emittable = List[]; rtoc_empty_list_145 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   typeEq__append_child_expr(self, &children, _);
   END
@@ -9448,7 +9448,7 @@ FN structInit__explicit_ownership_contract(self: StructInit) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN structInit__compact_child_exprs(self: StructInit, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_147: []Emittable = List[]; rtoc_empty_list_147 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   structInit__append_child_expr(self, &children, _);
   END
@@ -9511,7 +9511,7 @@ FN arrayInit__explicit_ownership_contract(self: ArrayInit) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN arrayInit__compact_child_exprs(self: ArrayInit, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_148: []Emittable = List[]; rtoc_empty_list_148 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   arrayInit__append_child_expr(self, &children, _);
   END
@@ -9556,7 +9556,7 @@ FN arrayDefaultInit__child_exprs(self: ArrayDefaultInit) RETURNS ![]Emittable EF
   RETURN TRY (arrayDefaultInit__compact_child_exprs(self, [CAST(self.default_value AS Any)]));
 END
 FN arrayDefaultInit__ownership_source_exprs(self: ArrayDefaultInit) RETURNS ![]Emittable ->
-  RETURN CAST(( { MUTABLE rtoc_empty_list_149: []Emittable = List[]; rtoc_empty_list_149 } ) AS []Emittable);
+  RETURN CAST(List[] AS []Emittable);
 END
 FN arrayDefaultInit__ownership_effect(self: ArrayDefaultInit) RETURNS OwnershipEffect EFFECTS REENTRANT ->
   RETURN ownershipEffect__none();
@@ -9582,7 +9582,7 @@ FN arrayDefaultInit__explicit_ownership_contract(self: ArrayDefaultInit) RETURNS
   RETURN NIL;
 END
 FN arrayDefaultInit__compact_child_exprs(self: ArrayDefaultInit, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_150: []Emittable = List[]; rtoc_empty_list_150 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   arrayDefaultInit__append_child_expr(self, &children, _);
   END
@@ -9647,7 +9647,7 @@ FN sliceExpr__explicit_ownership_contract(self: SliceExpr) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN sliceExpr__compact_child_exprs(self: SliceExpr, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_151: []Emittable = List[]; rtoc_empty_list_151 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   sliceExpr__append_child_expr(self, &children, _);
   END
@@ -9756,7 +9756,7 @@ FN blockExpr__explicit_ownership_contract(self: MIRBlockExpr) RETURNS ?Ownership
   RETURN NIL;
 END
 FN blockExpr__compact_child_exprs(self: MIRBlockExpr, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_152: []Emittable = List[]; rtoc_empty_list_152 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   blockExpr__append_child_expr(self, &children, _);
   END
@@ -9823,7 +9823,7 @@ FN concatStr__explicit_ownership_contract(self: ConcatStr) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN concatStr__compact_child_exprs(self: ConcatStr, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_153: []Emittable = List[]; rtoc_empty_list_153 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   concatStr__append_child_expr(self, &children, _);
   END
@@ -9904,7 +9904,7 @@ FN cast__explicit_ownership_contract(self: MIRCast) RETURNS ?OwnershipContract@m
   RETURN NIL;
 END
 FN cast__compact_child_exprs(self: MIRCast, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_154: []Emittable = List[]; rtoc_empty_list_154 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   cast__append_child_expr(self, &children, _);
   END
@@ -9967,7 +9967,7 @@ FN tryExpr__explicit_ownership_contract(self: TryExpr) RETURNS ?OwnershipContrac
   RETURN NIL;
 END
 FN tryExpr__compact_child_exprs(self: TryExpr, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_155: []Emittable = List[]; rtoc_empty_list_155 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   tryExpr__append_child_expr(self, &children, _);
   END
@@ -10042,7 +10042,7 @@ PRIVATE FN tryCatch__explicit_ownership_contract(self: TryCatch) RETURNS ?Owners
   RETURN NIL;
 END
 PRIVATE FN tryCatch__compact_child_exprs(self: TryCatch, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_156: []Emittable = List[]; rtoc_empty_list_156 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   tryCatch__append_child_expr(self, &children, _);
   END
@@ -10113,7 +10113,7 @@ FN orelse__explicit_ownership_contract(self: Orelse) RETURNS ?OwnershipContract@
   RETURN NIL;
 END
 FN orelse__compact_child_exprs(self: Orelse, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_157: []Emittable = List[]; rtoc_empty_list_157 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   orelse__append_child_expr(self, &children, _);
   END
@@ -10175,7 +10175,7 @@ FN conditional__explicit_ownership_contract(self: Conditional) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN conditional__compact_child_exprs(self: Conditional, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_158: []Emittable = List[]; rtoc_empty_list_158 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   conditional__append_child_expr(self, &children, _);
   END
@@ -10245,7 +10245,7 @@ FN ifOptional__explicit_ownership_contract(self: IfOptional) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN ifOptional__compact_child_exprs(self: IfOptional, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_159: []Emittable = List[]; rtoc_empty_list_159 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ifOptional__append_child_expr(self, &children, _);
   END
@@ -10308,7 +10308,7 @@ FN comptime__explicit_ownership_contract(self: Comptime) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN comptime__compact_child_exprs(self: Comptime, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_160: []Emittable = List[]; rtoc_empty_list_160 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   comptime__append_child_expr(self, &children, _);
   END
@@ -10372,7 +10372,7 @@ FN unionVariantGet__explicit_ownership_contract(self: UnionVariantGet) RETURNS ?
   RETURN NIL;
 END
 FN unionVariantGet__compact_child_exprs(self: UnionVariantGet, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_161: []Emittable = List[]; rtoc_empty_list_161 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   unionVariantGet__append_child_expr(self, &children, _);
   END
@@ -10434,7 +10434,7 @@ FN listItems__explicit_ownership_contract(self: ListItems) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN listItems__compact_child_exprs(self: ListItems, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_162: []Emittable = List[]; rtoc_empty_list_162 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   listItems__append_child_expr(self, &children, _);
   END
@@ -10499,7 +10499,7 @@ FN listLength__explicit_ownership_contract(self: ListLength) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN listLength__compact_child_exprs(self: ListLength, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_163: []Emittable = List[]; rtoc_empty_list_163 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   listLength__append_child_expr(self, &children, _);
   END
@@ -10564,7 +10564,7 @@ FN addressOf__explicit_ownership_contract(self: AddressOf) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN addressOf__compact_child_exprs(self: AddressOf, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_164: []Emittable = List[]; rtoc_empty_list_164 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   addressOf__append_child_expr(self, &children, _);
   END
@@ -10629,7 +10629,7 @@ FN deref__explicit_ownership_contract(self: Deref) RETURNS ?OwnershipContract@mu
   RETURN NIL;
 END
 FN deref__compact_child_exprs(self: Deref, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_165: []Emittable = List[]; rtoc_empty_list_165 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   deref__append_child_expr(self, &children, _);
   END
@@ -10695,7 +10695,7 @@ FN pointerCast__explicit_ownership_contract(self: PointerCast) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN pointerCast__compact_child_exprs(self: PointerCast, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_166: []Emittable = List[]; rtoc_empty_list_166 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   pointerCast__append_child_expr(self, &children, _);
   END
@@ -10760,7 +10760,7 @@ FN constCast__explicit_ownership_contract(self: ConstCast) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN constCast__compact_child_exprs(self: ConstCast, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_167: []Emittable = List[]; rtoc_empty_list_167 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   constCast__append_child_expr(self, &children, _);
   END
@@ -10822,7 +10822,7 @@ FN defaultStreamCapacity__explicit_ownership_contract(self: DefaultStreamCapacit
   RETURN NIL;
 END
 FN defaultStreamCapacity__compact_child_exprs(self: DefaultStreamCapacity, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_168: []Emittable = List[]; rtoc_empty_list_168 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   defaultStreamCapacity__append_child_expr(self, &children, _);
   END
@@ -10885,7 +10885,7 @@ FN undef__explicit_ownership_contract(self: Undef) RETURNS ?OwnershipContract@mu
   RETURN NIL;
 END
 FN undef__compact_child_exprs(self: Undef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_169: []Emittable = List[]; rtoc_empty_list_169 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   undef__append_child_expr(self, &children, _);
   END
@@ -10949,7 +10949,7 @@ FN typeSentinel__explicit_ownership_contract(self: TypeSentinel) RETURNS ?Owners
   RETURN NIL;
 END
 FN typeSentinel__compact_child_exprs(self: TypeSentinel, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_170: []Emittable = List[]; rtoc_empty_list_170 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   typeSentinel__append_child_expr(self, &children, _);
   END
@@ -11014,7 +11014,7 @@ FN iterRange__explicit_ownership_contract(self: IterRange) RETURNS ?OwnershipCon
   RETURN NIL;
 END
 FN iterRange__compact_child_exprs(self: IterRange, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_171: []Emittable = List[]; rtoc_empty_list_171 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   iterRange__append_child_expr(self, &children, _);
   END
@@ -11087,7 +11087,7 @@ FN optionalUnwrap__explicit_ownership_contract(self: MIROptionalUnwrap) RETURNS 
   RETURN NIL;
 END
 FN optionalUnwrap__compact_child_exprs(self: MIROptionalUnwrap, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_172: []Emittable = List[]; rtoc_empty_list_172 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   optionalUnwrap__append_child_expr(self, &children, _);
   END
@@ -11150,7 +11150,7 @@ FN tryOptional__explicit_ownership_contract(self: TryOptional) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN tryOptional__compact_child_exprs(self: TryOptional, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_173: []Emittable = List[]; rtoc_empty_list_173 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   tryOptional__append_child_expr(self, &children, _);
   END
@@ -11211,7 +11211,7 @@ FN foreignOwnedUnwrap__explicit_ownership_contract(self: ForeignOwnedUnwrap) RET
   RETURN NIL;
 END
 FN foreignOwnedUnwrap__compact_child_exprs(self: ForeignOwnedUnwrap, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_174: []Emittable = List[]; rtoc_empty_list_174 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   foreignOwnedUnwrap__append_child_expr(self, &children, _);
   END
@@ -11274,7 +11274,7 @@ FN foreignSliceView__explicit_ownership_contract(self: ForeignSliceView) RETURNS
   RETURN NIL;
 END
 FN foreignSliceView__compact_child_exprs(self: ForeignSliceView, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_175: []Emittable = List[]; rtoc_empty_list_175 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   foreignSliceView__append_child_expr(self, &children, _);
   END
@@ -11364,7 +11364,7 @@ FN rangeLit__explicit_ownership_contract(self: MIRRangeLit) RETURNS ?OwnershipCo
   RETURN NIL;
 END
 FN rangeLit__compact_child_exprs(self: MIRRangeLit, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_176: []Emittable = List[]; rtoc_empty_list_176 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   rangeLit__append_child_expr(self, &children, _);
   END
@@ -11430,7 +11430,7 @@ FN hasField__explicit_ownership_contract(self: HasField) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN hasField__compact_child_exprs(self: HasField, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_177: []Emittable = List[]; rtoc_empty_list_177 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   hasField__append_child_expr(self, &children, _);
   END
@@ -11495,7 +11495,7 @@ FN itemsAccess__explicit_ownership_contract(self: ItemsAccess) RETURNS ?Ownershi
   RETURN NIL;
 END
 FN itemsAccess__compact_child_exprs(self: ItemsAccess, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_178: []Emittable = List[]; rtoc_empty_list_178 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   itemsAccess__append_child_expr(self, &children, _);
   END
@@ -11563,7 +11563,7 @@ FN ownedSlice__explicit_ownership_contract(self: OwnedSlice) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN ownedSlice__compact_child_exprs(self: OwnedSlice, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_179: []Emittable = List[]; rtoc_empty_list_179 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   ownedSlice__append_child_expr(self, &children, _);
   END
@@ -11627,7 +11627,7 @@ FN lambdaExpr__explicit_ownership_contract(self: LambdaExpr) RETURNS ?OwnershipC
   RETURN NIL;
 END
 FN lambdaExpr__compact_child_exprs(self: LambdaExpr, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_180: []Emittable = List[]; rtoc_empty_list_180 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   lambdaExpr__append_child_expr(self, &children, _);
   END
@@ -11694,7 +11694,7 @@ FN pipeline__explicit_ownership_contract(self: Pipeline) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN pipeline__compact_child_exprs(self: Pipeline, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_181: []Emittable = List[]; rtoc_empty_list_181 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   pipeline__append_child_expr(self, &children, _);
   END
@@ -11780,7 +11780,7 @@ FN inlineBc__explicit_ownership_contract(self: InlineBc) RETURNS ?OwnershipContr
   RETURN NIL;
 END
 FN inlineBc__compact_child_exprs(self: InlineBc, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_182: []Emittable = List[]; rtoc_empty_list_182 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   inlineBc__append_child_expr(self, &children, _);
   END
@@ -11850,7 +11850,7 @@ FN orElseExitBcRewrite__explicit_ownership_contract(self: OrElseExitBcRewrite) R
   RETURN NIL;
 END
 FN orElseExitBcRewrite__compact_child_exprs(self: OrElseExitBcRewrite, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_183: []Emittable = List[]; rtoc_empty_list_183 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   orElseExitBcRewrite__append_child_expr(self, &children, _);
   END
@@ -11940,7 +11940,7 @@ FN shardedMapPut__without_try(self: ShardedMapPut) RETURNS Emittable ->
   RETURN COPY self;
 END
 FN shardedMapPut__compact_child_exprs(self: ShardedMapPut, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_184: []Emittable = List[]; rtoc_empty_list_184 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   shardedMapPut__append_child_expr(self, &children, _);
   END
@@ -12014,7 +12014,7 @@ FN shardedMapGet__explicit_ownership_contract(self: ShardedMapGet) RETURNS ?Owne
   RETURN NIL;
 END
 FN shardedMapGet__compact_child_exprs(self: ShardedMapGet, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_185: []Emittable = List[]; rtoc_empty_list_185 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   shardedMapGet__append_child_expr(self, &children, _);
   END
@@ -12097,13 +12097,13 @@ PUB FN ownershipContract__empty() RETURNS !OwnershipContract@multiowned ->
   RETURN TRY (ownershipContract__new(no_operands, no_produces, no_borrows));
 END
 PUB FN ownershipContract__consume_operands(operands: []OwnershipOperandFact) RETURNS !OwnershipContract@multiowned ->
-  RETURN TRY (ownershipContract__new(operands, ( { MUTABLE rtoc_empty_list_186: []String = List[]; rtoc_empty_list_186 } ), ( { MUTABLE rtoc_empty_list_187: []String = List[]; rtoc_empty_list_187 } ), TRUE));
+  RETURN TRY (ownershipContract__new(operands, List[], List[], TRUE));
 END
 PUB FN ownershipContract__owned_operand_names(self: OwnershipContract) RETURNS ![]String
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE names: []String = ( { MUTABLE rtoc_empty_list_188: []String = List[]; rtoc_empty_list_188 } );
+    MUTABLE names: []String = List[];
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_self_view.operands.length() DO
       IF rtoc_self_view.operands[rtoc_idx]?.borrowed THEN
@@ -12176,13 +12176,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
 }
 END
 PUB FN callableContract__no_ownership(checked_arg_count: Int64) RETURNS !CallableContract@multiowned ->
-  MUTABLE params: []Param = ( { MUTABLE rtoc_empty_list_189: []Param = List[]; rtoc_empty_list_189 } );
+  MUTABLE params: []Param = List[];
   MUTABLE idx: Int64 = 0;
   WHILE (idx < checked_arg_count) DO
   &params.append(Param{ name: "__arg${idx.toString()}", type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), default: NIL, mutable: NIL, takes: NIL, comptime: NIL, name_token: NIL, required: NIL, sync: NIL, symbol: NIL, carrier_contract: :polymorphic });
     idx = (idx + 1);
   END
-  RETURN callableContract__new(TRY (functionSignature__new(params, TypeTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, NIL, NIL, ( { MUTABLE rtoc_empty_list_190: []String@symbol = List[]; rtoc_empty_list_190 } ), {}, FALSE, FALSE, NIL, NIL, NIL, ( { MUTABLE rtoc_empty_list_191: []String@symbol = List[]; rtoc_empty_list_191 } ), NIL, ( { MUTABLE rtoc_empty_list_192: []String@symbol = List[]; rtoc_empty_list_192 } ))), TRY (ownershipContract__new(( { MUTABLE rtoc_empty_list_193: []OwnershipOperandFact = List[]; rtoc_empty_list_193 } ), ( { MUTABLE rtoc_empty_list_194: []String = List[]; rtoc_empty_list_194 } ), ( { MUTABLE rtoc_empty_list_195: []String = List[]; rtoc_empty_list_195 } ), TRUE)), checked_arg_count);
+  RETURN callableContract__new(TRY (functionSignature__new(params, TypeTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) }, NIL, NIL, List[], {}, FALSE, FALSE, NIL, NIL, NIL, List[], NIL, List[])), TRY (ownershipContract__new(List[], List[], List[], TRUE)), checked_arg_count);
 END
 PUB FN callableContract__new(signature: FunctionSignature, ownership_contract: OwnershipContract, checked_arg_count: Int64) RETURNS CallableContract@multiowned ->
   MUTABLE self = CallableContract{ checked_arg_count: checked_arg_count, ownership_contract: COPY ownership_contract, signature: COPY signature };
@@ -13057,7 +13057,7 @@ FN program__compact_child_exprs(self: MIRProgram, values: []Any) RETURNS ![]Emit
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_199: []Emittable = List[]; rtoc_empty_list_199 } );
+    MUTABLE children: []Emittable = List[];
     FOR _ IN values DO
     program__append_child_expr(rtoc_self_view, &children, _);
     END
@@ -13153,7 +13153,7 @@ FN protocolAdapterDef__explicit_ownership_contract(self: ProtocolAdapterDef) RET
   RETURN NIL;
 END
 FN protocolAdapterDef__compact_child_exprs(self: ProtocolAdapterDef, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_200: []Emittable = List[]; rtoc_empty_list_200 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   protocolAdapterDef__append_child_expr(self, &children, _);
   END
@@ -13323,7 +13323,7 @@ FN thunkTrampoline__explicit_ownership_contract(self: ThunkTrampoline) RETURNS ?
   RETURN NIL;
 END
 FN thunkTrampoline__compact_child_exprs(self: ThunkTrampoline, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_201: []Emittable = List[]; rtoc_empty_list_201 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   thunkTrampoline__append_child_expr(self, &children, _);
   END
@@ -13394,7 +13394,7 @@ FN mutualThunkTrampoline__explicit_ownership_contract(self: MutualThunkTrampolin
   RETURN NIL;
 END
 FN mutualThunkTrampoline__compact_child_exprs(self: MutualThunkTrampoline, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_202: []Emittable = List[]; rtoc_empty_list_202 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   mutualThunkTrampoline__append_child_expr(self, &children, _);
   END
@@ -13639,7 +13639,7 @@ FN directTenseMap__explicit_ownership_contract(self: DirectTenseMap) RETURNS ?Ow
   RETURN NIL;
 END
 FN directTenseMap__compact_child_exprs(self: DirectTenseMap, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_203: []Emittable = List[]; rtoc_empty_list_203 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   directTenseMap__append_child_expr(self, &children, _);
   END
@@ -13701,7 +13701,7 @@ FN asyncPayloadTake__explicit_ownership_contract(self: AsyncPayloadTake) RETURNS
   RETURN NIL;
 END
 FN asyncPayloadTake__compact_child_exprs(self: AsyncPayloadTake, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_204: []Emittable = List[]; rtoc_empty_list_204 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   asyncPayloadTake__append_child_expr(self, &children, _);
   END
@@ -13828,7 +13828,7 @@ FN failureAction__child_exprs(self: FailureAction) RETURNS ![]Emittable EFFECTS 
 END
 FN failureAction__body_slots(self: FailureAction) RETURNS ![]MIRBodySlot EFFECTS REENTRANT ->
   IF !((self.kind == FailureActionKind.Block)) THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_206: []MIRBodySlot = List[]; rtoc_empty_list_206 } ) AS []MIRBodySlot);
+    RETURN CAST(List[] AS []MIRBodySlot);
   END
   RETURN CAST([failureAction__body_slot(self, :body, self.body)] AS []MIRBodySlot);
 END
@@ -13859,7 +13859,7 @@ FN failureAction__explicit_ownership_contract(self: FailureAction) RETURNS ?Owne
   RETURN NIL;
 END
 FN failureAction__compact_child_exprs(self: FailureAction, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_207: []Emittable = List[]; rtoc_empty_list_207 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   failureAction__append_child_expr(self, &children, _);
   END
@@ -14007,7 +14007,7 @@ FN defaultValue__explicit_ownership_contract(self: DefaultValue) RETURNS ?Owners
   RETURN NIL;
 END
 FN defaultValue__compact_child_exprs(self: DefaultValue, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_208: []Emittable = List[]; rtoc_empty_list_208 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   defaultValue__append_child_expr(self, &children, _);
   END
@@ -14070,7 +14070,7 @@ FN enumTag__explicit_ownership_contract(self: EnumTag) RETURNS ?OwnershipContrac
   RETURN NIL;
 END
 FN enumTag__compact_child_exprs(self: EnumTag, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_209: []Emittable = List[]; rtoc_empty_list_209 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   enumTag__append_child_expr(self, &children, _);
   END
@@ -14141,7 +14141,7 @@ FN nextPromiseList__explicit_ownership_contract(self: NextPromiseList) RETURNS ?
   RETURN NIL;
 END
 FN nextPromiseList__compact_child_exprs(self: NextPromiseList, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_210: []Emittable = List[]; rtoc_empty_list_210 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   nextPromiseList__append_child_expr(self, &children, _);
   END
@@ -14257,7 +14257,7 @@ FN registryCall__body_slots(self: RegistryCall) RETURNS ![]MIRBodySlot EFFECTS R
   RETURN empty_body_slots;
 END
 FN registryCall__compact_child_exprs(self: RegistryCall, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_220: []Emittable = List[]; rtoc_empty_list_220 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   registryCall__append_child_expr(self, &children, _);
   END
@@ -14357,7 +14357,7 @@ FN indexedStore__without_try(self: IndexedStore) RETURNS Emittable ->
   RETURN COPY self;
 END
 FN indexedStore__compact_child_exprs(self: IndexedStore, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_231: []Emittable = List[]; rtoc_empty_list_231 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   indexedStore__append_child_expr(self, &children, _);
   END
@@ -14425,7 +14425,7 @@ FN cFunctionAdapter__explicit_ownership_contract(self: CFunctionAdapter) RETURNS
   RETURN NIL;
 END
 FN cFunctionAdapter__compact_child_exprs(self: CFunctionAdapter, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_232: []Emittable = List[]; rtoc_empty_list_232 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   cFunctionAdapter__append_child_expr(self, &children, _);
   END
@@ -14516,7 +14516,7 @@ FN externTrampoline__explicit_ownership_contract(self: ExternTrampoline) RETURNS
   RETURN NIL;
 END
 FN externTrampoline__compact_child_exprs(self: ExternTrampoline, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_238: []Emittable = List[]; rtoc_empty_list_238 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   externTrampoline__append_child_expr(self, &children, _);
   END
@@ -14586,7 +14586,7 @@ FN observableConsumerSpawn__without_try(self: ObservableConsumerSpawn) RETURNS E
   RETURN COPY self;
 END
 FN observableConsumerSpawn__compact_child_exprs(self: ObservableConsumerSpawn, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_239: []Emittable = List[]; rtoc_empty_list_239 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   observableConsumerSpawn__append_child_expr(self, &children, _);
   END
@@ -14667,7 +14667,7 @@ FN shardConcurrentEach__explicit_ownership_contract(self: ShardConcurrentEach) R
   RETURN NIL;
 END
 FN shardConcurrentEach__compact_child_exprs(self: ShardConcurrentEach, values: []Any) RETURNS ![]Emittable ->
-  MUTABLE children: []Emittable = ( { MUTABLE rtoc_empty_list_240: []Emittable = List[]; rtoc_empty_list_240 } );
+  MUTABLE children: []Emittable = List[];
   FOR _ IN values DO
   shardConcurrentEach__append_child_expr(self, &children, _);
   END

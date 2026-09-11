@@ -126,7 +126,7 @@ PRIVATE FN programMIRFinalizer__generic_projection_return?(function: FunctionDef
   IF !(((return_type != NIL) AND type__generic_type_parameter?(return_type))) THEN
     RETURN FALSE;
   END
-  MUTABLE returns: []ReturnNode = ( { MUTABLE rtoc_empty_list_1: []ReturnNode = List[]; rtoc_empty_list_1 } );
+  MUTABLE returns: []ReturnNode = List[];
   aST__each_locatable_list(function.body, FALSE, %(node: Locatable) USE(MUTABLE returns) -> {
   IF node IS_A ReturnNode AS return_node THEN
       &returns.append(return_node);
@@ -143,7 +143,7 @@ PRIVATE FN programMIRFinalizer__generic_returned_parameter_name(function: Functi
   IF !(((return_type != NIL) AND type__generic_type_parameter?(return_type))) THEN
     RETURN NIL;
   END
-  MUTABLE returns: []ReturnNode = ( { MUTABLE rtoc_empty_list_2: []ReturnNode = List[]; rtoc_empty_list_2 } );
+  MUTABLE returns: []ReturnNode = List[];
   aST__each_locatable_list(function.body, FALSE, %(node: Locatable) USE(MUTABLE returns) -> {
   IF node IS_A ReturnNode AS return_node THEN
       &returns.append(return_node);

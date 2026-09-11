@@ -319,13 +319,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE transfers: [Set]String = Set[];
     MUTABLE return_transfers: [Set]String = Set[];
     MUTABLE errdefer_destroy_names: [Set]String = Set[];
-    MUTABLE hpt_leaks: []String = ( { MUTABLE rtoc_empty_list_3: []String = List[]; rtoc_empty_list_3 } );
-    MUTABLE owned_return_lets: []Let = ( { MUTABLE rtoc_empty_list_4: []Let = List[]; rtoc_empty_list_4 } );
-    MUTABLE owned_result_lets: []Let = ( { MUTABLE rtoc_empty_list_5: []Let = List[]; rtoc_empty_list_5 } );
-    MUTABLE allocator_metadata_nodes: []Emittable = ( { MUTABLE rtoc_empty_list_6: []Emittable = List[]; rtoc_empty_list_6 } );
+    MUTABLE hpt_leaks: []String = List[];
+    MUTABLE owned_return_lets: []Let = List[];
+    MUTABLE owned_result_lets: []Let = List[];
+    MUTABLE allocator_metadata_nodes: []Emittable = List[];
     MUTABLE allocator_metadata_node_ids: {Int64}Bool = {};
-    MUTABLE structural_ownership_nodes: []Emittable = ( { MUTABLE rtoc_empty_list_7: []Emittable = List[]; rtoc_empty_list_7 } );
-    MUTABLE ownership_fact_nodes: []Emittable = ( { MUTABLE rtoc_empty_list_8: []Emittable = List[]; rtoc_empty_list_8 } );
+    MUTABLE structural_ownership_nodes: []Emittable = List[];
+    MUTABLE ownership_fact_nodes: []Emittable = List[];
     FOR _ IN nodes DO
     IF emittable__ownership_consumption(_) EXISTS THEN
         &structural_ownership_nodes.append(COPY _);
@@ -578,7 +578,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN TRY (mIRChecker__ownership_consumption_operand_names(rtoc_self_view, fact));
     END
     IF !(mIRChecker__stdlib_takes_ownership?(rtoc_self_view, node)) THEN
-      RETURN CAST(( { MUTABLE rtoc_empty_list_14: []String = List[]; rtoc_empty_list_14 } ) AS []String);
+      RETURN CAST(List[] AS []String);
     END
     MUTABLE value: ?Emittable = emittable__value(node);
     IF value EXISTS AS rtoc_value_node THEN
@@ -589,7 +589,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF TRY (mIRChecker__allocating_expr?(rtoc_self_view, value)) THEN
       &rtoc_self_view.errors.append(TRY (mIRChecker__error(rtoc_self_view, :IMPLICIT_OWNERSHIP_TRANSFER, Name{ StringValue: COPY mIRChecker__ownership_node_name(rtoc_self_view, node) }, "structural ownership sink takes a value, but the source owner is not a named MIR binding")));
     END
-    RETURN CAST(( { MUTABLE rtoc_empty_list_15: []String = List[]; rtoc_empty_list_15 } ) AS []String);
+    RETURN CAST(List[] AS []String);
 }
 END
 PUB FN mIRChecker__ownership_consumption_operand_names(self: MIRChecker, fact: OwnershipConsumptionFact) RETURNS ![]String
@@ -771,7 +771,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF stmt_value_mutable IS_A SwitchStmt AS switch_stmt THEN
         MUTABLE switch_stmt_mutable = COPY switch_stmt;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, switch_stmt_mutable.subject, &state));
-        MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_18: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_18 } );
+        MUTABLE states: []LinearOwnershipState@multiowned = List[];
         IF !((switch_stmt_mutable.arms).empty?()) THEN
                 FOR _ IN switch_stmt_mutable.arms DO
                 &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body, linearOwnershipState__copy(state))), state, "match")));
@@ -782,7 +782,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF stmt_value_mutable IS_A UnionMatchStmt AS union_match_stmt THEN
         MUTABLE union_match_stmt_mutable = COPY union_match_stmt;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, union_match_stmt_mutable.subject, &state));
-        MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_19: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_19 } );
+        MUTABLE states: []LinearOwnershipState@multiowned = List[];
         IF !((union_match_stmt_mutable.arms).empty?()) THEN
                 FOR _ IN union_match_stmt_mutable.arms DO
                 &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body, linearOwnershipState__copy(state))), state, "match")));
@@ -792,7 +792,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         TRY (mIRChecker__linear_merge_branch_states_mut(&rtoc_self_view, states, &state, "match"));
       ELSE_IF stmt_value_mutable IS_A IfChain AS if_chain THEN
         MUTABLE if_chain_mutable = COPY if_chain;
-        MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_20: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_20 } );
+        MUTABLE states: []LinearOwnershipState@multiowned = List[];
         IF !((if_chain_mutable.branches).empty?()) THEN
                 FOR _ IN if_chain_mutable.branches DO
             TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, _.cond, &state));
@@ -847,13 +847,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF stmt_value_mutable IS_A PolymorphicMutateFlow AS polymorphic_mutate_flow THEN
         MUTABLE polymorphic_mutate_flow_mutable = COPY polymorphic_mutate_flow;
         TRY (mIRChecker__check_linear_expr_uses_mut(&rtoc_self_view, polymorphic_mutate_flow_mutable.guard_cond, &state));
-        MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_21: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_21 } );
+        MUTABLE states: []LinearOwnershipState@multiowned = List[];
         &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, TRY (polymorphicMutateFlow__body(polymorphic_mutate_flow_mutable)), linearOwnershipState__copy(state))), state, "polymorphic-mutate-flow")));
         &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, (polymorphic_mutate_flow_mutable.guard_fail_body OR_ELSE List[]), linearOwnershipState__copy(state))), state, "polymorphic-mutate-flow")));
         TRY (mIRChecker__linear_merge_branch_states_mut(&rtoc_self_view, states, &state, "polymorphic-mutate-flow"));
       ELSE_IF stmt_value_mutable IS_A WithMatchDispatch AS with_match_dispatch THEN
         MUTABLE with_match_dispatch_mutable = COPY with_match_dispatch;
-        MUTABLE states: []LinearOwnershipState@multiowned = ( { MUTABLE rtoc_empty_list_22: []LinearOwnershipState@multiowned = List[]; rtoc_empty_list_22 } );
+        MUTABLE states: []LinearOwnershipState@multiowned = List[];
         IF !((with_match_dispatch_mutable.arms).empty?()) THEN
                 FOR _ IN with_match_dispatch_mutable.arms DO
                 &states.append(TRY (mIRChecker__linear_project_branch_state(&rtoc_self_view, TRY (mIRChecker__check_linear_stmts_mut(&rtoc_self_view, _.body, linearOwnershipState__copy(state))), state, "with-match")));
@@ -1698,7 +1698,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     TRY (mIRPassState__class_require_mut(PassStateProgram{ MIRProgram: COPY program }, :mir_lowered, "MIRChecker"));
     MUTABLE all_errors: []String = TRY (mIRChecker__ownership_registry_errors(rtoc_self_view));
     FOR _ IN (TRY (mIRChecker__program_functions(rtoc_self_view, program.items))) DO
-    ruby_array_concat_String__mir_checker(all_errors, TRY (mIRChecker__check_fn_mut(&rtoc_self_view, _, strict, ( { MUTABLE rtoc_empty_list_31: []String = List[]; rtoc_empty_list_31 } ))));
+    ruby_array_concat_String__mir_checker(all_errors, TRY (mIRChecker__check_fn_mut(&rtoc_self_view, _, strict, List[])));
     END
     IF (all_errors.length() == 0) THEN
       MUTABLE rtoc_mutable_receiver_32 = mIRPassState__for_mut(PassStateProgram{ MIRProgram: COPY program });
@@ -1712,7 +1712,7 @@ PUB FN mIRChecker__program_functions(self: MIRChecker, items: []Emittable) RETUR
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE functions: []FnDef = ( { MUTABLE rtoc_empty_list_33: []FnDef = List[]; rtoc_empty_list_33 } );
+    MUTABLE functions: []FnDef = List[];
     FOR _ IN items DO
     IF _ IS_A FnDef AS fn_def THEN
       &functions.append(COPY fn_def);
@@ -3476,7 +3476,7 @@ PRIVATE FN mIRChecker__iteration_frame_alloc_summary(self: MIRChecker, stmts: ?N
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE allocations: []String = ( { MUTABLE rtoc_empty_list_56: []String = List[]; rtoc_empty_list_56 } );
+    MUTABLE allocations: []String = List[];
     FOR node IN TRY (mIRChecker__loop_local_nodes(rtoc_self_view, stmts)) DO
       IF node IS_A AllocMark AS rtoc_mark THEN
         IF (placement__frame?(rtoc_mark.alloc) AND ((rtoc_mark.scope OR_ELSE :none) == :iteration)) THEN

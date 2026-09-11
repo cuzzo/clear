@@ -30,7 +30,7 @@ PUB FN materializationPacket__owned(alloc_mark: AllocMark, value_stmt: Emittable
   RETURN MaterializationPacket{ alloc_mark: COPY alloc_mark, value_stmt: COPY value_stmt, cleanup_stmt: COPY cleanup_stmt };
 END
 PUB FN materializationPacket__statements(self: MaterializationPacket) RETURNS ![]Emittable ->
-  MUTABLE out: []Emittable = ( { MUTABLE rtoc_empty_list_2: []Emittable = List[]; rtoc_empty_list_2 } );
+  MUTABLE out: []Emittable = List[];
   IF self.alloc_mark EXISTS AS alloc_mark_value THEN
     &out.append(COPY alloc_mark_value);
   END

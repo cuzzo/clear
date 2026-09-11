@@ -38,7 +38,7 @@ PUB FN intrinsicArgSpec__list_from_registry(raw: ?IntrinsicArgSpecRawArgSpec) RE
   IF raw? IS_A []IntrinsicArgSpecRawArgSpecEntry AS array THEN
     RETURN array |> SELECT intrinsicArgSpec__from_registry(_);
   END
-  RETURN CAST(( { MUTABLE rtoc_empty_list_1: []IntrinsicArgSpec = List[]; rtoc_empty_list_1 } ) AS []IntrinsicArgSpec);
+  RETURN CAST(List[] AS []IntrinsicArgSpec);
 END
 PUB FN intrinsicArgSpec__fixed_list_from_registry?(raw: ?IntrinsicArgSpecRawArgSpec) RETURNS Bool ->
   IF raw EXISTS AS raw_value THEN

@@ -27,7 +27,7 @@ PUB FN protocolProjectionResolver__resolve(self: ProtocolProjectionResolver, exp
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE issues: []ProtocolProjectionIssue = ( { MUTABLE rtoc_empty_list_1: []ProtocolProjectionIssue = List[]; rtoc_empty_list_1 } );
+    MUTABLE issues: []ProtocolProjectionIssue = List[];
     MUTABLE parameter_map: {String}GenericParamDecl = {};
     FOR _ IN parameters DO
     parameter_map[_.name] = COPY _;
@@ -127,7 +127,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF protocol EXISTS AS protocol_value THEN
       RETURN protocol_value.associated_types |> SELECT symbol(_.name);
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_2: []String@symbol = List[]; rtoc_empty_list_2 } ) AS []String@symbol);
+      RETURN CAST(List[] AS []String@symbol);
     END
 }
 END

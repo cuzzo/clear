@@ -18,7 +18,7 @@ PUB STRUCT ByValue {
 }
 
 PUB FN byValue__marker_plan(self: ByValue) RETURNS ![]MarkerPlanEntry ->
-  RETURN CAST(( { MUTABLE rtoc_empty_list_1: []MarkerPlanEntry = List[]; rtoc_empty_list_1 } ) AS []MarkerPlanEntry);
+  RETURN CAST(List[] AS []MarkerPlanEntry);
 END
 PUB FN byValue__needs_capture_site_annotation?(self: ByValue) RETURNS Bool ->
   RETURN FALSE;
@@ -29,7 +29,7 @@ PUB STRUCT RcClone {
 }
 
 PUB FN rcClone__marker_plan(self: RcClone) RETURNS ![]MarkerPlanEntry ->
-  RETURN CAST(( { MUTABLE rtoc_empty_list_2: []MarkerPlanEntry = List[]; rtoc_empty_list_2 } ) AS []MarkerPlanEntry);
+  RETURN CAST(List[] AS []MarkerPlanEntry);
 END
 PUB FN rcClone__needs_capture_site_annotation?(self: RcClone) RETURNS Bool ->
   RETURN FALSE;
@@ -64,7 +64,7 @@ PUB STRUCT Refuse {
 }
 
 PUB FN refuse__marker_plan(self: Refuse) RETURNS ![]MarkerPlanEntry ->
-  RETURN CAST(( { MUTABLE rtoc_empty_list_3: []MarkerPlanEntry = List[]; rtoc_empty_list_3 } ) AS []MarkerPlanEntry);
+  RETURN CAST(List[] AS []MarkerPlanEntry);
 END
 PUB FN refuse__needs_capture_site_annotation?(self: Refuse) RETURNS Bool ->
   RETURN FALSE;

@@ -145,7 +145,7 @@ PRIVATE FN recursiveSplitter__match_tail_mutual_call(node: Locatable, partner_na
 END
 PRIVATE FN recursiveSplitter__contains_any_call?(node: ?ThunkScanNode, names_set: [Set]String) RETURNS Bool ->
   IF node EXISTS AS node_value THEN
-    MUTABLE stack: []Locatable = ( { MUTABLE rtoc_empty_list_1: []Locatable = List[]; rtoc_empty_list_1 } );
+    MUTABLE stack: []Locatable = List[];
     IF node_value IS_A []Node AS array THEN
       MUTABLE rtoc_reverse_i_3 = array.length() - 1;
       WHILE rtoc_reverse_i_3 >= 0 DO

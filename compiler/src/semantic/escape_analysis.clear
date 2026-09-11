@@ -180,7 +180,7 @@ PUB FN escapeAnalysis__validate_escape_sink_handlers_mut() RETURNS !Void ->
   TRY (escapeAnalysis__validate_handler_registry_mut("EscapeAnalysis sink registry", CAST({:owning_return: [symbol("mark_heap_return_facts!"), symbol("mark_body_escapes!")], :enclosing_scope_store: [symbol("mark_body_escapes!")], :binding_result: [symbol("mark_body_escapes!")], :execution_boundary_capture: [symbol("mark_body_escapes!")], :lambda_capture: [symbol("mark_body_escapes!")], :takes_or_mutable_arg: [symbol("mark_body_escapes!")], :receiver_backing_storage: [symbol("mark_param_receiver_allocations_heap!"), symbol("mark_loop_receiver_allocations_heap!")]} AS {String@symbol}[]String@symbol)));
 END
 PUB FN escapeAnalysis__validate_escape_sinks_mut() RETURNS !Void ->
-  MUTABLE missing: []String = ( { MUTABLE rtoc_empty_list_1: []String = List[]; rtoc_empty_list_1 } );
+  MUTABLE missing: []String = List[];
   FOR _ IN escapeAnalysis__escape_sinks() DO
   IF !(([:owning_return, :enclosing_scope_store, :binding_result, :destructured_binding, :execution_boundary_capture, :lambda_capture, :takes_or_mutable_arg, :receiver_backing_storage] |> DISTINCT _).contains?(_.name)) THEN
       &missing.append(COPY CAST(_.name AS String));
@@ -198,7 +198,7 @@ PUB FN escapeAnalysis__validate_derived_placement_handlers_mut() RETURNS !Void -
   TRY (escapeAnalysis__validate_handler_registry_mut("EscapeAnalysis derived placement registry", CAST({:recursive_aggregate_owner: [symbol("mark_recursive_aggregate_owners_heap!")], :assignment_ownership: [symbol("propagate_assignment_ownership!")], :hoist_dependency: [symbol("propagate_hoist_dependencies!")]} AS {String@symbol}[]String@symbol)));
 END
 PUB FN escapeAnalysis__validate_handler_registry_mut(label: String, registry: {String@symbol}[]String@symbol) RETURNS !Void ->
-  MUTABLE missing: []String = ( { MUTABLE rtoc_empty_list_2: []String = List[]; rtoc_empty_list_2 } );
+  MUTABLE missing: []String = List[];
   FOR rtoc_key IN registry.keys() DO
   MUTABLE handlers: []String@symbol = COPY UNWRAP (registry[rtoc_key]);
   FOR _ IN handlers DO
@@ -1568,9 +1568,9 @@ END
 PUB FN escapeAnalysis__function_facts(fn_value: FunctionDef, summary: ?FunctionBodySummary = NIL, hoist_bindings: []VarDecl = []) RETURNS !FunctionFacts ->
   MUTABLE symbols: {String}SymbolEntry@multiowned = {};
   MUTABLE binding_values: {String}[]Locatable = {};
-  MUTABLE return_values: []Locatable = ( { MUTABLE rtoc_empty_list_20: []Locatable = List[]; rtoc_empty_list_20 } );
-  MUTABLE assignment_nodes: []AssignmentNode = ( { MUTABLE rtoc_empty_list_21: []AssignmentNode = List[]; rtoc_empty_list_21 } );
-  MUTABLE escape_nodes: []Locatable = ( { MUTABLE rtoc_empty_list_22: []Locatable = List[]; rtoc_empty_list_22 } );
+  MUTABLE return_values: []Locatable = List[];
+  MUTABLE assignment_nodes: []AssignmentNode = List[];
+  MUTABLE escape_nodes: []Locatable = List[];
   FOR _ IN fn_value.params DO
   MUTABLE sym: ?SymbolEntry = COPY _.symbol;
   IF sym EXISTS AS sym_value THEN
@@ -1712,7 +1712,7 @@ PUB FN escapeAnalysis__collect_lambda_identifier_refs(body: []Node) RETURNS !{In
   RETURN refs;
 END
 PUB FN escapeAnalysis__collect_lambda_body_identifiers(node: LambdaLit) RETURNS ![]Identifier ->
-  MUTABLE out: []Identifier = ( { MUTABLE rtoc_empty_list_24: []Identifier = List[]; rtoc_empty_list_24 } );
+  MUTABLE out: []Identifier = List[];
   MUTABLE stack: []Locatable = escapeAnalysisReversedLocatables(TRY (aST__lambda_body_nodes(node.body)));
   WHILE !((stack.length() == 0)) DO
     MUTABLE rtoc_popped: ?Locatable = &stack.pop();
@@ -1764,7 +1764,7 @@ PUB FN escapeAnalysis__params_for_call(call: FuncCall, fn_nodes: {String}Functio
   IF sig EXISTS AS sig_value THEN
     RETURN TRY (functionSignature__params(sig_value));
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_31: []Param = List[]; rtoc_empty_list_31 } ) AS []Param);
+    RETURN CAST(List[] AS []Param);
   END
 END
 PUB FN escapeAnalysis__params_for_method_call(call: MethodCall) RETURNS ![]Param ->
@@ -1778,7 +1778,7 @@ PUB FN escapeAnalysis__params_for_method_call(call: MethodCall) RETURNS ![]Param
   IF sig EXISTS AS sig_value THEN
     RETURN TRY (functionSignature__params(sig_value));
   ELSE
-    RETURN CAST(( { MUTABLE rtoc_empty_list_32: []Param = List[]; rtoc_empty_list_32 } ) AS []Param);
+    RETURN CAST(List[] AS []Param);
   END
 END
 PUB FN escapeAnalysis__borrowed_return?(fn_value: FunctionDef, expr: Locatable) RETURNS !Bool ->

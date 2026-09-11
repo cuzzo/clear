@@ -305,14 +305,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node EXISTS AS node_value THEN
       MUTABLE node_value_mutable = COPY node_value;
       IF ownershipNode__live?(node_value_mutable) THEN
-        MUTABLE owned: []String = ( { MUTABLE rtoc_empty_list_3: []String = List[]; rtoc_empty_list_3 } );
+        MUTABLE owned: []String = List[];
         MUTABLE rtoc_reverse_items_4: []String = (TRY (ownershipGraph__owned_children(rtoc_self_view, path)));
         MUTABLE rtoc_reverse_i_5 = rtoc_reverse_items_4.length() - 1;
         WHILE rtoc_reverse_i_5 >= 0 DO
     &owned.append(COPY (rtoc_reverse_items_4[rtoc_reverse_i_5])?);
     rtoc_reverse_i_5 = rtoc_reverse_i_5 - 1;
         END
-        MUTABLE to_cleanup: []String = ( { MUTABLE rtoc_empty_list_6: []String = List[]; rtoc_empty_list_6 } );
+        MUTABLE to_cleanup: []String = List[];
         FOR _ IN ((owned + [path])) DO
     MUTABLE candidate: ?OwnershipNode = ownershipGraph__node_for(rtoc_self_view, _);
     IF candidate EXISTS AS candidate_value THEN
@@ -335,10 +335,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         END
         RETURN to_cleanup;
       ELSE
-        RETURN CAST(( { MUTABLE rtoc_empty_list_2: []String = List[]; rtoc_empty_list_2 } ) AS []String);
+        RETURN CAST(List[] AS []String);
       END
     ELSE
-      RETURN CAST(( { MUTABLE rtoc_empty_list_7: []String = List[]; rtoc_empty_list_7 } ) AS []String);
+      RETURN CAST(List[] AS []String);
     END
 }
 END
@@ -346,7 +346,7 @@ FN ownershipGraph__prune_scope_mut(MUTABLE self: OwnershipGraph, scope_depth: In
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE places: []PlaceId = ( { MUTABLE rtoc_empty_list_8: []PlaceId = List[]; rtoc_empty_list_8 } );
+    MUTABLE places: []PlaceId = List[];
     FOR rtoc_each_key IN rtoc_self_view.nodes.keys() DO
     MUTABLE node: OwnershipNode = COPY UNWRAP (rtoc_self_view.nodes[rtoc_each_key]);
     IF (node.scope_depth >= scope_depth) THEN
@@ -489,7 +489,7 @@ PUB FN ownershipGraph__merge(MUTABLE self: OwnershipGraph, other: OwnershipGraph
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE errors: []String = ( { MUTABLE rtoc_empty_list_10: []String = List[]; rtoc_empty_list_10 } );
+    MUTABLE errors: []String = List[];
     MUTABLE own_nodes = COPY rtoc_self_view.nodes;
     MUTABLE other_nodes = COPY other.nodes;
     MUTABLE all_paths = ((own_nodes.keys() + other_nodes.keys())) |> DISTINCT _ |> SELECT COPY _;

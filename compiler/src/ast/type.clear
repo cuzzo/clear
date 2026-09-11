@@ -325,7 +325,7 @@ FN typeShape__generic_base_raw(self: TypeShape) RETURNS ?String@symbol ->
 END
 FN typeShape__generic_args_raw(self: TypeShape) RETURNS ![]String@symbol ->
   MUTABLE structural = COPY typeShape__structural_expression(self).kind;
-  MUTABLE items: []TypeExpression = ( { MUTABLE rtoc_empty_list_2: []TypeExpression = List[]; rtoc_empty_list_2 } );
+  MUTABLE items: []TypeExpression = List[];
   IF structural IS_A TupleTypeExpression THEN
     FOR _ IN ((UNWRAP (typeExpressionKind__tuple(structural))).items) DO
     &items.append(COPY _);
@@ -918,7 +918,7 @@ PUB FN type__tense_of(value_type: TypeTypeInput) RETURNS !Type ->
   RETURN t;
 END
 PUB FN type__generic_instance_of(base: String@symbol, args: []TypeTypeInput) RETURNS !Type ->
-  MUTABLE arguments: []TypeExpression = ( { MUTABLE rtoc_empty_list_3: []TypeExpression = List[]; rtoc_empty_list_3 } );
+  MUTABLE arguments: []TypeExpression = List[];
   MUTABLE index: Int64 = 0;
   WHILE (index < args.length()) DO
     MUTABLE argument = TRY (type__from_input(UNWRAP (args[index])));
@@ -931,7 +931,7 @@ PUB FN type__stream_step_of(item_type: TypeTypeInput) RETURNS !Type ->
   RETURN TRY (type__generic_instance_of(:StreamStep, [item_type]));
 END
 PUB FN type__function_type_from_parts(param_types: []Type, return_type: Type, reentrant: Bool, source_signature: ?TypeSourceSignature, abi_value: String@symbol = :clear, mutable_flags: []Bool = []) RETURNS !Type ->
-  MUTABLE params: []FunctionTypeParam = ( { MUTABLE rtoc_empty_list_4: []FunctionTypeParam = List[]; rtoc_empty_list_4 } );
+  MUTABLE params: []FunctionTypeParam = List[];
   MUTABLE i: Int64 = 0;
   WHILE (i < param_types.length()) DO
     &params.append(FunctionTypeParam{ type: COPY TRY (type__copy_type(UNWRAP (param_types[i]))), mutable: ((mutable_flags[i] OR_ELSE FALSE) == TRUE) });
@@ -2128,7 +2128,7 @@ PUB FN type__rank?(self: Type) RETURNS Bool ->
 END
 PUB FN type__rank_dimensions(self: Type) RETURNS ![]TypeExpressionDimension ->
   IF !(type__rank?(self)) THEN
-    RETURN CAST(( { MUTABLE rtoc_empty_list_5: []TypeExpressionDimension = List[]; rtoc_empty_list_5 } ) AS []TypeExpressionDimension);
+    RETURN CAST(List[] AS []TypeExpressionDimension);
   END
   MUTABLE kind = type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind));
   RETURN COPY (UNWRAP (typeExpressionKind__linear(kind))).dimensions;
@@ -2671,7 +2671,7 @@ PUB FN type__sync_family_name(self: Type) RETURNS ?String ->
 END
 PUB FN type__generic_args(self: Type) RETURNS ![]Type ->
   MUTABLE kind = type__unwrap_optional_kind(type__unwrap_fallible_kind(self.shape.expression.kind));
-  MUTABLE items: []TypeExpression = ( { MUTABLE rtoc_empty_list_6: []TypeExpression = List[]; rtoc_empty_list_6 } );
+  MUTABLE items: []TypeExpression = List[];
   IF kind IS_A TupleTypeExpression THEN
     FOR _ IN ((UNWRAP (typeExpressionKind__tuple(kind))).items) DO
     &items.append(COPY _);
@@ -2681,7 +2681,7 @@ PUB FN type__generic_args(self: Type) RETURNS ![]Type ->
     &items.append(COPY _);
     END
   END
-  MUTABLE args: []Type = ( { MUTABLE rtoc_empty_list_7: []Type = List[]; rtoc_empty_list_7 } );
+  MUTABLE args: []Type = List[];
   MUTABLE index: Int64 = 0;
   WHILE (index < items.length()) DO
     &args.append(TRY (type__from_child_expression(UNWRAP (items[index]))));
@@ -3857,7 +3857,7 @@ PRIVATE FN type__substitute_generic_schema_field_type(self: Type, field_type: Ty
   IF !(type__generic_instance?(self)) THEN
     RETURN normalized_field_type;
   END
-  MUTABLE params: []String@symbol = ( { MUTABLE rtoc_empty_list_16: []String@symbol = List[]; rtoc_empty_list_16 } );
+  MUTABLE params: []String@symbol = List[];
   IF schema IS_A StructSchema AS struct_schema THEN
     params = struct_schema.type_params;
   ELSE_IF schema IS_A ResourceSchema AS resource_schema THEN
@@ -4482,7 +4482,7 @@ PRIVATE FN type__compute_zig_type(self: Type, is_param: Bool = FALSE, is_field: 
   END
   IF type__fn_type?(self) THEN
     MUTABLE fn_raw = UNWRAP (type__function_type(self));
-    MUTABLE param_types_zig: []String = ( { MUTABLE rtoc_empty_list_17: []String = List[]; rtoc_empty_list_17 } );
+    MUTABLE param_types_zig: []String = List[];
     MUTABLE i: Int64 = 0;
     WHILE (i < fn_raw.params.length()) DO
       MUTABLE p = COPY UNWRAP (fn_raw.params[i]);
@@ -4589,7 +4589,7 @@ PRIVATE FN type__generic_instance_zig_type(self: Type) RETURNS !?String EFFECTS 
   IF type__id_handle?(self) THEN
     RETURN "u64";
   END
-  MUTABLE args_zig_parts: []String = ( { MUTABLE rtoc_empty_list_18: []String = List[]; rtoc_empty_list_18 } );
+  MUTABLE args_zig_parts: []String = List[];
   MUTABLE args = TRY (type__generic_args(self));
   MUTABLE i: Int64 = 0;
   WHILE (i < args.length()) DO

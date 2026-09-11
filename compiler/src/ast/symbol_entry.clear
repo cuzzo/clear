@@ -727,7 +727,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !(symbolEntry__non_escaping(rtoc_self_view)) THEN
       RETURN;
     END
-    rtoc_self_view.lifetime = ( { MUTABLE rtoc_empty_list_1: []SymbolEntry@multiowned = List[]; rtoc_empty_list_1 } );
+    rtoc_self_view.lifetime = List[];
 }
 END
 PUB FN symbolEntry__mark_borrowed_alias_mut(MUTABLE self: SymbolEntry) RETURNS Void
@@ -1012,7 +1012,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN CAST([rtoc_self_view] AS []SymbolEntry@multiowned);
       END
     END
-    MUTABLE sources: []SymbolEntryLifetimeSourceInput = ( { MUTABLE rtoc_empty_list_2: []SymbolEntryLifetimeSourceInput = List[]; rtoc_empty_list_2 } );
+    MUTABLE sources: []SymbolEntryLifetimeSourceInput = List[];
     IF value? IS_A {String@symbol}[]SymbolEntryLifetimeSourceInput AS hash THEN
       sources = (hash[:sources] OR_ELSE List[]);
     ELSE_IF value? IS_A []SymbolEntryLifetimeSourceInput AS array THEN
@@ -1020,7 +1020,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     ELSE_IF value THEN
       sources = [castOptionalSymbolEntryLifetimeInputToSymbolEntryLifetimeSourceInput(value)];
     END
-    MUTABLE normalized: []SymbolEntry@multiowned = ( { MUTABLE rtoc_empty_list_3: []SymbolEntry@multiowned = List[]; rtoc_empty_list_3 } );
+    MUTABLE normalized: []SymbolEntry@multiowned = List[];
     FOR _ IN sources DO
     IF !(_ IS_A SymbolEntry) THEN
         panic("SymbolEntry#lifetime sources must be SymbolEntry instances");
