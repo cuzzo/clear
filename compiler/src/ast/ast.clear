@@ -7043,11 +7043,7 @@ PRIVATE FN aST__walk_children_ProfileStmt_mut(MUTABLE item: ProfileStmt, MUTABLE
   item.expression = COPY expression_child;
 END
 PRIVATE FN aST__walk_children_FieldCleanup_mut(MUTABLE item: FieldCleanup, MUTABLE descend_functions: Bool, visitor: FN(MUTABLE Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
-  IF item.field EXISTS THEN
-    MUTABLE field_child: Locatable = COPY UNWRAP (item.field);
-    aST__each_locatable_mut(&field_child, &descend_functions, visitor);
-    item.field = COPY field_child;
-  END
+  RETURN;
 END
 PUB FN aST__each_locatable_list(items: []Locatable, MUTABLE descend_functions: Bool, visitor: FN(Locatable) -> Void) RETURNS Void EFFECTS REENTRANT ->
   FOR item IN items DO
@@ -14572,13 +14568,7 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
     RETURN Locatable{ ProfileStmt: COPY item };
   END
   IF value IS_A FieldCleanup AS rtoc_variant THEN
-    MUTABLE item = COPY rtoc_variant;
-    MUTABLE rtoc_new_field: ?Locatable@boxed = NIL;
-    IF item.field EXISTS AS rtoc_child THEN
-      rtoc_new_field = blk(COPY rtoc_child);
-    END
-    item.field = rtoc_new_field;
-    RETURN Locatable{ FieldCleanup: COPY item };
+    RETURN Locatable{ FieldCleanup: COPY rtoc_variant };
   END
   RETURN COPY value;
 END
