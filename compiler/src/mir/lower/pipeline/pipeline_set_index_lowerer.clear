@@ -210,7 +210,7 @@ PRIVATE FN pipelineSetIndexLowerer__bc_index_iter(self: PipelineSetIndexLowerer,
     RETURN Emittable{ IterRange: COPY IterRange{ start: start_mir, end_val: CAST(end_expr AS Emittable), capture_type: :i64, lowered_node_id: NIL, ownership_consumption: NIL } };
   END
   IF range_source IS_A Identifier AS identifier THEN
-    RETURN pipelineSetIndexLowerer__visit_mir_call(self, Locatable{ Identifier: identifier });
+    RETURN pipelineSetIndexLowerer__visit_mir_call(self, Locatable{ Identifier: COPY identifier });
   END
   RETURN NIL;
 END

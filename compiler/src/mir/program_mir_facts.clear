@@ -292,7 +292,7 @@ PRIVATE FN programMIRFinalizer__return_expr_needs_allocator?(function: FunctionD
     RETURN TRUE;
   END
   MUTABLE type = TRY (type__success_type((TRY (aST__full_type_mut(node)))));
-  IF (type__any_rc?(type) OR_ELSE type.any_sync?()) THEN
+  IF (type__any_rc?(type) OR_ELSE type__any_sync?(type)) THEN
     RETURN FALSE;
   END
   IF node IS_A Identifier AS identifier THEN
@@ -300,7 +300,7 @@ PRIVATE FN programMIRFinalizer__return_expr_needs_allocator?(function: FunctionD
       RETURN FALSE;
     END
     IF type THEN
-      RETURN (type__string?(type) OR type.recursive_cleanup_shape?(schema_lookup));
+      RETURN (type__string?(type) OR type__recursive_cleanup_shape?(type, schema_lookup));
     ELSE
       RETURN FALSE;
     END

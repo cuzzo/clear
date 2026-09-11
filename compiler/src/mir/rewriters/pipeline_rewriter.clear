@@ -269,7 +269,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE is_range_fold_terminal = (((terminal != NIL) AND (terminal IS_A EachOp)) OR aST__pipeline_terminal_fold?(UNWRAP (terminal)));
     MUTABLE source_type = TRY (aST__full_type_mut(real_source));
     MUTABLE has_limit = stages |> ANY _ IS_A LimitOp;
-    IF (TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: node })) }))))) AND (stages |> ANY _ IS_A SelectOp)) THEN
+    IF (TRY (type__canonical_stream_result?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: COPY node })) }))))) AND (stages |> ANY _ IS_A SelectOp)) THEN
         pipelineRewriter__patch_chain_source_mut(&rtoc_self_view, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
@@ -288,7 +288,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         pipelineRewriter__patch_chain_source_mut(&rtoc_self_view, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
-    MUTABLE is_fold = ((((terminal == NIL) OR (((terminal?) != NIL) AND ((terminal) IS_A EachOp))) OR aST__pipeline_terminal_fold?(terminal)) OR aST__pipeline_list_terminal?(terminal));
+    MUTABLE is_fold = ((((terminal == NIL) OR (((terminal?) != NIL) AND ((terminal) IS_A EachOp))) OR aST__pipeline_terminal_fold(terminal)) OR aST__pipeline_list_terminal?(terminal));
     IF ((stages.length() > 0) OR ((is_fold AND (terminal != NIL)))) THEN
       IF is_fold THEN
         RETURN TRY (pipelineRewriter__fuse_pipeline(&rtoc_self_view, &node, &real_source, stages, &terminal));
@@ -310,12 +310,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     END
     source = real_source;
-    MUTABLE result_is_error = type__error_union?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: node })) }))));
+    MUTABLE result_is_error = type__error_union?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: COPY node })) }))));
     result_is_error = (result_is_error OR TRY (pipelineRewriter__callee_returns_error?(rtoc_self_view, &rhs)));
     MUTABLE needs_try = type__error_union?((TRY (type__new( TypeConstructionInput{ Type: TRY (aST__full_type_mut(source)) }))));
     IF (IF rhs IS_A FuncCall AS func_call THEN !(result_is_error) ELSE FALSE END) THEN
       IF needs_try THEN
-        lhs_node = UnaryOp{ token: COPY rhs.token(), op: :TRY, right: COPY source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+        lhs_node = UnaryOp{ token: COPY locatable__token(rhs), op: :TRY, right: COPY source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
       ELSE
         lhs_node = COPY source;
       END
@@ -451,7 +451,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       NIL;
     END
     MUTABLE stage_inits = List[];
-    MUTABLE res_type = TRY (aST__full_type_mut( Locatable{ BinaryOp: smooth_node }));
+    MUTABLE res_type = TRY (aST__full_type_mut( Locatable{ BinaryOp: COPY smooth_node }));
     MUTABLE loop_body = TRY (pipelineRewriter__build_recursive_body(&rtoc_self_view, stages, terminal, &current_it, res_var, token, &stage_inits, CAST(res_type AS ?Type)));
     body = ruby_array_concat_Any__pipeline_rewriter(body, stage_inits);
     MUTABLE is_each = ((terminal != NIL) AND (terminal IS_A EachOp));
@@ -550,7 +550,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF terminal IS_A SumOp AS sum_op THEN
-      MUTABLE is_int = type__integer?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: smooth_node })) }))));
+      MUTABLE is_int = type__integer?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: COPY smooth_node })) }))));
       MUTABLE val = Literal{ token: COPY token, type: IF is_int THEN
         :INT64
       ELSE
@@ -575,7 +575,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       decl.var_mutated = TRUE;
       RETURN CAST([Node{ VarDecl: COPY decl }] AS []Node);
     ELSE_IF terminal IS_A CountOp AS count_op THEN
-      MUTABLE is_int = type__integer?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: smooth_node })) }))));
+      MUTABLE is_int = type__integer?((TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: COPY smooth_node })) }))));
       MUTABLE val = Literal{ token: COPY token, type: IF is_int THEN
         :INT64
       ELSE
@@ -1209,7 +1209,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       },
       DEFAULT -> {
         MUTABLE rtoc_value_block_marker = 0;
-        MUTABLE current_type = TRY (aST__full_type_mut( Locatable{ Identifier: current_val }));
+        MUTABLE current_type = TRY (aST__full_type_mut( Locatable{ Identifier: COPY current_val }));
         MUTABLE value =   IF type__future?(current_type) THEN
           MoveNode{ token: COPY token, value: Locatable{ Identifier: COPY current_val }, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }
         ELSE
@@ -1257,7 +1257,7 @@ PRIVATE FN pipelineRewriter__build_final_result(self: PipelineRewriter, terminal
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE res = Identifier{ token: COPY token, name: COPY res_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
     MUTABLE rtoc_union_writeback_88: Locatable = Locatable{ Identifier: COPY res };
-    TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_88, COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: smooth_node })), "synthetic AST type"));
+    TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_88, COPY TRY (aST__full_type_mut( Locatable{ BinaryOp: COPY smooth_node })), "synthetic AST type"));
     PARTIAL MATCH rtoc_union_writeback_88 START Locatable.Identifier AS rtoc_union_writeback_88_item -> res = COPY rtoc_union_writeback_88_item;, END
     NIL;
     MUTABLE sym: ?SymbolEntry@multiowned = COPY rtoc_self_view.list_res_symbols[res_var];
@@ -1265,7 +1265,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       res.symbol = sym_value;
       res.storage = symbolEntry__storage(sym_value);
     ELSE
-      res.storage = locatable__storage( Locatable{ BinaryOp: smooth_node });
+      res.storage = locatable__storage( Locatable{ BinaryOp: COPY smooth_node });
     END
     RETURN res;
 }

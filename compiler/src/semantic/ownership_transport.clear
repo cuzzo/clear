@@ -182,7 +182,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(rtoc_self_view, source);
     IF id EXISTS AS id_value THEN
       MUTABLE id_value_mutable = COPY id_value;
-      &rtoc_self_view.transfers.append(COPY Transfer{ container: COPY container, slot: slot, source: COPY source, source_id: id_value_mutable, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view) });
+      &rtoc_self_view.transfers.append(COPY Transfer{ container: COPY container, slot: COPY slot, source: COPY source, source_id: id_value_mutable, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view) });
     ELSE
       RETURN;
     END
