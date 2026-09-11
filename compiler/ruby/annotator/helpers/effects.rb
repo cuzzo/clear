@@ -712,6 +712,11 @@ module EffectAudit
     fn_nodes.each do |name, fn_node|
       ef = (error_fallible[name] == true)
       af = (alloc_fault[name] == true)
+      # An indirect call rides the uniform callback ABI: the lowering emits it
+      # as `try`, so the body carries an error channel whatever the callback's
+      # source-level result says. That is a FAULT, not an error -- it must not
+      # force `RETURNS !T` on the surface, but the Zig signature needs the `!`.
+      af ||= function_has_fnptr_call?(name)
       fn_node.error_fallible = ef
       fn_node.alloc_fault    = af
       fn_node.can_fail       = ef || af

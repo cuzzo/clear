@@ -1,0 +1,28 @@
+# A function value is called through the uniform callback ABI, which carries an
+# error channel whatever the callback's own result type is. A caller that
+# RETURNS the call's result still has to hold that channel.
+STRUCT Holder { op: FN(Int64) -> Int64 }
+
+FN twice(x: Int64) RETURNS Int64 ->
+  RETURN (x * 2);
+END
+
+FN through_param(blk: FN(Int64) -> Int64, n: Int64) RETURNS Int64 ->
+  RETURN blk(n);
+END
+
+FN through_field(h: Holder, n: Int64) RETURNS Int64 ->
+  MUTABLE f = h.op;
+  RETURN f(n);
+END
+
+FN through_generic<U>(blk: FN() -> U) RETURNS U ->
+  RETURN blk();
+END
+
+FN main() RETURNS Void ->
+  h = Holder{ op: twice };
+  print("param ${through_param(twice, 4).toString()}");
+  print("field ${through_field(h, 5).toString()}");
+  print("generic ${through_generic(%() -> 6).toString()}");
+END
