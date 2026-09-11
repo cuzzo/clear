@@ -35,7 +35,9 @@ OptionParser.new do |o|
   o.on('--zig PATH') { |v| zig_out = v }
 end.parse!(ARGV)
 
-GEN = File.join(ROOT, 'compiler', 'src')
+# Measure a SNAPSHOT so the live tree stays editable: a round takes minutes,
+# and editing compiler/src underneath it silently invalidates the result.
+GEN = ENV['CLEAR_SELFHOST_SRC'] || File.join(ROOT, 'compiler', 'src')
 
 # The closure is what the annotator harness links: every unit the entry point
 # reaches. Reuse the parser harness's package map so this measures exactly what

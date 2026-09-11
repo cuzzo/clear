@@ -35,17 +35,22 @@ module ProbeUnitSurvives
   end
 
   def compile_file(path, caller_dir: nil)
-    guard(path.to_s, File.dirname(path.to_s)) { super }
+    abs = File.expand_path(path.to_s, caller_dir || instance_variable_get(:@base_dir))
+    guard(abs, File.dirname(abs), abs) { super }
   end
 
   def compile_package_group(pkg_name, members)
     dir = File.dirname(members.first.to_s)
-    guard("pkg:#{pkg_name}", dir) { super }
+    guard("pkg:#{pkg_name}", dir, "pkg-group:#{pkg_name}") { super }
   end
 
   private
 
-  def guard(unit, source_dir)
+  # A failed unit MUST be memoised under the importer's own key. Without it the
+  # importer never records the failure, so every dependent re-attempts the
+  # compile from scratch and pays its full cost again -- the traversal stops
+  # being linear in units and never finishes.
+  def guard(unit, source_dir, cache_key)
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     result = yield
     TIMING << { 'unit' => unit, 'seconds' => (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(2) }
@@ -61,7 +66,12 @@ module ProbeUnitSurvives
       'class' => e.class.name.to_s,
       'message' => e.message.to_s.gsub(/\e\[[0-9;]*m/, '').lines.first(3).join.strip[0, 400],
     }
-    ProbeUnitSurvives.blank_module(source_dir)
+    blank = ProbeUnitSurvives.blank_module(source_dir)
+    cache = instance_variable_get(:@module_cache)
+    cache[cache_key] = blank if cache.respond_to?(:[]=)
+    compiling = instance_variable_get(:@compiling)
+    compiling.delete(cache_key) if compiling.respond_to?(:delete)
+    blank
   end
 end
 
