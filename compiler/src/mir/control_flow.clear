@@ -640,7 +640,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((node IS_A VarDecl OR ((IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :assign) ELSE FALSE END)))) THEN
         RETURN;
     END
-    MUTABLE entry = aST__node_mir_binding_entry(node);
+    MUTABLE entry:? = aST__node_mir_binding_entry(node);
     IF !(entry) THEN
         RETURN;
     END
@@ -1921,7 +1921,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   IF !((TRY (functionSignature__emits_allocating?( UNWRAP (sig))) AND TRY (functionSignature__mutates_receiver?( UNWRAP (sig))))) THEN
       RETURN;
   END
-  MUTABLE root: ?Identifier = aST__root_identifier(locatable__object(node));
+  MUTABLE root: ?Identifier = aST__root_identifier( UNWRAP (locatable__object(node)));
   IF !(root?.symbol) THEN
       RETURN;
   END

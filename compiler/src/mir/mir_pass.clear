@@ -420,7 +420,7 @@ PRIVATE FN mIRPass__consume_call_args(self: MIRPass, node: Node, MUTABLE names: 
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE sig_obj: ?FunctionSignature@multiowned = NIL;
     IF (aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
-      sig_obj = functionSignature__unwrap(node__matched_signature(node));
+      sig_obj = functionSignature__unwrap( CAST(node__matched_signature(node) AS ?X));
     END
     MUTABLE params: []Any = List[];
     IF sig_obj != NIL THEN
