@@ -12019,14 +12019,14 @@ PRIVATE FN mIRLowering__with_block_borrow_names(self: MIRLowering, MUTABLE node:
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN TRY (mIRLowering__with_capability_specs(rtoc_self_view, node)) |> SELECT:? {
+    RETURN (TRY (mIRLowering__with_capability_specs(rtoc_self_view, node)) |> SELECT:? {
     MUTABLE var_node: CapabilityVarNode = COPY castLocatableToCapabilityVarNode(_.var_node);
     (IF var_node IS_A Identifier THEN
         CAST(aST__node_name(castCapabilityVarNodeToLocatable(var_node)) AS String)
       ELSE
         NIL
       END)
-    } |> WHERE _ != NIL;
+    } |> WHERE _ != NIL) |> SELECT UNWRAP (_);
 }
 END
 PRIVATE FN mIRLowering__with_block_inline_bindings(self: MIRLowering, materialization: WithBindingMaterialization, node: WithBlock) RETURNS !?Emittable
@@ -12037,7 +12037,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       _
     ELSE
       NIL
-    END) |> WHERE _ != NIL) |> WHERE !(_.empty?());
+    END) |> WHERE _ != NIL) |> SELECT CAST(UNWRAP (_) AS String) |> WHERE !(_.empty?());
     IF (string_bindings.length() == 0) THEN
       RETURN NIL;
     END
@@ -12133,18 +12133,15 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         alias_owner_map[alias_name] = COPY var_name;
         IF ((node.universal_poly OR_ELSE FALSE) AND generic_inner) THEN
           polymorphic_types[alias_name] = "CheatLib.PolymorphicInner(${type__resolved(_.resolved_type)})";
-          RETURN "CheatLib.PolymorphicInner(${type__resolved(_.resolved_type)})";
         END
     END
     IF (_.capability == symbol("EXCLUSIVE")) OR (_.capability == :write_locked_read) THEN
         locked_map[alias_name] = LockedUnwrapMapValue{ BoolValue: TRUE };
         IF (alias_name != var_name) THEN
           locked_map[var_name] = LockedUnwrapMapValue{ StringValue: COPY alias_name };
-          RETURN alias_name;
         END
     ELSE_IF (_.capability == :multiowned) OR (_.capability == :shared) THEN
         rc_map[var_name] = "__${var_name}_unwrap";
-        RETURN "__${var_name}_unwrap";
     END
   END
   RETURN blk();
@@ -12157,7 +12154,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE action_mir: []Emittable = List[];
     MUTABLE exit_msg_mir: ?Emittable = NIL;
     IF (clause.action == ErrorActionKind.Block) THEN
-      action_mir = TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList( CAST(clause AS []Locatable)).body));
+      action_mir = TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(clause.body)));
     ELSE_IF (clause.action == ErrorActionKind.Exit) THEN
       exit_msg_mir = TRY (mIRLowering__lower(&rtoc_self_view, castNodeToMIRLoweringLowerableStmt(castLocatableToNode(UNWRAP (clause.message)))));
     END
@@ -12191,13 +12188,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE resolved_source = COPY cap.resolved_type;
     MUTABLE rt_obj:? = TRY (type__from_node_mut( CAST(resolved_source AS ?Locatable), "WITH polymorphic capability resolved type"));
     MUTABLE generic_inner = type__generic_type_parameter?( UNWRAP (rt_obj));
-    MUTABLE bare_type = TRY (type__new({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_468: ?String = NIL;
+    MUTABLE bare_type: String = COPY UNWRAP ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_468: ?String = NIL;
     IF generic_inner THEN
       rtoc_ternary_value_468 = "CheatLib.PolymorphicInner(${type__resolved( UNWRAP (rt_obj))})";
     ELSE
-      rtoc_ternary_value_468 = TRY (type__bare_data_type( UNWRAP (rt_obj)));
+      rtoc_ternary_value_468 = COPY CAST(TRY (type__bare_data_type( UNWRAP (rt_obj))) AS String);
     END
-    rtoc_ternary_value_468? }));
+    rtoc_ternary_value_468 });
     MUTABLE body_mir:! = mIRLowering__with_capability_alias_maps(&rtoc_self_view, &node, %() USE(node, MUTABLE rtoc_self_view) -> {
     rtoc_lambda_result_469 = TRY (mIRLowering__lower_body(&rtoc_self_view, castLocatableListToMIRLoweringLowerableStmtList(node.body)));
     rtoc_lambda_result_469
@@ -12211,10 +12208,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         rtoc_ternary_value_471 = List[];
       END
       rtoc_ternary_value_471? };
-      RETURN ScopeBlock{ body: [Emittable{ PolymorphicMutateFlow: COPY PolymorphicMutateFlow{ cell: Emittable{ AddressOf: COPY cell_mir }, rt: mIRLowering__runtime_binding_name(&rtoc_self_view), alias_name: COPY safe_alias, bare_type: bare_type, return_type: TRY (type__new((mIRLowering__current_function_return_payload_zig(&rtoc_self_view) OR_ELSE :Void))), body: COPY body_mir, guard_cond: Emittable{ MIRBinOp: COPY UNWRAP (COPY guard_cond) }, guard_fail_body: guard_fail, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: Emittable{ PolymorphicMutateFlow: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      RETURN ScopeBlock{ body: [Emittable{ PolymorphicMutateFlow: COPY PolymorphicMutateFlow{ cell: Emittable{ AddressOf: COPY cell_mir }, rt: mIRLowering__runtime_binding_name(&rtoc_self_view), alias_name: COPY safe_alias, bare_type: bare_type, return_type: COPY mIRLowering__current_function_return_payload_zig(&rtoc_self_view), body: COPY TRY (body_mir), guard_cond: Emittable{ MIRBinOp: COPY UNWRAP (COPY guard_cond) }, guard_fail_body: guard_fail, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: Emittable{ PolymorphicMutateFlow: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     ELSE
       body_mir = TRY (mIRLowering__wrap_body_with_guard(&rtoc_self_view, &node, TRY (body_mir), NIL));
-      RETURN ScopeBlock{ body: [Emittable{ PolymorphicMutate: COPY PolymorphicMutate{ cell: Emittable{ AddressOf: COPY cell_mir }, rt: mIRLowering__runtime_binding_name(&rtoc_self_view), alias_name: COPY safe_alias, bare_type: bare_type, body: COPY body_mir, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: Emittable{ PolymorphicMutate: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      RETURN ScopeBlock{ body: [Emittable{ PolymorphicMutate: COPY PolymorphicMutate{ cell: Emittable{ AddressOf: COPY cell_mir }, rt: mIRLowering__runtime_binding_name(&rtoc_self_view), alias_name: COPY safe_alias, bare_type: bare_type, body: COPY TRY (body_mir), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: Emittable{ PolymorphicMutate: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     END
 }
 END
@@ -12222,7 +12219,7 @@ PRIVATE FN mIRLowering__polymorphic_flow_required?(self: MIRLowering, MUTABLE no
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    IF TRY (mIRLowering__with_capability_specs(rtoc_self_view, node)) |> ANY _.guard_expr THEN
+    IF TRY (mIRLowering__with_capability_specs(rtoc_self_view, node)) |> ANY (_.guard_expr != NIL) THEN
       RETURN TRUE;
     END
     RETURN mIRLowering__ast_contains_return?(rtoc_self_view, AstReturnSearchNode{ ArrayValue: node.body |> SELECT castLocatableToNode__mir_lowering(_) });
@@ -12232,13 +12229,7 @@ PRIVATE FN mIRLowering__ast_contains_return?(self: MIRLowering, node: ?AstReturn
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    MUTABLE root_branch_value: ?AstReturnSearchNode = NIL;
-    IF ((node != NIL) AND (node IS_A [Set]Any)) THEN
-      root_branch_value = node.to_a();
-    ELSE
-      root_branch_value = COPY node;
-    END
-    MUTABLE root: ?AstReturnSearchNode = root_branch_value;
+    MUTABLE root: ?AstReturnSearchNode = COPY node;
     MUTABLE found: Bool = FALSE;
     aST__each_locatable_list(castOptionalAstReturnSearchNodeToAnyMultiowned(root), FALSE, %(candidate: Locatable) -> {
     IF candidate IS_A ReturnNode AS return_node THEN
