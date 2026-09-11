@@ -1668,7 +1668,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MIRLoweringLowerableStmt.EnumDef -> mIRLowering__lower_enum_def(&rtoc_self_view, node),
       MIRLoweringLowerableStmt.UnionDef AS MUTABLE union_def -> TRY (mIRLowering__lower_union_def(&rtoc_self_view, &union_def)),
       MIRLoweringLowerableStmt.StructDef -> TRY (mIRLowering__lower_struct_def(&rtoc_self_view, &node)),
-      MIRLoweringLowerableStmt.ExternFnDecl AS MUTABLE extern_fn_decl -> TRY (mIRLowering__lower_extern_fn(rtoc_self_view, extern_fn_decl)),
+      MIRLoweringLowerableStmt.ExternFnDecl AS MUTABLE extern_fn_decl -> TRY (mIRLowering__lower_extern_fn(&rtoc_self_view, extern_fn_decl)),
       MIRLoweringLowerableStmt.ExternStructDecl AS MUTABLE extern_struct_decl -> TRY (mIRLowering__lower_extern_struct(&rtoc_self_view, extern_struct_decl)),
       MIRLoweringLowerableStmt.VarDecl AS MUTABLE var_decl -> TRY (mIRLowering__lower_var_decl(&rtoc_self_view, &var_decl)),
       MIRLoweringLowerableStmt.BindExpr AS MUTABLE bind_expr -> TRY (mIRLowering__lower_bind_expr(&rtoc_self_view, &bind_expr)),
@@ -7388,28 +7388,38 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       &marks.append(COPY _);
     END
     END
-    MUTABLE break_stmt = body.reverse().grep(MIR.BreakStmt).first();
-    MUTABLE value = (IF break_stmt != NIL THEN
-      break_stmt.value()
-    ELSE
-      NIL
-    END);
-    IF value IS_A StructInit AS rtoc_struct_init THEN
-      RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY CAST((TRY (type__zig_type(rtoc_struct_init))) AS String) }));
-    ELSE_IF (value IS_A Ident) THEN
-      MUTABLE let = body.grep(MIR.Let) |> FIND (CAST(_.name() AS String) == CAST(value.name() AS String));
-      MUTABLE init = (IF let != NIL THEN
-        let.init
-      ELSE
-        NIL
-      END);
-      IF init IS_A StructInit THEN
-        RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY CAST((TRY (type__zig_type(init))) AS String) }));
+    MUTABLE value: ?Emittable = NIL;
+    MUTABLE break_idx = body.length() - 1;
+    WHILE break_idx >= 0 DO
+      IF body[break_idx] EXISTS AS body_stmt THEN
+        IF body_stmt IS_A BreakStmt AS break_stmt THEN
+          value = COPY break_stmt.value;
+          break_idx = -1;
+        END
       END
-      IF init IS_A ContainerInit THEN
-        RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY CAST((TRY (type__zig_type(init))) AS String) }));
+      break_idx = break_idx - 1;
+    END
+    IF value IS_A StructInit AS struct_init THEN
+      RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY (struct_init.zig_type OR_ELSE "") }));
+    END
+    IF value IS_A Ident AS value_ident THEN
+      MUTABLE init: ?Emittable = NIL;
+      FOR body_stmt IN body DO
+        IF body_stmt IS_A Let AS let_stmt THEN
+          IF (CAST(let_stmt.name AS String) == CAST(value_ident.name AS String)) THEN
+            init = COPY let_stmt.init;
+          END
+        END
       END
-      MUTABLE mark: ?AllocMark = marks |> FIND (_.name == CAST(value.name() AS String));
+      IF init EXISTS AS init_value THEN
+        IF init_value IS_A StructInit AS init_struct THEN
+          RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY (init_struct.zig_type OR_ELSE "") }));
+        END
+        IF init_value IS_A ContainerInit AS init_container THEN
+          RETURN TRY (type__new(TypeConstructionInput{ StringValue: COPY init_container.zig_type }));
+        END
+      END
+      MUTABLE mark: ?AllocMark = marks |> FIND (_.name == CAST(value_ident.name AS String));
       IF mark EXISTS AS mark_value THEN
         RETURN TRY (type__new(TypeConstructionInput{ Type: COPY mark_value.type_info }));
       END
@@ -7754,7 +7764,23 @@ PRIVATE FN mIRLowering__if_bind_transfer_present?(MUTABLE self: MIRLowering, stm
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN (CAST(Tuple{stmt.then_body, stmt.else_body} AS Tuple<[]ResourceClose, Any>)) |> ANY _ |> ANY (_ IS_A TransferMark AND (_.name() == name));
+    FOR branch_stmt IN stmt.then_body DO
+      IF branch_stmt IS_A TransferMark AS transfer_mark THEN
+        IF (transfer_mark.name == name) THEN
+          RETURN TRUE;
+        END
+      END
+    END
+    IF stmt.else_body EXISTS AS else_body THEN
+      FOR branch_stmt IN else_body DO
+        IF branch_stmt IS_A TransferMark AS transfer_mark THEN
+          IF (transfer_mark.name == name) THEN
+            RETURN TRUE;
+          END
+        END
+      END
+    END
+    RETURN FALSE;
 }
 END
 PRIVATE FN mIRLowering__normalize_nested_mir_bodies_mut(MUTABLE self: MIRLowering, node: Emittable) RETURNS !Void
@@ -8461,19 +8487,19 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
 }
 END
-PRIVATE FN mIRLowering__lower_extern_fn(self: MIRLowering, node: ExternFnDecl) RETURNS !Emittable
+PRIVATE FN mIRLowering__lower_extern_fn(MUTABLE self: MIRLowering, node: ExternFnDecl) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
-WITH POLYMORPHIC self AS rtoc_self_view {
+WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE source: ?ExternSource = COPY node.extern_source;
     IF ((source != NIL) AND (source.abi == :c)) THEN
-      MUTABLE params = node.params |> SELECT {
+      MUTABLE params = (node.params OR_ELSE List[]) |> SELECT {
     MUTABLE zig_type = TRY (mIRLowering__c_abi_param_zig_type(rtoc_self_view, _));
     MIRParam{ name: COPY _.name, zig_type: COPY zig_type, pointer_passed: (_.mutable OR_ELSE FALSE), lowered_node_id: NIL, ownership_consumption: NIL }
       };
       RETURN Emittable{ CExternFnDecl: COPY CExternFnDecl{ name: CAST((source.symbol OR node.name) AS String), params: params, return_type: TRY (type__zig_type(TRY (externFnDecl__annotation_return_type(node)))), library: source.dependency, callconv: source.callconv, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
-    MUTABLE mod: ?String = COPY node.from_module;
+    MUTABLE mod: String = COPY (node.from_module OR_ELSE "");
     IF &rtoc_self_view.state.program.emitted_extern_modules.insert(mod) THEN
       MUTABLE mod_parts = mod.split(".");
       MUTABLE root_module = mod_parts.first();

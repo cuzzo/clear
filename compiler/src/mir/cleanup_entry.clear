@@ -27,6 +27,7 @@ PUB STRUCT CleanupEntry {
   fixed_alloc: Bool,
   elem_needs_cleanup: Bool,
   rc_alloc: ?String@symbol,
+  rc_variant: ?String@symbol,
   base_zig: ?String,
   zig_type: ?String,
   elem_zig_type: ?String,
@@ -41,7 +42,7 @@ PUB FN cleanupEntry__blank() RETURNS CleanupEntry@multiowned ->
   MUTABLE blank = CleanupEntry{
     needs_cleanup: FALSE, alloc: :none, scope: :function, kind: :none,
     has_moved_guard: FALSE, match_as: FALSE, via_pointer: FALSE,
-    needs_release_fields: FALSE, fixed_alloc: FALSE, elem_needs_cleanup: FALSE,
+    needs_release_fields: FALSE, fixed_alloc: FALSE, elem_needs_cleanup: FALSE, rc_variant: NIL,
     rc_alloc: NIL, base_zig: NIL, zig_type: NIL, elem_zig_type: NIL, source_kind: NIL, sync: NIL,
     resource_close_plan: NIL, lifecycle_plan: NIL, tuple_cleanup_fields: List[]
   };

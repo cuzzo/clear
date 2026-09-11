@@ -663,7 +663,7 @@ FN typeAlias__stmt?(self: TypeAlias) RETURNS Bool ->
 END
 PUB STRUCT CExternFnDecl {
   name: String,
-  params: []FieldDef,
+  params: []MIRParam,
   return_type: String,
   library: ?String,
   callconv: ?String@symbol,
