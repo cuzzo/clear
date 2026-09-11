@@ -125,24 +125,23 @@ PRIVATE FN liveness__tail_targets(seg: Segment) RETURNS ![]Int64 ->
   END
 END
 PRIVATE FN liveness__collect_tail_uses(seg: Segment, MUTABLE uses_by_seg: {Int64}[Set]String) RETURNS Void ->
-  MUTABLE tail = seg.tail;
-  IF (tail IS_A IoSuspend) THEN
+  IF seg.tail IS_A IoSuspend AS io_tail THEN
     MUTABLE next_idx = (seg.index + 1);
-    uses_by_seg[next_idx] = (uses_by_seg[next_idx] OR_ELSE Set[]);
-    MUTABLE bucket: ?[Set]String = COPY uses_by_seg[next_idx];
-    MUTABLE call_node = tail.call_node;
-    IF call_node IS_A MethodCall THEN
-      liveness__walk_idents(call_node.object, %(name: String) USE(bucket) -> {
-  UNWRAP (bucket).insert(COPY name);
+    MUTABLE bucket: [Set]String = (COPY uses_by_seg[next_idx] OR_ELSE Set[]);
+    MUTABLE call_node: Locatable = UNWRAP (COPY io_tail.call_node);
+    IF call_node IS_A MethodCall AS method_call THEN
+      liveness__walk_idents(castLocatableToOptionalAstIdentWalkRoot(method_call.object), %(name: String) USE(MUTABLE bucket) -> {
+  &bucket.insert(COPY name);
   rubyToClearVoid__liveness()
       });
     END
-    FOR _ IN call_node.args() DO
-    liveness__walk_idents(_, %(name: String) USE(bucket) -> {
-  UNWRAP (bucket).insert(COPY name);
+    FOR _ IN (locatable__args(call_node) OR_ELSE List[]) DO
+    liveness__walk_idents(castLocatableToOptionalAstIdentWalkRoot(_), %(name: String) USE(MUTABLE bucket) -> {
+  &bucket.insert(COPY name);
   rubyToClearVoid__liveness()
     });
     END
+    uses_by_seg[next_idx] = bucket;
   END
 END
 PRIVATE FN liveness__collect_defs(stmt: Stmt, MUTABLE into: {String}?Type) RETURNS !Void ->
@@ -217,6 +216,126 @@ PRIVATE FN liveness__collect_uses(stmt: Any, into: ?[Set]String) RETURNS Void ->
   ELSE
     RETURN;
   END
+END
+FN castLocatableToOptionalAstIdentWalkRoot(value: Locatable) RETURNS ?AstIdentWalkRoot ->
+  PARTIAL MATCH value START
+    Locatable.RequireNode AS cast_payload -> RETURN AstIdentWalkRoot{ RequireNode: COPY cast_payload };,
+    Locatable.ProtocolRequirement AS cast_payload -> RETURN AstIdentWalkRoot{ ProtocolRequirement: COPY cast_payload };,
+    Locatable.ProtocolDef AS cast_payload -> RETURN AstIdentWalkRoot{ ProtocolDef: COPY cast_payload };,
+    Locatable.FunctionDef AS cast_payload -> RETURN AstIdentWalkRoot{ FunctionDef: COPY cast_payload };,
+    Locatable.ImplementationDef AS cast_payload -> RETURN AstIdentWalkRoot{ ImplementationDef: COPY cast_payload };,
+    Locatable.ConformanceDef AS cast_payload -> RETURN AstIdentWalkRoot{ ConformanceDef: COPY cast_payload };,
+    Locatable.VarDecl AS cast_payload -> RETURN AstIdentWalkRoot{ VarDecl: COPY cast_payload };,
+    Locatable.Assignment AS cast_payload -> RETURN AstIdentWalkRoot{ Assignment: COPY cast_payload };,
+    Locatable.DestructuringAssignment AS cast_payload -> RETURN AstIdentWalkRoot{ DestructuringAssignment: COPY cast_payload };,
+    Locatable.BindExpr AS cast_payload -> RETURN AstIdentWalkRoot{ BindExpr: COPY cast_payload };,
+    Locatable.BinaryOp AS cast_payload -> RETURN AstIdentWalkRoot{ BinaryOp: COPY cast_payload };,
+    Locatable.IsA AS cast_payload -> RETURN AstIdentWalkRoot{ IsA: COPY cast_payload };,
+    Locatable.CallSiteOverride AS cast_payload -> RETURN AstIdentWalkRoot{ CallSiteOverride: COPY cast_payload };,
+    Locatable.Identifier AS cast_payload -> RETURN AstIdentWalkRoot{ Identifier: COPY cast_payload };,
+    Locatable.Literal AS cast_payload -> RETURN AstIdentWalkRoot{ Literal: COPY cast_payload };,
+    Locatable.ListLit AS cast_payload -> RETURN AstIdentWalkRoot{ ListLit: COPY cast_payload };,
+    Locatable.TupleLit AS cast_payload -> RETURN AstIdentWalkRoot{ TupleLit: COPY cast_payload };,
+    Locatable.DefaultArrayLit AS cast_payload -> RETURN AstIdentWalkRoot{ DefaultArrayLit: COPY cast_payload };,
+    Locatable.HashLit AS cast_payload -> RETURN AstIdentWalkRoot{ HashLit: COPY cast_payload };,
+    Locatable.DefaultLit AS cast_payload -> RETURN AstIdentWalkRoot{ DefaultLit: COPY cast_payload };,
+    Locatable.StructLit AS cast_payload -> RETURN AstIdentWalkRoot{ StructLit: COPY cast_payload };,
+    Locatable.LambdaLit AS cast_payload -> RETURN AstIdentWalkRoot{ LambdaLit: COPY cast_payload };,
+    Locatable.IfStatement AS cast_payload -> RETURN AstIdentWalkRoot{ IfStatement: COPY cast_payload };,
+    Locatable.IfBind AS cast_payload -> RETURN AstIdentWalkRoot{ IfBind: COPY cast_payload };,
+    Locatable.WhileLoop AS cast_payload -> RETURN AstIdentWalkRoot{ WhileLoop: COPY cast_payload };,
+    Locatable.WhileBindLoop AS cast_payload -> RETURN AstIdentWalkRoot{ WhileBindLoop: COPY cast_payload };,
+    Locatable.BreakNode AS cast_payload -> RETURN AstIdentWalkRoot{ BreakNode: COPY cast_payload };,
+    Locatable.ContinueNode AS cast_payload -> RETURN AstIdentWalkRoot{ ContinueNode: COPY cast_payload };,
+    Locatable.FuncCall AS cast_payload -> RETURN AstIdentWalkRoot{ FuncCall: COPY cast_payload };,
+    Locatable.GetField AS cast_payload -> RETURN AstIdentWalkRoot{ GetField: COPY cast_payload };,
+    Locatable.GetIndex AS cast_payload -> RETURN AstIdentWalkRoot{ GetIndex: COPY cast_payload };,
+    Locatable.ReturnNode AS cast_payload -> RETURN AstIdentWalkRoot{ ReturnNode: COPY cast_payload };,
+    Locatable.Assert AS cast_payload -> RETURN AstIdentWalkRoot{ Assert: COPY cast_payload };,
+    Locatable.Raise AS cast_payload -> RETURN AstIdentWalkRoot{ Raise: COPY cast_payload };,
+    Locatable.ThrowNode AS cast_payload -> RETURN AstIdentWalkRoot{ ThrowNode: COPY cast_payload };,
+    Locatable.DieNode AS cast_payload -> RETURN AstIdentWalkRoot{ DieNode: COPY cast_payload };,
+    Locatable.Slice AS cast_payload -> RETURN AstIdentWalkRoot{ Slice: COPY cast_payload };,
+    Locatable.Require AS cast_payload -> RETURN AstIdentWalkRoot{ Require: COPY cast_payload };,
+    Locatable.WithBlock AS cast_payload -> RETURN AstIdentWalkRoot{ WithBlock: COPY cast_payload };,
+    Locatable.SyncPolicyDecl AS cast_payload -> RETURN AstIdentWalkRoot{ SyncPolicyDecl: COPY cast_payload };,
+    Locatable.SelectOp AS cast_payload -> RETURN AstIdentWalkRoot{ SelectOp: COPY cast_payload };,
+    Locatable.WhereOp AS cast_payload -> RETURN AstIdentWalkRoot{ WhereOp: COPY cast_payload };,
+    Locatable.IndexOp AS cast_payload -> RETURN AstIdentWalkRoot{ IndexOp: COPY cast_payload };,
+    Locatable.ReduceOp AS cast_payload -> RETURN AstIdentWalkRoot{ ReduceOp: COPY cast_payload };,
+    Locatable.OrderByOp AS cast_payload -> RETURN AstIdentWalkRoot{ OrderByOp: COPY cast_payload };,
+    Locatable.LimitOp AS cast_payload -> RETURN AstIdentWalkRoot{ LimitOp: COPY cast_payload };,
+    Locatable.UnnestOp AS cast_payload -> RETURN AstIdentWalkRoot{ UnnestOp: COPY cast_payload };,
+    Locatable.DistinctOp AS cast_payload -> RETURN AstIdentWalkRoot{ DistinctOp: COPY cast_payload };,
+    Locatable.EachOp AS cast_payload -> RETURN AstIdentWalkRoot{ EachOp: COPY cast_payload };,
+    Locatable.TapOp AS cast_payload -> RETURN AstIdentWalkRoot{ TapOp: COPY cast_payload };,
+    Locatable.SkipOp AS cast_payload -> RETURN AstIdentWalkRoot{ SkipOp: COPY cast_payload };,
+    Locatable.CollectOp AS cast_payload -> RETURN AstIdentWalkRoot{ CollectOp: COPY cast_payload };,
+    Locatable.TakeWhileOp AS cast_payload -> RETURN AstIdentWalkRoot{ TakeWhileOp: COPY cast_payload };,
+    Locatable.WindowOp AS cast_payload -> RETURN AstIdentWalkRoot{ WindowOp: COPY cast_payload };,
+    Locatable.BatchWindowOp AS cast_payload -> RETURN AstIdentWalkRoot{ BatchWindowOp: COPY cast_payload };,
+    Locatable.JoinOp AS cast_payload -> RETURN AstIdentWalkRoot{ JoinOp: COPY cast_payload };,
+    Locatable.FindOp AS cast_payload -> RETURN AstIdentWalkRoot{ FindOp: COPY cast_payload };,
+    Locatable.AnyOp AS cast_payload -> RETURN AstIdentWalkRoot{ AnyOp: COPY cast_payload };,
+    Locatable.AllOp AS cast_payload -> RETURN AstIdentWalkRoot{ AllOp: COPY cast_payload };,
+    Locatable.CountOp AS cast_payload -> RETURN AstIdentWalkRoot{ CountOp: COPY cast_payload };,
+    Locatable.SumOp AS cast_payload -> RETURN AstIdentWalkRoot{ SumOp: COPY cast_payload };,
+    Locatable.AverageOp AS cast_payload -> RETURN AstIdentWalkRoot{ AverageOp: COPY cast_payload };,
+    Locatable.MinOp AS cast_payload -> RETURN AstIdentWalkRoot{ MinOp: COPY cast_payload };,
+    Locatable.MaxOp AS cast_payload -> RETURN AstIdentWalkRoot{ MaxOp: COPY cast_payload };,
+    Locatable.ShardOp AS cast_payload -> RETURN AstIdentWalkRoot{ ShardOp: COPY cast_payload };,
+    Locatable.ConcurrentOp AS cast_payload -> RETURN AstIdentWalkRoot{ ConcurrentOp: COPY cast_payload };,
+    Locatable.Placeholder AS cast_payload -> RETURN AstIdentWalkRoot{ Placeholder: COPY cast_payload };,
+    Locatable.Copy AS cast_payload -> RETURN AstIdentWalkRoot{ Copy: COPY cast_payload };,
+    Locatable.TenseNavigation AS cast_payload -> RETURN AstIdentWalkRoot{ TenseNavigation: COPY cast_payload };,
+    Locatable.MutableBorrow AS cast_payload -> RETURN AstIdentWalkRoot{ MutableBorrow: COPY cast_payload };,
+    Locatable.OrElseRaise AS cast_payload -> RETURN AstIdentWalkRoot{ OrElseRaise: COPY cast_payload };,
+    Locatable.OrElseExit AS cast_payload -> RETURN AstIdentWalkRoot{ OrElseExit: COPY cast_payload };,
+    Locatable.OrElsePass AS cast_payload -> RETURN AstIdentWalkRoot{ OrElsePass: COPY cast_payload };,
+    Locatable.OrElsePrune AS cast_payload -> RETURN AstIdentWalkRoot{ OrElsePrune: COPY cast_payload };,
+    Locatable.OrElseBreak AS cast_payload -> RETURN AstIdentWalkRoot{ OrElseBreak: COPY cast_payload };,
+    Locatable.CatchBlock AS cast_payload -> RETURN AstIdentWalkRoot{ CatchBlock: COPY cast_payload };,
+    Locatable.RecoverOp AS cast_payload -> RETURN AstIdentWalkRoot{ RecoverOp: COPY cast_payload };,
+    Locatable.StringConcat AS cast_payload -> RETURN AstIdentWalkRoot{ StringConcat: COPY cast_payload };,
+    Locatable.CapabilityWrap AS cast_payload -> RETURN AstIdentWalkRoot{ CapabilityWrap: COPY cast_payload };,
+    Locatable.MoveNode AS cast_payload -> RETURN AstIdentWalkRoot{ MoveNode: COPY cast_payload };,
+    Locatable.CopyNode AS cast_payload -> RETURN AstIdentWalkRoot{ CopyNode: COPY cast_payload };,
+    Locatable.KeepNode AS cast_payload -> RETURN AstIdentWalkRoot{ KeepNode: COPY cast_payload };,
+    Locatable.ShareNode AS cast_payload -> RETURN AstIdentWalkRoot{ ShareNode: COPY cast_payload };,
+    Locatable.LinkNode AS cast_payload -> RETURN AstIdentWalkRoot{ LinkNode: COPY cast_payload };,
+    Locatable.ResolveNode AS cast_payload -> RETURN AstIdentWalkRoot{ ResolveNode: COPY cast_payload };,
+    Locatable.FreezeNode AS cast_payload -> RETURN AstIdentWalkRoot{ FreezeNode: COPY cast_payload };,
+    Locatable.PassStmt AS cast_payload -> RETURN AstIdentWalkRoot{ PassStmt: COPY cast_payload };,
+    Locatable.StructPattern AS cast_payload -> RETURN AstIdentWalkRoot{ StructPattern: COPY cast_payload };,
+    Locatable.ExternFnDecl AS cast_payload -> RETURN AstIdentWalkRoot{ ExternFnDecl: COPY cast_payload };,
+    Locatable.ExternStructDecl AS cast_payload -> RETURN AstIdentWalkRoot{ ExternStructDecl: COPY cast_payload };,
+    Locatable.UnionDef AS cast_payload -> RETURN AstIdentWalkRoot{ UnionDef: COPY cast_payload };,
+    Locatable.UnionVariantLit AS cast_payload -> RETURN AstIdentWalkRoot{ UnionVariantLit: COPY cast_payload };,
+    Locatable.StaticCall AS cast_payload -> RETURN AstIdentWalkRoot{ StaticCall: COPY cast_payload };,
+    Locatable.ThenChain AS cast_payload -> RETURN AstIdentWalkRoot{ ThenChain: COPY cast_payload };,
+    Locatable.BgStreamBlock AS cast_payload -> RETURN AstIdentWalkRoot{ BgStreamBlock: COPY cast_payload };,
+    Locatable.YieldExpr AS cast_payload -> RETURN AstIdentWalkRoot{ YieldExpr: COPY cast_payload };,
+    Locatable.CloseStream AS cast_payload -> RETURN AstIdentWalkRoot{ CloseStream: COPY cast_payload };,
+    Locatable.NextExpr AS cast_payload -> RETURN AstIdentWalkRoot{ NextExpr: COPY cast_payload };,
+    Locatable.MatchStatement AS cast_payload -> RETURN AstIdentWalkRoot{ MatchStatement: COPY cast_payload };,
+    Locatable.ForRange AS cast_payload -> RETURN AstIdentWalkRoot{ ForRange: COPY cast_payload };,
+    Locatable.ForEach AS cast_payload -> RETURN AstIdentWalkRoot{ ForEach: COPY cast_payload };,
+    Locatable.TestBlock AS cast_payload -> RETURN AstIdentWalkRoot{ TestBlock: COPY cast_payload };,
+    Locatable.WhenBlock AS cast_payload -> RETURN AstIdentWalkRoot{ WhenBlock: COPY cast_payload };,
+    Locatable.LetBinding AS cast_payload -> RETURN AstIdentWalkRoot{ LetBinding: COPY cast_payload };,
+    Locatable.TestThat AS cast_payload -> RETURN AstIdentWalkRoot{ TestThat: COPY cast_payload };,
+    Locatable.AssertRaises AS cast_payload -> RETURN AstIdentWalkRoot{ AssertRaises: COPY cast_payload };,
+    Locatable.BenchmarkStmt AS cast_payload -> RETURN AstIdentWalkRoot{ BenchmarkStmt: COPY cast_payload };,
+    Locatable.SmashStmt AS cast_payload -> RETURN AstIdentWalkRoot{ SmashStmt: COPY cast_payload };,
+    Locatable.ProfileStmt AS cast_payload -> RETURN AstIdentWalkRoot{ ProfileStmt: COPY cast_payload };,
+    Locatable.StubDecl AS cast_payload -> RETURN AstIdentWalkRoot{ StubDecl: COPY cast_payload };,
+    Locatable.Drop AS cast_payload -> RETURN AstIdentWalkRoot{ Drop: COPY cast_payload };,
+    Locatable.SuppressCleanup AS cast_payload -> RETURN AstIdentWalkRoot{ SuppressCleanup: COPY cast_payload };,
+    Locatable.Return AS cast_payload -> RETURN AstIdentWalkRoot{ Return: COPY cast_payload };,
+    Locatable.ReassignCleanup AS cast_payload -> RETURN AstIdentWalkRoot{ ReassignCleanup: COPY cast_payload };,
+    Locatable.FieldCleanup AS cast_payload -> RETURN AstIdentWalkRoot{ FieldCleanup: COPY cast_payload };,
+  END
+  RETURN NIL;
 END
 PUB FN liveness__walk_idents(node: ?AstIdentWalkRoot, block: FN(String) -> Void) RETURNS Void ->
   IF node EXISTS AS node_value THEN

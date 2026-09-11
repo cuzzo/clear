@@ -48,16 +48,19 @@ PUB FN builder__with_alias_overrides<U>(MUTABLE self: Builder, overrides: {Strin
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE prev: ?{String}String = COPY rtoc_self_view.current_alias_overrides;
   DEFER rtoc_self_view.current_alias_overrides = prev;
-  rtoc_self_view.current_alias_overrides = ((prev OR_ELSE {})).merge(overrides);
+  MUTABLE merged: {String}String = (COPY prev OR_ELSE {});
+  &merged.merge_mut(COPY overrides);
+  rtoc_self_view.current_alias_overrides = merged;
   RETURN blk();
 }
 END
 PUB FN builder__stamp_overrides(MUTABLE self: Builder, idx: Int64) RETURNS Void ->
-    IF self.current_alias_overrides EXISTS AS current_alias_overrides_value THEN
-      IF (current_alias_overrides_value.count == 0) THEN
+    IF self.current_alias_overrides EXISTS THEN
+      MUTABLE current_alias_overrides_value: {String}String = COPY UNWRAP (self.current_alias_overrides);
+      IF (current_alias_overrides_value.length() == 0) THEN
         RETURN;
       ELSE
-        self.alias_overrides_for[idx] = UNWRAP (COPY current_alias_overrides_value);
+        self.alias_overrides_for[idx] = current_alias_overrides_value;
       END
     ELSE
       RETURN;
