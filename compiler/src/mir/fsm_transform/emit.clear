@@ -386,7 +386,7 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
     END
   ELSE_IF tail IS_A NextSuspend AS next_suspend THEN
     IF desc EXISTS AS desc_value THEN
-      MUTABLE explicit_next = next_suspend.next_index;
+      MUTABLE explicit_next:? = next_suspend.next_index;
       MUTABLE target_step = explicit_next;
       MUTABLE desc_tail = desc_value.tail;
       IF desc_tail IS_A FsmTailYield AS rtoc_fsm_tail_yield THEN

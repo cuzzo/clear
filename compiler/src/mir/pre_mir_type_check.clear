@@ -3142,7 +3142,7 @@ FN rtocChildrenOfWalkNodeExternStructDecl(v: ExternStructDecl) RETURNS []WalkNod
     &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   IF v.as_type EXISTS AS rtoc_opt_child THEN
-    &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
+    &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
   # extern_source: ?ExternSource holds no Locatable -- Ruby's walk stops at its leaves.
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
@@ -3869,7 +3869,7 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   IF v.implementation_owner EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
-  &out.append(WalkNode{ SymbolValue: COPY v.source_name });
+  &out.append(WalkNode{ SymbolValue: symbol(COPY v.source_name)});
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNode ->
@@ -4028,7 +4028,7 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
   IF v.implementation_owner EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: symbol(COPY rtoc_opt_child)});
   END
-  &out.append(WalkNode{ SymbolValue: COPY v.source_name });
+  &out.append(WalkNode{ SymbolValue: symbol(COPY v.source_name)});
   RETURN out;
 END
 FN rtocChildrenOfWalkNodeGetField(v: GetField) RETURNS []WalkNode ->
