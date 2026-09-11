@@ -3155,7 +3155,7 @@ PRIVATE FN mIRChecker__check_stmt_for_unhoisted(MUTABLE self: MIRChecker, node: 
       TRY (mIRChecker__check_stmts_for_unhoisted(&self, _.body));
       END
       RETURN;
-    ELSE_IF node? IS_A BatchWindowPush AS batch_window_push THEN
+    ELSE_IF node IS_A BatchWindowPush AS batch_window_push THEN
       MUTABLE batch_window_push_mutable = COPY batch_window_push;
       TRY (mIRChecker__check_expr_for_unhoisted(&self, batch_window_push_mutable.item_expr));
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&self, batch_window_push_mutable.value_expr, "BatchWindow value"));
