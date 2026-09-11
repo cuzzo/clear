@@ -100,13 +100,19 @@ END
 PUB FN fsmTransform__coerce_context_inits(raw: ?ContextInitInput) RETURNS ![]StructInitField EFFECTS REENTRANT ->
   IF raw EXISTS AS raw_value THEN
     IF raw_value IS_A []ContextInitListItem AS array THEN
-      RETURN array |> UNNEST (      IF _ IS_A StructInitField THEN
-        [_]
-      ELSE_IF _ IS_A []StructInitField THEN
-        TRY (fsmTransform__coerce_context_inits(castContextInitListItemToOptionalContextInitInput(_)))
-      ELSE
-        panic("FSM context init must be MIR::StructInitField, got {}")
-      END);
+      MUTABLE out: []StructInitField = List[];
+      FOR rtoc_item IN array DO
+        IF rtoc_item IS_A StructInitField AS rtoc_field THEN
+          &out.append(COPY rtoc_field);
+        ELSE_IF rtoc_item IS_A []StructInitField THEN
+          FOR rtoc_inner IN (TRY (fsmTransform__coerce_context_inits(castContextInitListItemToOptionalContextInitInput(rtoc_item)))) DO
+            &out.append(COPY rtoc_inner);
+          END
+        ELSE
+          panic("FSM context init must be MIR::StructInitField, got {}");
+        END
+      END
+      RETURN out;
     END
     panic("FSM context inits must be MIR::StructInitField values, got {}");
   ELSE
@@ -116,13 +122,19 @@ END
 PUB FN fsmTransform__coerce_promoted_decls(raw: ?PromotedDeclInput) RETURNS ![]Emittable EFFECTS REENTRANT ->
   IF raw EXISTS AS raw_value THEN
     IF raw_value IS_A []PromotedDeclListItem AS array THEN
-      RETURN array |> UNNEST (      IF _ IS_A Emittable THEN
-        [_]
-      ELSE_IF _ IS_A []Emittable THEN
-        TRY (fsmTransform__coerce_promoted_decls(castPromotedDeclListItemToOptionalPromotedDeclInput(_)))
-      ELSE
-        panic("FSM promoted decl must be MIR::Emittable, got {}")
-      END);
+      MUTABLE out: []Emittable = List[];
+      FOR rtoc_item IN array DO
+        IF rtoc_item IS_A Emittable AS rtoc_node THEN
+          &out.append(COPY rtoc_node);
+        ELSE_IF rtoc_item IS_A []Emittable THEN
+          FOR rtoc_inner IN (TRY (fsmTransform__coerce_promoted_decls(castPromotedDeclListItemToOptionalPromotedDeclInput(rtoc_item)))) DO
+            &out.append(COPY rtoc_inner);
+          END
+        ELSE
+          panic("FSM promoted decl must be MIR::Emittable, got {}");
+        END
+      END
+      RETURN out;
     END
     panic("FSM promoted decls must be MIR::Emittable values, got {}");
   ELSE
@@ -156,7 +168,7 @@ PRIVATE FN fsmTransform__local_entry_for_node(node: Locatable) RETURNS !?Promote
     IF !((bind_expr_mutable.mode == :decl)) THEN
       RETURN NIL;
     END
-    RETURN TRY (fsmTransform__local_entry(bind_expr_mutable.name, TRY (aST__full_type_mut(Locatable{ BindExpr: COPY bind_expr_mutable })), TRY (fsmTransform__suspend_value?( Locatable{ BindExpr: COPY bind_expr_mutable.value }))));
+    RETURN TRY (fsmTransform__local_entry(bind_expr_mutable.name, TRY (aST__full_type_mut(Locatable{ BindExpr: COPY bind_expr_mutable })), TRY (fsmTransform__suspend_value?(COPY bind_expr_mutable.value))));
   ELSE_IF node IS_A ForRange AS for_range THEN
     IF for_range.var_name THEN
       RETURN PromotedLocalFact{ name: COPY CAST(for_range.var_name AS String), type_zig: "i64", is_suspend_result: FALSE };
@@ -175,14 +187,12 @@ PRIVATE FN fsmTransform__foreach_local_entry(node: ForEach) RETURNS !?PromotedLo
   END
   MUTABLE ct = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.collection)) }));
   MUTABLE desc: ?TypeFsmForEachDescriptor = TRY (type__fsm_foreach_descriptor(ct));
-  MUTABLE elem_zig = { MUTABLE rtoc_value_block_marker = 0; MUTABLE elem_t: ?Type = TRY (type__element_type(ct));
-  (IF elem_t != NIL THEN
-    TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY elem_t })))))
-  ELSE
-    "anyopaque"
-  END) };
-  IF desc != NIL THEN
-    elem_zig = desc.var_zig_type;
+  MUTABLE elem_zig: String = "anyopaque";
+  IF type__element_type(ct) EXISTS AS elem_t THEN
+    elem_zig = TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY elem_t })))));
+  END
+  IF desc EXISTS AS desc_value THEN
+    elem_zig = COPY desc_value.var_zig_type;
   END
   RETURN PromotedLocalFact{ name: COPY CAST(node.var_name AS String), type_zig: COPY elem_zig, is_suspend_result: FALSE };
 END
@@ -266,9 +276,9 @@ FN castOptionalTransformValueToInt64(value: ?TransformValue) RETURNS Int64 ->
   RETURN 0_i64;
 END
 FN castOptionalTransformValueToOptionalHashMapStringType(value: ?TransformValue) RETURNS ?{String}Type ->
-  IF value != NIL THEN
-    IF value IS_A {String}Type AS cast_payload THEN
-      RETURN cast_payload;
+  IF value EXISTS AS value_present THEN
+    PARTIAL MATCH value_present START
+      TransformValue.HashMapValue3 AS cast_payload -> RETURN COPY cast_payload;,
     END
   END
   RETURN NIL;
@@ -314,8 +324,8 @@ FN castTransformValueToHashMapStringResourceClosePlan(value: ?TransformValue) RE
 END
 FN castTransformValueToHashMapStringType(value: ?TransformValue) RETURNS {String}Type ->
   IF value EXISTS AS value_present THEN
-    IF value_present IS_A {String}Type AS cast_payload THEN
-      RETURN cast_payload;
+    PARTIAL MATCH value_present START
+      TransformValue.HashMapValue3 AS cast_payload -> RETURN COPY cast_payload;,
     END
   END
   RETURN {};
