@@ -208,26 +208,22 @@ PRIVATE FN fsmRecursiveSplitter__stmt_introduces_split?(stmt: ?SegmentStmt) RETU
     RETURN FALSE;
   END
 END
-PRIVATE FN fsmRecursiveSplitter__contains_suspend_anywhere?(stmts: ?Stmts) RETURNS !Bool EFFECTS REENTRANT ->
-  MUTABLE rtoc_idx = 0;
-  WHILE rtoc_idx < UNWRAP (stmts).length() DO
-    IF (stmts[rtoc_idx] IS_A Locatable AND segments__classify_suspend(stmts[rtoc_idx])) THEN
+PRIVATE FN fsmRecursiveSplitter__contains_suspend_anywhere?(stmts: ?[]Locatable) RETURNS !Bool EFFECTS REENTRANT ->
+  FOR rtoc_stmt IN (stmts OR_ELSE List[]) DO
+    IF segments__classify_suspend(rtoc_stmt) THEN
+      RETURN TRUE;
+    END
+    IF rtoc_stmt IS_A WithBlock AS rtoc_with THEN
+      IF (TRY (fsmRecursiveSplitter__with_lock_suspend?(rtoc_with)) OR TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(COPY rtoc_with.body))) THEN
         RETURN TRUE;
-    END
-    IF (stmts[rtoc_idx] IS_A WithBlock) THEN
-        IF (TRY (fsmRecursiveSplitter__with_lock_suspend?(stmts[rtoc_idx])) OR TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(stmts[rtoc_idx].body()))) THEN
-          RETURN TRUE;
-        END
+      END
     ELSE
-        IF !(stmts[rtoc_idx] IS_A Struct) THEN
-          rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
-        END
-        IF (aST__child_bodies(stmts[rtoc_idx])) |> ANY TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt(_) })) THEN
+      FOR rtoc_child_body IN aST__child_bodies(rtoc_stmt) DO
+        IF TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(COPY rtoc_child_body)) THEN
           RETURN TRUE;
         END
+      END
     END
-  rtoc_idx = rtoc_idx + 1;
   END
   RETURN FALSE;
 END

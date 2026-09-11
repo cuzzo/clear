@@ -954,9 +954,9 @@ FN castNodeToCollectValue(value: Node) RETURNS CollectValue ->
   panic("Invalid cast to CollectValue");
 END
 FN castOptionalTransformValueToHashMapStringTypeMultiowned(value: ?TransformValue) RETURNS {String}Type@multiowned ->
-  IF value != NIL THEN
-    IF value IS_A {String}Type@multiowned AS cast_payload THEN
-      RETURN cast_payload;
+  IF value EXISTS AS value_present THEN
+    PARTIAL MATCH value_present START
+      TransformValue.HashMapValue AS cast_payload -> RETURN COPY cast_payload;,
     END
   END
   RETURN {};

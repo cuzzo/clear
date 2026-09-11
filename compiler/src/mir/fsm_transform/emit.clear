@@ -223,7 +223,15 @@ PRIVATE FN emit__prior_lock_release_stmts(ctx_id: Int64, lock_index: Int64, lock
   RETURN CAST([Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${lock_index.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY lock_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, method: COPY unlock_method, args: List[], try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
 END
 PUB FN emit__unique_fsm_ownership_facts(facts: []FsmOwnershipFact) RETURNS ![]FsmOwnershipFact ->
-  RETURN facts |> DISTINCT CAST(Tuple{_.name, _.target, _.target_alloc, _.move_guarded} AS Tuple<String, String@symbol, ?String@symbol, Bool>);
+  MUTABLE seen: [Set]String = Set[];
+  MUTABLE unique: []FsmOwnershipFact = List[];
+  FOR rtoc_fact IN facts DO
+    MUTABLE rtoc_key = "${rtoc_fact.name}|${rtoc_fact.target.toString()}|${(rtoc_fact.target_alloc OR_ELSE :none).toString()}|${(IF rtoc_fact.move_guarded THEN "1" ELSE "0" END)}";
+    IF &seen.insert(rtoc_key) THEN
+      &unique.append(COPY rtoc_fact);
+    END
+  END
+  RETURN unique;
 END
 PRIVATE FN emit__collect_required_move_guards(nodes: []Emittable, id: Int64, cleanup_names: []String) RETURNS ![]String ->
   RETURN CAST((((nodes |> SELECT:? (IF !(_ IS_A TransferMark) THEN NIL ELSE (IF !(((_.target == :owned_sink) OR (locatable__target(_) == :return))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = emit__normalized_ctx_field_name(CAST(_.name() AS String), id); (IF cleanup_names.contains?(name) THEN
@@ -652,13 +660,17 @@ PRIVATE FN emit__build_recursive_capture_map(ctx: FsmEmitContext, segments: []Se
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segments.length() DO
-    MUTABLE tail = segments[rtoc_idx]?.tail;
-    IF !((tail IS_A IoSuspend OR tail IS_A NextSuspend)) THEN
+    MUTABLE tail: SegmentTail = COPY UNWRAP (segments[rtoc_idx]).tail;
+    MUTABLE rv: ?String = NIL;
+    IF tail IS_A IoSuspend AS rtoc_io THEN
+      rv = COPY rtoc_io.result_var;
+    ELSE_IF tail IS_A NextSuspend AS rtoc_next THEN
+      rv = COPY rtoc_next.result_var;
+    ELSE
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    MUTABLE rv = tail.result_var;
-    IF (rv AND (rv != "_")) THEN
+    IF ((rv != NIL) AND (rv != "_")) THEN
         capture_map[rv] = (capture_map[rv] OR_ELSE "__ctx_${id.toString()}.${rv}");
     END
   rtoc_idx = rtoc_idx + 1;
