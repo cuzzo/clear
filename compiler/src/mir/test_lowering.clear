@@ -15,33 +15,25 @@ PUB STRUCT TestBlockCtx {
   test_name: String
 }
 
-PUB FN testBlockCtx__initialize(MUTABLE self: TestBlockCtx, test_block: TestBlock, MUTABLE lowering: MIRLowering) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.test_block = COPY test_block;
-    rtoc_self_view.test_name = COPY test_block.name;
-    rtoc_self_view.lowering = COPY lowering;
-    rtoc_self_view.setup_mir = TRY (mIRLowering__lower_body(&lowering, CAST(test_block.setup AS []MIRLoweringLowerableStmt)));
-    rtoc_self_view.test_before_each_mir = (((test_block.before_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&lowering, castLocatableListToMIRLoweringLowerableStmtList(_)));
-    rtoc_self_view.test_after_each_mir = (((test_block.after_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&lowering, castLocatableListToMIRLoweringLowerableStmtList(_)));
-}
+PUB FN testBlockCtx__initialize(MUTABLE self: TestBlockCtx, test_block: TestBlock, MUTABLE lowering: MIRLowering) RETURNS !Void ->
+    self.test_block = COPY test_block;
+    self.test_name = COPY test_block.name;
+    self.lowering = COPY lowering;
+    self.setup_mir = TRY (mIRLowering__lower_body(&lowering, CAST(test_block.setup AS []MIRLoweringLowerableStmt)));
+    self.test_before_each_mir = (((test_block.before_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&lowering, castLocatableListToMIRLoweringLowerableStmtList(_)));
+    self.test_after_each_mir = (((test_block.after_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&lowering, castLocatableListToMIRLoweringLowerableStmtList(_)));
 END
 PUB FN testBlockCtx__fresh_preamble(self: TestBlockCtx) RETURNS TestPreamble ->
     RETURN TestPreamble{ unused: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
-PUB FN testBlockCtx__emit_all_hooks(MUTABLE self: TestBlockCtx, bodies: [List, List]Locatable, name_kind: String, desc_prefix: String, MUTABLE tests: []TestDef) RETURNS ![]TestDef
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN testBlockCtx__emit_all_hooks(MUTABLE self: TestBlockCtx, bodies: [List, List]Locatable, name_kind: String, desc_prefix: String, MUTABLE tests: []TestDef) RETURNS ![]TestDef ->
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < bodies.length() DO
-      MUTABLE name = "${rtoc_self_view.test_name}: ${desc_prefix}${name_kind}_${(rtoc_idx + 1)}";
-      &tests.append(TestDef{ name: name, body: COPY ([testBlockCtx__fresh_preamble(rtoc_self_view)] + TRY (mIRLowering__lower_body(&rtoc_self_view.lowering, bodies[rtoc_idx]?))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL });
+      MUTABLE name = "${self.test_name}: ${desc_prefix}${name_kind}_${(rtoc_idx + 1)}";
+      &tests.append(TestDef{ name: name, body: COPY ([testBlockCtx__fresh_preamble(self)] + TRY (mIRLowering__lower_body(&self.lowering, bodies[rtoc_idx]?))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL });
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN COPY tests;
-}
 END
 PUB FN testBlockCtx__new(test_block: TestBlock, MUTABLE lowering: MIRLowering) RETURNS !TestBlockCtx@multiowned ->
   MUTABLE self = TestBlockCtx{ lowering: COPY lowering, setup_mir: List[], test_after_each_mir: List[], test_before_each_mir: List[], test_block: COPY test_block, test_name: "" };

@@ -31,16 +31,12 @@ PUB STRUCT ProgramMIRFacts {
   functions: {String}FunctionMIRFacts
 }
 
-PUB FN programMIRFacts__initialize(MUTABLE self: ProgramMIRFacts, functions: {String}FunctionMIRFacts) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN programMIRFacts__initialize(MUTABLE self: ProgramMIRFacts, functions: {String}FunctionMIRFacts) RETURNS Void ->
     MUTABLE rtoc_sorted_functions: {String}FunctionMIRFacts = {};
     FOR rtoc_function_key IN (functions.keys() |> ORDER_BY _) DO
       rtoc_sorted_functions[rtoc_function_key] = COPY UNWRAP (functions[rtoc_function_key]);
     END
-    rtoc_self_view.functions = rtoc_sorted_functions;
-}
+    self.functions = rtoc_sorted_functions;
 END
 PUB FN programMIRFacts__empty() RETURNS ProgramMIRFacts@multiowned ->
   RETURN programMIRFacts__new({});

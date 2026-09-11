@@ -22,26 +22,18 @@ STRUCT ScopeBindings {
   entries: {String}SymbolEntry@multiowned
 }
 
-FN scopeBindings__initialize(MUTABLE self: ScopeBindings) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.entries = {};
-}
+FN scopeBindings__initialize(MUTABLE self: ScopeBindings) RETURNS Void ->
+    self.entries = {};
 END
 FN scopeBindings__get_index(self: ScopeBindings, name: String) RETURNS ?SymbolEntry@multiowned
   EFFECTS REENTRANT ->
     RETURN KEEP self.entries[name];
 END
 FN scopeBindings__set_index(MUTABLE self: ScopeBindings, name: String, entry: SymbolEntry) RETURNS SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.entries[name] = entry;
+  EFFECTS REENTRANT ->
+    self.entries[name] = entry;
     MUTABLE rtoc_owned_return_1: SymbolEntry@multiowned = entry;
     RETURN rtoc_owned_return_1;
-}
 END
 FN scopeBindings__key?(self: ScopeBindings, name: String) RETURNS Bool
   EFFECTS REENTRANT ->
@@ -76,20 +68,12 @@ STRUCT ScopeTypes {
   entries: {String@symbol}ScopeTypeEntry
 }
 
-FN scopeTypes__initialize(MUTABLE self: ScopeTypes) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.entries = {};
-}
+FN scopeTypes__initialize(MUTABLE self: ScopeTypes) RETURNS Void ->
+    self.entries = {};
 END
-FN scopeTypes__declare(MUTABLE self: ScopeTypes, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.entries[name] = COPY ScopeTypeEntry{ schema: COPY schema };
+FN scopeTypes__declare(MUTABLE self: ScopeTypes, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry ->
+    self.entries[name] = COPY ScopeTypeEntry{ schema: COPY schema };
     RETURN ScopeTypeEntry{ schema: COPY schema };
-}
 END
 FN scopeTypes__get_index(self: ScopeTypes, name: String@symbol) RETURNS !?ScopeTypeEntry
   EFFECTS REENTRANT ->
@@ -105,58 +89,42 @@ FN scopeTypes__new() RETURNS ScopeTypes@multiowned ->
   scopeTypes__initialize(&self);
   RETURN self @multiowned;
 END
-FN scope__initialize(MUTABLE self: Scope) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.parent = NIL;
-    rtoc_self_view.bindings = scopeBindings__new();
-    rtoc_self_view.binding_entries = COPY rtoc_self_view.bindings.entries;
-    rtoc_self_view.dependencies = {};
-    rtoc_self_view.type_store = scopeTypes__new();
-    rtoc_self_view.types = COPY rtoc_self_view.type_store.entries;
-    rtoc_self_view.owned_names = Set[];
-    rtoc_self_view.depth = 0;
-}
+FN scope__initialize(MUTABLE self: Scope) RETURNS Void ->
+    self.parent = NIL;
+    self.bindings = scopeBindings__new();
+    self.binding_entries = COPY self.bindings.entries;
+    self.dependencies = {};
+    self.type_store = scopeTypes__new();
+    self.types = COPY self.type_store.entries;
+    self.owned_names = Set[];
+    self.depth = 0;
 END
-PUB FN scope__declare(MUTABLE self: Scope, name: String, reg: ?SymbolEntryRegInput, type: ?SymbolEntryTypeInput, is_mutable: ?ScopeMutabilityInput = ScopeMutabilityInput{ BoolValue: TRUE }, is_rebindable: Bool = FALSE, size: ?Int64 = NIL, storage: String@symbol = :stack, capabilities: [Set]String@symbol = Set[], ignored_borrowed_paths: []SymbolEntry = List[], sync_value: ?String@symbol = NIL, layout: ?String@symbol = NIL, resource: ?Bool = NIL, close_plan: ?ResourceClosePlan = NIL) RETURNS !SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    &rtoc_self_view.owned_names.insert(COPY name);
+PUB FN scope__declare(MUTABLE self: Scope, name: String, reg: ?SymbolEntryRegInput, type: ?SymbolEntryTypeInput, is_mutable: ?ScopeMutabilityInput = ScopeMutabilityInput{ BoolValue: TRUE }, is_rebindable: Bool = FALSE, size: ?Int64 = NIL, storage: String@symbol = :stack, capabilities: [Set]String@symbol = Set[], ignored_borrowed_paths: []SymbolEntry = List[], sync_value: ?String@symbol = NIL, layout: ?String@symbol = NIL, resource: ?Bool = NIL, close_plan: ?ResourceClosePlan = NIL) RETURNS !SymbolEntry@multiowned ->
+    &self.owned_names.insert(COPY name);
     MUTABLE entry = TRY (symbolEntry__new(reg, type, !(!(is_mutable)), storage, sync_value, layout, is_rebindable, (size OR_ELSE 0), capabilities, TRUE, NIL, resource, close_plan));
-    entry.scope = COPY rtoc_self_view;
-    entry.scope_depth = rtoc_self_view.depth;
-    scopeBindings__set_index(&rtoc_self_view.bindings, name, entry);
+    entry.scope = COPY self;
+    entry.scope_depth = self.depth;
+    scopeBindings__set_index(&self.bindings, name, entry);
     RETURN entry;
-}
 END
-FN scope__install_entry(MUTABLE self: Scope, name: String, MUTABLE entry: SymbolEntry, owned: Bool = TRUE) RETURNS SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+FN scope__install_entry(MUTABLE self: Scope, name: String, MUTABLE entry: SymbolEntry, owned: Bool = TRUE) RETURNS SymbolEntry@multiowned ->
     IF owned THEN
-      &rtoc_self_view.owned_names.insert(COPY name);
+      &self.owned_names.insert(COPY name);
     END
-    entry.scope = COPY rtoc_self_view;
-    entry.scope_depth = rtoc_self_view.depth;
-    scopeBindings__set_index(&rtoc_self_view.bindings, name, entry);
+    entry.scope = COPY self;
+    entry.scope_depth = self.depth;
+    scopeBindings__set_index(&self.bindings, name, entry);
     MUTABLE rtoc_owned_return_3: SymbolEntry@multiowned = entry;
     RETURN rtoc_owned_return_3;
-}
 END
-FN scope__initialize_copy(MUTABLE self: Scope, original: Scope) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.parent = COPY original;
-    rtoc_self_view.bindings = scopeBindings__new();
-    rtoc_self_view.binding_entries = COPY rtoc_self_view.bindings.entries;
-    rtoc_self_view.dependencies = COPY original.dependencies;
-    rtoc_self_view.type_store = scopeTypes__new();
-    rtoc_self_view.types = COPY rtoc_self_view.type_store.entries;
-    rtoc_self_view.owned_names = Set[];
-}
+FN scope__initialize_copy(MUTABLE self: Scope, original: Scope) RETURNS Void ->
+    self.parent = COPY original;
+    self.bindings = scopeBindings__new();
+    self.binding_entries = COPY self.bindings.entries;
+    self.dependencies = COPY original.dependencies;
+    self.type_store = scopeTypes__new();
+    self.types = COPY self.type_store.entries;
+    self.owned_names = Set[];
 END
 PUB FN scope__live_param_syms(fn_value: FunctionDef) RETURNS !{String}SymbolEntry@multiowned ->
   RETURN fn_value.params |> REDUCE({}) {
@@ -166,12 +134,8 @@ PUB FN scope__live_param_syms(fn_value: FunctionDef) RETURNS !{String}SymbolEntr
   acc
   };
 END
-PUB FN scope__install_type(MUTABLE self: Scope, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN scopeTypes__declare(&rtoc_self_view.type_store, name, schema);
-}
+PUB FN scope__install_type(MUTABLE self: Scope, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry ->
+    RETURN scopeTypes__declare(&self.type_store, name, schema);
 END
 PUB FN scope__declare_type(MUTABLE self: Scope, name: String@symbol, schema: SchemaValue) RETURNS ScopeTypeEntry ->
   scope__install_type(&self, name, schema);
@@ -217,12 +181,8 @@ END
 PUB FN scope__local_entry(self: Scope, name: String) RETURNS ?SymbolEntry@multiowned ->
     RETURN KEEP scopeBindings__get_index(self.bindings, name);
 END
-PUB FN scope__local_entry_mut(MUTABLE self: Scope, name: String) RETURNS SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN UNWRAP (scope__local_entry(rtoc_self_view, name));
-}
+PUB FN scope__local_entry_mut(MUTABLE self: Scope, name: String) RETURNS SymbolEntry@multiowned ->
+    RETURN UNWRAP (scope__local_entry(self, name));
 END
 PUB FN scope__resolve_entry(self: Scope, name: String) RETURNS ?SymbolEntry@multiowned ->
     MUTABLE local: ?SymbolEntry@multiowned = COPY scopeBindings__get_index(self.bindings, name);
@@ -240,52 +200,32 @@ PUB FN scope__resolve_entry(self: Scope, name: String) RETURNS ?SymbolEntry@mult
     END
     RETURN NIL;
 END
-FN scope__resolve_entry_mut(MUTABLE self: Scope, name: String) RETURNS SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN UNWRAP (scope__resolve_entry(rtoc_self_view, name));
-}
+FN scope__resolve_entry_mut(MUTABLE self: Scope, name: String) RETURNS SymbolEntry@multiowned ->
+    RETURN UNWRAP (scope__resolve_entry(self, name));
 END
-FN scope__local_entry?(MUTABLE self: Scope, name: String) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN scopeBindings__key?(rtoc_self_view.bindings, name);
-}
+FN scope__local_entry?(MUTABLE self: Scope, name: String) RETURNS Bool ->
+    RETURN scopeBindings__key?(self.bindings, name);
 END
-PUB FN scope__entry?(MUTABLE self: Scope, name: String) RETURNS Bool
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN !((scope__resolve_entry(rtoc_self_view, name) == NIL));
-}
+PUB FN scope__entry?(MUTABLE self: Scope, name: String) RETURNS Bool ->
+    RETURN !((scope__resolve_entry(self, name) == NIL));
 END
-PUB FN scope__entry_for_write(MUTABLE self: Scope, name: String) RETURNS ?SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE entry: ?SymbolEntry@multiowned = COPY scopeBindings__get_index(rtoc_self_view.bindings, name);
+PUB FN scope__entry_for_write(MUTABLE self: Scope, name: String) RETURNS ?SymbolEntry@multiowned ->
+    MUTABLE entry: ?SymbolEntry@multiowned = COPY scopeBindings__get_index(self.bindings, name);
     IF entry EXISTS AS entry_value THEN
       RETURN COPY entry_value;
     END
-    MUTABLE inherited: ?SymbolEntry@multiowned = scope__resolve_entry(rtoc_self_view, name);
+    MUTABLE inherited: ?SymbolEntry@multiowned = scope__resolve_entry(self, name);
     IF inherited EXISTS AS inherited_value THEN
       MUTABLE inherited_value_mutable = COPY inherited_value;
-      MUTABLE materialized = scope__clone_entry_for_scope(rtoc_self_view, inherited_value_mutable);
-      scopeBindings__set_index(&rtoc_self_view.bindings, name, materialized);
+      MUTABLE materialized = scope__clone_entry_for_scope(self, inherited_value_mutable);
+      scopeBindings__set_index(&self.bindings, name, materialized);
       RETURN materialized;
     ELSE
       RETURN NIL;
     END
-}
 END
-PUB FN scope__entry_for_write_mut(MUTABLE self: Scope, name: String) RETURNS SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN UNWRAP (scope__entry_for_write(&rtoc_self_view, name));
-}
+PUB FN scope__entry_for_write_mut(MUTABLE self: Scope, name: String) RETURNS SymbolEntry@multiowned ->
+    RETURN UNWRAP (scope__entry_for_write(&self, name));
 END
 PRIVATE FN scope__clone_entry_for_scope(self: Scope, entry: SymbolEntry) RETURNS SymbolEntry@multiowned ->
     MUTABLE new_entry = COPY entry;
@@ -303,12 +243,8 @@ END
 FN scope__local_entry_count(self: Scope) RETURNS Int64 ->
     RETURN scopeBindings__length(self.bindings);
 END
-FN scope__visible_entry_count(MUTABLE self: Scope) RETURNS !Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    RETURN TRY (scope__count_visible_entries_mut(&rtoc_self_view, Set[]));
-}
+FN scope__visible_entry_count(MUTABLE self: Scope) RETURNS !Int64 ->
+    RETURN TRY (scope__count_visible_entries_mut(&self, Set[]));
 END
 FN scope__count_visible_entries_mut(MUTABLE self: Scope, MUTABLE seen: [Set]String) RETURNS !Int64
   REQUIRES self: LOCAL
@@ -404,23 +340,16 @@ END
 PUB FN scope__is_restricted?(self: Scope, name: String) RETURNS Bool ->
     RETURN !(!((scope__resolve_entry(self, name)?.capabilities).contains?(symbol("RESTRICT"))));
 END
-PUB FN scope__mark_read(MUTABLE self: Scope, name: String) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE entry: ?SymbolEntry@multiowned = scope__entry_for_write(&rtoc_self_view, name);
+PUB FN scope__mark_read(MUTABLE self: Scope, name: String) RETURNS Void ->
+    MUTABLE entry: ?SymbolEntry@multiowned = scope__entry_for_write(&self, name);
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
       symbolEntry__mark_read_mut(&entry_value_mutable);
     ELSE
       RETURN;
     END
-}
 END
-PUB FN scope__declare_with_new_capability(MUTABLE self: Scope, capability: Capability) RETURNS ?SymbolEntry@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN scope__declare_with_new_capability(MUTABLE self: Scope, capability: Capability) RETURNS ?SymbolEntry@multiowned ->
     MUTABLE var_node: Locatable = CAST(capability.var_node AS Locatable);
     MUTABLE old_scope: Scope@multiowned = CAST(capability.old_scope AS Scope@multiowned);
     MUTABLE name = COPY (UNWRAP (aST__root_identifier(var_node))).name;
@@ -430,13 +359,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE local_value_mutable = OWN COPY local_value_mutable;
       local_value_mutable.capabilities = COPY local_value_mutable.capabilities;
       &local_value_mutable.capabilities.insert(symbol(UNWRAP (COPY capability.capability)));
-      local_value_mutable.scope = COPY rtoc_self_view;
-      scopeBindings__set_index(&rtoc_self_view.bindings, name, local_value_mutable);
+      local_value_mutable.scope = COPY self;
+      scopeBindings__set_index(&self.bindings, name, local_value_mutable);
       RETURN local_value_mutable;
     ELSE
       RETURN NIL;
     END
-}
 END
 PUB FN scope__get_path_to_root(self: Scope, node: Locatable) RETURNS ![]String@symbol ->
     MUTABLE path: []String@symbol = List[];
@@ -463,11 +391,8 @@ PUB FN scope__get_path_to_root(self: Scope, node: Locatable) RETURNS ![]String@s
     END
     RETURN reversed;
 END
-PUB FN scope__check_validity_mut(MUTABLE self: Scope, name: String) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE entry: ?SymbolEntry@multiowned = scope__resolve_entry(rtoc_self_view, name);
+PUB FN scope__check_validity_mut(MUTABLE self: Scope, name: String) RETURNS !Void ->
+    MUTABLE entry: ?SymbolEntry@multiowned = scope__resolve_entry(self, name);
     IF entry EXISTS AS entry_value THEN
       IF (symbolEntry__valid(entry_value) == FALSE) THEN
         panic("Compile Error: Cannot use variable '{}'. Reason: {}");
@@ -475,7 +400,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       RETURN;
     END
-}
 END
 PUB FN scope__new() RETURNS Scope@multiowned ->
   MUTABLE self = Scope{ binding_entries: {}, bindings: scopeBindings__new(), dependencies: {}, depth: 0, owned_names: Set[], parent: NIL, type_store: scopeTypes__new(), types: {} };

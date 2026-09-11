@@ -37,31 +37,23 @@ PUB STRUCT SemanticAnnotatorConfig {
   strict_test: Bool,
   source_code: ?String
 }
-PUB FN semanticAnnotator__initialize(MUTABLE self: SemanticAnnotator, importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN semanticAnnotator__initialize(MUTABLE self: SemanticAnnotator, importer: ?ModuleImporter = NIL, compiler: ?ModuleImporter = NIL, source_dir: ?String = NIL, strict_test: Bool = FALSE, source_code: ?String = NIL) RETURNS !Void ->
     MUTABLE rtoc_source_dir: String = TRY (rtocResolveSourceDir(source_dir));
-    rtoc_self_view.config = SemanticAnnotatorConfig{ importer: ( { MUTABLE rtoc_optional_or_source_1: ?ModuleImporter@multiowned = importer; MUTABLE rtoc_optional_or_result_2: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_1 != NIL THEN rtoc_optional_or_result_2 = COPY rtoc_optional_or_source_1; ELSE rtoc_optional_or_result_2 = COPY compiler; END rtoc_optional_or_result_2 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code };
-    rtoc_self_view.annotation_products = annotationProducts__new();
-    rtoc_self_view.semantic_index = NIL;
-}
+    self.config = SemanticAnnotatorConfig{ importer: ( { MUTABLE rtoc_optional_or_source_1: ?ModuleImporter@multiowned = importer; MUTABLE rtoc_optional_or_result_2: ?ModuleImporter@multiowned = NIL; IF rtoc_optional_or_source_1 != NIL THEN rtoc_optional_or_result_2 = COPY rtoc_optional_or_source_1; ELSE rtoc_optional_or_result_2 = COPY compiler; END rtoc_optional_or_result_2 } ), source_dir: COPY rtoc_source_dir, strict_test: strict_test, source_code: COPY source_code };
+    self.annotation_products = annotationProducts__new();
+    self.semantic_index = NIL;
 END
-PUB FN semanticAnnotator__annotate_mut(MUTABLE self: SemanticAnnotator, MUTABLE program: Program) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN semanticAnnotator__annotate_mut(MUTABLE self: SemanticAnnotator, MUTABLE program: Program) RETURNS !Void ->
     aST__reset_user_types_mut();
-    rtoc_self_view.semantic_index = NIL;
-    MUTABLE pipeline = annotationPipeline__new(KEEP rtoc_self_view.config.importer, rtoc_self_view.config.source_dir, rtoc_self_view.config.source_code, rtoc_self_view.config.strict_test);
-    DEFER rtoc_self_view.annotation_products = KEEP pipeline.products;
+    self.semantic_index = NIL;
+    MUTABLE pipeline = annotationPipeline__new(KEEP self.config.importer, self.config.source_dir, self.config.source_code, self.config.strict_test);
+    DEFER self.annotation_products = KEEP pipeline.products;
     TRY (annotationPipeline__run(&pipeline, &program));
-    IF !(annotationProducts__complete?(rtoc_self_view.annotation_products)) THEN
+    IF !(annotationProducts__complete?(self.annotation_products)) THEN
       panic("annotation pipeline did not publish complete products");
     END
-    rtoc_self_view.semantic_index = TRY (semanticIndex__from_products(rtoc_self_view.annotation_products, semanticAnnotator__semantic_id_index(rtoc_self_view)));
-    TRY (annotationBoundary__verify_mut(program, rtoc_self_view.annotation_products));
-}
+    self.semantic_index = TRY (semanticIndex__from_products(self.annotation_products, semanticAnnotator__semantic_id_index(self)));
+    TRY (annotationBoundary__verify_mut(program, self.annotation_products));
 END
 PUB FN semanticAnnotator__semantic_root_scope(self: SemanticAnnotator) RETURNS !Scope@multiowned ->
     MUTABLE index: ?SemanticIndex = COPY self.semantic_index;

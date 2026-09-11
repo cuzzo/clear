@@ -14,39 +14,27 @@ PUB STRUCT StageSpec {
 PRIVATE FN passStages() RETURNS [12]StageSpec ->
   RETURN [StageSpec{ name: :annotated, producer: "SemanticAnnotator", requires: NIL }, StageSpec{ name: :pipeline_rewritten, producer: "PipelineRewriter", requires: :annotated }, StageSpec{ name: :string_concat_rewritten, producer: "StringConcatRewriter", requires: :pipeline_rewritten }, StageSpec{ name: :hoisted, producer: "Hoist", requires: :string_concat_rewritten }, StageSpec{ name: :premir_type_checked, producer: "PreMirTypeCheck", requires: :hoisted }, StageSpec{ name: :escape_analyzed, producer: "MIRPass/EscapeAnalysis", requires: :premir_type_checked }, StageSpec{ name: :cleanup_classified, producer: "MIRPass/CleanupClassifier", requires: :escape_analyzed }, StageSpec{ name: :loop_frame_analyzed, producer: "MIRPass/LoopFrameAnalysis", requires: :cleanup_classified }, StageSpec{ name: :needs_rt_finalized, producer: "MIRPass#finalize_needs_rt!", requires: :loop_frame_analyzed }, StageSpec{ name: :mir_pass_complete, producer: "MIRPass", requires: :needs_rt_finalized }, StageSpec{ name: :mir_lowered, producer: "MIRLowering", requires: :mir_pass_complete }, StageSpec{ name: :mir_checked, producer: "MIRChecker", requires: :mir_lowered }];
 END
-PUB FN mIRPassState__initialize(MUTABLE self: MIRPassState) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.completed = Set[];
-}
+PUB FN mIRPassState__initialize(MUTABLE self: MIRPassState) RETURNS Void ->
+    self.completed = Set[];
 END
-PUB FN mIRPassState__mark_mut(MUTABLE self: MIRPassState, stage: String@symbol) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE spec = TRY (mIRPassState__stage_spec_mut(&rtoc_self_view, stage));
-    IF rtoc_self_view.completed.contains?(stage) THEN
+PUB FN mIRPassState__mark_mut(MUTABLE self: MIRPassState, stage: String@symbol) RETURNS !Void ->
+    MUTABLE spec = TRY (mIRPassState__stage_spec_mut(&self, stage));
+    IF self.completed.contains?(stage) THEN
       RAISE Input, MIRPassOrderError, "{} attempted to mark {} twice";
     END
-    MUTABLE expected: ?String@symbol = mIRPassState__next_unmarked_stage(rtoc_self_view);
+    MUTABLE expected: ?String@symbol = mIRPassState__next_unmarked_stage(self);
     IF !((stage == expected)) THEN
       RAISE Input, MIRPassOrderError, "{}{}";
     END
-    &rtoc_self_view.completed.insert(COPY stage);
-}
+    &self.completed.insert(COPY stage);
 END
 PUB FN mIRPassState__require_mut(MUTABLE self: MIRPassState, stage: String@symbol, consumer: String) RETURNS !Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (mIRPassState__stage_spec_mut(&rtoc_self_view, stage));
-    IF rtoc_self_view.completed.contains?(stage) THEN
+  EFFECTS REENTRANT ->
+    TRY (mIRPassState__stage_spec_mut(&self, stage));
+    IF self.completed.contains?(stage) THEN
       RETURN;
     END
     RAISE Input, MIRPassOrderError, "{} requires {}; completed stages: {}";
-}
 END
 PRIVATE FN mIRPassState__completed_stages(self: MIRPassState) RETURNS ![]String@symbol ->
     MUTABLE done: []String@symbol = [];
@@ -91,29 +79,21 @@ PUB FN mIRPassState__class_require_mut(program: PassStateProgram, stage: String@
   END
   RAISE Input, MIRPassOrderError, "{} requires pass state; program was not produced by the MIR pipeline";
 END
-PUB FN mIRPassState__validate_stage_mut(MUTABLE self: MIRPassState, stage: String@symbol) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN mIRPassState__validate_stage_mut(MUTABLE self: MIRPassState, stage: String@symbol) RETURNS !Void ->
     FOR spec IN passStages() DO
       IF (spec.name == stage) THEN
         RETURN;
       END
     END
     RAISE Input, MIRPassOrderError, "unknown MIR pass stage {}";
-}
 END
-PRIVATE FN mIRPassState__stage_spec_mut(MUTABLE self: MIRPassState, stage: String@symbol) RETURNS !StageSpec
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PRIVATE FN mIRPassState__stage_spec_mut(MUTABLE self: MIRPassState, stage: String@symbol) RETURNS !StageSpec ->
     FOR spec IN passStages() DO
       IF (spec.name == stage) THEN
         RETURN COPY spec;
       END
     END
     RAISE Input, MIRPassOrderError, "unknown MIR pass stage {}";
-}
 END
 PRIVATE FN mIRPassState__next_unmarked_stage(self: MIRPassState) RETURNS ?String@symbol ->
     FOR spec IN passStages() DO

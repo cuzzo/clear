@@ -521,17 +521,13 @@ PUB STRUCT Occurrence {
   position: Int64,
   loop_depth: Int64
 }
-PUB FN keptEdgeLiveness__initialize(MUTABLE self: KeptEdgeLiveness, body: []Locatable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.by_object = {};
-    rtoc_self_view.last_position = {};
-    rtoc_self_view.counter = 0;
+PUB FN keptEdgeLiveness__initialize(MUTABLE self: KeptEdgeLiveness, body: []Locatable) RETURNS Void ->
+    self.by_object = {};
+    self.last_position = {};
+    self.counter = 0;
     FOR _ IN body DO
-    keptEdgeLiveness__index_node(&rtoc_self_view, _, 0);
+    keptEdgeLiveness__index_node(&self, _, 0);
     END
-}
 END
 PUB FN keptEdgeLiveness__last_use?(self: KeptEdgeLiveness, arg: Identifier) RETURNS Bool ->
     MUTABLE occ: ?Occurrence = COPY self.by_object[aST__node_identity(Locatable{ Identifier: COPY arg })];
@@ -545,18 +541,15 @@ PUB FN keptEdgeLiveness__last_use?(self: KeptEdgeLiveness, arg: Identifier) RETU
     END
 END
 PRIVATE FN keptEdgeLiveness__index_node(MUTABLE self: KeptEdgeLiveness, node: Locatable, loop_depth: Int64) RETURNS Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node IS_A FunctionDef AS function_def THEN
       RETURN;
     END
     IF node IS_A Identifier AS identifier THEN
-      rtoc_self_view.counter = (rtoc_self_view.counter + 1);
-      rtoc_self_view.by_object[aST__node_identity(Locatable{ Identifier: COPY identifier })] = Occurrence{ position: rtoc_self_view.counter, loop_depth: COPY loop_depth };
-      IF (rtoc_self_view.counter > (rtoc_self_view.last_position[identifier__name(identifier)] OR_ELSE -1)) THEN
-        rtoc_self_view.last_position[identifier__name(identifier)] = COPY rtoc_self_view.counter;
+      self.counter = (self.counter + 1);
+      self.by_object[aST__node_identity(Locatable{ Identifier: COPY identifier })] = Occurrence{ position: self.counter, loop_depth: COPY loop_depth };
+      IF (self.counter > (self.last_position[identifier__name(identifier)] OR_ELSE -1)) THEN
+        self.last_position[identifier__name(identifier)] = COPY self.counter;
       END
     END
     MUTABLE child_depth = IF aST__loop_node?(node) THEN
@@ -564,11 +557,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE
       loop_depth
     END;
-    aST__each_child_node(node, %(child: Locatable) USE(child_depth, MUTABLE rtoc_self_view) -> {
-    keptEdgeLiveness__index_node(&rtoc_self_view, child, child_depth);
+    aST__each_child_node(node, %(child: Locatable) USE(child_depth, MUTABLE self) -> {
+    keptEdgeLiveness__index_node(&self, child, child_depth);
     rubyToClearVoid__escape_analysis()
     });
-}
 END
 PUB FN keptEdgeLiveness__new(body: []Locatable) RETURNS KeptEdgeLiveness@multiowned ->
   MUTABLE self = KeptEdgeLiveness{ by_object: {}, counter: 0, last_position: {} };

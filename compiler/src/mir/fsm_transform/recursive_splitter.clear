@@ -35,16 +35,12 @@ PUB STRUCT Finalized {
   segments: []Segment,
   alias_overrides_by_index: {Int64}{String}String
 }
-PUB FN builder__initialize(MUTABLE self: Builder) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.segments = List[];
-    rtoc_self_view.synthetic_fields = List[];
-    rtoc_self_view.alias_overrides_for = {};
-    rtoc_self_view.current_alias_overrides = NIL;
-    rtoc_self_view.next_lock_index = 0;
-}
+PUB FN builder__initialize(MUTABLE self: Builder) RETURNS Void ->
+    self.segments = List[];
+    self.synthetic_fields = List[];
+    self.alias_overrides_for = {};
+    self.current_alias_overrides = NIL;
+    self.next_lock_index = 0;
 END
 PUB FN builder__with_alias_overrides<U>(MUTABLE self: Builder, overrides: {String}String, blk: FN() -> U) RETURNS U
   REQUIRES self: LOCAL
@@ -56,66 +52,42 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   RETURN blk();
 }
 END
-PUB FN builder__stamp_overrides(MUTABLE self: Builder, idx: Int64) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF rtoc_self_view.current_alias_overrides EXISTS AS current_alias_overrides_value THEN
+PUB FN builder__stamp_overrides(MUTABLE self: Builder, idx: Int64) RETURNS Void ->
+    IF self.current_alias_overrides EXISTS AS current_alias_overrides_value THEN
       IF (current_alias_overrides_value.count == 0) THEN
         RETURN;
       ELSE
-        rtoc_self_view.alias_overrides_for[idx] = UNWRAP (COPY current_alias_overrides_value);
+        self.alias_overrides_for[idx] = UNWRAP (COPY current_alias_overrides_value);
       END
     ELSE
       RETURN;
     END
-}
 END
-PUB FN builder__add_synthetic_field(MUTABLE self: Builder, decl: ContextFieldDecl) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF !(rtoc_self_view.synthetic_fields |> ANY (_.name == decl.name)) THEN
-      &rtoc_self_view.synthetic_fields.append(COPY decl);
+PUB FN builder__add_synthetic_field(MUTABLE self: Builder, decl: ContextFieldDecl) RETURNS Void ->
+    IF !(self.synthetic_fields |> ANY (_.name == decl.name)) THEN
+      &self.synthetic_fields.append(COPY decl);
     END
     NIL;
-}
 END
-PUB FN builder__reserve_index(MUTABLE self: Builder) RETURNS Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE idx = rtoc_self_view.segments.length();
-    &rtoc_self_view.segments.append(SegmentSlot{ SymbolValue: :placeholder });
+PUB FN builder__reserve_index(MUTABLE self: Builder) RETURNS Int64 ->
+    MUTABLE idx = self.segments.length();
+    &self.segments.append(SegmentSlot{ SymbolValue: :placeholder });
     RETURN idx;
-}
 END
-PUB FN builder__reserve_lock_index(MUTABLE self: Builder) RETURNS Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE idx = rtoc_self_view.next_lock_index;
-    rtoc_self_view.next_lock_index = (rtoc_self_view.next_lock_index + 1);
+PUB FN builder__reserve_lock_index(MUTABLE self: Builder) RETURNS Int64 ->
+    MUTABLE idx = self.next_lock_index;
+    self.next_lock_index = (self.next_lock_index + 1);
     RETURN idx;
-}
 END
-PUB FN builder__fill(MUTABLE self: Builder, idx: Int64, stmts: []SegmentStmt, tail: SegmentTail) RETURNS Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.segments[idx] = Segment{ index: COPY idx, stmts: stmts, tail: tail };
-    builder__stamp_overrides(&rtoc_self_view, idx);
+PUB FN builder__fill(MUTABLE self: Builder, idx: Int64, stmts: []SegmentStmt, tail: SegmentTail) RETURNS Int64 ->
+    self.segments[idx] = Segment{ index: COPY idx, stmts: stmts, tail: tail };
+    builder__stamp_overrides(&self, idx);
     RETURN COPY idx;
-}
 END
-PUB FN builder__push(MUTABLE self: Builder, stmts: []SegmentStmt, tail: SegmentTail) RETURNS Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE idx = builder__reserve_index(&rtoc_self_view);
-    builder__fill(&rtoc_self_view, idx, stmts, tail);
+PUB FN builder__push(MUTABLE self: Builder, stmts: []SegmentStmt, tail: SegmentTail) RETURNS Int64 ->
+    MUTABLE idx = builder__reserve_index(&self);
+    builder__fill(&self, idx, stmts, tail);
     RETURN idx;
-}
 END
 PUB FN builder__finalize(self: Builder) RETURNS !Finalized ->
     MUTABLE unfilled = {

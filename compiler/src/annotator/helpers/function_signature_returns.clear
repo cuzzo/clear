@@ -32,30 +32,26 @@ PUB FN functionSignature__import_copy(self: FunctionSignature, module_alias: ?St
     MUTABLE copy = TRY (functionSignature__dup(self));
     RETURN TRY (functionSignature__replace_import_mutable_state_mut(&copy, module_alias));
 END
-PUB FN functionSignature__replace_import_mutable_state_mut(MUTABLE self: FunctionSignature, module_alias: ?String) RETURNS !FunctionSignature@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.contract.params = TRY (functionSignature__copy_params_for_import(rtoc_self_view.contract.params));
-    rtoc_self_view.contract.type_params = COPY rtoc_self_view.contract.type_params;
-    rtoc_self_view.contract.module_alias = COPY module_alias;
-    rtoc_self_view.contract.extern_effects = COPY rtoc_self_view.contract.extern_effects;
-    rtoc_self_view.contract.fn_type_params = COPY rtoc_self_view.contract.fn_type_params;
-    rtoc_self_view.contract.owner_type_params = COPY rtoc_self_view.contract.owner_type_params;
-    IF rtoc_self_view.facts.effects != NIL THEN
-      rtoc_self_view.facts.effects = UNWRAP (COPY rtoc_self_view.facts.effects);
+PUB FN functionSignature__replace_import_mutable_state_mut(MUTABLE self: FunctionSignature, module_alias: ?String) RETURNS !FunctionSignature@multiowned ->
+    self.contract.params = TRY (functionSignature__copy_params_for_import(self.contract.params));
+    self.contract.type_params = COPY self.contract.type_params;
+    self.contract.module_alias = COPY module_alias;
+    self.contract.extern_effects = COPY self.contract.extern_effects;
+    self.contract.fn_type_params = COPY self.contract.fn_type_params;
+    self.contract.owner_type_params = COPY self.contract.owner_type_params;
+    IF self.facts.effects != NIL THEN
+      self.facts.effects = UNWRAP (COPY self.facts.effects);
     ELSE
-      rtoc_self_view.facts.effects = NIL;
+      self.facts.effects = NIL;
     END
-    rtoc_self_view.facts.requires = TRY (functionSignature__copy_requires_for_import(rtoc_self_view.facts.requires));
-    IF rtoc_self_view.facts.heap_carry_return_vars != NIL THEN
-      rtoc_self_view.facts.heap_carry_return_vars = UNWRAP (COPY rtoc_self_view.facts.heap_carry_return_vars);
+    self.facts.requires = TRY (functionSignature__copy_requires_for_import(self.facts.requires));
+    IF self.facts.heap_carry_return_vars != NIL THEN
+      self.facts.heap_carry_return_vars = UNWRAP (COPY self.facts.heap_carry_return_vars);
     ELSE
-      rtoc_self_view.facts.heap_carry_return_vars = NIL;
+      self.facts.heap_carry_return_vars = NIL;
     END
-    rtoc_self_view.facts.return_def = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_10 = (TRY (functionSignature__return_def(rtoc_self_view)));
+    self.facts.return_def = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_10 = (TRY (functionSignature__return_def(self)));
     TRY (functionReturn__copy(rtoc_local_receiver_10)) };
-    MUTABLE rtoc_owned_return_11: FunctionSignature@multiowned = rtoc_self_view;
+    MUTABLE rtoc_owned_return_11: FunctionSignature@multiowned = self;
     RETURN rtoc_owned_return_11;
-}
 END

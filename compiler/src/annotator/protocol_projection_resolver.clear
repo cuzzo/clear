@@ -16,12 +16,8 @@ PUB STRUCT ProtocolProjectionResolver {
   protocols: {String}ProtocolDef
 }
 
-PUB FN protocolProjectionResolver__initialize(MUTABLE self: ProtocolProjectionResolver, protocols: {String}ProtocolDef) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.protocols = COPY protocols;
-}
+PUB FN protocolProjectionResolver__initialize(MUTABLE self: ProtocolProjectionResolver, protocols: {String}ProtocolDef) RETURNS Void ->
+    self.protocols = COPY protocols;
 END
 PUB FN protocolProjectionResolver__resolve(self: ProtocolProjectionResolver, expression: TypeExpression, parameters: []GenericParamDecl) RETURNS !ProtocolProjectionResult ->
     MUTABLE issues: []ProtocolProjectionIssue = List[];

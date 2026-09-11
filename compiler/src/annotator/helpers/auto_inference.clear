@@ -16,15 +16,11 @@ PUB STRUCT AutoSlotId {
   kind: String@symbol
 }
 
-FN autoSlotId__initialize(MUTABLE self: AutoSlotId, kind: String@symbol, fn_name: ?String = NIL, index_value: ?Int64 = NIL, decl_id: ?Int64 = NIL) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.kind = COPY kind;
-    rtoc_self_view.fn_name = COPY fn_name;
-    rtoc_self_view.index = COPY index_value;
-    rtoc_self_view.decl_id = COPY decl_id;
-}
+FN autoSlotId__initialize(MUTABLE self: AutoSlotId, kind: String@symbol, fn_name: ?String = NIL, index_value: ?Int64 = NIL, decl_id: ?Int64 = NIL) RETURNS Void ->
+    self.kind = COPY kind;
+    self.fn_name = COPY fn_name;
+    self.index = COPY index_value;
+    self.decl_id = COPY decl_id;
 END
 PUB FN autoSlotId__param(fn_name: String, index_value: Int64) RETURNS AutoSlotId@multiowned ->
   RETURN autoSlotId__new(:param, fn_name, index_value);
@@ -74,13 +70,9 @@ STRUCT AutoMapShapeEntry {
   value: AutoSlotId@multiowned
 }
 
-FN autoMapShapeEntry__initialize(MUTABLE self: AutoMapShapeEntry, key: AutoSlotId, value: AutoSlotId) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.key = COPY key;
-    rtoc_self_view.value = COPY value;
-}
+FN autoMapShapeEntry__initialize(MUTABLE self: AutoMapShapeEntry, key: AutoSlotId, value: AutoSlotId) RETURNS Void ->
+    self.key = COPY key;
+    self.value = COPY value;
 END
 FN autoMapShapeEntry__new(key: AutoSlotId, value: AutoSlotId) RETURNS AutoMapShapeEntry@multiowned ->
   MUTABLE self = AutoMapShapeEntry{ key: COPY key, value: COPY value };
@@ -107,45 +99,33 @@ PUB STRUCT Slot {
   auto_token: ?Token,
   resolved_scalar: ?Type
 }
-FN autoConstraintCollector__initialize(MUTABLE self: AutoConstraintCollector, fn_nodes: {String}FunctionDef) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.fn_nodes = COPY fn_nodes;
-    rtoc_self_view.slots = {};
-    rtoc_self_view.local_decls = {};
-}
+FN autoConstraintCollector__initialize(MUTABLE self: AutoConstraintCollector, fn_nodes: {String}FunctionDef) RETURNS Void ->
+    self.fn_nodes = COPY fn_nodes;
+    self.slots = {};
+    self.local_decls = {};
 END
-PUB FN autoConstraintCollector__collect_mut(MUTABLE self: AutoConstraintCollector, program_node: Program) RETURNS !{AutoSlotId@multiowned}Slot@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    TRY (autoConstraintCollector__register_signature_slots(&rtoc_self_view));
-    autoConstraintCollector__walk(&rtoc_self_view, castProgramToOptionalAutoInferenceWalkNode(program_node), NIL);
-    RETURN COPY rtoc_self_view.slots;
-}
+PUB FN autoConstraintCollector__collect_mut(MUTABLE self: AutoConstraintCollector, program_node: Program) RETURNS !{AutoSlotId@multiowned}Slot@multiowned ->
+    TRY (autoConstraintCollector__register_signature_slots(&self));
+    autoConstraintCollector__walk(&self, castProgramToOptionalAutoInferenceWalkNode(program_node), NIL);
+    RETURN COPY self.slots;
 END
-PRIVATE FN autoConstraintCollector__register_signature_slots(MUTABLE self: AutoConstraintCollector) RETURNS !{AutoSlotId@multiowned}Slot@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR rtoc_each_3 IN rtoc_self_view.fn_nodes.keys() DO
-    MUTABLE fn_value: FunctionDef@multiowned = (rtoc_self_view.fn_nodes[rtoc_each_3] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
+PRIVATE FN autoConstraintCollector__register_signature_slots(MUTABLE self: AutoConstraintCollector) RETURNS !{AutoSlotId@multiowned}Slot@multiowned ->
+    FOR rtoc_each_3 IN self.fn_nodes.keys() DO
+    MUTABLE fn_value: FunctionDef@multiowned = (self.fn_nodes[rtoc_each_3] OR_ELSE CAST(panic("missing hash key") AS FunctionDef@multiowned));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < fn_value.params.length() DO
-        IF !(autoConstraintCollector__auto?(rtoc_self_view, param__type(fn_value.params[rtoc_idx]?))) THEN
+        IF !(autoConstraintCollector__auto?(self, param__type(fn_value.params[rtoc_idx]?))) THEN
           rtoc_idx = rtoc_idx + 1;
       CONTINUE;
         END
-        rtoc_self_view.slots[autoSlotId__param(rtoc_each_3, rtoc_idx)] = COPY Slot{ kind: :param, fn_name: COPY rtoc_each_3, index: rtoc_idx, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: List[], auto_token: COPY param__type(fn_value.params[rtoc_idx]?).auto_token, shape: NIL, resolved_scalar: NIL } @multiowned;
+        self.slots[autoSlotId__param(rtoc_each_3, rtoc_idx)] = COPY Slot{ kind: :param, fn_name: COPY rtoc_each_3, index: rtoc_idx, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: List[], auto_token: COPY param__type(fn_value.params[rtoc_idx]?).auto_token, shape: NIL, resolved_scalar: NIL } @multiowned;
       rtoc_idx = rtoc_idx + 1;
     END
-    IF autoConstraintCollector__auto?(rtoc_self_view, fn_value.return_type) THEN
-        rtoc_self_view.slots[autoSlotId__return(rtoc_each_3)] = COPY Slot{ kind: :return, fn_name: COPY rtoc_each_3, index: NIL, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: List[], auto_token: COPY UNWRAP (fn_value.return_type).auto_token, shape: NIL, resolved_scalar: NIL } @multiowned;
+    IF autoConstraintCollector__auto?(self, fn_value.return_type) THEN
+        self.slots[autoSlotId__return(rtoc_each_3)] = COPY Slot{ kind: :return, fn_name: COPY rtoc_each_3, index: NIL, decl_node: AutoConstraintCollectorSlotDeclNode{ FunctionDefMultiowned: COPY fn_value }, sources: List[], auto_token: COPY UNWRAP (fn_value.return_type).auto_token, shape: NIL, resolved_scalar: NIL } @multiowned;
     END
         END
-    RETURN COPY rtoc_self_view.slots;
-}
+    RETURN COPY self.slots;
 END
 PRIVATE FN autoConstraintCollector__auto?(self: AutoConstraintCollector, t: ?Type) RETURNS Bool
   EFFECTS REENTRANT ->
@@ -155,10 +135,7 @@ PRIVATE FN autoConstraintCollector__auto?(self: AutoConstraintCollector, t: ?Typ
     RETURN FALSE;
 END
 PRIVATE FN autoConstraintCollector__walk(MUTABLE self: AutoConstraintCollector, node: ?AutoInferenceWalkNode, current_fn: ?FunctionDef) RETURNS Void
-  REQUIRES self: LOCAL
-  EFFECTS REENTRANT
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+  EFFECTS REENTRANT ->
     IF node EXISTS AS node_value THEN
       MUTABLE node_value_mutable = COPY node_value;
       IF node_value_mutable IS_A String@symbol AS string_symbol THEN
@@ -191,51 +168,46 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     
       ELSE_IF node_value_mutable IS_A []Node AS array_value THEN
         FOR rtoc_array_item IN array_value DO
-        autoConstraintCollector__walk(&rtoc_self_view, castNodeToOptionalAutoInferenceWalkNode(rtoc_array_item), current_fn);
+        autoConstraintCollector__walk(&self, castNodeToOptionalAutoInferenceWalkNode(rtoc_array_item), current_fn);
         END
       ELSE
-        autoConstraintCollector__record_constraint(&rtoc_self_view, node_value_mutable, current_fn);
+        autoConstraintCollector__record_constraint(&self, node_value_mutable, current_fn);
         MUTABLE next_fn: ?FunctionDef = COPY current_fn;
         IF node_value_mutable IS_A FunctionDef AS next_function_def THEN
           next_fn = COPY next_function_def;
         END
         MUTABLE saved_local_decls: {String}AutoConstraintCollectorLocalDeclEntry = {};
         IF node_value_mutable IS_A FunctionDef AS function_def THEN
-          saved_local_decls = COPY rtoc_self_view.local_decls;
-          rtoc_self_view.local_decls = {};
+          saved_local_decls = COPY self.local_decls;
+          self.local_decls = {};
         END
         FOR rtoc_walk_child_5 IN rtocChildrenAutoInferenceWalkNode(node_value_mutable) DO
-        autoConstraintCollector__walk(&rtoc_self_view, rtoc_walk_child_5, next_fn);
+        autoConstraintCollector__walk(&self, rtoc_walk_child_5, next_fn);
         END
         IF node_value_mutable IS_A FunctionDef AS function_def THEN
-          rtoc_self_view.local_decls = saved_local_decls;
+          self.local_decls = saved_local_decls;
         END
       END
     ELSE
       RETURN;
     END
-}
 END
-PRIVATE FN autoConstraintCollector__record_constraint(MUTABLE self: AutoConstraintCollector, node: ?AutoInferenceWalkNode, current_fn: ?FunctionDef) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PRIVATE FN autoConstraintCollector__record_constraint(MUTABLE self: AutoConstraintCollector, node: ?AutoInferenceWalkNode, current_fn: ?FunctionDef) RETURNS Void ->
     IF node EXISTS AS node_value THEN
       IF node_value IS_A FuncCall AS func_call THEN
-        autoConstraintCollector__record_call_site(rtoc_self_view, func_call);
+        autoConstraintCollector__record_call_site(self, func_call);
       ELSE_IF node_value IS_A ReturnNode AS return_node THEN
         IF current_fn EXISTS AS current_fn_value THEN
-          autoConstraintCollector__record_return(rtoc_self_view, return_node, current_fn_value);
+          autoConstraintCollector__record_return(self, return_node, current_fn_value);
         END
       ELSE_IF node_value IS_A BindExpr AS bind_expr THEN
         MUTABLE bind_expr_mutable = COPY bind_expr;
-        autoConstraintCollector__record_local(&rtoc_self_view, AutoConstraintCollectorDeclarationNode{ BindExpr: COPY bind_expr_mutable });
+        autoConstraintCollector__record_local(&self, AutoConstraintCollectorDeclarationNode{ BindExpr: COPY bind_expr_mutable });
       ELSE_IF node_value IS_A VarDecl AS var_decl THEN
         MUTABLE var_decl_mutable = COPY var_decl;
-        autoConstraintCollector__record_local(&rtoc_self_view, AutoConstraintCollectorDeclarationNode{ VarDecl: COPY var_decl_mutable });
+        autoConstraintCollector__record_local(&self, AutoConstraintCollectorDeclarationNode{ VarDecl: COPY var_decl_mutable });
       END
     END
-}
 END
 PRIVATE FN autoConstraintCollector__record_call_site(self: AutoConstraintCollector, call_node: FuncCall) RETURNS Void ->
     MUTABLE callee_name: String = "";
@@ -307,38 +279,34 @@ FN declNodeName(decl_node: AutoConstraintCollectorDeclarationNode) RETURNS Strin
   END
   RETURN "";
 END
-PRIVATE FN autoConstraintCollector__record_local(MUTABLE self: AutoConstraintCollector, decl_node: AutoConstraintCollectorDeclarationNode) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF autoConstraintCollector__auto?(rtoc_self_view, declNodeType(decl_node)) THEN
-      IF autoConstraintCollector__empty_list_lit?(rtoc_self_view, declNodeValue(decl_node)) THEN
-        autoConstraintCollector__register_list_shape_slot(&rtoc_self_view, decl_node);
+PRIVATE FN autoConstraintCollector__record_local(MUTABLE self: AutoConstraintCollector, decl_node: AutoConstraintCollectorDeclarationNode) RETURNS Void ->
+    IF autoConstraintCollector__auto?(self, declNodeType(decl_node)) THEN
+      IF autoConstraintCollector__empty_list_lit?(self, declNodeValue(decl_node)) THEN
+        autoConstraintCollector__register_list_shape_slot(&self, decl_node);
         RETURN;
-      ELSE_IF autoConstraintCollector__empty_hash_lit?(rtoc_self_view, declNodeValue(decl_node)) THEN
-        autoConstraintCollector__register_map_shape_slots(&rtoc_self_view, decl_node);
+      ELSE_IF autoConstraintCollector__empty_hash_lit?(self, declNodeValue(decl_node)) THEN
+        autoConstraintCollector__register_map_shape_slots(&self, decl_node);
         RETURN;
       END
       MUTABLE slot_id = autoSlotId__local(castAutoConstraintCollectorDeclarationNodeToLocatable__auto_inference(decl_node));
-      rtoc_self_view.slots[slot_id] = (rtoc_self_view.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: List[], shape: NIL, auto_token: declNodeAutoToken(decl_node), resolved_scalar: NIL } @multiowned);
+      self.slots[slot_id] = (self.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: List[], shape: NIL, auto_token: declNodeAutoToken(decl_node), resolved_scalar: NIL } @multiowned);
       IF declNodeValue(decl_node) THEN
-        IF rtoc_self_view.slots[slot_id] EXISTS AS rtoc_map_slot_7 THEN
+        IF self.slots[slot_id] EXISTS AS rtoc_map_slot_7 THEN
           MUTABLE local_slot = COPY rtoc_map_slot_7;
           &local_slot.sources.append(declNodeValue(decl_node));
         ELSE
           panic("T.must: map slot is NIL");
         END
       END
-      rtoc_self_view.local_decls[declNodeName(decl_node)] = AutoConstraintCollectorLocalDeclEntry{ AutoSlotIdMultiowned: COPY slot_id };
+      self.local_decls[declNodeName(decl_node)] = AutoConstraintCollectorLocalDeclEntry{ AutoSlotIdMultiowned: COPY slot_id };
     ELSE_IF (FALSE AND TRUE) THEN
-      MUTABLE entry: ?AutoConstraintCollectorLocalDeclEntry = COPY rtoc_self_view.local_decls[declNodeName(decl_node)];
+      MUTABLE entry: ?AutoConstraintCollectorLocalDeclEntry = COPY self.local_decls[declNodeName(decl_node)];
       IF entry EXISTS AS entry_value THEN
-        autoConstraintCollector__record_reassignment_sources(rtoc_self_view, entry_value, declNodeValue(decl_node));
+        autoConstraintCollector__record_reassignment_sources(self, entry_value, declNodeValue(decl_node));
       ELSE
         RETURN;
       END
     END
-}
 END
 PRIVATE FN autoConstraintCollector__record_reassignment_sources(self: AutoConstraintCollector, entry: AutoConstraintCollectorLocalDeclEntry, rhs: ?Locatable) RETURNS Void ->
     IF rhs EXISTS AS rhs_value THEN
@@ -386,26 +354,18 @@ PRIVATE FN autoConstraintCollector__empty_hash_lit?(self: AutoConstraintCollecto
     END
     RETURN FALSE;
 END
-PRIVATE FN autoConstraintCollector__register_list_shape_slot(MUTABLE self: AutoConstraintCollector, decl_node: AutoConstraintCollectorDeclarationNode) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PRIVATE FN autoConstraintCollector__register_list_shape_slot(MUTABLE self: AutoConstraintCollector, decl_node: AutoConstraintCollectorDeclarationNode) RETURNS Void ->
     MUTABLE slot_id = autoSlotId__list_element(castAutoConstraintCollectorDeclarationNodeToLocatable__auto_inference(decl_node));
-    rtoc_self_view.slots[slot_id] = (rtoc_self_view.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: List[], shape: :list_element, auto_token: declNodeAutoToken(decl_node), resolved_scalar: NIL } @multiowned);
-    rtoc_self_view.local_decls[declNodeName(decl_node)] = AutoConstraintCollectorLocalDeclEntry{ AutoSlotIdMultiowned: COPY slot_id };
-}
+    self.slots[slot_id] = (self.slots[slot_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: List[], shape: :list_element, auto_token: declNodeAutoToken(decl_node), resolved_scalar: NIL } @multiowned);
+    self.local_decls[declNodeName(decl_node)] = AutoConstraintCollectorLocalDeclEntry{ AutoSlotIdMultiowned: COPY slot_id };
 END
-PRIVATE FN autoConstraintCollector__register_map_shape_slots(MUTABLE self: AutoConstraintCollector, decl_node: AutoConstraintCollectorDeclarationNode) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PRIVATE FN autoConstraintCollector__register_map_shape_slots(MUTABLE self: AutoConstraintCollector, decl_node: AutoConstraintCollectorDeclarationNode) RETURNS Void ->
     MUTABLE key_id = autoSlotId__map_key(castAutoConstraintCollectorDeclarationNodeToLocatable__auto_inference(decl_node));
     MUTABLE val_id = autoSlotId__map_value(castAutoConstraintCollectorDeclarationNodeToLocatable__auto_inference(decl_node));
     MUTABLE auto_tok: ?Token = declNodeAutoToken(decl_node);
-    rtoc_self_view.slots[key_id] = (rtoc_self_view.slots[key_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: List[], shape: :map_key, auto_token: auto_tok, resolved_scalar: NIL } @multiowned);
-    rtoc_self_view.slots[val_id] = (rtoc_self_view.slots[val_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: List[], shape: :map_value, auto_token: auto_tok, resolved_scalar: NIL } @multiowned);
-    rtoc_self_view.local_decls[declNodeName(decl_node)] = AutoConstraintCollectorLocalDeclEntry{ AutoMapShapeEntryMultiowned: COPY autoMapShapeEntry__new(key_id, val_id) };
-}
+    self.slots[key_id] = (self.slots[key_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: List[], shape: :map_key, auto_token: auto_tok, resolved_scalar: NIL } @multiowned);
+    self.slots[val_id] = (self.slots[val_id] OR_ELSE Slot{ kind: :local, fn_name: NIL, index: NIL, decl_node: castAutoConstraintCollectorDeclarationNodeToAutoConstraintCollectorSlotDeclNode(COPY decl_node), sources: List[], shape: :map_value, auto_token: auto_tok, resolved_scalar: NIL } @multiowned);
+    self.local_decls[declNodeName(decl_node)] = AutoConstraintCollectorLocalDeclEntry{ AutoMapShapeEntryMultiowned: COPY autoMapShapeEntry__new(key_id, val_id) };
 END
 PUB FN autoConstraintCollector__new(fn_nodes: {String}FunctionDef) RETURNS AutoConstraintCollector@multiowned ->
   MUTABLE self = AutoConstraintCollector{ fn_nodes: COPY fn_nodes, local_decls: {}, slots: {} };
@@ -418,14 +378,10 @@ STRUCT AutoShapeSlots {
   value: ?Slot
 }
 
-FN autoShapeSlots__initialize(MUTABLE self: AutoShapeSlots, list: ?Slot, key: ?Slot, value: ?Slot) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.list = COPY list;
-    rtoc_self_view.key = COPY key;
-    rtoc_self_view.value = COPY value;
-}
+FN autoShapeSlots__initialize(MUTABLE self: AutoShapeSlots, list: ?Slot, key: ?Slot, value: ?Slot) RETURNS Void ->
+    self.list = COPY list;
+    self.key = COPY key;
+    self.value = COPY value;
 END
 FN autoShapeSlots__new(list: ?Slot, key: ?Slot, value: ?Slot) RETURNS AutoShapeSlots@multiowned ->
   MUTABLE self = AutoShapeSlots{ key: COPY key, list: COPY list, value: COPY value };
@@ -452,13 +408,9 @@ STRUCT MapPairResolution {
   value: ?Resolution
 }
 
-FN mapPairResolution__initialize(MUTABLE self: MapPairResolution) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.key = NIL;
-    rtoc_self_view.value = NIL;
-}
+FN mapPairResolution__initialize(MUTABLE self: MapPairResolution) RETURNS Void ->
+    self.key = NIL;
+    self.value = NIL;
 END
 FN mapPairResolution__new() RETURNS MapPairResolution@multiowned ->
   MUTABLE self = MapPairResolution{ key: NIL, value: NIL };
@@ -475,32 +427,25 @@ FN autoUnifier__default_type_of(node: Locatable) RETURNS !?AutoConstraintCollect
 CATCH Transient, Input, System, NotFound, Permission, Canceled
   RETURN NIL;
 END
-FN autoUnifier__initialize(MUTABLE self: AutoUnifier, slots: {AutoSlotId}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.slots = COPY slots;
-    rtoc_self_view.type_of = (type_of OR_ELSE autoUnifier__default_type_of);
-}
+FN autoUnifier__initialize(MUTABLE self: AutoUnifier, slots: {AutoSlotId}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS Void ->
+    self.slots = COPY slots;
+    self.type_of = (type_of OR_ELSE autoUnifier__default_type_of);
 END
-PUB FN autoUnifier__resolve_mut(MUTABLE self: AutoUnifier) RETURNS !Result
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN autoUnifier__resolve_mut(MUTABLE self: AutoUnifier) RETURNS !Result ->
     MUTABLE resolved: {AutoSlotId@multiowned}Resolution = {};
     MUTABLE ambiguous: {AutoSlotId@multiowned}Ambiguity = {};
     MUTABLE progress: Bool = TRUE;
     WHILE progress DO
       progress = FALSE;
-      FOR rtoc_each_4 IN rtoc_self_view.slots.keys() DO
-    MUTABLE slot: Slot@multiowned = (rtoc_self_view.slots[rtoc_each_4] OR_ELSE CAST(panic("missing hash key") AS Slot));
+      FOR rtoc_each_4 IN self.slots.keys() DO
+    MUTABLE slot: Slot@multiowned = (self.slots[rtoc_each_4] OR_ELSE CAST(panic("missing hash key") AS Slot));
     IF (resolved.contains?(rtoc_each_4) OR ambiguous.contains?(rtoc_each_4)) THEN
       CONTINUE;
     END
-    MUTABLE observed = TRY (autoUnifier__collect_observed_types(rtoc_self_view, slot));
+    MUTABLE observed = TRY (autoUnifier__collect_observed_types(self, slot));
     IF (observed.length() == 1) THEN
           MUTABLE type = COPY UNWRAP (observed.first());
-          TRY (autoUnifier__stamp_slot_mut(&rtoc_self_view, &slot, type));
+          TRY (autoUnifier__stamp_slot_mut(&self, &slot, type));
           resolved[rtoc_each_4] = Resolution{ slot: COPY slot, type: COPY type, sources: COPY slot.sources };
           progress = TRUE;
     ELSE_IF (observed.length() == 0) THEN
@@ -512,15 +457,14 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
             END
     END
     MUTABLE unresolved: {AutoSlotId@multiowned}Slot@multiowned = {};
-    FOR rtoc_slot_key IN rtoc_self_view.slots.keys() DO
+    FOR rtoc_slot_key IN self.slots.keys() DO
       IF (resolved.contains?(rtoc_slot_key) OR ambiguous.contains?(rtoc_slot_key)) THEN
         CONTINUE;
       END
-      MUTABLE slot: Slot@multiowned = (rtoc_self_view.slots[rtoc_slot_key] OR_ELSE CAST(panic("missing hash key") AS Slot));
+      MUTABLE slot: Slot@multiowned = (self.slots[rtoc_slot_key] OR_ELSE CAST(panic("missing hash key") AS Slot));
       unresolved[rtoc_slot_key] = COPY slot;
     END
     RETURN Result{ resolved: COPY resolved, ambiguous: COPY ambiguous, unresolved: COPY unresolved };
-}
 END
 PRIVATE FN autoUnifier__collect_observed_types(self: AutoUnifier, slot: Slot) RETURNS ![]AutoConstraintCollectorObservedType ->
     MUTABLE seen: []AutoConstraintCollectorObservedType = List[];
@@ -577,10 +521,7 @@ PRIVATE FN autoUnifier__types_equal?(self: AutoUnifier, a: AutoConstraintCollect
     END
     RETURN FALSE;
 END
-PRIVATE FN autoUnifier__stamp_slot_mut(MUTABLE self: AutoUnifier, MUTABLE slot: Slot, type: AutoConstraintCollectorObservedType) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PRIVATE FN autoUnifier__stamp_slot_mut(MUTABLE self: AutoUnifier, MUTABLE slot: Slot, type: AutoConstraintCollectorObservedType) RETURNS !Void ->
     MUTABLE resolved_branch: ?Type = NIL;
     IF type IS_A Type AS observed_type_value THEN
       resolved_branch = COPY observed_type_value;
@@ -607,7 +548,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE rtoc_writer_receiver_16: AutoConstraintCollectorDeclarationNode = castAutoConstraintCollectorSlotDeclNodeToAutoConstraintCollectorDeclarationNode__auto_inference(slot.decl_node);
       declNode__set_type(&rtoc_writer_receiver_16, resolved_type);
     END
-}
 END
 FN observedTypeSymbol(observed: AutoConstraintCollectorObservedType) RETURNS String@symbol ->
   PARTIAL MATCH observed START
@@ -633,10 +573,7 @@ PUB FN slotDeclIdentity(decl_node: AutoConstraintCollectorSlotDeclNode) RETURNS 
   END
   RETURN 0;
 END
-PUB FN autoUnifier__stamp_map_pairs_mut(MUTABLE self: AutoUnifier, resolved_slots: {AutoSlotId}Resolution) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN autoUnifier__stamp_map_pairs_mut(MUTABLE self: AutoUnifier, resolved_slots: {AutoSlotId}Resolution) RETURNS !Void ->
     MUTABLE by_decl: {Int64}MapPairResolution@multiowned = {};
     FOR _ IN resolved_slots.values() DO
     IF !(((_.slot.shape == :map_key) OR (_.slot.shape == :map_value))) THEN
@@ -668,7 +605,6 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE v_sym: String@symbol = observedTypeSymbol(val_resolution.type);
     declNode__set_type(&decl, TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol("HashMap<${k_sym}, ${v_sym}>") })));
         END
-}
 END
 PUB FN autoUnifier__new(slots: {AutoSlotId}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS AutoUnifier@multiowned ->
   MUTABLE self = AutoUnifier{ slots: COPY slots, type_of: (COPY type_of OR_ELSE autoUnifier__default_type_of) };
@@ -680,23 +616,15 @@ STRUCT ShapeEvidenceCollector {
   slots: {AutoSlotId@multiowned}Slot@multiowned
 }
 
-FN shapeEvidenceCollector__initialize(MUTABLE self: ShapeEvidenceCollector, slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.slots = COPY slots;
-    rtoc_self_view.fn_nodes = COPY fn_nodes;
-}
+FN shapeEvidenceCollector__initialize(MUTABLE self: ShapeEvidenceCollector, slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS Void ->
+    self.slots = COPY slots;
+    self.fn_nodes = COPY fn_nodes;
 END
-PUB FN shapeEvidenceCollector__collect_mut(MUTABLE self: ShapeEvidenceCollector) RETURNS !{AutoSlotId@multiowned}Slot@multiowned
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR _ IN rtoc_self_view.fn_nodes.values() DO
-    TRY (shapeEvidenceCollector__collect_in_function(rtoc_self_view, _));
+PUB FN shapeEvidenceCollector__collect_mut(MUTABLE self: ShapeEvidenceCollector) RETURNS !{AutoSlotId@multiowned}Slot@multiowned ->
+    FOR _ IN self.fn_nodes.values() DO
+    TRY (shapeEvidenceCollector__collect_in_function(self, _));
     END
-    RETURN COPY rtoc_self_view.slots;
-}
+    RETURN COPY self.slots;
 END
 PRIVATE FN shapeEvidenceCollector__collect_in_function(self: ShapeEvidenceCollector, fn_value: FunctionDef) RETURNS !Void ->
     MUTABLE name_map = TRY (shapeEvidenceCollector__build_name_map(self, fn_value));
@@ -845,24 +773,16 @@ STRUCT OperatorEvidenceCollector {
   slots: {AutoSlotId@multiowned}Slot@multiowned
 }
 
-FN operatorEvidenceCollector__initialize(MUTABLE self: OperatorEvidenceCollector, slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.slots = COPY slots;
-    rtoc_self_view.fn_nodes = COPY fn_nodes;
-    rtoc_self_view.evidence = {};
-}
+FN operatorEvidenceCollector__initialize(MUTABLE self: OperatorEvidenceCollector, slots: {AutoSlotId}Slot@multiowned, fn_nodes: {String}FunctionDef) RETURNS Void ->
+    self.slots = COPY slots;
+    self.fn_nodes = COPY fn_nodes;
+    self.evidence = {};
 END
-PUB FN operatorEvidenceCollector__collect_mut(MUTABLE self: OperatorEvidenceCollector) RETURNS !{AutoSlotId@multiowned}[Set]String@symbol
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    FOR _ IN rtoc_self_view.fn_nodes.values() DO
-    TRY (operatorEvidenceCollector__collect_in_function(rtoc_self_view, _));
+PUB FN operatorEvidenceCollector__collect_mut(MUTABLE self: OperatorEvidenceCollector) RETURNS !{AutoSlotId@multiowned}[Set]String@symbol ->
+    FOR _ IN self.fn_nodes.values() DO
+    TRY (operatorEvidenceCollector__collect_in_function(self, _));
     END
-    RETURN COPY rtoc_self_view.evidence;
-}
+    RETURN COPY self.evidence;
 END
 PRIVATE FN operatorEvidenceCollector__collect_in_function(self: OperatorEvidenceCollector, fn_value: FunctionDef) RETURNS !Void ->
     MUTABLE name_to_slot = TRY (operatorEvidenceCollector__build_name_map(self, fn_value));

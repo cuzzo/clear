@@ -128,25 +128,21 @@ PUB STRUCT RuntimeHost {
   with_fiber_rt: FN(String, FN() -> Any@multiowned) -> Any@multiowned
 }
 
-PUB FN runtimeHost__initialize(MUTABLE self: RuntimeHost, visit_mir: FN(Locatable) -> Emittable, visit_mir_with_decl_alloc: FN(Locatable, String@symbol) -> Emittable, visit_mir_with_context: FN(Locatable, ?String, ?String) -> Emittable, lower_head_with_context: FN(Locatable, ?String) -> PipelineLowerHeadResult, with_fiber_rt: FN(String, FN() -> Any) -> Any, visit_pipeline_body_mir: FN(Locatable[], String) -> ![]Emittable, ast_stmts_use_placeholder: FN(Locatable[]) -> Bool, bc_target: FN() -> Bool, next_label: FN() -> String, transpile_type: FN(PipelineTypeInput) -> String, schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult, runtime_name: FN() -> String, next_observable_id: FN() -> Int64, task_config_variant: FN() -> String) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.visit_mir = COPY visit_mir;
-    rtoc_self_view.visit_mir_with_decl_alloc = COPY visit_mir_with_decl_alloc;
-    rtoc_self_view.visit_mir_with_context = COPY visit_mir_with_context;
-    rtoc_self_view.lower_head_with_context = COPY lower_head_with_context;
-    rtoc_self_view.with_fiber_rt = COPY with_fiber_rt;
-    rtoc_self_view.visit_pipeline_body_mir = COPY visit_pipeline_body_mir;
-    rtoc_self_view.ast_stmts_use_placeholder = COPY ast_stmts_use_placeholder;
-    rtoc_self_view.bc_target = COPY bc_target;
-    rtoc_self_view.next_label = COPY next_label;
-    rtoc_self_view.transpile_type = COPY transpile_type;
-    rtoc_self_view.schema_lookup = COPY schema_lookup;
-    rtoc_self_view.runtime_name = COPY runtime_name;
-    rtoc_self_view.next_observable_id = COPY next_observable_id;
-    rtoc_self_view.task_config_variant = COPY task_config_variant;
-}
+PUB FN runtimeHost__initialize(MUTABLE self: RuntimeHost, visit_mir: FN(Locatable) -> Emittable, visit_mir_with_decl_alloc: FN(Locatable, String@symbol) -> Emittable, visit_mir_with_context: FN(Locatable, ?String, ?String) -> Emittable, lower_head_with_context: FN(Locatable, ?String) -> PipelineLowerHeadResult, with_fiber_rt: FN(String, FN() -> Any) -> Any, visit_pipeline_body_mir: FN(Locatable[], String) -> ![]Emittable, ast_stmts_use_placeholder: FN(Locatable[]) -> Bool, bc_target: FN() -> Bool, next_label: FN() -> String, transpile_type: FN(PipelineTypeInput) -> String, schema_lookup: FN() -> FN(String@symbol) -> ?TypeSchemaLookupResult, runtime_name: FN() -> String, next_observable_id: FN() -> Int64, task_config_variant: FN() -> String) RETURNS Void ->
+    self.visit_mir = COPY visit_mir;
+    self.visit_mir_with_decl_alloc = COPY visit_mir_with_decl_alloc;
+    self.visit_mir_with_context = COPY visit_mir_with_context;
+    self.lower_head_with_context = COPY lower_head_with_context;
+    self.with_fiber_rt = COPY with_fiber_rt;
+    self.visit_pipeline_body_mir = COPY visit_pipeline_body_mir;
+    self.ast_stmts_use_placeholder = COPY ast_stmts_use_placeholder;
+    self.bc_target = COPY bc_target;
+    self.next_label = COPY next_label;
+    self.transpile_type = COPY transpile_type;
+    self.schema_lookup = COPY schema_lookup;
+    self.runtime_name = COPY runtime_name;
+    self.next_observable_id = COPY next_observable_id;
+    self.task_config_variant = COPY task_config_variant;
 END
 PUB FN runtimeHost__range_visit_mir(self: RuntimeHost, node: Locatable) RETURNS Emittable ->
     RETURN runtimeHost__visit_mir_call(self, node);
@@ -200,12 +196,8 @@ PUB FN runtimeHost__new(visit_mir: FN(Locatable) -> Emittable, visit_mir_with_de
   RETURN self @multiowned;
 END
 MUTABLE pipeline_alloc_ref_def: FunctionSignature@multiowned = TRY (functionSignature__borrowing_intrinsic());
-PUB FN pipelineRangeLowerer__initialize(MUTABLE self: PipelineRangeLowerer, host: RuntimeHost) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.host = COPY host;
-}
+PUB FN pipelineRangeLowerer__initialize(MUTABLE self: PipelineRangeLowerer, host: RuntimeHost) RETURNS Void ->
+    self.host = COPY host;
 END
 PUB FN pipelineRangeLowerer__finite_stream_source_node?(self: PipelineRangeLowerer, node: Locatable) RETURNS !Bool ->
     RETURN ((((node IS_A RangeLit OR TRY (type__dynamic_stream?((TRY (aST__full_type_mut(node)))))) OR TRY (type__open_stream?((TRY (aST__full_type_mut(node)))))) OR TRY (type__bounded_stream?((TRY (aST__full_type_mut(node)))))) OR TRY (type__inf_stream?((TRY (aST__full_type_mut(node))))));

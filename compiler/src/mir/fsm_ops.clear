@@ -194,13 +194,9 @@ STRUCT Lowerer {
   ctx_id: Int64
 }
 
-FN lowerer__initialize(MUTABLE self: Lowerer, ctx_id: Int64, arg_mirs: []Emittable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.ctx_id = COPY ctx_id;
-    rtoc_self_view.arg_mirs = COPY arg_mirs;
-}
+FN lowerer__initialize(MUTABLE self: Lowerer, ctx_id: Int64, arg_mirs: []Emittable) RETURNS Void ->
+    self.ctx_id = COPY ctx_id;
+    self.arg_mirs = COPY arg_mirs;
 END
 PUB FN lowerer__lower_stmts(self: Lowerer, ops: []Stmt) RETURNS ![]Emittable ->
     RETURN ops |> SELECT TRY (lowerer__lower_stmt(self, _));

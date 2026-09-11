@@ -12,15 +12,11 @@ STRUCT SourceError {
   token: ?Token
 }
 
-FN sourceError__initialize(MUTABLE self: SourceError, token: ?Token, message: String, source_code: ?String, code: ?String@symbol = NIL) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.token = COPY token;
-    rtoc_self_view.original_message = COPY message;
-    rtoc_self_view.source_code = COPY source_code;
-    rtoc_self_view.code = COPY code;
-}
+FN sourceError__initialize(MUTABLE self: SourceError, token: ?Token, message: String, source_code: ?String, code: ?String@symbol = NIL) RETURNS Void ->
+    self.token = COPY token;
+    self.original_message = COPY message;
+    self.source_code = COPY source_code;
+    self.code = COPY code;
 END
 FN sourceError__error_type(self: SourceError) RETURNS String ->
     RETURN "Error";

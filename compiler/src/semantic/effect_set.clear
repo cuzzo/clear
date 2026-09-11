@@ -3,10 +3,7 @@ PUB STRUCT EffectSet {
 }
 
 effect_order: [10]String@symbol = [:yield, :alloc_heap, :io, :fail, :contention, :contends_maybe, symbol("contention?"), :blocking, :blocks_maybe, symbol("blocking?")];
-FN effectSet__initialize(MUTABLE self: EffectSet, effects_value: ?[Set]String@symbol = NIL) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+FN effectSet__initialize(MUTABLE self: EffectSet, effects_value: ?[Set]String@symbol = NIL) RETURNS !Void ->
     MUTABLE eff: [Set]String@symbol = Set[];
     IF effects_value EXISTS AS effects_present THEN
       eff = COPY effects_present;
@@ -18,8 +15,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       panic("Unknown effect: {}. Valid: {}");
     END
     END
-    rtoc_self_view.effects = eff;
-}
+    self.effects = eff;
 END
 PUB FN effectSet__include?(self: EffectSet, effect: String@symbol) RETURNS Bool
   EFFECTS REENTRANT ->

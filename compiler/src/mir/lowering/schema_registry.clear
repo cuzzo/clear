@@ -6,15 +6,11 @@ PUB STRUCT MIRLoweringSchemas {
   union_schemas: {String@symbol}UnionSchema@multiowned
 }
 
-PUB FN mIRLoweringSchemas__initialize(MUTABLE self: MIRLoweringSchemas, struct_schemas: {String@symbol}StructSchema, enum_schemas: {String@symbol}[]TypeEnumVariantsItem, union_schemas: {String@symbol}UnionSchema) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.struct_schemas = COPY struct_schemas;
-    rtoc_self_view.enum_schemas = COPY enum_schemas;
-    rtoc_self_view.union_schemas = COPY union_schemas;
-    rtoc_self_view.lookup_proc = %(name) USE(rtoc_self_view) -> mIRLoweringSchemas__lookup(rtoc_self_view, name);
-}
+PUB FN mIRLoweringSchemas__initialize(MUTABLE self: MIRLoweringSchemas, struct_schemas: {String@symbol}StructSchema, enum_schemas: {String@symbol}[]TypeEnumVariantsItem, union_schemas: {String@symbol}UnionSchema) RETURNS Void ->
+    self.struct_schemas = COPY struct_schemas;
+    self.enum_schemas = COPY enum_schemas;
+    self.union_schemas = COPY union_schemas;
+    self.lookup_proc = %(name) USE(self) -> mIRLoweringSchemas__lookup(self, name);
 END
 PUB FN mIRLoweringSchemas__lookup_proc(self: MIRLoweringSchemas) RETURNS FN(String@symbol) -> ?TypeSchemaLookupResult ->
     RETURN COPY self.lookup_proc;
@@ -31,51 +27,31 @@ PUB FN mIRLoweringSchemas__lookup(self: MIRLoweringSchemas, name: String@symbol)
     END
     RETURN COPY self.enum_schemas[key];
 END
-PUB FN mIRLoweringSchemas__replace_lookup_proc_mut(MUTABLE self: MIRLoweringSchemas, lookup_proc: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.lookup_proc = COPY lookup_proc;
-}
+PUB FN mIRLoweringSchemas__replace_lookup_proc_mut(MUTABLE self: MIRLoweringSchemas, lookup_proc: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS Void ->
+    self.lookup_proc = COPY lookup_proc;
 END
-PUB FN mIRLoweringSchemas__register_enum(MUTABLE self: MIRLoweringSchemas, name: String@symbol, variants: []TypeEnumVariantsItem) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.enum_schemas[mIRLoweringSchemas__schema_key(rtoc_self_view, name)] = COPY variants;
-}
+PUB FN mIRLoweringSchemas__register_enum(MUTABLE self: MIRLoweringSchemas, name: String@symbol, variants: []TypeEnumVariantsItem) RETURNS Void ->
+    self.enum_schemas[mIRLoweringSchemas__schema_key(self, name)] = COPY variants;
 END
-PUB FN mIRLoweringSchemas__register_struct(MUTABLE self: MIRLoweringSchemas, name: String@symbol, schema: StructSchema) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.struct_schemas[mIRLoweringSchemas__schema_key(rtoc_self_view, name)] = schema;
-}
+PUB FN mIRLoweringSchemas__register_struct(MUTABLE self: MIRLoweringSchemas, name: String@symbol, schema: StructSchema) RETURNS Void ->
+    self.struct_schemas[mIRLoweringSchemas__schema_key(self, name)] = schema;
 END
-PUB FN mIRLoweringSchemas__register_union(MUTABLE self: MIRLoweringSchemas, name: String@symbol, schema: UnionSchema) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.union_schemas[mIRLoweringSchemas__schema_key(rtoc_self_view, name)] = schema;
-}
+PUB FN mIRLoweringSchemas__register_union(MUTABLE self: MIRLoweringSchemas, name: String@symbol, schema: UnionSchema) RETURNS Void ->
+    self.union_schemas[mIRLoweringSchemas__schema_key(self, name)] = schema;
 END
-PUB FN mIRLoweringSchemas__merge_mut(MUTABLE self: MIRLoweringSchemas, struct_schemas: {String@symbol}StructSchema, enum_schemas: {String@symbol}[]TypeEnumVariantsItem, union_schemas: {String@symbol}UnionSchema) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN mIRLoweringSchemas__merge_mut(MUTABLE self: MIRLoweringSchemas, struct_schemas: {String@symbol}StructSchema, enum_schemas: {String@symbol}[]TypeEnumVariantsItem, union_schemas: {String@symbol}UnionSchema) RETURNS Void ->
     FOR rtoc_each_key IN struct_schemas.keys() DO
     MUTABLE schema: StructSchema = COPY UNWRAP (struct_schemas[rtoc_each_key]);
-    rtoc_self_view.struct_schemas[rtoc_each_key] = schema;
+    self.struct_schemas[rtoc_each_key] = schema;
     END
     FOR rtoc_inner_key IN enum_schemas.keys() DO
     MUTABLE variants: []TypeEnumVariantsItem = COPY UNWRAP (enum_schemas[rtoc_inner_key]);
-    rtoc_self_view.enum_schemas[rtoc_inner_key] = COPY variants;
+    self.enum_schemas[rtoc_inner_key] = COPY variants;
     END
     FOR rtoc_inner_key IN union_schemas.keys() DO
     MUTABLE schema: UnionSchema = COPY UNWRAP (union_schemas[rtoc_inner_key]);
-    rtoc_self_view.union_schemas[rtoc_inner_key] = schema;
+    self.union_schemas[rtoc_inner_key] = schema;
     END
-}
 END
 PRIVATE FN mIRLoweringSchemas__schema_key(self: MIRLoweringSchemas, name: String@symbol) RETURNS String@symbol ->
     RETURN COPY name;

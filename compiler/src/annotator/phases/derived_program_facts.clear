@@ -86,16 +86,12 @@ PUB STRUCT DerivedProgramFacts {
   functions: {String}DerivedFunctionFacts
 }
 
-PUB FN derivedProgramFacts__initialize(MUTABLE self: DerivedProgramFacts, functions: {String}DerivedFunctionFacts) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN derivedProgramFacts__initialize(MUTABLE self: DerivedProgramFacts, functions: {String}DerivedFunctionFacts) RETURNS Void ->
     MUTABLE rtoc_sorted_functions: {String}DerivedFunctionFacts = {};
     FOR rtoc_function_key IN (functions.keys() |> ORDER_BY _) DO
       rtoc_sorted_functions[rtoc_function_key] = COPY UNWRAP (functions[rtoc_function_key]);
     END
-    rtoc_self_view.functions = rtoc_sorted_functions;
-}
+    self.functions = rtoc_sorted_functions;
 END
 PUB FN derivedProgramFacts__empty() RETURNS DerivedProgramFacts@multiowned ->
   RETURN derivedProgramFacts__new({});

@@ -23,13 +23,9 @@ STRUCT LinearResourceFacts {
   linear: {String}Bool
 }
 
-FN linearResourceFacts__initialize(MUTABLE self: LinearResourceFacts, known: {String}Bool, linear: {String}Bool) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.known = COPY known;
-    rtoc_self_view.linear = COPY linear;
-}
+FN linearResourceFacts__initialize(MUTABLE self: LinearResourceFacts, known: {String}Bool, linear: {String}Bool) RETURNS Void ->
+    self.known = COPY known;
+    self.linear = COPY linear;
 END
 PUB FN linearResourceFacts__empty() RETURNS LinearResourceFacts@multiowned ->
   RETURN linearResourceFacts__new({}, {});
@@ -464,13 +460,9 @@ FN lifecycleRegistry__add_monomorphic_carrier_plans_mut(MUTABLE plans: {String}L
   END
   END
 END
-FN lifecycleRegistry__initialize(MUTABLE self: LifecycleRegistry, plans: {String}LifecyclePlan, binding_plans: {Int64}LifecyclePlan) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.plans = COPY plans;
-    rtoc_self_view.binding_plans = COPY binding_plans;
-}
+FN lifecycleRegistry__initialize(MUTABLE self: LifecycleRegistry, plans: {String}LifecyclePlan, binding_plans: {Int64}LifecyclePlan) RETURNS Void ->
+    self.plans = COPY plans;
+    self.binding_plans = COPY binding_plans;
 END
 PUB FN lifecycleRegistry__fetch(self: LifecycleRegistry, type_info: Type) RETURNS !LifecyclePlan
   EFFECTS REENTRANT

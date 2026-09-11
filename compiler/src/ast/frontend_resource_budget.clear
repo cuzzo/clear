@@ -10,38 +10,26 @@ PUB STRUCT Exceeded {
   limit: Int64
 }
 
-FN exceeded__initialize(MUTABLE self: Exceeded, kind: String@symbol, limit_value: Int64) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.kind = COPY kind;
-    rtoc_self_view.limit = COPY limit_value;
-}
+FN exceeded__initialize(MUTABLE self: Exceeded, kind: String@symbol, limit_value: Int64) RETURNS Void ->
+    self.kind = COPY kind;
+    self.limit = COPY limit_value;
 END
 FN exceeded__new(kind: String@symbol, limit: Int64) RETURNS Exceeded@multiowned ->
   MUTABLE self = Exceeded{ kind: COPY kind, limit: limit };
   exceeded__initialize(&self, kind, limit);
   RETURN self @multiowned;
 END
-FN frontendResourceBudget__initialize(MUTABLE self: FrontendResourceBudget, max_nesting: Int64 = 192, max_tokens: Int64 = 1000000, max_source_bytes: Int64 = ((32 * 1024) * 1024)) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.max_nesting = COPY max_nesting;
-    rtoc_self_view.max_tokens = COPY max_tokens;
-    rtoc_self_view.max_source_bytes = COPY max_source_bytes;
-    rtoc_self_view.nesting = 0;
-}
+FN frontendResourceBudget__initialize(MUTABLE self: FrontendResourceBudget, max_nesting: Int64 = 192, max_tokens: Int64 = 1000000, max_source_bytes: Int64 = ((32 * 1024) * 1024)) RETURNS Void ->
+    self.max_nesting = COPY max_nesting;
+    self.max_tokens = COPY max_tokens;
+    self.max_source_bytes = COPY max_source_bytes;
+    self.nesting = 0;
 END
-FN frontendResourceBudget__check_source_mut(MUTABLE self: FrontendResourceBudget, source: String) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE violation: ?Exceeded@multiowned = frontendResourceBudget__source_violation(rtoc_self_view, source);
+FN frontendResourceBudget__check_source_mut(MUTABLE self: FrontendResourceBudget, source: String) RETURNS !Void ->
+    MUTABLE violation: ?Exceeded@multiowned = frontendResourceBudget__source_violation(self, source);
     IF violation EXISTS AS violation_value THEN
       panic("Ruby exception raised");
     END
-}
 END
 PUB FN frontendResourceBudget__source_violation(self: FrontendResourceBudget, source: String) RETURNS ?Exceeded@multiowned ->
     IF (source.bytes() > self.max_source_bytes) THEN
@@ -49,15 +37,11 @@ PUB FN frontendResourceBudget__source_violation(self: FrontendResourceBudget, so
     END
     RETURN NIL;
 END
-FN frontendResourceBudget__check_tokens_mut(MUTABLE self: FrontendResourceBudget, count_value: Int64) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE violation: ?Exceeded@multiowned = frontendResourceBudget__tokens_violation(rtoc_self_view, count_value);
+FN frontendResourceBudget__check_tokens_mut(MUTABLE self: FrontendResourceBudget, count_value: Int64) RETURNS !Void ->
+    MUTABLE violation: ?Exceeded@multiowned = frontendResourceBudget__tokens_violation(self, count_value);
     IF violation EXISTS AS violation_value THEN
       panic("Ruby exception raised");
     END
-}
 END
 PUB FN frontendResourceBudget__tokens_violation(self: FrontendResourceBudget, count_value: Int64) RETURNS ?Exceeded@multiowned ->
     IF (count_value > self.max_tokens) THEN
@@ -68,23 +52,15 @@ END
 FN frontendResourceBudget__nesting_limit(self: FrontendResourceBudget) RETURNS Int64 ->
     RETURN self.max_nesting;
 END
-PUB FN frontendResourceBudget__enter_mut(MUTABLE self: FrontendResourceBudget) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.nesting = (rtoc_self_view.nesting + 1);
-    IF (rtoc_self_view.nesting > rtoc_self_view.max_nesting) THEN
-      rtoc_self_view.nesting = (rtoc_self_view.nesting - 1);
-      RAISE Input, Exceeded, "Frontend nesting resource limit exceeded (limit ${rtoc_self_view.max_nesting.toString()})";
+PUB FN frontendResourceBudget__enter_mut(MUTABLE self: FrontendResourceBudget) RETURNS !Void ->
+    self.nesting = (self.nesting + 1);
+    IF (self.nesting > self.max_nesting) THEN
+      self.nesting = (self.nesting - 1);
+      RAISE Input, Exceeded, "Frontend nesting resource limit exceeded (limit ${self.max_nesting.toString()})";
     END
-}
 END
-PUB FN frontendResourceBudget__leave_mut(MUTABLE self: FrontendResourceBudget) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.nesting = (rtoc_self_view.nesting - 1);
-}
+PUB FN frontendResourceBudget__leave_mut(MUTABLE self: FrontendResourceBudget) RETURNS Void ->
+    self.nesting = (self.nesting - 1);
 END
 PUB FN frontendResourceBudget__new(max_nesting: Int64 = 192, max_tokens: Int64 = 1000000, max_source_bytes: Int64 = ((32 * 1024) * 1024)) RETURNS FrontendResourceBudget@multiowned ->
   MUTABLE self = FrontendResourceBudget{ max_nesting: max_nesting, max_source_bytes: max_source_bytes, max_tokens: max_tokens, nesting: 0 };

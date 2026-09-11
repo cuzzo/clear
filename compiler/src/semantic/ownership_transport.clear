@@ -60,18 +60,14 @@ PUB STRUCT TransferDecision {
   transfer: Transfer,
   materialize: Bool
 }
-PUB FN ownershipTransportFacts__initialize(MUTABLE self: OwnershipTransportFacts, parameter_ids: [Set]Int64 = Set[]) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.parameter_ids = COPY parameter_ids;
-    rtoc_self_view.reads = List[];
-    rtoc_self_view.mutations = List[];
-    rtoc_self_view.aliases = List[];
-    rtoc_self_view.transfers = List[];
-    rtoc_self_view.alias_roots = {};
-    rtoc_self_view.ordinal = 0;
-}
+PUB FN ownershipTransportFacts__initialize(MUTABLE self: OwnershipTransportFacts, parameter_ids: [Set]Int64 = Set[]) RETURNS Void ->
+    self.parameter_ids = COPY parameter_ids;
+    self.reads = List[];
+    self.mutations = List[];
+    self.aliases = List[];
+    self.transfers = List[];
+    self.alias_roots = {};
+    self.ordinal = 0;
 END
 PUB FN ownershipTransportFacts__source?(node: Locatable) RETURNS Bool ->
   RETURN ((node IS_A Identifier OR node IS_A GetField) OR node IS_A GetIndex);
@@ -87,52 +83,33 @@ PUB FN ownershipTransportFacts__source_display(node: Locatable) RETURNS String E
     RETURN COPY "value";
   END
 END
-PUB FN ownershipTransportFacts__next_ordinal(MUTABLE self: OwnershipTransportFacts) RETURNS Int64
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE value = rtoc_self_view.ordinal;
-    rtoc_self_view.ordinal = (rtoc_self_view.ordinal + 1);
+PUB FN ownershipTransportFacts__next_ordinal(MUTABLE self: OwnershipTransportFacts) RETURNS Int64 ->
+    MUTABLE value = self.ordinal;
+    self.ordinal = (self.ordinal + 1);
     RETURN value;
-}
 END
-PUB FN ownershipTransportFacts__record_read(MUTABLE self: OwnershipTransportFacts, node: Identifier, ancestors: []Locatable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(rtoc_self_view, node);
+PUB FN ownershipTransportFacts__record_read(MUTABLE self: OwnershipTransportFacts, node: Identifier, ancestors: []Locatable) RETURNS Void ->
+    MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(self, node);
     IF id EXISTS AS id_value THEN
       MUTABLE id_value_mutable = COPY id_value;
-      &rtoc_self_view.reads.append(COPY Event{ node: Locatable{ Identifier: COPY node }, binding_id: id_value_mutable, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view), ancestors: COPY ancestors, escape: ancestors |> ANY ownershipTransportFacts__escape_ancestor?(rtoc_self_view, _) });
+      &self.reads.append(COPY Event{ node: Locatable{ Identifier: COPY node }, binding_id: id_value_mutable, ordinal: ownershipTransportFacts__next_ordinal(&self), ancestors: COPY ancestors, escape: ancestors |> ANY ownershipTransportFacts__escape_ancestor?(self, _) });
     ELSE
       RETURN;
     END
-}
 END
-PUB FN ownershipTransportFacts__record_mutation(MUTABLE self: OwnershipTransportFacts, node: Locatable, identifier: Identifier, ancestors: []Locatable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(rtoc_self_view, identifier);
+PUB FN ownershipTransportFacts__record_mutation(MUTABLE self: OwnershipTransportFacts, node: Locatable, identifier: Identifier, ancestors: []Locatable) RETURNS Void ->
+    MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(self, identifier);
     IF id EXISTS AS id_value THEN
       MUTABLE id_value_mutable = COPY id_value;
-      ownershipTransportFacts__record_mutation_id(&rtoc_self_view, node, id_value_mutable, ancestors);
+      ownershipTransportFacts__record_mutation_id(&self, node, id_value_mutable, ancestors);
     ELSE
       RETURN;
     END
-}
 END
-PUB FN ownershipTransportFacts__record_mutation_id(MUTABLE self: OwnershipTransportFacts, node: Locatable, binding_id: Int64, ancestors: []Locatable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    &rtoc_self_view.mutations.append(COPY Event{ node: COPY node, binding_id: COPY binding_id, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view), ancestors: COPY ancestors, escape: FALSE });
-}
+PUB FN ownershipTransportFacts__record_mutation_id(MUTABLE self: OwnershipTransportFacts, node: Locatable, binding_id: Int64, ancestors: []Locatable) RETURNS Void ->
+    &self.mutations.append(COPY Event{ node: COPY node, binding_id: COPY binding_id, ordinal: ownershipTransportFacts__next_ordinal(&self), ancestors: COPY ancestors, escape: FALSE });
 END
-PUB FN ownershipTransportFacts__record_alias(MUTABLE self: OwnershipTransportFacts, node: Node, ancestors: []Locatable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+PUB FN ownershipTransportFacts__record_alias(MUTABLE self: OwnershipTransportFacts, node: Node, ancestors: []Locatable) RETURNS Void ->
     MUTABLE source: Locatable = castNodeToLocatable__ownership_transport(COPY node);
     MUTABLE symbol: ?SymbolEntry@multiowned = NIL;
     IF node IS_A VarDecl AS var_decl THEN
@@ -149,44 +126,39 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN;
     END
     MUTABLE symbol_value: SymbolEntry@multiowned = KEEP symbol;
-    MUTABLE root: ?Identifier = ownershipTransportFacts__source_root_identifier(rtoc_self_view, source);
+    MUTABLE root: ?Identifier = ownershipTransportFacts__source_root_identifier(self, source);
     IF root EXISTS AS root_value THEN
       MUTABLE root_value_mutable = COPY root_value;
-      MUTABLE source_id: ?Int64 = ownershipTransportFacts__binding_id(rtoc_self_view, root_value_mutable);
+      MUTABLE source_id: ?Int64 = ownershipTransportFacts__binding_id(self, root_value_mutable);
       IF source_id EXISTS AS source_id_value THEN
         MUTABLE source_id_value_mutable = COPY source_id_value;
         MUTABLE source_name = ownershipTransportFacts__source_display(source);
         MUTABLE fallback_root: Tuple<Int64,String> = CAST(Tuple{source_id_value_mutable, COPY source_name} AS Tuple<Int64,String>);
-        MUTABLE root_id, root_name = (rtoc_self_view.alias_roots[source_id_value_mutable] OR_ELSE fallback_root);
+        MUTABLE root_id, root_name = (self.alias_roots[source_id_value_mutable] OR_ELSE fallback_root);
         MUTABLE destination_name: String = "";
         IF node IS_A VarDecl AS var_decl THEN
           destination_name = COPY CAST(var_decl.name AS String);
         ELSE_IF node IS_A BindExpr AS bind_expr THEN
           destination_name = COPY CAST(bind_expr.name AS String);
         END
-        MUTABLE fact = Alias{ declaration: node, source: COPY source, source_id: source_id_value_mutable, destination_id: symbol_value.binding_id, source_name: COPY source_name, destination_name: COPY destination_name, root_id: root_id, root_name: COPY root_name, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view), ancestors: COPY ancestors, whole_binding: source IS_A Identifier };
-        &rtoc_self_view.aliases.append(COPY fact);
-        rtoc_self_view.alias_roots[symbol_value.binding_id] = CAST(Tuple{root_id, COPY root_name} AS Tuple<Int64, String>);
+        MUTABLE fact = Alias{ declaration: node, source: COPY source, source_id: source_id_value_mutable, destination_id: symbol_value.binding_id, source_name: COPY source_name, destination_name: COPY destination_name, root_id: root_id, root_name: COPY root_name, ordinal: ownershipTransportFacts__next_ordinal(&self), ancestors: COPY ancestors, whole_binding: source IS_A Identifier };
+        &self.aliases.append(COPY fact);
+        self.alias_roots[symbol_value.binding_id] = CAST(Tuple{root_id, COPY root_name} AS Tuple<Int64, String>);
       ELSE
         RETURN;
       END
     ELSE
       RETURN;
     END
-}
 END
-PUB FN ownershipTransportFacts__record_transfer(MUTABLE self: OwnershipTransportFacts, container: Locatable, slot: OwnershipTransportSlot, source: Identifier) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(rtoc_self_view, source);
+PUB FN ownershipTransportFacts__record_transfer(MUTABLE self: OwnershipTransportFacts, container: Locatable, slot: OwnershipTransportSlot, source: Identifier) RETURNS Void ->
+    MUTABLE id: ?Int64 = ownershipTransportFacts__binding_id(self, source);
     IF id EXISTS AS id_value THEN
       MUTABLE id_value_mutable = COPY id_value;
-      &rtoc_self_view.transfers.append(COPY Transfer{ container: COPY container, slot: COPY slot, source: COPY source, source_id: id_value_mutable, ordinal: ownershipTransportFacts__next_ordinal(&rtoc_self_view) });
+      &self.transfers.append(COPY Transfer{ container: COPY container, slot: COPY slot, source: COPY source, source_id: id_value_mutable, ordinal: ownershipTransportFacts__next_ordinal(&self) });
     ELSE
       RETURN;
     END
-}
 END
 PUB FN ownershipTransportFacts__decisions(self: OwnershipTransportFacts) RETURNS ![]Decision ->
     RETURN self.aliases |> SELECT {

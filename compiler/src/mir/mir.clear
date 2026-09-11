@@ -12080,15 +12080,11 @@ PUB STRUCT OwnershipContract {
   produces: []String
 }
 
-FN ownershipContract__initialize(MUTABLE self: OwnershipContract, operands: []OwnershipOperandFact, produces: []String, borrows: []String, covers_consuming_params: Bool = FALSE) RETURNS !Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.operands = COPY operands;
-    rtoc_self_view.produces = TRY (ownershipContract__normalize_names(rtoc_self_view, produces));
-    rtoc_self_view.borrows = TRY (ownershipContract__normalize_names(rtoc_self_view, borrows));
-    rtoc_self_view.covers_consuming_params = COPY covers_consuming_params;
-}
+FN ownershipContract__initialize(MUTABLE self: OwnershipContract, operands: []OwnershipOperandFact, produces: []String, borrows: []String, covers_consuming_params: Bool = FALSE) RETURNS !Void ->
+    self.operands = COPY operands;
+    self.produces = TRY (ownershipContract__normalize_names(self, produces));
+    self.borrows = TRY (ownershipContract__normalize_names(self, borrows));
+    self.covers_consuming_params = COPY covers_consuming_params;
 END
 PUB FN ownershipContract__empty() RETURNS !OwnershipContract@multiowned ->
   MUTABLE no_operands: []OwnershipOperandFact = [];
@@ -12154,14 +12150,10 @@ PUB STRUCT CallableContract {
   signature: FunctionSignature
 }
 
-FN callableContract__initialize(MUTABLE self: CallableContract, signature: FunctionSignature, ownership_contract: OwnershipContract, checked_arg_count: Int64) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.signature = COPY signature;
-    rtoc_self_view.ownership_contract = COPY ownership_contract;
-    rtoc_self_view.checked_arg_count = COPY checked_arg_count;
-}
+FN callableContract__initialize(MUTABLE self: CallableContract, signature: FunctionSignature, ownership_contract: OwnershipContract, checked_arg_count: Int64) RETURNS Void ->
+    self.signature = COPY signature;
+    self.ownership_contract = COPY ownership_contract;
+    self.checked_arg_count = COPY checked_arg_count;
 END
 PUB FN callableContract__no_ownership(checked_arg_count: Int64) RETURNS !CallableContract@multiowned ->
   MUTABLE params: []Param = List[];
@@ -12283,20 +12275,12 @@ PUB STRUCT MIRBodySlot {
   name: String@symbol
 }
 
-FN bodySlot__initialize(MUTABLE self: MIRBodySlot, name: String@symbol, body: []Emittable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.name = COPY name;
-    rtoc_self_view.body = COPY body;
-}
+FN bodySlot__initialize(MUTABLE self: MIRBodySlot, name: String@symbol, body: []Emittable) RETURNS Void ->
+    self.name = COPY name;
+    self.body = COPY body;
 END
-PUB FN bodySlot__replace(MUTABLE self: MIRBodySlot, body: []Emittable) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.body = COPY body;
-}
+PUB FN bodySlot__replace(MUTABLE self: MIRBodySlot, body: []Emittable) RETURNS Void ->
+    self.body = COPY body;
 END
 FN bodySlot__new(name: String@symbol, body: []Emittable) RETURNS MIRBodySlot@multiowned ->
   MUTABLE self = MIRBodySlot{ body: COPY body, name: COPY name };
@@ -12783,10 +12767,7 @@ PUB STRUCT InlineAllocMetadata {
   slots: {String@symbol}String@symbol
 }
 
-FN inlineAllocMetadata__initialize(MUTABLE self: InlineAllocMetadata, alloc: ?String@symbol = NIL, key_alloc: ?String@symbol = NIL, val_alloc: ?String@symbol = NIL, shard_alloc: ?String@symbol = NIL) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
+FN inlineAllocMetadata__initialize(MUTABLE self: InlineAllocMetadata, alloc: ?String@symbol = NIL, key_alloc: ?String@symbol = NIL, val_alloc: ?String@symbol = NIL, shard_alloc: ?String@symbol = NIL) RETURNS Void ->
     MUTABLE slots: {String@symbol}String@symbol = {};
     IF alloc EXISTS AS alloc_value THEN
       slots[:alloc] = COPY alloc_value;
@@ -12800,8 +12781,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF shard_alloc EXISTS AS shard_alloc_value THEN
       slots[:shard_alloc] = COPY shard_alloc_value;
     END
-    rtoc_self_view.slots = slots;
-}
+    self.slots = slots;
 END
 PUB FN inlineAllocMetadata__empty?(self: InlineAllocMetadata) RETURNS Bool
   EFFECTS REENTRANT ->
@@ -12885,23 +12865,15 @@ PUB STRUCT MIRProgram {
   pass_state: ?MIRPassState@multiowned
 }
 
-FN program__initialize(MUTABLE self: MIRProgram, items: []Emittable, pass_state: ?MIRPassState = NIL) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.items = COPY items;
-    rtoc_self_view.pass_state = COPY pass_state;
-}
+FN program__initialize(MUTABLE self: MIRProgram, items: []Emittable, pass_state: ?MIRPassState = NIL) RETURNS Void ->
+    self.items = COPY items;
+    self.pass_state = COPY pass_state;
 END
 FN program__mir_pass_state(self: MIRProgram) RETURNS ?MIRPassState@multiowned ->
     RETURN KEEP self.pass_state;
 END
-FN program__set_mir_pass_state(MUTABLE self: MIRProgram, state: ?MIRPassState) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.pass_state = COPY state;
-}
+FN program__set_mir_pass_state(MUTABLE self: MIRProgram, state: ?MIRPassState) RETURNS Void ->
+    self.pass_state = COPY state;
 END
 FN program__mir?(self: MIRProgram) RETURNS Bool ->
     RETURN TRUE;

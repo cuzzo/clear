@@ -47,28 +47,16 @@ PUB STRUCT PipelineLabelState {
   current_label: ?String
 }
 
-PUB FN pipelineLabelState__initialize(MUTABLE self: PipelineLabelState) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.counter = 0;
-    rtoc_self_view.current_label = NIL;
-}
+PUB FN pipelineLabelState__initialize(MUTABLE self: PipelineLabelState) RETURNS Void ->
+    self.counter = 0;
+    self.current_label = NIL;
 END
-PUB FN pipelineLabelState__next_label(MUTABLE self: PipelineLabelState) RETURNS String
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.counter = (rtoc_self_view.counter + 1);
-    RETURN "__pblk${rtoc_self_view.counter.toString()}";
-}
+PUB FN pipelineLabelState__next_label(MUTABLE self: PipelineLabelState) RETURNS String ->
+    self.counter = (self.counter + 1);
+    RETURN "__pblk${self.counter.toString()}";
 END
-PUB FN pipelineLabelState__set_current_label(MUTABLE self: PipelineLabelState, label: String) RETURNS Void
-  REQUIRES self: LOCAL
-->
-WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    rtoc_self_view.current_label = COPY label;
-}
+PUB FN pipelineLabelState__set_current_label(MUTABLE self: PipelineLabelState, label: String) RETURNS Void ->
+    self.current_label = COPY label;
 END
 PUB FN pipelineLabelState__current_label(self: PipelineLabelState) RETURNS ?String ->
     RETURN COPY self.current_label;
