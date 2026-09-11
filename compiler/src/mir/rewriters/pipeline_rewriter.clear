@@ -320,7 +320,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         lhs_node = COPY source;
       END
       IF needs_try THEN
-        TRY (aST__stamp_synthetic_type_mut(&lhs_node, COPY UNWRAP (TRY (type__payload_type((TRY (type__new(TRY (aST__full_type_mut(source)))))))), "synthetic AST type"));
+        TRY (aST__stamp_synthetic_type_mut(&lhs_node, COPY UNWRAP (TRY (type__payload_type((TRY (type__new( TypeConstructionInput{ Type: TRY (aST__full_type_mut(source)) })))))), "synthetic AST type"));
       END
       locatable__args(rhs).unshift(lhs_node);
       RETURN rhs;
