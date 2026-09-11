@@ -4866,13 +4866,7 @@ PRIVATE FN mIRLowering__lower_step_stmts(MUTABLE self: MIRLowering, stmts: []Loc
         IF retained_error THEN
           expr_t_branch_value = TRY (type__new( TypeConstructionInput{ Type: retained_error }));
         ELSE
-          expr_t_branch_value = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_195: ?Type = NIL;
-          IF expr_type IS_A Type THEN
-            rtoc_ternary_value_195 = expr_type;
-          ELSE
-            rtoc_ternary_value_195 = TRY (type__new(expr_type));
-          END
-          rtoc_ternary_value_195? });
+          expr_t_branch_value = COPY expr_type;
         END
         MUTABLE expr_t: Type = expr_t_branch_value?;
         MUTABLE declared_result_type: Type = expr_t;
@@ -4880,17 +4874,10 @@ PRIVATE FN mIRLowering__lower_step_stmts(MUTABLE self: MIRLowering, stmts: []Loc
           declared_result_type = COPY async_result_shape.payload_type;
         END
         MUTABLE result_alloc: ?String@symbol = TRY (mIRLowering__escaping_value_alloc(&self, declared_result_type));
-        MUTABLE raw_last_mir = mIRLowering__with_decl_alloc(&self, result_alloc, %() USE(last_step_value_mutable, MUTABLE self) -> {
-    rtoc_lambda_result_196 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(last_step_value_mutable.expr)));
+        MUTABLE last_mir: ?Emittable = mIRLowering__with_decl_alloc(&self, result_alloc, %() USE(last_step_value_mutable, MUTABLE self) -> {
+    MUTABLE rtoc_lambda_result_196: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(last_step_value_mutable.expr)));
     rtoc_lambda_result_196
         });
-        MUTABLE last_mir_branch_value: ?Emittable = NIL;
-        IF raw_last_mir IS_A Emittable THEN
-          last_mir_branch_value = raw_last_mir;
-        ELSE
-          last_mir_branch_value = NIL;
-        END
-        MUTABLE last_mir: ?Emittable = last_mir_branch_value;
         MUTABLE result_destination_type_branch_value: ?Type = NIL;
         IF (TRY (type__string?(declared_result_type)) AND type__rodata?(expr_t)) THEN
           result_destination_type_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: :String }, NIL, NIL, NIL, result_alloc));
@@ -4899,21 +4886,21 @@ PRIVATE FN mIRLowering__lower_step_stmts(MUTABLE self: MIRLowering, stmts: []Loc
         END
         MUTABLE result_destination_type: Type = result_destination_type_branch_value?;
         IF last_mir EXISTS AS MUTABLE last_mir_value THEN
-          MUTABLE last_mir_value = TRY (mIRLowering__place_value_for_destination(&self, &last_mir_value, last_step_value_mutable.expr, result_alloc, TypeTypeInput{ Type: COPY result_destination_type }));
+          MUTABLE last_mir_value = TRY (mIRLowering__place_value_for_destination(&self, &last_mir_value, &last_step_value_mutable.expr, result_alloc, TypeTypeInput{ Type: COPY result_destination_type }));
         END
         IF ((last_mir != NIL) AND ((TRY (mIRLowering__mir_allocates?(&self, last_mir)) OR lifecyclePlan__needs_drop?((TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), result_destination_type))))))) THEN
-          last_mir = TRY (mIRLowering__hoist_alloc(&self, &last_mir, last_step_value_mutable.expr, TRUE, FALSE, TRUE, result_alloc));
+          last_mir = TRY (mIRLowering__hoist_alloc(&self, &last_mir, &last_step_value_mutable.expr, TRUE, FALSE, TRUE, result_alloc));
         END
         MUTABLE last_pending = TRY (mIRLowering__flush_pending(&self));
         result_mir = ruby_array_concat_Emittable__mir_lowering(result_mir, CAST(last_pending AS []Emittable));
         MUTABLE last_is_assign = last_step_value_mutable.expr IS_A Assignment;
-        MUTABLE is_step_void = (TRY (mIRLowering__ast_void_type?(self, expr_type)) AND !(type__error_union?(expr_t)));
+        MUTABLE is_step_void = (TRY (mIRLowering__ast_void_type?(self, TypeTypeInput{ Type: COPY expr_type })) AND !(type__error_union?(expr_t)));
         IF ((last_mir != NIL) AND ((last_is_assign OR is_step_void))) THEN
           MUTABLE stmt_mir: ?Emittable = TRY (mIRLowering__wrap_step_as_stmt(self, ThenStep{ expr: COPY last_step_value_mutable.expr, binding: NIL }, last_mir));
           IF stmt_mir EXISTS AS stmt_mir_value THEN
             &result_mir.append(stmt_mir_value);
           END
-        ELSE_IF last_mir THEN
+        ELSE_IF last_mir EXISTS THEN
           MUTABLE ctx_ident = Ident{ name: "__ctx_${UNWRAP (ctx_id).toString()}", lowered_node_id: NIL, ownership_consumption: NIL };
           MUTABLE target = FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY ctx_ident }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "result", lowered_node_id: NIL, ownership_consumption: NIL };
           MUTABLE result_value = TRY (mIRLowering__coerce_fsm_result_value(self, mIRLowering__strip_try(self, UNWRAP (last_mir)), expr_t));
@@ -5266,15 +5253,15 @@ PUB FN mIRLowering__fsm_cap_metadata(self: MIRLowering, cap: CapabilityTransitio
     END
 END
 PUB FN mIRLowering__emit_fsm_lock_error_arm_split(MUTABLE self: MIRLowering, clause: ErrorClause, ctx_id: Int64, with_node: WithBlock, capture_map: {String}String, pointer_captures: [Set]String, bg_rt: String) RETURNS !?FsmLockErrorArmSplit ->
-    MUTABLE line = COPY with_node.token.line;
+    MUTABLE line: String = with_node.token.line.toString();
     IF (clause.action == ErrorActionKind.Raise) THEN
       RETURN FsmLockErrorArmSplit{ body_stmts: COPY TRY (mIRLowering__lock_error_done_stmts(self, ctx_id, Emittable{ Lit: COPY Lit{ value: "\"lock acquire failed\"", lowered_node_id: NIL, ownership_consumption: NIL } }, CAST(line AS String), "error.CheatError")), exit_kind: :done };
     ELSE_IF (clause.action == ErrorActionKind.Exit) THEN
-      MUTABLE message_mir = mIRLowering__with_fiber_capture_map(&self, capture_map, {}, bg_rt, %() USE(clause, MUTABLE self) -> {
-    rtoc_lambda_result_214 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(UNWRAP (clause.message))));
+      MUTABLE message_mir: ?Emittable = mIRLowering__with_fiber_capture_map(&self, capture_map, {}, bg_rt, %() USE(clause, MUTABLE self) -> {
+    MUTABLE rtoc_lambda_result_214: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(UNWRAP (clause.message))));
     rtoc_lambda_result_214
       });
-      IF !(message_mir IS_A Emittable) THEN
+      IF !(message_mir EXISTS) THEN
         RETURN NIL;
       END
       RETURN FsmLockErrorArmSplit{ body_stmts: COPY TRY (mIRLowering__lock_error_done_stmts(self, ctx_id, message_mir, line, "error.CheatError")), exit_kind: :done };
@@ -5617,7 +5604,7 @@ PRIVATE FN mIRLowering__descend(MUTABLE self: MIRLowering, parent: BinaryOp, fie
     MUTABLE child: Locatable = child_branch_value?;
     IF (TRUE AND binaryOp__lazy_fields(parent).contains?(field)) THEN
       TRY (mIRLowering__lower_scoped(&self, %() USE(child, MUTABLE self) -> {
-    rtoc_lambda_result_250 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(child)));
+    MUTABLE rtoc_lambda_result_250: Emittable = UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(child))));
     rtoc_lambda_result_250
       }));
     ELSE
@@ -7319,13 +7306,8 @@ PRIVATE FN mIRLowering__default_catch_body(self: MIRLowering, node: FunctionDef)
       RETURN CAST(List[] AS []Locatable);
     END
 END
-PRIVATE FN mIRLowering__function_catch_clauses(self: MIRLowering, node: FunctionDef) RETURNS ![]ASTCatchClause ->
-    MUTABLE clauses = node.catch_clauses;
-    IF clauses IS_A []Any THEN
-      RETURN COPY clauses;
-    ELSE
-      RETURN CAST(List[] AS []ASTCatchClause);
-    END
+PRIVATE FN mIRLowering__function_catch_clauses(self: MIRLowering, node: FunctionDef) RETURNS ![]CatchClause ->
+    RETURN COPY node.catch_clauses;
 END
 PRIVATE FN mIRLowering__has_default_catch?(self: MIRLowering, MUTABLE node: FunctionDef) RETURNS !Bool ->
     RETURN !(((TRY (mIRLowering__default_catch_body(self, node))).length() == 0));
