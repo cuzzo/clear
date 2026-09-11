@@ -42,12 +42,13 @@ PUB STRUCT FsmSegmentFacts {
 PUB FN fsmSegmentFacts__empty() RETURNS FsmSegmentFacts ->
   RETURN FsmSegmentFacts{ ctx_reads: List[], required_move_guards: List[], move_guard_writes: List[], result_names: List[], ownership_facts: List[] };
 END
+PUB UNION EmitSegmentTail { Done: Done, Goto: Goto, LoopBack: LoopBack, CondBranch: CondBranch, IoSuspend: IoSuspend, NextSuspend: NextSuspend, LockSuspend: LockSuspend, FsmTailDone: FsmTailDone, FsmTailJump: FsmTailJump, FsmTailYield: FsmTailYield, FsmTailRegisterYield: FsmTailRegisterYield, FsmTailCondJump: FsmTailCondJump, FsmTailCondSkip: FsmTailCondSkip, FsmTailLockTry: FsmTailLockTry, FsmTailWokenCheck: FsmTailWokenCheck, FsmTailRetryOrError: FsmTailRetryOrError }
 PUB STRUCT FsmSegmentSpec {
   index: Int64,
   prologue_stmts: []FsmBodyItem,
   body_stmts: []FsmBodyItem,
   structure_stmts: []Emittable,
-  tail: SegmentTail,
+  tail: EmitSegmentTail,
   descriptor: ?SuspendDescriptor,
   fsm_result_transfer_facts: []FsmResultTransferFact,
   fn_name: ?String,
@@ -165,7 +166,7 @@ END
 PUB FN emit__fsm_destroy_cleanup_names(actions: []FsmDestroyAction) RETURNS ![]String ->
   RETURN (actions |> SELECT:? fsmDestroyAction__cleanup_name(_) |> WHERE _ != NIL).compact() |> DISTINCT _ |> SELECT COPY _;
 END
-PRIVATE FN emit__tail_resume_target(tail: SegmentTail) RETURNS ?Int64 ->
+PRIVATE FN emit__tail_resume_target(tail: EmitSegmentTail) RETURNS ?Int64 ->
   IF tail IS_A IoSuspend AS io_suspend THEN
     RETURN io_suspend.next_index;
   ELSE_IF tail IS_A NextSuspend AS next_suspend THEN
@@ -372,10 +373,7 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
   ELSE_IF tail IS_A LoopBack AS loop_back THEN
     RETURN FsmTail{ FsmTailJump: COPY FsmTailJump{ next_step: loop_back.target_index } };
   ELSE_IF tail IS_A CondBranch AS cond_branch THEN
-    MUTABLE condition = cond_branch.cond_ast;
-    IF !(condition IS_A Emittable) THEN
-      panic("CondBranch tail condition must be structural MIR, got {}");
-    END
+    MUTABLE condition = COPY cond_branch.cond_ast;
     RETURN FsmTail{ FsmTailCondJump: COPY FsmTailCondJump{ condition: condition, then_step: cond_branch.then_index, else_step: cond_branch.else_index } };
   ELSE_IF tail IS_A IoSuspend AS io_suspend THEN
     IF desc EXISTS AS desc_value THEN
@@ -930,16 +928,16 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   END
   rtoc_ternary_value_42? };
   MUTABLE has_step_work = (!((spec.prologue_stmts.length() == 0)) OR !((spec.body_stmts.length() == 0)));
-  MUTABLE lock_try_spec = FsmSegmentSpec{ index: spec.index, prologue_stmts: COPY spec.prologue_stmts, body_stmts: COPY spec.body_stmts, structure_stmts: COPY spec.structure_stmts, tail: SegmentTail{ FsmTailLockTry: COPY FsmTailLockTry{ try_method: COPY meta[:try_method], lock_field_ref: COPY meta[:lock_field_ref], ok_step: try_success_idx, wait_step: woken_idx, error_step: retry_idx } }, descriptor: NIL, fsm_result_transfer_facts: COPY spec.fsm_result_transfer_facts, fn_name: COPY IF has_step_work THEN
+  MUTABLE lock_try_spec = FsmSegmentSpec{ index: spec.index, prologue_stmts: COPY spec.prologue_stmts, body_stmts: COPY spec.body_stmts, structure_stmts: COPY spec.structure_stmts, tail: EmitSegmentTail{ FsmTailLockTry: COPY FsmTailLockTry{ try_method: COPY meta[:try_method], lock_field_ref: COPY meta[:lock_field_ref], ok_step: try_success_idx, wait_step: woken_idx, error_step: retry_idx } }, descriptor: NIL, fsm_result_transfer_facts: COPY spec.fsm_result_transfer_facts, fn_name: COPY IF has_step_work THEN
     spec.fn_name
   ELSE
     NIL
   END, suppress_runtime_ref: spec.suppress_runtime_ref, err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
-  MUTABLE woken_spec = FsmSegmentSpec{ index: woken_idx, body_stmts: List[], tail: SegmentTail{ FsmTailWokenCheck: COPY FsmTailWokenCheck{ ok_step: try_success_idx, error_step: retry_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
-  MUTABLE retry_spec = FsmSegmentSpec{ index: retry_idx, body_stmts: List[], tail: SegmentTail{ FsmTailRetryOrError: COPY FsmTailRetryOrError{ retries: COPY meta[:retries], retry_step: spec.index, fail_step: fail_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
+  MUTABLE woken_spec = FsmSegmentSpec{ index: woken_idx, body_stmts: List[], tail: EmitSegmentTail{ FsmTailWokenCheck: COPY FsmTailWokenCheck{ ok_step: try_success_idx, error_step: retry_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
+  MUTABLE retry_spec = FsmSegmentSpec{ index: retry_idx, body_stmts: List[], tail: EmitSegmentTail{ FsmTailRetryOrError: COPY FsmTailRetryOrError{ retries: COPY meta[:retries], retry_step: spec.index, fail_step: fail_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
   MUTABLE fail_spec = FsmSegmentSpec{ index: fail_idx, body_stmts: List[], pre_body_stmts: COPY fail_body_stmts, tail: COPY fail_tail, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
   MUTABLE held_set_stmt = Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${cap_idx}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-  MUTABLE held_set_spec = FsmSegmentSpec{ index: held_set_idx, body_stmts: List[], pre_body_stmts: [Emittable{ Set: COPY held_set_stmt }], tail: SegmentTail{ Goto: COPY Goto{ target_index: tail.post_acquire_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
+  MUTABLE held_set_spec = FsmSegmentSpec{ index: held_set_idx, body_stmts: List[], pre_body_stmts: [Emittable{ Set: COPY held_set_stmt }], tail: EmitSegmentTail{ Goto: COPY Goto{ target_index: tail.post_acquire_idx } }, descriptor: NIL, fn_name: NIL, suppress_runtime_ref: TRUE, prologue_stmts: List[], structure_stmts: List[], fsm_result_transfer_facts: List[], err_cleanups: List[], pre_body_skip: NIL, extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() };
   MUTABLE extra_fields = [emit__ctx_field_decl("lock_waiter", "CheatHeader.WaiterNode", Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }), emit__ctx_field_decl("__lock_held_${cap_idx}", "bool", Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } })];
   IF (meta[:retries] > 0) THEN
     &extra_fields.append(emit__ctx_field_decl("retry_count", "u32", Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }));
@@ -1091,7 +1089,7 @@ FN castPromotableFsmValueToEmittable(value: PromotableFsmValue) RETURNS Emittabl
   END
   RETURN panic("Invalid cast to Emittable");
 END
-FN castSegmentTailToLockSuspend(value: SegmentTail) RETURNS LockSuspend ->
+FN castSegmentTailToLockSuspend(value: EmitSegmentTail) RETURNS LockSuspend ->
   IF value IS_A LockSuspend AS cast_payload THEN
     RETURN cast_payload;
   END
