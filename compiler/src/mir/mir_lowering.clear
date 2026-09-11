@@ -1819,14 +1819,14 @@ FN mIRLowering__lower_union_payload_coercion(MUTABLE self: MIRLowering, mir: Emi
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE target_type = TRY (type__value_payload_type(coerced_type));
     MUTABLE schema: ?UnionSchema@multiowned = COPY (TRY (mIRLowering__union_schemas(&rtoc_self_view)))[type__resolved(target_type)];
-    schema = (schema OR_ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE looked_up: ?TypeSchemaLookupResult = mIRLowering__mir_schema_lookup(&rtoc_self_view)(type__resolved(target_type));
-    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_29: ?TypeSchemaLookupResult = NIL;
-    IF ((looked_up != NIL) AND (looked_up IS_A UnionSchema)) THEN
-      rtoc_ternary_value_29 = looked_up;
-    ELSE
-      rtoc_ternary_value_29 = NIL;
+    IF schema == NIL THEN
+      MUTABLE schema_lookup = mIRLowering__mir_schema_lookup(&rtoc_self_view);
+      IF schema_lookup(type__resolved(target_type)) EXISTS AS looked_up THEN
+        IF looked_up IS_A UnionSchema AS looked_up_schema THEN
+          schema = COPY looked_up_schema;
+        END
+      END
     END
-    rtoc_ternary_value_29 }) });
     IF schema EXISTS AS schema_value THEN
       MUTABLE schema_value_mutable = COPY schema_value;
       MUTABLE compared_actual_branch_value: ?Type = NIL;
@@ -1843,7 +1843,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF (type__optional?(actual_type) AND type__optional?(coerced_type)) THEN
             MUTABLE capture = "_union_payload_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_30 = mIRLowering__lowering_counters(&rtoc_self_view);
             mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_30)) }}";
-            MUTABLE wrapped = StructInit{ zig_type: TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ Type: COPY target_type })), fields: [CAST({:name: variant_name_value_mutable, :value: Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL }} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL };
+            MUTABLE wrapped = StructInit{ zig_type: TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ Type: COPY target_type })), fields: [CAST(StructInitField{ name: symbol(variant_name_value_mutable), value: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL } AS Any)], lowered_node_id: NIL, ownership_consumption: NIL };
             MUTABLE result = IfOptional{ optional: COPY mir, capture: COPY capture, then_expr: Emittable{ StructInit: COPY wrapped }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
             result.result_type = COPY coerced_type;
             RETURN Emittable{ IfOptional: COPY result };
@@ -1892,12 +1892,12 @@ FN mIRLowering__union_payload_coercion_value(MUTABLE self: MIRLowering, mir: Emi
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE ast_node = COPY node;
-    MUTABLE target_alloc = (mIRLowering__function_state(&rtoc_self_view).current_decl_alloc OR_ELSE TRY (mIRLowering__alloc_for_node(&rtoc_self_view, ast_node)));
+    MUTABLE target_alloc: String@symbol = (mIRLowering__function_state(&rtoc_self_view).current_decl_alloc OR_ELSE TRY (mIRLowering__alloc_for_node(&rtoc_self_view, ast_node)));
     MUTABLE payload = TRY (mIRLowering__materialize_owned_sink_value(&rtoc_self_view, mir, ast_node, target_alloc, TypeTypeInput{ Type: COPY payload_type }));
     IF TRY (mIRLowering__mir_allocates?(&rtoc_self_view, &payload)) THEN
       payload = TRY (mIRLowering__hoist_alloc(&rtoc_self_view, &payload, &ast_node, TRUE));
     END
-    RETURN Emittable{ StructInit: COPY castEmittableToStructInit(TRY (mIRLowering__with_ownership_consumption(&rtoc_self_view, Emittable{ StructInit: COPY StructInit{ zig_type: TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ Type: COPY union_type })), fields: [CAST({:name: variant_name, :value: payload} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } }, TRY (mIRLowering__mir_ident_names(rtoc_self_view, payload)), "MIR::StructInit", :owned_sink, target_alloc))) };
+    RETURN Emittable{ StructInit: COPY castEmittableToStructInit(TRY (mIRLowering__with_ownership_consumption(&rtoc_self_view, Emittable{ StructInit: COPY StructInit{ zig_type: TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ Type: COPY union_type })), fields: [CAST(StructInitField{ name: symbol(variant_name), value: COPY payload, alloc: NIL } AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } }, TRY (mIRLowering__mir_ident_names(rtoc_self_view, payload)), "MIR::StructInit", :owned_sink, target_alloc))) };
 }
 END
 FN mIRLowering__stack_fixed_array_coercion?(MUTABLE self: MIRLowering, node: Locatable) RETURNS !Bool
@@ -3539,7 +3539,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     cleanupEntry__present?(rtoc_local_receiver_83) } THEN
       RETURN TRUE;
     END
-    IF mIRLowering__function_state(&rtoc_self_view).pending_stmts |> ANY (_ IS_A AllocMark AND (_.name() == name)) THEN
+    IF mIRLowering__function_state(&rtoc_self_view).pending_stmts |> ANY ((IF _ IS_A AllocMark AS alloc_mark THEN (alloc_mark.name == name) ELSE FALSE END)) THEN
       RETURN TRUE;
     END
     IF mIRLowering__capture_state(&rtoc_self_view).current_fsm_inherited_alloc_names.contains?(name) THEN
@@ -3552,7 +3552,7 @@ FN mIRLowering__materialized_owned_binding_visible?(MUTABLE self: MIRLowering, n
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
-    IF mIRLowering__function_state(&rtoc_self_view).pending_stmts |> ANY (_ IS_A AllocMark AND (_.name() == name)) THEN
+    IF mIRLowering__function_state(&rtoc_self_view).pending_stmts |> ANY ((IF _ IS_A AllocMark AS alloc_mark THEN (alloc_mark.name == name) ELSE FALSE END)) THEN
       RETURN TRUE;
     END
     IF mIRLowering__capture_state(&rtoc_self_view).current_fsm_inherited_alloc_names.contains?(name) THEN
