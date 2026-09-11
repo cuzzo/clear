@@ -1067,7 +1067,7 @@ PUB FN emit__profile_dispatch_id(dispatch: String@symbol) RETURNS Int64 ->
   END;
 END
 PUB FN emit__bg_profile_site_comment(ctx: FsmEmitContext, dispatch: Dispatch, form: String@symbol) RETURNS String ->
-  RETURN "// CLEAR_PROFILE_TASK_SITE id=${ctx.profile_site_id} kind=BG line=${ctx.profile_line} column=${ctx.profile_column} dispatch=${dispatch} form=${form}";
+  RETURN "// CLEAR_PROFILE_TASK_SITE id=${(ctx.profile_site_id OR_ELSE 0).toString()} kind=BG line=${(ctx.profile_line OR_ELSE 0).toString()} column=${(ctx.profile_column OR_ELSE 0).toString()} dispatch=${CAST(dispatch AS String)} form=${CAST(form AS String)}";
 END
 # End Ruby module FsmTransform::Emit
 # End Ruby module FsmTransform

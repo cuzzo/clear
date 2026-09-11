@@ -6414,8 +6414,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE safe = mIRLowering__fsm_zig_safe_name(rtoc_self_view, node.name);
     safe = COPY (rename_map[safe] OR_ELSE safe);
-    MUTABLE entry = ((IF bindings[node.name] != NIL THEN bindings[node.name] ELSE bindings[safe] END) OR_ELSE cleanupEntry__none());
-    RETURN (((cleanupEntry__present?(entry) AND entry.heap?())) OR ((node.symbol != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_203 = ((node.symbol)?);
+    MUTABLE entry: CleanupEntry@multiowned = cleanupEntry__none();
+    IF bindings[node.name] EXISTS AS named_entry THEN
+      entry = KEEP named_entry;
+    ELSE_IF bindings[safe] EXISTS AS safe_entry THEN
+      entry = KEEP safe_entry;
+    END
+    RETURN (((cleanupEntry__present?(entry) AND cleanupEntry__heap?(entry))) OR ((node.symbol != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_203 = ((node.symbol)?);
     symbolEntry__heap_storage?(rtoc_local_receiver_203) } == TRUE)));
 }
 END
@@ -11411,7 +11416,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF TRUE THEN
         type_str = TRY (type__zig_type(p_type, CAST({:is_param: TRUE} AS Bool)));
       ELSE
-        type_str = TRY (mIRLowering__transpile_type(rtoc_self_view, (p_type OR_ELSE :Any), TRUE));
+        type_str = TRY (mIRLowering__transpile_type(rtoc_self_view, MIRLoweringType{ SymbolValue: :Any }, TRUE));
       END
     MUTABLE pt_obj = IF p_type IS_A Type THEN
         p_type
@@ -13161,7 +13166,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF ((captureSpec__requires_setup?(_) OR promoted_names[_.name]) OR (outer_capture_map[_.name] == NIL)) THEN
         ftype = COPY _.field_type_zig;
       ELSE
-        ftype = replaceFirst(_.field_type_zig, "(${(_.name OR_ELSE "")})", "(${outer_capture_map[_.name]})");
+        ftype = compilerRegexReplaceFirst(_.field_type_zig, compilerRegexCompile(compilerRegexEscape("(${_.name})")), "(${(outer_capture_map[_.name] OR_ELSE "")})");
       END
     mIRLowering__context_field_decl(rtoc_self_view, _.name, ftype)
     };
@@ -15078,7 +15083,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     MUTABLE target_node = COPY node.target;
     MUTABLE implicit_safe_nav = ((aST__node_safe_nav_chain(target_node) EXISTS) AND (locatable__safe_nav_chain(target_node) == TRUE));
-    MUTABLE explicit_safe_nav = (target_node IS_A OptionalUnwrap AND locatable__safe_navigation?(target_node));
+    MUTABLE explicit_safe_nav = (target_node IS_A OptionalUnwrap AND (locatable__safe_navigation?(target_node) OR_ELSE FALSE));
     IF (explicit_safe_nav OR implicit_safe_nav) THEN
       MUTABLE inner_ast_branch_value: ?Locatable = NIL;
       IF explicit_safe_nav THEN

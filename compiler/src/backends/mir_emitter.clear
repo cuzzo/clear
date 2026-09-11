@@ -4178,8 +4178,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (node.method == :as) THEN
       RETURN "@as(${(target_t OR_ELSE "")}, ${inner})";
     ELSE_IF (node.method == :intCast) THEN
-      IF target_t THEN
-        RETURN "@as(${(target_t OR_ELSE "")}, @intCast(${inner}))";
+      IF target_t EXISTS AS int_cast_target THEN
+        RETURN "@as(${int_cast_target}, @intCast(${inner}))";
       ELSE
         RETURN "@intCast(${inner})";
       END
@@ -4194,8 +4194,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     ELSE_IF (node.method == :truncate) THEN
       RETURN "@truncate(${inner})";
     ELSE_IF (node.method == :enumFromInt) THEN
-      IF target_t THEN
-        RETURN "@as(${(target_t OR_ELSE "")}, @enumFromInt(${inner}))";
+      IF target_t EXISTS AS enum_cast_target THEN
+        RETURN "@as(${enum_cast_target}, @enumFromInt(${inner}))";
       ELSE
         RETURN "@enumFromInt(${inner})";
       END
