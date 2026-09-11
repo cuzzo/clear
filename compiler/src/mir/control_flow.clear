@@ -651,8 +651,8 @@ WITH POLYMORPHIC self AS rtoc_self_view {
         RETURN;
     END
     MUTABLE name = COPY CAST(UNWRAP (locatable__name(node)) AS String);
-    &pairs.append(CleanupEntryPair{ place: COPY ownershipDataflow__place_for_binding_node(name, castLocatableToNode(node)), name: COPY name, entry: entry });
-    &seen.insert(aST__node_identity(entry));
+    &pairs.append(CleanupEntryPair{ place: COPY ownershipDataflow__place_for_binding_node(name, castLocatableToNode(node)), name: COPY name, entry: KEEP UNWRAP (entry) });
+    &seen.insert(aST__node_identity(node));
     rubyToClearVoid__control_flow()
     });
     frozenCleanupFacts__each_entry(facts, %(place: PlaceId, entry: CleanupEntry) USE(MUTABLE pairs, seen) -> {
