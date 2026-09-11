@@ -662,7 +662,7 @@ PUB FN schemaValue__visibility(value: SchemaValue) RETURNS ?String@symbol ->
   END
   RETURN NIL;
 END
-FN castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(value: SchemasUnionSchemaVariantInput) RETURNS ?SchemasUnionSchemaVariantValue ->
+PUB FN castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(value: SchemasUnionSchemaVariantInput) RETURNS ?SchemasUnionSchemaVariantValue ->
   PARTIAL MATCH value START
     SchemasUnionSchemaVariantInput.FunctionType AS item -> RETURN SchemasUnionSchemaVariantValue{ FunctionType: COPY item };,
     SchemasUnionSchemaVariantInput.TypeMultiowned AS item -> RETURN SchemasUnionSchemaVariantValue{ TypeMultiowned: COPY item };,
@@ -727,7 +727,7 @@ END
 # Ruby asks `respond_to?(:kind)` and then calls it. The variants that
 # can answer compute it; the rest do not respond.
 PUB UNION TypeAnalysisSchema { StructSchemaMultiowned: StructSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, InlineStructVariantMultiowned: InlineStructVariant@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, StructSchema: StructSchema, UnionSchema: UnionSchema }
-FN castSchemaValueToTypeAnalysisSchema(value: SchemaValue) RETURNS ?TypeAnalysisSchema ->
+PUB FN castSchemaValueToTypeAnalysisSchema(value: SchemaValue) RETURNS ?TypeAnalysisSchema ->
   PARTIAL MATCH value START
     SchemaValue.StructSchemaMultiowned AS item -> RETURN TypeAnalysisSchema{ StructSchemaMultiowned: COPY item };,
     SchemaValue.UnionSchemaMultiowned AS item -> RETURN TypeAnalysisSchema{ UnionSchemaMultiowned: COPY item };,

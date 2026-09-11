@@ -14579,7 +14579,7 @@ PUB FN castNodeListToLocatableList(values: []Node) RETURNS []Locatable ->
   END
   RETURN out;
 END
-FN castNodeToLocatable(value: Node) RETURNS ?Locatable ->
+PUB FN castNodeToLocatable(value: Node) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     Node.Program AS item -> RETURN Locatable{ Program: COPY item };,
     Node.RequireNode AS item -> RETURN Locatable{ RequireNode: COPY item };,
@@ -19228,7 +19228,7 @@ PUB FN locatable__set_tight_reentrance_mut(MUTABLE value: Locatable, new_value: 
     DEFAULT -> RETURN;
   END
 END
-FN castContractClauseValueToLocatable(value: ContractClauseValue) RETURNS ?Locatable ->
+PUB FN castContractClauseValueToLocatable(value: ContractClauseValue) RETURNS ?Locatable ->
   PARTIAL MATCH value START
 
     DEFAULT -> RETURN NIL;
@@ -19378,7 +19378,7 @@ END
 
 # Ruby hands the node straight to a callee that wants one specific shape.
 # The union either holds that variant or it does not.
-FN castIsARightToNode(value: IsARight) RETURNS ?Node ->
+PUB FN castIsARightToNode(value: IsARight) RETURNS ?Node ->
   PARTIAL MATCH value START
 
     DEFAULT -> RETURN NIL;
@@ -19404,7 +19404,7 @@ PUB FN castLocatableToMatchStatement(value: Locatable) RETURNS ?MatchStatement E
   END
   RETURN NIL;
 END
-FN castLocatableToClearParserConcurrentPipelineOp(value: Locatable) RETURNS ?ClearParserConcurrentPipelineOp ->
+PUB FN castLocatableToClearParserConcurrentPipelineOp(value: Locatable) RETURNS ?ClearParserConcurrentPipelineOp ->
   PARTIAL MATCH value START
     Locatable.SelectOp AS item -> RETURN ClearParserConcurrentPipelineOp{ SelectOp: COPY item };,
     Locatable.WhereOp AS item -> RETURN ClearParserConcurrentPipelineOp{ WhereOp: COPY item };,
@@ -19489,7 +19489,7 @@ PUB FN locatable__async_result_shape(value: Locatable) RETURNS ?AsyncResultShape
   END
   RETURN NIL;
 END
-FN castBenchmarkEntryToLocatable(value: BenchmarkEntry) RETURNS ?Locatable ->
+PUB FN castBenchmarkEntryToLocatable(value: BenchmarkEntry) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     BenchmarkEntry.BenchmarkStmt AS item -> RETURN Locatable{ BenchmarkStmt: COPY item };,
     BenchmarkEntry.SmashStmt AS item -> RETURN Locatable{ SmashStmt: COPY item };,

@@ -44,6 +44,7 @@ EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replace
 EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexCapture(scanner: CompilerRegexScanner, index: Int64) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexPosition(scanner: CompilerRegexScanner) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 UNION CapabilityAuditBodyFacts { BodyScanSummary: BodyScanSummary, FunctionBodySummary: FunctionBodySummary }
 UNION CapabilityAuditCall { FuncCall: FuncCall, MethodCall: MethodCall }

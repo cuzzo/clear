@@ -16,6 +16,7 @@ EXTERN FN compilerInspectValue() RETURNS String EFFECTS :safe FROM "compiler_reg
 EXTERN STRUCT CompilerRegex {} FROM "compiler_regex";
 EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexReplaceAll(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRepeatString(value: String, count: Int64) RETURNS String EFFECTS :safe FROM "compiler_regex";
 FN regexReplaceAll__mir_emitter(subject: String, pattern: String, replacement: String) RETURNS String ->
   RETURN compilerRegexReplaceAll(subject, compilerRegexCompile(pattern), replacement);
 END

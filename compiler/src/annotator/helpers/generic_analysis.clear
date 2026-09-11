@@ -35,7 +35,7 @@ PUB STRUCT TypeAnnotationFacts {
 }
 structural_capabilities = [:link];
 # End Ruby module GenericAnalysis
-FN castAnnotationNodeToLocatable(value: AnnotationNode) RETURNS ?Locatable ->
+PUB FN castAnnotationNodeToLocatable(value: AnnotationNode) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     AnnotationNode.Program AS item -> RETURN Locatable{ Program: COPY item };,
     AnnotationNode.RequireNode AS item -> RETURN Locatable{ RequireNode: COPY item };,
@@ -200,7 +200,7 @@ FN castDeclarationNodeToLocatable(value: DeclarationNode) RETURNS ?Locatable ->
   END
   RETURN NIL;
 END
-FN castGenericCallNodeToLocatable(value: GenericCallNode) RETURNS ?Locatable ->
+PUB FN castGenericCallNodeToLocatable(value: GenericCallNode) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     GenericCallNode.FuncCall AS item -> RETURN Locatable{ FuncCall: COPY item };,
     GenericCallNode.MethodCall AS item -> RETURN Locatable{ MethodCall: COPY item };,
@@ -208,7 +208,7 @@ FN castGenericCallNodeToLocatable(value: GenericCallNode) RETURNS ?Locatable ->
   END
   RETURN NIL;
 END
-FN castGenericDeclarationNodeToLocatable(value: GenericDeclarationNode) RETURNS ?Locatable ->
+PUB FN castGenericDeclarationNodeToLocatable(value: GenericDeclarationNode) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     GenericDeclarationNode.FunctionDefMultiowned AS item -> RETURN Locatable{ FunctionDef: COPY item };,
     GenericDeclarationNode.StructDef AS item -> RETURN Locatable{ StructDef: COPY item };,
@@ -392,7 +392,7 @@ PUB FN genericBinding__indirect?(value: GenericBinding) RETURNS ?Bool EFFECTS RE
   END
   RETURN NIL;
 END
-FN castLocatableToDeclarationNode(value: Locatable) RETURNS ?DeclarationNode ->
+PUB FN castLocatableToDeclarationNode(value: Locatable) RETURNS ?DeclarationNode ->
   PARTIAL MATCH value START
     Locatable.VarDecl AS item -> RETURN DeclarationNode{ VarDecl: COPY item };,
     Locatable.BindExpr AS item -> RETURN DeclarationNode{ BindExpr: COPY item };,

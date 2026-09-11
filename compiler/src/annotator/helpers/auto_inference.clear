@@ -10788,7 +10788,7 @@ PUB FN autoConstraintCollectorSlotDeclNode__type(value: AutoConstraintCollectorS
   END
   RETURN NIL;
 END
-FN castAutoConstraintCollectorSlotDeclNodeToLocatable(value: AutoConstraintCollectorSlotDeclNode) RETURNS ?Locatable ->
+PUB FN castAutoConstraintCollectorSlotDeclNodeToLocatable(value: AutoConstraintCollectorSlotDeclNode) RETURNS ?Locatable ->
   PARTIAL MATCH value START
     AutoConstraintCollectorSlotDeclNode.FunctionDefMultiowned AS item -> RETURN Locatable{ FunctionDef: COPY item };,
     AutoConstraintCollectorSlotDeclNode.VarDecl AS item -> RETURN Locatable{ VarDecl: COPY item };,

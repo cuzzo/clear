@@ -796,7 +796,7 @@ FN castOptionalLocatableToBgNode(value: ?Locatable) RETURNS BgNode ->
   END
   panic("Invalid cast to BgNode");
 END
-FN castOptionalSymbolEntryRegInputToOptionalLocatable(value: ?SymbolEntryRegInput) RETURNS ?Locatable ->
+PUB FN castOptionalSymbolEntryRegInputToOptionalLocatable(value: ?SymbolEntryRegInput) RETURNS ?Locatable ->
   IF value == NIL THEN
     panic("Invalid cast to ?Locatable");
   END

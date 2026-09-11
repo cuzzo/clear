@@ -1836,7 +1836,7 @@ FN castAssignmentNameToLocatable__cleanup_classifier(value: AssignmentName) RETU
   END
   panic("Invalid cast to Locatable");
 END
-FN castBindingNodeToLocatable(value: BindingNode) RETURNS Locatable ->
+PUB FN castBindingNodeToLocatable(value: BindingNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     BindingNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
     BindingNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,

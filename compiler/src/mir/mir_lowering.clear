@@ -50,6 +50,10 @@ REQUIRE "../semantic/escape_analysis.clear"
 REQUIRE "mir_checker.clear"
 REQUIRE "../ast/type_capabilities.clear"
 REQUIRE "../annotator/helpers/intrinsic_emit.clear"
+EXTERN FN compilerFormatTemplate(template: String) RETURNS (template): String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexCompile(pattern: String) RETURNS CompilerRegex EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
+EXTERN FN compilerRegexReplaceFirst(subject: String, regex: CompilerRegex, replacement: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
 UNION CallNode { FuncCall: FuncCall, MethodCall: MethodCall }
 # The four Emittable shapes a capabilities lowering can return. Used in
 # signatures throughout this file but declared nowhere.

@@ -20024,7 +20024,7 @@ PUB FN emittable__set_scope_mut(MUTABLE value: Emittable, new_value: ?String@sym
   END
 END
 
-FN castMIRFsmLoweringResultFsmBodyToFsmBody(value: MIRFsmLoweringResultFsmBody) RETURNS FsmBody ->
+PUB FN castMIRFsmLoweringResultFsmBodyToFsmBody(value: MIRFsmLoweringResultFsmBody) RETURNS FsmBody ->
   PARTIAL MATCH value START
     MIRFsmLoweringResultFsmBody.FsmIoBody AS cast_payload -> RETURN FsmBody{ FsmIoBody: COPY cast_payload };,
     MIRFsmLoweringResultFsmBody.FsmB1Body AS cast_payload -> RETURN FsmBody{ FsmB1Body: COPY cast_payload };,

@@ -18,7 +18,12 @@ require_relative '../compiler/ruby/compiler/module_importer'
 GEN = File.join(File.expand_path('..', __dir__), 'compiler', 'src')
 # A generic definition spells its type params before the arg list.
 DEF  = /^(PUB |PRIVATE )?FN\s+([a-zA-Z_]\w*[?!]?)\s*(?:<[^>]*>)?\s*\(/
-CALL = /(?<![\w.])([a-z]\w*__\w+[?!]?)\s*\(/
+# Not just `owner__method`: rtoc also emits bare helpers like
+# castNodeToLocatable, and those cross unit boundaries the same way. A call is
+# worth resolving when the corpus defines a function of that name SOMEWHERE --
+# anything else is an intrinsic or a method, which this check has no business
+# ruling on.
+CALL = /(?<![\w.])([a-z]\w*[?!]?)\s*\(/
 
 groups = ParserCompat.package_groups(GEN)
 pkg_paths = {}
@@ -26,11 +31,16 @@ groups.each { |n, m| pkg_paths[n] = m.map { |r| File.join(GEN, r) }.join(',') }
 ParserCompat.generated_relatives(GEN).each { |r| pkg_paths[ParserCompat.package_name(r)] = File.join(GEN, r) }
 in_group = groups.values.flatten.to_set
 
+# Every function the corpus defines anywhere, so a call can be told apart from
+# an intrinsic.
+ALL_DEFINED = Set.new
+
 # name => file that exports it PUB
 exported = {}
 ParserCompat.generated_relatives(GEN).each do |rel|
   File.readlines(File.join(GEN, rel)).each do |line|
     m = DEF.match(line) or next
+    ALL_DEFINED << m[2]
     exported[m[2]] = rel if m[1] == 'PUB '
   end
 end
@@ -59,6 +69,7 @@ units.each do |name, members|
   end
   src.scan(CALL).flatten.uniq.each do |called|
     next if visible.include?(called)
+    next unless ALL_DEFINED.include?(called)
 
     missing[called] << name
   end
@@ -70,3 +81,25 @@ missing.sort_by { |k, _v| k }.each do |called, where|
 end
 puts "unresolved cross-unit calls: #{missing.length}"
 exit(missing.empty? ? 0 : 1)
+
+# An EXTERN is declared per unit, not imported, so a unit that calls one it
+# never declared is the same undefined-function blocker with a different cause.
+externs = {}
+Dir.glob(File.join(GEN, '**', '*.clear')).each do |path|
+  File.readlines(path).each do |line|
+    m = line.match(/^EXTERN FN\s+(\w+)\(/) or next
+    externs[m[1]] ||= line.rstrip
+  end
+end
+missing_externs = 0
+Dir.glob(File.join(GEN, '**', '*.clear')).sort.each do |path|
+  src = File.read(path)
+  declared = src.scan(/^EXTERN FN\s+(\w+)\(/).flatten.to_set
+  src.scan(/(?<![\w.])(\w+)\s*\(/).flatten.uniq.each do |called|
+    next unless externs.key?(called) && !declared.include?(called)
+
+    puts "#{path.sub("#{GEN}/", '')}: calls EXTERN #{called} without declaring it"
+    missing_externs += 1
+  end
+end
+puts "undeclared EXTERN calls: #{missing_externs}"
