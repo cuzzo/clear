@@ -17548,6 +17548,28 @@ PUB FN emittable__set_lowered_node_id_mut(MUTABLE value: Emittable, new_value: ?
   END
 END
 
+# Ruby answers this per node class: a construction that BUILDS a value (a
+# literal, a copy, a container init) materializes it; everything else does not.
+PUB FN emittable__materializes_value?(value: Emittable) RETURNS Bool ->
+  PARTIAL MATCH value START
+    Emittable.HeapCreate -> RETURN TRUE;,
+    Emittable.DupeSlice -> RETURN TRUE;,
+    Emittable.AllocSlice -> RETURN TRUE;,
+    Emittable.DeepCopy -> RETURN TRUE;,
+    Emittable.ContainerInit -> RETURN TRUE;,
+    Emittable.CapWrap -> RETURN TRUE;,
+    Emittable.MakeList -> RETURN TRUE;,
+    Emittable.MakeSet -> RETURN TRUE;,
+    Emittable.ConcatList -> RETURN TRUE;,
+    Emittable.TupleLiteral -> RETURN TRUE;,
+    Emittable.StructInit -> RETURN TRUE;,
+    Emittable.ArrayInit -> RETURN TRUE;,
+    Emittable.ConcatStr -> RETURN TRUE;,
+    Emittable.OwnedSlice -> RETURN TRUE;,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
 PUB FN emittable__lowered_node_id(value: Emittable) RETURNS ?LoweredNodeId ->
   PARTIAL MATCH value START
     Emittable.FnDef AS item -> RETURN COPY item.lowered_node_id;,
