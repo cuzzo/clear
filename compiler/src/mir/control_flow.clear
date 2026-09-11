@@ -107,7 +107,7 @@ PUB FN functionCFG__build(fn_node: FunctionDef, can_fail_fns: ?[Set]String = NIL
   MUTABLE last_block: ?BasicBlock = TRY (functionCFG__build_body( CAST(fn_node.body AS []Node), UNWRAP (KEEP cfg.entry), UNWRAP (KEEP cfg.exit_block), &cfg));
   IF last_block EXISTS AS last_block_value THEN
     MUTABLE last_block_value_mutable = COPY last_block_value;
-    basicBlock__add_successor(&last_block_value_mutable, KEEP cfg.exit_block);
+    basicBlock__add_successor(&last_block_value_mutable, UNWRAP (KEEP cfg.exit_block));
   END
   RETURN cfg;
 END
@@ -609,9 +609,9 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
       IF !(df_entry.needs_cleanup) THEN
           IF ownershipDataflow__preserve_guard_after_full_move?(&rtoc_self_view, UNWRAP (var), UNWRAP (entry), decision_facts, ambiguous_names) THEN
-            cleanupEntry__mark_moved_guard_mut(&entry);
+            cleanupEntry__mark_moved_guard_mut( UNWRAP (&entry));
           ELSE
-            cleanupEntry__suppress_cleanup_mut(&entry);
+            cleanupEntry__suppress_cleanup_mut( UNWRAP (&entry));
           END
       ELSE_IF (!(df_entry.has_moved_guard) AND cleanupEntry__has_moved_guard?( UNWRAP (entry))) THEN
           cleanupEntry__clear_moved_guard_mut( UNWRAP (&entry));
