@@ -40,10 +40,19 @@ FN main() RETURNS Void ->
     scale_all(&h);
     ASSERT (h.items[0]?.n OR_ELSE 0_i64) == 6_i64, "wrote through a field collection";
 
+    # Assigning the binding REPLACES the element -- Ruby's `map!`, Rust's
+    # `*x = ...`. Without it a whole-element rewrite has no spelling.
+    FOR MUTABLE it IN items DO
+        it = Item{ n: it.n + 1_i64, tag: COPY it.tag };
+    END
+    ASSERT items[0].n == 111_i64, "whole-element replacement wrote back";
+    ASSERT items[1].n == 121_i64, "and the second";
+    ASSERT items[0].tag == "a", "replacement kept the owned child";
+
     # A plain FOR still binds a copy, leaving the collection untouched.
     FOR it IN items DO
         ASSERT it.n > 0_i64, "readable";
     END
-    ASSERT items[0].n == 110_i64, "plain FOR did not write back";
+    ASSERT items[0].n == 111_i64, "plain FOR did not write back";
     RETURN;
 END

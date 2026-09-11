@@ -1026,7 +1026,7 @@ module MIRLoweringVariables
       # first frees the very value being stored, so the reassignment keeps the
       # side effects and skips the cleanup.
       result = if self_reassign
-        MIR::Set.new(MIR::Ident.new(target_name), value)
+        MIR::Set.new(reassignment_target_ident(target_name), value)
       elsif rp
         plan = rp.lifecycle_plan
         raise "reassignment cleanup lacks annotation lifecycle plan for #{target_name}" unless plan&.needs_drop?
@@ -1035,7 +1035,7 @@ module MIRLoweringVariables
         target_type = node.full_type!(context: "reassign target")
         MIR::ReassignWithCleanup.new(target_name, value, transpile_type(target_type), :heap)
       else
-        MIR::Set.new(MIR::Ident.new(target_name), value)
+        MIR::Set.new(reassignment_target_ident(target_name), value)
       end
       ownership_value = fallible_self_fallback_success_expr(target_name, value) || value
       ownership_ast = if ownership_value.equal?(value)
@@ -1350,6 +1350,16 @@ module MIRLoweringVariables
       target: T.cast(lower(name), MIR::Emittable),
       cleanup_field: cleanup_field,
     )
+  end
+
+  # `FOR MUTABLE x IN xs` binds the element BY POINTER, so replacing the whole
+  # element (Ruby's `map!`, Rust's `*x = ...`) has to write through the capture
+  # rather than rebind the loop's const.
+  sig { params(name: String).returns(MIR::Emittable) }
+  def reassignment_target_ident(name)
+    T.bind(self, MIRLowering) rescue nil
+    ident = MIR::Ident.new(name)
+    pointer_shaped_ident?(ident) ? MIR::Deref.new(ident) : ident
   end
 
   sig { params(node: AST::Assignment).returns(MIR::Emittable) }
