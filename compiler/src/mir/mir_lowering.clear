@@ -3136,13 +3136,35 @@ FN mIRLowering__append_lowered_items_mut(MUTABLE self: MIRLowering, MUTABLE targ
     END
 END
 FN mIRLowering__lower_protocol_adapters(self: MIRLowering, program: Program) RETURNS ![]ProtocolAdapterDef ->
-    MUTABLE protocols = program.statements.grep(BgSourceWalkValue.ProtocolDef).to_h(%(protocol) -> [protocol.name(), protocol]);
-    MUTABLE conformances = program.statements.grep(AST.ConformanceDef).group_by(%(declaration) USE(self) -> mIRLowering__protocol_base_name_for_lowering(self, declaration.protocol_type));
-    RETURN (TRY (inlineAllocMetadata__values(protocols))) |> SELECT {
-    MUTABLE cases = (((conformances[_.name()] OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_protocol_conformance_case(self, _, _));
-    MUTABLE requirements = _.requirements |> SELECT ProtocolRequirementAdapter{ name: COPY _.name(), argument_count: (_.params()).length(), return_type: COPY TRY (mIRLowering__protocol_requirement_return_type(self, _, _)) };
-    ProtocolAdapterDef{ protocol: COPY _.name(), associated_types: COPY _.associated_types() |> SELECT _.name(), requirements: COPY requirements, conformances: COPY cases }
-    };
+    MUTABLE protocols: []ProtocolDef = List[];
+    MUTABLE conformances: {String}[]ConformanceDef = {};
+    FOR rtoc_stmt IN program.statements DO
+      IF rtoc_stmt IS_A ProtocolDef AS rtoc_protocol THEN
+        &protocols.append(COPY rtoc_protocol);
+      ELSE_IF rtoc_stmt IS_A ConformanceDef AS rtoc_conformance THEN
+        MUTABLE rtoc_base = mIRLowering__protocol_base_name_for_lowering(self, rtoc_conformance.protocol_type);
+        MUTABLE rtoc_bucket: []ConformanceDef = (COPY conformances[rtoc_base] OR_ELSE List[]);
+        &rtoc_bucket.append(COPY rtoc_conformance);
+        conformances[COPY rtoc_base] = rtoc_bucket;
+      END
+    END
+    MUTABLE adapters: []ProtocolAdapterDef = List[];
+    FOR rtoc_protocol IN protocols DO
+      MUTABLE cases: []ProtocolConformanceCase = List[];
+      FOR rtoc_declaration IN (COPY conformances[rtoc_protocol.name] OR_ELSE List[]) DO
+        &cases.append(TRY (mIRLowering__lower_protocol_conformance_case(self, rtoc_protocol, rtoc_declaration)));
+      END
+      MUTABLE requirements: []ProtocolRequirementAdapter = List[];
+      FOR rtoc_requirement IN rtoc_protocol.requirements DO
+        &requirements.append(ProtocolRequirementAdapter{ name: COPY rtoc_requirement.name, argument_count: rtoc_requirement.params.length(), return_type: COPY TRY (mIRLowering__protocol_requirement_return_type(self, rtoc_protocol, rtoc_requirement)) });
+      END
+      MUTABLE associated: []String = List[];
+      FOR rtoc_assoc IN rtoc_protocol.associated_types DO
+        &associated.append(COPY rtoc_assoc.name);
+      END
+      &adapters.append(ProtocolAdapterDef{ protocol: COPY rtoc_protocol.name, associated_types: associated, requirements: requirements, conformances: cases, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+    END
+    RETURN adapters;
 END
 FN mIRLowering__lower_protocol_conformance_case(self: MIRLowering, protocol: ProtocolDef, declaration: ConformanceDef) RETURNS !ProtocolConformanceCase ->
     MUTABLE generic = (declaration.binders.length() > 0);
@@ -3902,20 +3924,45 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     RETURN methods;
 }
 END
+FN castSchemasUnionSchemaVariantInputToMIRLoweringType(value: SchemasUnionSchemaVariantInput) RETURNS MIRLoweringType ->
+  PARTIAL MATCH value START
+    SchemasUnionSchemaVariantInput.StringValue AS cast_payload -> RETURN MIRLoweringType{ StringValue: COPY cast_payload };,
+    SchemasUnionSchemaVariantInput.SymbolValue AS cast_payload -> RETURN MIRLoweringType{ SymbolValue: COPY cast_payload };,
+    SchemasUnionSchemaVariantInput.Type AS cast_payload -> RETURN MIRLoweringType{ Type: COPY cast_payload };,
+    SchemasUnionSchemaVariantInput.TypeMultiowned AS cast_payload -> RETURN MIRLoweringType{ Type: COPY cast_payload };,
+  END
+  RETURN MIRLoweringType{ SymbolValue: :Any };
+END
+FN castSchemasUnionSchemaVariantInputToOptionalMIRLoweringUnionVariantPayload(value: ?SchemasUnionSchemaVariantInput) RETURNS ?MIRLoweringUnionVariantPayload ->
+  IF value EXISTS AS value_present THEN
+    PARTIAL MATCH value_present START
+      SchemasUnionSchemaVariantInput.FunctionType AS cast_payload -> RETURN MIRLoweringUnionVariantPayload{ FunctionType: COPY cast_payload };,
+      SchemasUnionSchemaVariantInput.TypeMultiowned AS cast_payload -> RETURN MIRLoweringUnionVariantPayload{ TypeMultiowned: COPY cast_payload };,
+      SchemasUnionSchemaVariantInput.SymbolValue AS cast_payload -> RETURN MIRLoweringUnionVariantPayload{ SymbolValue: COPY cast_payload };,
+      SchemasUnionSchemaVariantInput.StringValue AS cast_payload -> RETURN MIRLoweringUnionVariantPayload{ StringValue: COPY cast_payload };,
+      SchemasUnionSchemaVariantInput.InlineStructVariantMultiowned AS cast_payload -> RETURN MIRLoweringUnionVariantPayload{ InlineStructVariantMultiowned: COPY cast_payload };,
+      SchemasUnionSchemaVariantInput.Type AS cast_payload -> RETURN MIRLoweringUnionVariantPayload{ Type: COPY cast_payload };,
+    END
+  END
+  RETURN NIL;
+END
 PRIVATE FN mIRLowering__union_variant_lowering_facts(self: MIRLowering, node: UnionDef) RETURNS ![]UnionVariantLoweringFact ->
-    RETURN node.variants |> SELECT {
-    MUTABLE inline_struct = schemas__inline_struct?(_._1);
-    MUTABLE name = COPY CAST(_._0 AS String);
-    MUTABLE zig_type: String = "";
-      IF (_._1 == NIL) THEN
-        zig_type = "void";
-      ELSE_IF inline_struct THEN
-        zig_type = "${node.name}_${name}";
-      ELSE
-        zig_type = TRY (mIRLowering__transpile_type(self, _._1, FALSE, TRUE));
+    MUTABLE facts: []UnionVariantLoweringFact = List[];
+    FOR rtoc_variant_name IN node.variants.keys() DO
+      MUTABLE rtoc_data: ?SchemasUnionSchemaVariantInput = COPY node.variants[rtoc_variant_name];
+      MUTABLE inline_struct = schemas__inline_struct?(IF rtoc_data EXISTS AS rtoc_variant_value THEN castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(rtoc_variant_value) ELSE NIL END);
+      MUTABLE name = COPY rtoc_variant_name;
+      MUTABLE zig_type: String = "void";
+      IF rtoc_data EXISTS THEN
+        IF inline_struct THEN
+          zig_type = "${node.name}_${name}";
+        ELSE
+          zig_type = TRY (mIRLowering__transpile_type(self, castSchemasUnionSchemaVariantInputToMIRLoweringType(rtoc_data), FALSE, TRUE));
+        END
       END
-    UnionVariantLoweringFact{ owner_name: COPY node.name, name: COPY name, data: COPY _._1, inline_struct: inline_struct, zig_type: COPY zig_type }
-    };
+      &facts.append(UnionVariantLoweringFact{ owner_name: COPY node.name, name: COPY name, data: castSchemasUnionSchemaVariantInputToOptionalMIRLoweringUnionVariantPayload(COPY rtoc_data), inline_struct: inline_struct, zig_type: COPY zig_type });
+    END
+    RETURN facts;
 END
 PRIVATE FN mIRLowering__lower_cast(MUTABLE self: MIRLowering, node: Cast) RETURNS !?Emittable
   EFFECTS REENTRANT ->
