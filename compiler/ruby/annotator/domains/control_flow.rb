@@ -126,6 +126,18 @@ module Annotator
         nil
       end
 
+      # A condition is a value position like any other: `WHILE (IF x IS_A T AS t
+      # THEN ... END)` is a Bool, and without the promotion the IF lowers as a
+      # statement and the condition reads as Void.
+      sig { params(node: T.any(AST::IfStatement, AST::WhileLoop)).void }
+      def promote_condition_if!(node)
+        T.bind(self, Annotator::Phases::TypeAnalysisSession)
+        condition = node.condition
+        return unless condition.is_a?(AST::IfStatement) || condition.is_a?(AST::IfBind)
+
+        promote_to_expr_if!(node, condition)
+      end
+
       sig { params(node: AST::IfStatement).returns(T.nilable(Symbol)) }
       def visit_IfStatement(node)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
@@ -137,6 +149,7 @@ module Annotator
             emit_is_a_needs_comptime_fix!(node)
           end
           with_if_is_a_condition(node.condition) { visit(node.condition) }
+          promote_condition_if!(node)
         end
 
         then_value_refinements = short_circuit_non_nil_refinements(node.condition, truthy: true)
@@ -1343,6 +1356,7 @@ module Annotator
 
         # 1. Analyze Condition
         visit(node.condition)
+        promote_condition_if!(node)
 
         if node.condition.resolved_type != :Bool
           error!(node, :CONDITION_NEEDS_BOOL, got: node.condition.resolved_type)

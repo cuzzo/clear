@@ -1,0 +1,21 @@
+# An IF expression is a value wherever a value goes -- including the condition
+# of another IF, or of a WHILE.
+UNION Shape { Circle: Int64, Square: Int64 }
+
+FN main() RETURNS Void ->
+  MUTABLE s: Shape = Shape{ Circle: 3 };
+  IF (IF s IS_A Circle AS c THEN (c > 0) ELSE FALSE END) THEN
+    print("if-condition sees a positive circle");
+  END
+
+  MUTABLE rounds = 0;
+  WHILE (IF s IS_A Circle AS c THEN (c > 0) ELSE FALSE END) DO
+    rounds = (rounds + 1);
+    s = Shape{ Square: 1 };
+  END
+  print("while ran ${rounds.toString()} time(s)");
+
+  IF (IF s IS_A Square AS sq THEN (sq == 1) ELSE FALSE END) THEN
+    print("and left a unit square");
+  END
+END
