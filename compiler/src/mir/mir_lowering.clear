@@ -4398,7 +4398,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       rtoc_ternary_value_120 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__mir_lowering(to_type)));
     END
     rtoc_ternary_value_120? };
-    IF (type__semantic_type_key( castTypeTypeInputToType(UNWRAP (castTypeTypeInputToType( TypeTypeInput{ Type: UNWRAP (castTypeTypeInputToType( TypeTypeInput{ Type: from_t })) })))) == type__semantic_type_key(to_t)) THEN
+    IF (type__semantic_type_key( castTypeTypeInputToType( TypeTypeInput{ Type: UNWRAP (castTypeTypeInputToType( TypeTypeInput{ Type: UNWRAP (castTypeTypeInputToType( TypeTypeInput{ Type: from_t })) })) })) == type__semantic_type_key(to_t)) THEN
       RETURN NIL;
     END
     IF ((typeTypeInput__indirect?(to_t) AND !(type__indirect?(from_t))) AND (type__resolved(from_t) == to_t.resolved())) THEN
@@ -10439,7 +10439,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN TRUE;
       END
     END
-    RETURN ((((((TRY (type__ownership_bearing?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&rtoc_self_view))) OR type__indirect?( UNWRAP (ti))) OR type__collection?( UNWRAP (ti))) OR TRY (type__any_rc?( UNWRAP (ti)))) OR type__any_sync?(ti)) OR type__resource?(ti)) OR TRY (type__recursive_cleanup_shape?(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view))));
+    RETURN ((((((TRY (type__ownership_bearing?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&rtoc_self_view))) OR type__indirect?( UNWRAP (ti))) OR type__collection?( UNWRAP (ti))) OR TRY (type__any_rc?( UNWRAP (ti)))) OR type__any_sync?( UNWRAP (ti))) OR type__resource?(ti)) OR TRY (type__recursive_cleanup_shape?(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view))));
 }
 END
 PRIVATE FN mIRLowering__call_owned_return_from_args?(MUTABLE self: MIRLowering, MUTABLE node: CallNode, sig_obj: ?FunctionSignature) RETURNS !?Bool
@@ -16502,7 +16502,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: Emittable{ ComptimeCarrierPayload: COPY projected }, zig_type: COPY TRY (type__zig_type(payload_ti)), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(payload_ti))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
     END
-    MUTABLE source = TRY (mIRLowering__lower(&rtoc_self_view, &node.value));
+    MUTABLE source = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge(&node.value)));
     IF mIRLowering__fresh_copy_constructor?(rtoc_self_view, node.value) THEN
       RETURN source;
     END
