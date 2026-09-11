@@ -25,9 +25,14 @@ require_relative 'parser_compat'
 
 out_json = nil
 limit = nil
+zig_out = nil
 OptionParser.new do |o|
   o.on('--json PATH') { |v| out_json = v }
   o.on('--limit N', Integer) { |v| limit = v }
+  # 2c: emit the closure's Zig and hand it to `zig build-exe`. The frontend
+  # alone stops after lowering, which answers 2b but not whether the emitted
+  # program is a program.
+  o.on('--zig PATH') { |v| zig_out = v }
 end.parse!(ARGV)
 
 GEN = File.join(ROOT, 'compiler', 'src')
@@ -52,7 +57,7 @@ CLEAR
 # transitive source digests, but only when these are set -- `./clear` sets
 # them, this harness did not, so every round recompiled all 177 units and took
 # 15 minutes. Keyed on compiler CONTENT: a mirror swap rewrites every mtime.
-if ENV['CLEAR_MODULE_CACHE_DIR'].to_s.empty?
+if ENV['CLEAR_MODULE_CACHE_DIR'].to_s.empty? && ENV['CLEAR_DISABLE_MODULE_CACHE'].to_s.empty?
   require 'digest'
   ruby_src = Dir.glob(File.join(ROOT, 'compiler', 'ruby', '**', '*.rb')).sort
   ENV['CLEAR_MODULE_CACHE_DIR'] = File.join(ROOT, 'tmp', 'stage2-modcache')
@@ -61,6 +66,9 @@ end
 
 ENV['CLEAR_PROBE_ERROR_CAP'] = (limit || 5000).to_s
 require_relative 'probe_multi_error'
+# 2a asks whether the closure ANNOTATES, 2b whether it LOWERS. Without this the
+# first function that cannot lower ends the run, and 2b has no denominator.
+require_relative 'probe_lowering_survives'
 require_relative '../compiler/ruby/compiler/compiler_frontend'
 
 dir = File.join(ROOT, 'tmp', 'stage2')
@@ -102,8 +110,14 @@ end
 ModuleImporter.prepend(Stage2Unit)
 
 first_error = nil
+zig_source = nil
 begin
-  CompilerFrontend.compile(source, importer: importer, source_dir: GEN)
+  if zig_out
+    require_relative '../compiler/ruby/backends/transpiler'
+    zig_source = ZigTranspiler.new.transpile(source, source_dir: GEN, pkg_paths: pkg_paths)
+  else
+    CompilerFrontend.compile(source, importer: importer, source_dir: GEN)
+  end
 rescue StandardError => e
   first_error = e
 end
@@ -117,11 +131,17 @@ def build_marker_index(members, pkg_paths, gen)
   index = []
   current = nil
   offset = 0
-  merged.source.split("\n", -1).each_with_index do |line, idx|
+  merged_lines = merged.source.split("\n", -1)
+  merged_lines.each_with_index do |line, idx|
     m = line.match(/\A# FILE: (.+)\z/)
     if m
       current = m[1]
-      offset = idx + 1
+      # The merge drops each member's REQUIRE lines, so the block does not
+      # start at the file's line 1. Anchor on the first surviving line.
+      first_body = merged_lines[idx + 1]
+      real = File.exist?(current) ? File.readlines(current, chomp: true) : []
+      dropped = real.index(first_body) || 0
+      offset = idx + 1 - dropped
     end
     index << (current ? [current.sub("#{gen}/", ''), idx + 1 - offset] : nil)
   end
@@ -151,10 +171,32 @@ end
 ProbeMultiError::RECORDED.clear
 ProbeMultiError::UNITS.clear
 
-if first_error && records.empty?
-  warn "stage 2a: the frontend raised before accumulation could start:"
-  warn first_error.message.to_s.gsub(/\e\[[0-9;]*m/, '').lines.first(6).join
+# A raise from a later pass names the merged package text it was lexed from.
+# Every such site is `pkg:<name>:<line>:<col>`; the marker index already knows
+# how to turn that back into a file a person can open.
+def resolve_pkg_sites(text)
+  text.gsub(/pkg:([A-Za-z0-9_]+):(\d+)/) do
+    where = MARKERS[Regexp.last_match(1)]&.[](Regexp.last_match(2).to_i - 1)
+    where ? "#{where[0]}:#{where[1]}" : Regexp.last_match(0)
+  end
 end
+
+# ALWAYS, not only when nothing accumulated: gating this on `records.empty?`
+# hid the raise behind any annotation blocker and made two runs that failed
+# identically look like one clean and one broken.
+if first_error
+  warn 'stage 2a: the frontend raised:'
+  warn resolve_pkg_sites(first_error.message.to_s.gsub(/\e\[[0-9;]*m/, '').lines.first(6).join)
+  if ENV['STAGE2_BACKTRACE']
+    warn first_error.backtrace.to_a.grep(%r{compiler/ruby|tools/}).first(45).join("\n")
+  end
+end
+
+lowering = ProbeLoweringSurvives::RECORDED.map do |r|
+  where = r['file'].to_s.start_with?('pkg:') ? resolve_pkg_sites("#{r['file']}:#{r['line']}") : nil
+  r.merge('site' => where || "#{r['file'] || r['unit']}:#{r['line']}")
+end
+ProbeLoweringSurvives::RECORDED.clear
 
 by_code = records.group_by { |r| r['code'] }.transform_values(&:length).sort_by { |_c, n| -n }
 by_file = records.group_by { |r| r['file'] || '?' }.transform_values(&:length).sort_by { |_f, n| -n }
@@ -166,5 +208,26 @@ puts
 records.first(20).each do |r|
   puts format('  %s:%s  %s', r['file'] || '?', r['file_line'] || r['line'], r['message'][0, 150])
 end
-File.write(out_json, JSON.pretty_generate(records)) if out_json
-exit(records.empty? && first_error.nil? ? 0 : 1)
+puts
+stub_failed = lowering.count { |r| r['stub_failed'] }
+passes = lowering.group_by { |r| r['pass'] }.transform_values(&:length).sort
+puts "stage 2b failures by lowering pass: #{passes.inspect}"
+puts "stage 2b unlowered functions: #{lowering.length} (#{stub_failed} could not even stub)"
+lowering.group_by { |r| r['message'][0, 80] }.sort_by { |_m, g| -g.length }.first(10).each do |m, g|
+  puts format('%5d  %s', g.length, m)
+end
+lowering.first(10).each { |r| puts format('  %s  %s  %s', r['site'], r['fn'], r['message'][0, 110]) }
+
+if zig_out
+  if zig_source
+    File.write(zig_out, zig_source)
+    puts
+    puts "stage 2c: wrote #{zig_source.length} bytes of Zig to #{zig_out}"
+  else
+    puts
+    puts 'stage 2c: no Zig emitted (the transpiler raised; see 2a/2b above)'
+  end
+end
+
+File.write(out_json, JSON.pretty_generate({ 'annotate' => records, 'lower' => lowering })) if out_json
+exit(records.empty? && lowering.empty? && first_error.nil? ? 0 : 1)

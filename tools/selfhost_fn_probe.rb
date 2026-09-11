@@ -523,6 +523,7 @@ module SelfhostFnProbe
     limit = nil
     passing = nil
     all_files_mode = false
+    stub_census = nil
     OptionParser.new do |p|
       # Several files at once: the annotator is three of them, and measuring
       # just those skips a hang in an unrelated file that has killed whole runs.
@@ -539,6 +540,9 @@ module SelfhostFnProbe
       # Stage 2 only makes sense for what already passed stage 1.
       p.on('--passing FILE') { |v| passing = v }
       p.on('--all-files', 'Probe every translated file, not just the largest package group') { all_files_mode = true }
+      # Which functions call nothing internal: those are the ones a recorded-
+      # input run can execute today, because they have no stub to trap on.
+      p.on('--stub-census PATH') { |v| stub_census = v }
     end.parse!(argv)
 
     group = all_files_mode ? all_files : members
@@ -555,6 +559,19 @@ module SelfhostFnProbe
     targets = targets.select { |t| only_fns.include?(t.name) } if only_fns
     targets = targets.first(limit) if limit
     warn "#{targets.length} functions across #{files.length} file(s); #{jobs} jobs; stage=#{stage}"
+
+    if stub_census
+      rows = targets.map do |t|
+        src = probe_source(t, nil, cache, 'fnprobe_types')
+        names = src[/# --- stand-ins for what it calls ---\n(.*?)\n# --- /m, 1].to_s
+                   .scan(/^FN ([\w?!]+)\(/).flatten
+        { 'file' => rel(t.file), 'fn' => t.name, 'stubs' => names.length, 'stub_names' => names }
+      end
+      File.write(stub_census, JSON.pretty_generate(rows))
+      empty = rows.count { |r| r['stubs'].zero? }
+      warn "stub census: #{empty}/#{rows.length} functions call nothing internal"
+      return 0
+    end
 
     stub_dir = File.join(ROOT, 'tmp', 'fnprobe')
     FileUtils.mkdir_p(stub_dir)
