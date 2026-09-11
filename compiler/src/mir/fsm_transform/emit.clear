@@ -522,7 +522,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   IF rtoc_indexed_result_15 == NIL THEN
     RETURN NIL;
   END
-  MUTABLE seg_codes = rtoc_indexed_result_15?;
+  MUTABLE seg_codes = rtoc_indexed_result_15;
   TRY (emit__check_fsm_cleanup_invariant_mut(seg_mir_codes, segment_nodes, liveness, captured, conservative_promoted));
   MUTABLE void_assign_stmt_branch_value: ?Set = NIL;
   IF is_void THEN
@@ -590,7 +590,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   IF rtoc_indexed_result_21 == NIL THEN
     RETURN NIL;
   END
-  MUTABLE segment_specs = rtoc_indexed_result_21?;
+  MUTABLE segment_specs = rtoc_indexed_result_21;
   TRY (emit__register_owned_suspend_result_cleanups_mut(segment_specs, &ctx, id));
   MUTABLE lock_extra_fields: []ContextFieldDecl = List[];
   MUTABLE next_lock_segment_index = segment_specs.length();

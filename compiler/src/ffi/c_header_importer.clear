@@ -156,7 +156,7 @@ PRIVATE FN translator__collect_aliases_mut(MUTABLE self: Translator) RETURNS Voi
     CONTINUE;
       END
       MUTABLE name = COPY compilerRegexCapture(match, 1);
-      MUTABLE rhs = compilerRegexCapture(match?, 2).trim();
+      MUTABLE rhs = compilerRegexCapture(match, 2).trim();
       self.aliases[name] = rhs;
     rtoc_idx = rtoc_idx + 1;
     END

@@ -257,7 +257,7 @@ PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MU
         pipelineRewriter__patch_chain_source_mut(&self, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
-    MUTABLE is_fold = ((((terminal == NIL) OR (((terminal?) != NIL) AND ((terminal) IS_A EachOp))) OR aST__pipeline_terminal_fold(terminal)) OR aST__pipeline_list_terminal(terminal));
+    MUTABLE is_fold = ((((terminal == NIL) OR (((terminal) != NIL) AND ((terminal) IS_A EachOp))) OR aST__pipeline_terminal_fold(terminal)) OR aST__pipeline_list_terminal(terminal));
     IF ((stages.length() > 0) OR ((is_fold AND (terminal != NIL)))) THEN
       IF is_fold THEN
         RETURN TRY (pipelineRewriter__fuse_pipeline(&self, &node, &real_source, stages, &terminal));

@@ -3115,7 +3115,7 @@ PRIVATE FN mIRChecker__check_stmt_for_unhoisted(MUTABLE self: MIRChecker, node: 
     IF node IS_A Let AS let THEN
       MUTABLE let_mutable = COPY let;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&self, let_mutable.init, "Let initializer"));
-    ELSE_IF node? IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
+    ELSE_IF node IS_A ReassignWithCleanup AS reassign_with_cleanup THEN
       MUTABLE reassign_with_cleanup_mutable = COPY reassign_with_cleanup;
       TRY (mIRChecker__check_owned_expr_position_for_unhoisted(&self, reassign_with_cleanup_mutable.value, "ReassignWithCleanup value"));
     ELSE_IF node? IS_A DiscardOwned AS discard_owned THEN
