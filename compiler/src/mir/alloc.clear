@@ -123,7 +123,7 @@ PUB FN allocDeclarationNode__finalize_storage_mut(MUTABLE self: AllocDeclaration
   # Rank topology belongs to the declared comma dimensions; a List[] initializer
   # is construction syntax, not an @list capability.
   IF type__rank?(type_obj) THEN
-    stamped.collection = NIL;
+    TRY (type__set_collection(&stamped, NIL));
   END
 
   allocDeclarationNode__set_type_object_mut(&self, COPY stamped);

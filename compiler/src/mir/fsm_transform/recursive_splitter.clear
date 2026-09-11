@@ -151,28 +151,38 @@ PRIVATE FN fsmRecursiveSplitter__emit_stmts(stmts: []SegmentStmt, after_idx: Int
   IF (FALSE OR (stmts.length() == 0)) THEN
     RETURN COPY after_idx;
   END
-  MUTABLE pivot_idx = stmts.indexOf();
+  MUTABLE pivot_idx: ?Int64 = NIL;
+  MUTABLE rtoc_scan = 0;
+  WHILE (rtoc_scan < stmts.length()) DO
+    IF TRY (fsmRecursiveSplitter__stmt_introduces_split?(stmts[rtoc_scan])) THEN
+      pivot_idx = rtoc_scan;
+      BREAK;
+    END
+    rtoc_scan = (rtoc_scan + 1);
+  END
   IF (pivot_idx == NIL) THEN
     RETURN builder__push(&builder, stmts, SegmentTail{ Goto: COPY Goto{ target_index: COPY after_idx } });
   END
-  MUTABLE pre = COPY UNWRAP (stmts.substr(0, (pivot_idx - 0)));
-  MUTABLE pivot: ?SegmentStmt = COPY stmts[pivot_idx];
-  MUTABLE rest = (stmts.substr(((pivot_idx + 1)), (stmts.length() - ((pivot_idx + 1)))) OR_ELSE List[]);
-  MUTABLE rest_entry = TRY (fsmRecursiveSplitter__emit_stmts(rest, after_idx, &builder, &lowering, ctx));
-  MUTABLE pivot_ast_branch_value: ?SegmentStmt = NIL;
-  IF pivot? IS_A Locatable AS locatable THEN
-    pivot_ast_branch_value = castLocatableToOptionalSegmentStmt(locatable);
-  ELSE
-    pivot_ast_branch_value = NIL;
+  MUTABLE rtoc_pivot_at: Int64 = pivot_idx;
+  MUTABLE pre: []SegmentStmt = List[];
+  MUTABLE rest: []SegmentStmt = List[];
+  MUTABLE rtoc_split = 0;
+  WHILE (rtoc_split < stmts.length()) DO
+    IF (rtoc_split < rtoc_pivot_at) THEN
+      &pre.append(COPY UNWRAP (stmts[rtoc_split]));
+    ELSE_IF (rtoc_split > rtoc_pivot_at) THEN
+      &rest.append(COPY UNWRAP (stmts[rtoc_split]));
+    END
+    rtoc_split = (rtoc_split + 1);
   END
-  MUTABLE pivot_ast: ?SegmentStmt = pivot_ast_branch_value;
-  MUTABLE sus:? = IF pivot_ast != NIL THEN
-    segments__classify_suspend(castSegmentStmtToLocatable(pivot_ast))
-  ELSE
-    NIL
-  END;
-  IF sus THEN
-    RETURN TRY (fsmRecursiveSplitter__emit_suspend_with_pre(sus, pre, rest_entry, &builder));
+  MUTABLE pivot: ?SegmentStmt = COPY stmts[rtoc_pivot_at];
+  MUTABLE rest_entry = TRY (fsmRecursiveSplitter__emit_stmts(rest, after_idx, &builder, &lowering, ctx));
+  MUTABLE sus: ?SegmentTail = NIL;
+  IF pivot EXISTS AS rtoc_pivot_value THEN
+    sus = TRY (segments__classify_suspend(castOptionalSegmentStmtToLocatable(rtoc_pivot_value)));
+  END
+  IF sus EXISTS AS rtoc_suspend_tail THEN
+    RETURN TRY (fsmRecursiveSplitter__emit_suspend_with_pre(castSegmentTailToSuspendTail(rtoc_suspend_tail), pre, rest_entry, &builder));
   ELSE
     MUTABLE pivot_entry = TRY (fsmRecursiveSplitter__emit_pivot(UNWRAP (pivot), rest_entry, &builder, &lowering, ctx));
     IF pre.empty?() THEN
@@ -832,6 +842,14 @@ FN castNodeToSegmentStmt(value: Node) RETURNS SegmentStmt ->
     DEFAULT -> panic("Invalid cast to SegmentStmt");
   END
   panic("Invalid cast to SegmentStmt");
+END
+FN castSegmentTailToSuspendTail(value: SegmentTail) RETURNS SuspendTail ->
+  PARTIAL MATCH value START
+    SegmentTail.IoSuspend AS cast_payload -> RETURN SuspendTail{ IoSuspend: COPY cast_payload };,
+    SegmentTail.NextSuspend AS cast_payload -> RETURN SuspendTail{ NextSuspend: COPY cast_payload };,
+    SegmentTail.LockSuspend AS cast_payload -> RETURN SuspendTail{ LockSuspend: COPY cast_payload };,
+  END
+  panic("segment tail is not a suspend");
 END
 FN castOptionalSegmentStmtToLocatable(value: ?SegmentStmt) RETURNS Locatable ->
   IF value == NIL THEN
