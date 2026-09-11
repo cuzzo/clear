@@ -395,7 +395,6 @@ module MIRLoweringExpressions
     end
   end
 
-  sig { params(node: AST::Locatable, operation: TenseOperationKind, backend: TenseBackendForm).returns(TenseOperationPlan) }
   # A missing stamp is a compiler bug; naming the site is the difference
   # between a work list and a needle in a linked program.
   sig { params(node: T.untyped).returns(String) }
@@ -403,11 +402,20 @@ module MIRLoweringExpressions
     tok = node.respond_to?(:token) ? node.token : nil
     return '' unless tok
 
-    " (line #{tok[:line]}, col #{tok[:column]}#{$CLEAR_PROBE_UNIT ? ", unit #{$CLEAR_PROBE_UNIT}" : ''})"
+    # The token's own file, not the unit being compiled: a linked build lowers
+    # imported units too, and naming the importer sends you to the wrong file.
+    where = tok[:file] || $CLEAR_PROBE_UNIT
+    fn = begin
+      current_function_context&.zig_name
+    rescue StandardError
+      nil
+    end
+    " (#{where}:#{tok[:line]}:#{tok[:column]}, `#{tok[:value]}`, in #{fn || '?'})"
   rescue StandardError
     ''
   end
 
+  sig { params(node: AST::Locatable, operation: TenseOperationKind, backend: TenseBackendForm).returns(TenseOperationPlan) }
   def require_tense_operation_plan!(node, operation, backend)
     plan = T.cast(node.tense_plan, T.nilable(TenseOperationPlan))
     unless plan && plan.operation == operation && plan.backend_form == backend
