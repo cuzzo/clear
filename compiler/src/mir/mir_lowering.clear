@@ -5486,9 +5486,9 @@ PRIVATE FN mIRLowering__try_catch_with_provenance(self: MIRLowering, left: Emitt
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE stripped:! = mIRLowering__strip_try(rtoc_self_view, left);
-    MUTABLE out = TryCatch{ expr: COPY stripped, catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-    IF ((emittable__result_type(stripped) != NIL) AND emittable__result_type(stripped)) THEN
-      out.result_type = TRY (type__new( TypeConstructionInput{ Type: COPY UNWRAP (emittable__result_type(stripped)) }));
+    MUTABLE out = TryCatch{ expr: COPY TRY (stripped), catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+    IF emittable__result_type(TRY (stripped)) != NIL THEN
+      out.result_type = TRY (type__new( TypeConstructionInput{ Type: COPY UNWRAP (emittable__result_type(TRY (stripped))) }));
     ELSE_IF ((fallback != NIL) AND mIRLoweringFallback__responds_to_full_type?(fallback)) THEN
       out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( CAST(fallback AS Locatable))) }));
     END
@@ -5855,10 +5855,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       IF (TRY (functionState__bindings(mIRLowering__function_state(&rtoc_self_view))))[identifier__name(identifier)] != NIL THEN
     RETURN KEEP ((TRY (functionState__bindings(mIRLowering__function_state(&rtoc_self_view))))[identifier__name(identifier)])?;
       ELSE
-    RETURN mIRLowering__new();
+    RETURN cleanupEntry__none();
       END
     ELSE
-      RETURN mIRLowering__new();
+      RETURN cleanupEntry__none();
     END
 }
 END
@@ -5889,7 +5889,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF (ast_node IS_A MoveNode OR ast_node IS_A KeepNode) THEN
       RETURN TRUE;
     END
-    IF ast_node IS_A CopyNode AS MUTABLE copy_node THEN
+    IF ast_node IS_A CopyNode AS copy_node THEN
       MUTABLE copy_type = TRY (mIRLowering__copy_source_type_info(rtoc_self_view, copy_node.value));
       MUTABLE rtoc_recv_5811 = mIRLowering__lifecycle_registry(&rtoc_self_view);
       RETURN ((TRY (lifecycleRegistry__fetch(rtoc_recv_5811, copy_type))).copy_strategy != :bit_copy);
@@ -5944,12 +5944,13 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN FALSE;
     END
     MUTABLE root:? = (aST__root_identifier(ast_node));
-    MUTABLE borrowed = (((IF root != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_186:? = root.symbol;
-    symbolEntry__borrow_provenance?( UNWRAP (rtoc_local_receiver_186)) }
-    ELSE
-      NIL
-    END)) OR aST__container_borrow?(ast_node));
+    MUTABLE borrowed: Bool = FALSE;
+    IF root EXISTS AS root_value THEN
+      IF root_value.symbol EXISTS AS root_symbol THEN
+        borrowed = symbolEntry__borrow_provenance?(root_symbol);
+      END
+    END
+    borrowed = (borrowed OR aST__container_borrow?(ast_node));
     IF !(borrowed) THEN
       RETURN FALSE;
     END
@@ -5967,19 +5968,19 @@ PRIVATE FN mIRLowering__rc_retain_needed?(MUTABLE self: MIRLowering, value_node:
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF value_node IS_A Identifier AS identifier THEN
-      MUTABLE ti = TRY ( Locatable{ Identifier: COPY type__from_node_mut(Locatable{ Identifier: COPY identifier }, "rc retain") });
+      MUTABLE ti = UNWRAP (TRY (type__from_node_mut(Locatable{ Identifier: COPY identifier }, "rc retain")));
       MUTABLE declared: ?Type@multiowned = NIL;
       IF identifier.symbol != NIL THEN
         declared = COPY symbolEntry__type(((identifier.symbol)?));
       END
-      IF ((((declared != NIL) AND !(TRY (type__any_rc?(declared)))) AND TRY (type__any_rc?( UNWRAP (ti)))) AND ((identifier.symbol == NIL) OR ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_187 = ((identifier.symbol)?);
+      IF ((((declared != NIL) AND !(TRY (type__any_rc?(declared)))) AND TRY (type__any_rc?(ti))) AND ((identifier.symbol == NIL) OR ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_187 = ((identifier.symbol)?);
       symbolEntry__rc_stored?(rtoc_local_receiver_187) } != TRUE))) THEN
         RETURN FALSE;
       END
-      IF !(TRY (type__any_rc?( UNWRAP (ti)))) THEN
+      IF !(TRY (type__any_rc?(ti))) THEN
         RETURN FALSE;
       END
-      IF type__atomic_ptr?( UNWRAP (ti)) THEN
+      IF type__atomic_ptr?( ti) THEN
         RETURN FALSE;
       END
       MUTABLE rc_map = (mIRLowering__capability_state(&rtoc_self_view).rc_unwrap_map OR_ELSE {});
@@ -9821,7 +9822,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       ELSE_IF (plan_value_mutable.op == :retain_handle) THEN
         MUTABLE ti = TRY (type__from_node_mut(inner, "kept edge retain"));
         MUTABLE payload: String = "";
-        IF TRY (type__any_rc?( UNWRAP (ti))) THEN
+        IF TRY (type__any_rc?(ti)) THEN
           payload = TRY (mIRLowering__rc_payload_zig_type(rtoc_self_view, UNWRAP (ti)));
         ELSE
           payload = TRY (type__zig_type( UNWRAP (ti)));
@@ -10510,7 +10511,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         RETURN TRUE;
       END
     END
-    RETURN ((((((TRY (type__ownership_bearing?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&rtoc_self_view))) OR type__indirect?( UNWRAP (ti))) OR type__collection?( UNWRAP (ti))) OR TRY (type__any_rc?( UNWRAP (ti)))) OR type__any_sync?( UNWRAP (UNWRAP (ti)))) OR type__resource(ti)) OR TRY (type__recursive_cleanup_shape(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view))));
+    RETURN ((((((TRY (type__ownership_bearing?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&rtoc_self_view))) OR type__indirect?( UNWRAP (ti))) OR type__collection?( UNWRAP (ti))) OR TRY (type__any_rc?(ti))) OR type__any_sync?( UNWRAP (UNWRAP (ti)))) OR type__resource(ti)) OR TRY (type__recursive_cleanup_shape(ti, mIRLowering__mir_schema_lookup(&rtoc_self_view))));
 }
 END
 PRIVATE FN mIRLowering__call_owned_return_from_args?(MUTABLE self: MIRLowering, MUTABLE node: CallNode, sig_obj: ?FunctionSignature) RETURNS !?Bool
