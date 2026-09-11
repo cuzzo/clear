@@ -197,12 +197,12 @@ PRIVATE FN fsmRecursiveSplitter__stmt_introduces_split?(stmt: ?SegmentStmt) RETU
       RETURN TRUE;
     END
     IF stmt_value IS_A WithBlock@multiowned AS with_block_multiowned THEN
-      RETURN (TRY (fsmRecursiveSplitter__with_lock_suspend?(CAST(COPY with_block_multiowned AS WithBlock))) OR (TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: with_block_multiowned.body |> SELECT castLocatableToSegmentStmt(_) }))));
+      RETURN (TRY (fsmRecursiveSplitter__with_lock_suspend?(CAST(COPY with_block_multiowned AS WithBlock))) OR (TRY (fsmRecursiveSplitter__contains_suspend_anywhere?( CAST(Stmts{ ArrayValue: with_block_multiowned.body |> SELECT castLocatableToSegmentStmt(_) } AS ?[]Locatable)))));
     ELSE
       IF !(stmt_value IS_A Struct) THEN
         RETURN FALSE;
       END
-      RETURN (aST__child_bodies(castSegmentStmtToLocatable(stmt_value))) |> ANY TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt( castLocatableToNode__auto_inference(_)) }));
+      RETURN (aST__child_bodies(castSegmentStmtToLocatable(stmt_value))) |> ANY TRY (fsmRecursiveSplitter__contains_suspend_anywhere?( CAST(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt( castLocatableToNode__auto_inference(_)) } AS ?[]Locatable)));
     END
   ELSE
     RETURN FALSE;
