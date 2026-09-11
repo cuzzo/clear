@@ -308,7 +308,7 @@ PRIVATE FN programMIRFinalizer__return_expr_needs_allocator?(function: FunctionD
     RETURN TRUE;
   END
   IF type THEN
-    RETURN (!(node IS_A Literal) AND ((((((type__string?(type) OR type__heap_ptr?(type)) OR type.collection_value?()) OR type.collection?()) OR type.needs_cleanup?(schema_lookup)) OR type.recursive_cleanup_shape?(schema_lookup))));
+    RETURN (!(node IS_A Literal) AND ((((((type__string?(type) OR type__heap_ptr?(type)) OR type__collection_value?(type)) OR type.collection?()) OR type.needs_cleanup?(schema_lookup)) OR type.recursive_cleanup_shape?(schema_lookup))));
   ELSE
     RETURN FALSE;
   END

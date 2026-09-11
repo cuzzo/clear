@@ -516,7 +516,7 @@ PUB FN ownershipDataflow__cleanup_decisions_mut(MUTABLE self: OwnershipDataflow,
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_11.length() DO
       MUTABLE var:? = COPY emittable__name( CAST(UNWRAP (rtoc_each_items_11[rtoc_idx]) AS Emittable));
-      MUTABLE entry = COPY KEEP rtoc_each_items_11[rtoc_idx]?.entry;
+      MUTABLE entry:? = COPY KEEP rtoc_each_items_11[rtoc_idx]?.entry;
       IF !(cleanupEntry__needs_cleanup?( UNWRAP (entry))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
