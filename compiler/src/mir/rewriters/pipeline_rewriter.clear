@@ -1218,7 +1218,7 @@ PRIVATE FN pipelineRewriter__needs_transpiler_pipeline?(self: PipelineRewriter, 
 END
 PRIVATE FN pipelineRewriter__patch_chain_source_mut(MUTABLE self: PipelineRewriter, node: BinaryOp, new_source: Locatable) RETURNS Locatable ->
     MUTABLE cursor: BinaryOp = COPY node;
-    WHILE (cursor.left IS_A BinaryOp AND locatable__smooth?(cursor.left)) DO
+    WHILE (cursor.left IS_A BinaryOp AND (locatable__smooth OR_ELSE FALSE)?(cursor.left)) DO
       cursor = COPY castLocatableToBinaryOp__pipeline_rewriter(cursor.left);
     END
     cursor.left = COPY new_source;

@@ -1929,7 +1929,7 @@ PRIVATE FN borrowChecker__handle_with_block(MUTABLE self: BorrowChecker, stmt: W
       IF borrowState__conflicts_with?(body_state, source, kind) THEN
           IF (kind == :mutable) THEN
             &self.errors.append("[ALIAS_VIOLATION] ${self.fn_name}::${(source OR_ELSE "")} -- mutable borrow (RESTRICT) while already borrowed${borrowChecker__line_info(self, token)}");
-          ELSE_IF borrowState__mutable?(body_state, UNWRAP (source)) THEN
+          ELSE_IF borrowState__mutable?(body_state, source) THEN
             &self.errors.append("[ALIAS_VIOLATION] ${self.fn_name}::${(source OR_ELSE "")} -- immutable borrow while mutably borrowed (RESTRICT)${borrowChecker__line_info(self, token)}");
           END
       END

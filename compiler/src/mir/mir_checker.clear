@@ -2356,14 +2356,14 @@ PRIVATE FN mIRChecker__verify_allocator_metadata_contracts_mut(MUTABLE self: MIR
     CONTINUE;
           END
           MUTABLE rtoc_bound_2682 = alloc_metadata;
-          &self.errors.append(TRY (mIRChecker__error(self, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${emittable__variant_name(UNWRAP (metadata_nodes[rtoc_idx]))} has allocator metadata ${inlineAllocMetadata__inspect(rtoc_bound_2682)} for '${UNWRAP (target)}' but no MIR::AllocMark")));
+          &self.errors.append(TRY (mIRChecker__error(self, :INLINE_ALLOC_WITHOUT_ALLOCMARK, ruby_wrap_optional_String_Name(target), "${emittable__variant_name(UNWRAP (metadata_nodes[rtoc_idx]))} has allocator metadata ${inlineAllocMetadata__inspect(rtoc_bound_2682)} for '${target}' but no MIR::AllocMark")));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE container_alloc = ((UNWRAP (allocs[UNWRAP (target)])).first()).alloc;
+      MUTABLE container_alloc = ((UNWRAP (allocs[target])).first()).alloc;
       MUTABLE rtoc_bound_2688 = alloc_metadata;
       IF inlineAllocMetadata__primary(rtoc_bound_2688) THEN
-          MUTABLE rtoc_bound_2690 = UNWRAP (alloc_metadata);
+          MUTABLE rtoc_bound_2690 = alloc_metadata;
           MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(rtoc_bound_2690);
           IF (op_alloc != container_alloc) THEN
             &self.errors.append(TRY (mIRChecker__error(self, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${UNWRAP (target)}' is :${container_alloc}")));

@@ -8746,28 +8746,28 @@ FN rtocChildrenOfWalkNodeTestBlock(v: TestBlock) RETURNS []WalkNode ->
   IF v.before_each EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_group IN rtoc_opt_child DO
       FOR rtoc_walk_item IN rtoc_walk_group DO
-        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+        &out.append(castLocatableToWalkNode(rtoc_walk_item));
       END
     END
   END
   IF v.after_each EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_group IN rtoc_opt_child DO
       FOR rtoc_walk_item IN rtoc_walk_group DO
-        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+        &out.append(castLocatableToWalkNode(rtoc_walk_item));
       END
     END
   END
   IF v.before_all EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_group IN rtoc_opt_child DO
       FOR rtoc_walk_item IN rtoc_walk_group DO
-        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+        &out.append(castLocatableToWalkNode(rtoc_walk_item));
       END
     END
   END
   IF v.after_all EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_group IN rtoc_opt_child DO
       FOR rtoc_walk_item IN rtoc_walk_group DO
-        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+        &out.append(castLocatableToWalkNode(rtoc_walk_item));
       END
     END
   END
@@ -9473,28 +9473,28 @@ FN rtocChildrenOfWalkNodeWhenBlock(v: WhenBlock) RETURNS []WalkNode ->
   IF v.before_each EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_group IN rtoc_opt_child DO
       FOR rtoc_walk_item IN rtoc_walk_group DO
-        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+        &out.append(castLocatableToWalkNode(rtoc_walk_item));
       END
     END
   END
   IF v.after_each EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_group IN rtoc_opt_child DO
       FOR rtoc_walk_item IN rtoc_walk_group DO
-        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+        &out.append(castLocatableToWalkNode(rtoc_walk_item));
       END
     END
   END
   IF v.before_all EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_group IN rtoc_opt_child DO
       FOR rtoc_walk_item IN rtoc_walk_group DO
-        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+        &out.append(castLocatableToWalkNode(rtoc_walk_item));
       END
     END
   END
   IF v.after_all EXISTS AS rtoc_opt_child THEN
     FOR rtoc_walk_group IN rtoc_opt_child DO
       FOR rtoc_walk_item IN rtoc_walk_group DO
-        &out.append(castLocatableToWalkNode(UNWRAP (rtoc_walk_item)));
+        &out.append(castLocatableToWalkNode(rtoc_walk_item));
       END
     END
   END
