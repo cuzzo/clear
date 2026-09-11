@@ -1950,7 +1950,7 @@ PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema
   END
 END
 PUB FN loopFrameAnalysis__walk_all_nodes(nodes: ?ControlFlowNodeInput, visited: [Set]Int64 = Set[], block: FN(Locatable) -> Void) RETURNS Void ->
-  aST__each_locatable(nodes, TRUE, %(node: Locatable) USE(visited) -> {
+  aST__each_locatable(nodes, TRUE, %(node: Locatable) USE(MUTABLE visited) -> {
   IF !(&visited.insert(aST__node_identity(node))) THEN
       RETURN;
   END
