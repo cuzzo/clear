@@ -640,7 +640,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF !((node IS_A VarDecl OR ((IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :assign) ELSE FALSE END)))) THEN
         RETURN;
     END
-    MUTABLE entry = node.mir_binding_entry;
+    MUTABLE entry = aST__node_mir_binding_entry(node);
     IF !(entry) THEN
         RETURN;
     END
@@ -1519,7 +1519,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE func_call_mutable = COPY func_call;
       TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, CallNode{ FuncCall: COPY func_call_mutable }, state));
     ELSE_IF (stmt IS_A MethodCall) THEN
-      TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, stmt.object, state));
+      TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, locatable__object(stmt), state));
       TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, castLocatableToCallNode__control_flow(stmt), state));
     ELSE_IF stmt IS_A IfStatement AS if_statement THEN
       MUTABLE if_statement_mutable = COPY if_statement;
@@ -1617,7 +1617,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE func_call_mutable = COPY func_call;
         TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, CallNode{ FuncCall: COPY func_call_mutable }, state));
       ELSE_IF (node_value_mutable IS_A MethodCall) THEN
-        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, node_value_mutable.object, state));
+        TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, locatable__object(node_value_mutable), state));
         TRY (useAfterMoveChecker__check_call_reads(&rtoc_self_view, castLocatableToCallNode__control_flow(node_value_mutable), state));
       ELSE_IF node_value_mutable IS_A GetField AS get_field THEN
         MUTABLE get_field_mutable = COPY get_field;
@@ -1891,7 +1891,7 @@ PUB FN loopFrameAnalysis__outer_mutating_receiver_call?(node: Locatable, local_n
       RETURN FALSE;
     END
     MUTABLE receiver =     IF node IS_A MethodCall THEN
-      node.object
+      locatable__object(node)
     ELSE
       locatable__args(node).first()
     END;
@@ -1921,7 +1921,7 @@ PUB FN loopFrameAnalysis__outer_frame_receiver_alloc?(body: []Locatable, local_n
   IF !((TRY (functionSignature__emits_allocating?( UNWRAP (sig))) AND TRY (functionSignature__mutates_receiver?( UNWRAP (sig))))) THEN
       RETURN;
   END
-  MUTABLE root: ?Identifier = aST__root_identifier(node.object);
+  MUTABLE root: ?Identifier = aST__root_identifier(locatable__object(node));
   IF !(root?.symbol) THEN
       RETURN;
   END
