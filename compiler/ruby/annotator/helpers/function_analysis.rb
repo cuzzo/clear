@@ -482,6 +482,16 @@ module FunctionAnalysis
   def resolve_call(node, args)
     T.bind(self, Annotator::Phases::TypeAnalysisSession) rescue nil
     func_name = node.name
+    # The postfix-call parser accepts any expression as the callee, and
+    # FuncCall#name stringifies whatever sits in the slot. Read the slot so a
+    # bare identifier still resolves by name and every other expression -- which
+    # has no name to look up -- is reported instead of dumped into the message.
+    callee = node.is_a?(AST::FuncCall) ? node[:name] : nil
+    if callee && !callee.is_a?(String) && !callee.is_a?(Symbol)
+      return error!(node, :CALL_TARGET_NOT_IDENTIFIER) unless callee.is_a?(AST::Identifier)
+
+      func_name = callee.name
+    end
 
     scope = lookup_scope_for(func_name)
     unless scope

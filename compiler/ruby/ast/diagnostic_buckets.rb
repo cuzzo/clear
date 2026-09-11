@@ -60,7 +60,7 @@ module DiagnosticBuckets
       summary: "Wrong arity, wrong arg type, wrong return. Familiar to anyone who's used a typed language; same shape as Python's TypeError.",
       codes: %i[
         ARITY_MISMATCH ARITY_MISMATCH_RANGE ARGUMENT_TYPE_ERROR
-        NOT_A_FUNCTION RETURN_MISMATCH
+        NOT_A_FUNCTION CALL_TARGET_NOT_IDENTIFIER RETURN_MISMATCH
         STDLIB_METHOD_NO_ARGS STDLIB_METHOD_ARITY
         INTRINSIC_NO_OVERLOAD INTRINSIC_REJECTED
       ],

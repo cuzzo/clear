@@ -3294,6 +3294,11 @@ module DiagnosticRegistry
       template: "Unsupported ABI C %{position} type %{type}: %{reason}.",
       summary:  "The declaration uses a CLEAR representation that has no sound C ABI lowering.",
     },
+    CALL_TARGET_NOT_IDENTIFIER: {
+      severity: :error, category: :type,
+      template: "Cannot call this expression directly. Bind it to a variable first, then call the variable.",
+      summary:  "Call target is an expression, not a named binding.",
+    },
     NOT_A_FUNCTION: {
       severity: :error, category: :type,
       template: "Cannot call '%{name}' - not a function",

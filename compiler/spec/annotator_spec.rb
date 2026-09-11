@@ -402,6 +402,34 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "Uppercase callee" do
+      let(:code) {
+        <<~FLUX
+          PRINT("x");
+        FLUX
+      }
+      it "names the callee instead of dumping its node" do
+        expect { ast }.to raise_error(/Undefined function 'PRINT'/)
+      end
+    end
+
+    context "Expression callee" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Holder { op: FN(Int64) -> Int64 }
+          FN double(x: Int64) RETURNS Int64 -> RETURN (x * 2); END
+          FN main() RETURNS Int64 ->
+            h = Holder{ op: double };
+            b = (COPY h.op)(10);
+            RETURN b;
+          END
+        FLUX
+      }
+      it "rejects calling an expression and says to bind it first" do
+        expect { ast }.to raise_error(/Cannot call this expression directly/)
+      end
+    end
+
     context "Missing Local Argument" do
        let(:code) {
         <<~FLUX
