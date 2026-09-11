@@ -4643,7 +4643,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         methods_branch_value = lifecycle_methods;
       END
       MUTABLE methods: ?[]FnDef = methods_branch_value;
-      RETURN Emittable{ MIRStructDef: COPY MIRStructDef{ name: COPY node.name, fields: fields, methods: methods, visibility: node.visibility, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
+      RETURN Emittable{ MIRStructDef: COPY MIRStructDef{ name: COPY node.name, fields: fields, methods: CAST(methods AS ?[]Emittable), visibility: node.visibility, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
 }
 END
@@ -4674,7 +4674,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         MUTABLE wrapped_plan = COPY TRY (lifecycleRegistry__fetch(rtoc_recv_4602, wrapped));
         IF (wrapped_plan.drop_strategy == :resource_close) THEN
           MUTABLE capture = "__close_${mIRLowering__zig_safe_name(rtoc_self_view, rtoc_key)}";
-          &drop_statements.append(CAST(IfBindStmt{ bindings: COPY [{:expr: field_ref, :capture: capture, :pointer_capture: TRUE}], then_body: [Emittable{ ResourceClose: COPY ResourceClose{ target: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, close_plan: UNWRAP (wrapped_plan.resource_close_plan), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
+          &drop_statements.append(CAST(IfBindStmt{ bindings: [MIRIfBinding{ expr: CAST(COPY field_ref AS Emittable), capture: MirCapture{ StringValue: COPY capture }, node_ref: NIL, owns_capture: NIL, predicate: NIL, pointer_capture: TRUE }], then_body: [Emittable{ ResourceClose: COPY ResourceClose{ target: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, close_plan: UNWRAP (wrapped_plan.resource_close_plan), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
         ELSE_IF lifecyclePlan__needs_drop?(plan) THEN
           &drop_statements.append(TRY (mIRLowering__lifecycle_cleanup_statement(&rtoc_self_view, Expr{ Emittable: Emittable{ FieldGet: COPY field_ref } }, field_type, Expr{ Emittable: Emittable{ Ident: COPY alloc_ref } })));
         END
@@ -4693,21 +4693,21 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     END
     MUTABLE methods: []FnDef = List[];
-    drop_statements = ([Suppress{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + drop_statements);
+    drop_statements = ([Emittable{ Suppress: COPY Suppress{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + drop_statements);
     IF (drop_statements.length() == 1) THEN
-      drop_statements = ([Suppress{ name: "self", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + drop_statements);
+      drop_statements = ([Emittable{ Suppress: COPY Suppress{ name: "self", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + drop_statements);
     END
-    &methods.append(FnDef{ name: "__clear_drop", params: [MIRParam{ name: "self", zig_type: "*@This()", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }, MIRParam{ name: "alloc", zig_type: "std.mem.Allocator", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }], ret_type: "void", body: drop_statements |> SELECT castStmtToLocatable(_), visibility: :pub, can_fail: FALSE, comptime_params: List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+    &methods.append(FnDef{ name: "__clear_drop", params: [MIRParam{ name: "self", zig_type: "*@This()", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }, MIRParam{ name: "alloc", zig_type: "std.mem.Allocator", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }], ret_type: "void", body: COPY drop_statements, visibility: :pub, can_fail: FALSE, comptime_params: List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
     IF !(copy_forbidden) THEN
-      clone_statements[0] = Let{ name: COPY "result", init: Emittable{ Ident: COPY self_ref }, mutable: clone_fields |> ANY _, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
-      clone_statements = ([Suppress{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + clone_statements);
+      clone_statements[0] = Let{ name: COPY "result", init: Emittable{ Ident: COPY self_ref }, mutable: !(clone_fields.empty?()), annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
+      clone_statements = ([Emittable{ Suppress: COPY Suppress{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + clone_statements);
       &clone_statements.append(CAST(ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: "result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
-      &methods.append(FnDef{ name: "__clear_clone", params: [MIRParam{ name: "self", zig_type: "@This()", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }, MIRParam{ name: "alloc", zig_type: "std.mem.Allocator", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }], ret_type: "@This()", body: clone_statements |> SELECT castStmtToLocatable(_), visibility: :pub, can_fail: TRUE, comptime_params: List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+      &methods.append(FnDef{ name: "__clear_clone", params: [MIRParam{ name: "self", zig_type: "@This()", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }, MIRParam{ name: "alloc", zig_type: "std.mem.Allocator", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }], ret_type: "@This()", body: COPY clone_statements, visibility: :pub, can_fail: TRUE, comptime_params: List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
     END
     RETURN methods;
 }
 END
-PRIVATE FN mIRLowering__lifecycle_cleanup_statement(MUTABLE self: MIRLowering, field_ref: Expr, field_type: Type, alloc_ref: Expr) RETURNS !Stmt
+PRIVATE FN mIRLowering__lifecycle_cleanup_statement(MUTABLE self: MIRLowering, field_ref: Expr, field_type: Type, alloc_ref: Expr) RETURNS !Emittable
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
@@ -4726,31 +4726,45 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF node.type_params.any?() THEN
       MUTABLE comptime_params = node.type_params |> SELECT "comptime ${_}: type";
       MUTABLE lifecycle_methods = TRY (mIRLowering__lower_union_lifecycle_methods(&rtoc_self_view, node, variant_facts));
-      MUTABLE inner_union = UnionTypeDef{ name: NIL, variants: variants, visibility: NIL, methods: { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_137: ?Void = NIL;
+      MUTABLE inner_union = UnionTypeDef{ name: NIL, variants: variants, visibility: NIL, methods: { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_137: ?[]Emittable = NIL;
       IF (lifecycle_methods.length() == 0) THEN
         rtoc_ternary_value_137 = NIL;
       ELSE
-        rtoc_ternary_value_137 = lifecycle_methods;
+        rtoc_ternary_value_137 = CAST(COPY lifecycle_methods AS ?[]Emittable);
       END
       rtoc_ternary_value_137? }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
       MUTABLE body = [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ UnionTypeDef: COPY inner_union }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
-      MUTABLE generic_fn = FnDef{ name: node.name, params: List[], ret_type: "type", body: body |> SELECT SegmentStmt{ Emittable: Emittable{ ReturnStmt: COPY _ } }, visibility: NIL, can_fail: FALSE, comptime_params: comptime_params, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      MUTABLE generic_fn = FnDef{ name: node.name, params: List[], ret_type: "type", body: COPY body, visibility: NIL, can_fail: FALSE, comptime_params: comptime_params, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
       IF (helper_structs.length() > 0) THEN
-        RETURN (helper_structs + [Emittable{ FnDef: COPY generic_fn }]);
+        MUTABLE lowered_items: []Emittable = List[];
+        FOR helper IN helper_structs DO
+          IF helper EXISTS AS helper_value THEN
+            &lowered_items.append(Emittable{ MIRStructDef: COPY helper_value });
+          END
+        END
+        &lowered_items.append(Emittable{ FnDef: COPY generic_fn });
+        RETURN MIRLoweringLoweredMir{ ArrayValue: COPY lowered_items };
       ELSE
         RETURN MIRLoweringLoweredMir{ Emittable: Emittable{ FnDef: COPY generic_fn } };
       END
     ELSE
       lifecycle_methods = TRY (mIRLowering__lower_union_lifecycle_methods(&rtoc_self_view, node, variant_facts));
-      MUTABLE union_node = UnionTypeDef{ name: node.name, variants: variants, visibility: node.visibility, methods: { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_139: ?Void = NIL;
+      MUTABLE union_node = UnionTypeDef{ name: node.name, variants: variants, visibility: node.visibility, methods: { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_139: ?[]Emittable = NIL;
       IF (lifecycle_methods.length() == 0) THEN
         rtoc_ternary_value_139 = NIL;
       ELSE
-        rtoc_ternary_value_139 = lifecycle_methods;
+        rtoc_ternary_value_139 = CAST(COPY lifecycle_methods AS ?[]Emittable);
       END
       rtoc_ternary_value_139? }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
       IF (helper_structs.length() > 0) THEN
-        RETURN (helper_structs + [Emittable{ UnionTypeDef: COPY union_node }]);
+        MUTABLE union_items: []Emittable = List[];
+      FOR helper IN helper_structs DO
+        IF helper EXISTS AS helper_value THEN
+          &union_items.append(Emittable{ MIRStructDef: COPY helper_value });
+        END
+      END
+      &union_items.append(Emittable{ UnionTypeDef: COPY union_node });
+      RETURN MIRLoweringLoweredMir{ ArrayValue: COPY union_items };
       ELSE
         RETURN MIRLoweringLoweredMir{ Emittable: Emittable{ UnionTypeDef: COPY union_node } };
       END
@@ -4789,7 +4803,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       MUTABLE dupe_fn = FnDef{ name: "__clear_clone", params: [MIRParam{ name: "self", zig_type: "@This()", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }, MIRParam{ name: "alloc", zig_type: "std.mem.Allocator", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }], ret_type: "!@This()", body: CAST(dupe_stmts |> SELECT castStmtToLocatable(_) AS []Emittable), visibility: :pub, can_fail: FALSE, comptime_params: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
       methods = [deinit_fn, dupe_fn];
     END
-    RETURN MIRStructDef{ name: unionVariantLoweringFact__helper_name(fact), fields: fields, methods: methods, visibility: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN MIRStructDef{ name: unionVariantLoweringFact__helper_name(fact), fields: fields, methods: CAST(methods AS ?[]Emittable), visibility: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 }
 END
 PRIVATE FN mIRLowering__inline_union_deinit_statements(MUTABLE self: MIRLowering, entry: InlineStructDeinitEntry, self_ref: Expr, alloc_ref: Expr) RETURNS ![]Emittable
