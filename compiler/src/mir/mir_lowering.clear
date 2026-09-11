@@ -6197,7 +6197,10 @@ PRIVATE FN mIRLowering__uniform_fsm_result_target_alloc(self: MIRLowering, facts
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE allocs = (facts |> SELECT _.target_alloc) |> DISTINCT _ |> SELECT COPY _;
     IF ((allocs).length() == 1) THEN
-      RETURN allocs.first();
+      FOR only_alloc IN allocs DO
+        RETURN COPY only_alloc;
+      END
+      RETURN NIL;
     ELSE
       RETURN NIL;
     END
@@ -10899,7 +10902,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
       END
       RETURN COPY method_call.args[(index_value - 1)];
     END
-    RETURN COPY node__args(node)[index_value];
+    RETURN COPY (node__args(node) OR_ELSE List[])[index_value];
 }
 END
 PRIVATE FN mIRLowering__materialize_stdlib_arguments(MUTABLE self: MIRLowering, mir_args: []Emittable, stdlib_facts: StdlibCallFacts, ownership_facts: CallOwnershipFacts, sink_alloc: String@symbol, val_alloc_placeholder_input: ?String@symbol) RETURNS !StdlibArgumentMaterialization
@@ -10969,7 +10972,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       END
     rtoc_idx = rtoc_idx + 1;
       END
-      &consumed_names.uniq_mut();
+      consumed_names = consumed_names |> DISTINCT _ |> SELECT COPY _;
       val_alloc_placeholder = (val_alloc_placeholder OR_ELSE TRY (mIRLowering__stdlib_consumed_alloc(&rtoc_self_view, consumed_names)));
     END
     RETURN StdlibArgumentMaterialization{ mir_args: COPY materialized_args, consumed_names: COPY consumed_names, consumed_operands: COPY consumed_operands, val_alloc_placeholder: COPY val_alloc_placeholder };
@@ -10983,20 +10986,36 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       RETURN NIL;
     END
     MUTABLE pending_stmts = COPY mIRLowering__function_state(&rtoc_self_view).pending_stmts;
-    MUTABLE allocs = (consumed_names |> SELECT:? {
-    MUTABLE mark: ?AllocMark = CAST(pending_stmts.reverse() |> FIND (_ IS_A AllocMark AND (_.name() == _)) AS ?AllocMark);
-    (IF ruby_wrap_optional_string_to_symbol__mir_lowering(mark?.alloc) != NIL THEN ruby_wrap_optional_string_to_symbol__mir_lowering(mark?.alloc) ELSE (IF (TRY (functionState__bindings(mIRLowering__function_state(&rtoc_self_view))))[_] != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_401 = ((TRY (functionState__bindings(mIRLowering__function_state(&rtoc_self_view))))[_]);
-    cleanupEntry__alloc(rtoc_local_receiver_401) }
-      ELSE
-        NIL
-      END) END)
-    } |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
-    IF ((allocs).length() == 1) THEN
-      RETURN allocs.first();
-    ELSE
-      RETURN NIL;
+    MUTABLE allocs: [Set]String@symbol = Set[];
+    FOR consumed_name IN consumed_names DO
+      MUTABLE mark_alloc: ?String@symbol = NIL;
+      MUTABLE mark_idx = pending_stmts.length() - 1;
+      WHILE mark_idx >= 0 DO
+        IF pending_stmts[mark_idx] EXISTS AS pending_stmt THEN
+          IF pending_stmt IS_A AllocMark AS alloc_mark THEN
+            IF (alloc_mark.name == consumed_name) THEN
+              mark_alloc = COPY alloc_mark.alloc;
+              mark_idx = -1;
+            END
+          END
+        END
+        mark_idx = mark_idx - 1;
+      END
+      IF mark_alloc == NIL THEN
+        IF (TRY (functionState__bindings(mIRLowering__function_state(&rtoc_self_view))))[consumed_name] EXISTS AS binding_entry THEN
+          mark_alloc = symbol(cleanupEntry__alloc(binding_entry));
+        END
+      END
+      IF mark_alloc EXISTS AS mark_alloc_value THEN
+        &allocs.insert(COPY mark_alloc_value);
+      END
     END
+    IF ((allocs).length() == 1) THEN
+      FOR only_alloc IN allocs DO
+        RETURN COPY only_alloc;
+      END
+    END
+    RETURN NIL;
 }
 END
 PRIVATE FN mIRLowering__intrinsic_result_ownership_bearing?(MUTABLE self: MIRLowering, type_info: Type) RETURNS !Bool
@@ -11139,7 +11158,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
     MUTABLE obj: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.object)));
     MUTABLE ast_args = COPY node.args;
-    MUTABLE args = ast_args |> SELECT TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_)));
+    MUTABLE args = ast_args |> SELECT:? TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_))) |> WHERE _ != NIL |> SELECT UNWRAP (_);
     sig = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature));
     RETURN MIRMethodCall{ receiver: UNWRAP (COPY obj), method: COPY node.name, args: COPY args, try_wrap: FALSE, callable_contract: COPY TRY (mIRLowering__callable_contract_for(&rtoc_self_view, sig, ([node.object] + ast_args))), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
 }
@@ -11150,7 +11169,7 @@ PRIVATE FN mIRLowering__lower_extern_arg(MUTABLE self: MIRLowering, ast_arg: Loc
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE mir: ?Emittable = TRY (mIRLowering__lower(&rtoc_self_view, castLocatableToMIRLoweringLowerableStmt__mir_lowering(ast_arg)));
     IF mIR__const_u8_literal_cast?(mir) THEN
-      RETURN emittable__expr( UNWRAP (mir));
+      RETURN CAST(emittable__expr( UNWRAP (mir)) AS ?Emittable);
     ELSE
       RETURN mir;
     END
@@ -11356,7 +11375,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       clear_function_branch_value = lowered;
     END
     MUTABLE clear_function: Emittable = clear_function_branch_value?;
-    RETURN Emittable{ CFunctionAdapter: COPY CFunctionAdapter{ clear_function: COPY clear_function, signature: COPY signature? } };
+    RETURN Emittable{ CFunctionAdapter: COPY CFunctionAdapter{ clear_function: COPY clear_function, signature: COPY signature } };
 }
 END
 PRIVATE FN mIRLowering__lambda_tail_pipeline?(self: MIRLowering, expr: Locatable) RETURNS Bool
