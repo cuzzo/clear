@@ -69,6 +69,9 @@ require_relative 'probe_multi_error'
 # 2a asks whether the closure ANNOTATES, 2b whether it LOWERS. Without this the
 # first function that cannot lower ends the run, and 2b has no denominator.
 require_relative 'probe_lowering_survives'
+# A cache hit skips a unit's diagnostics as well as its compilation; replaying
+# them is what lets a 52s warm run answer the same question as a 10m cold one.
+require_relative 'probe_error_replay'
 require_relative '../compiler/ruby/compiler/compiler_frontend'
 
 dir = File.join(ROOT, 'tmp', 'stage2')
