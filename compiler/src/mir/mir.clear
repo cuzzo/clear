@@ -12944,7 +12944,7 @@ PUB FN inlineAllocMetadata__inspect(self: InlineAllocMetadata) RETURNS String
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    RETURN compilerInspectValue();
+    RETURN CAST(compilerInspectValue() AS String);
 }
 END
 PUB FN inlineAllocMetadata__new(alloc: ?String@symbol = NIL, key_alloc: ?String@symbol = NIL, val_alloc: ?String@symbol = NIL, shard_alloc: ?String@symbol = NIL) RETURNS InlineAllocMetadata@multiowned ->

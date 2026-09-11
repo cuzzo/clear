@@ -1208,7 +1208,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
                 END
         END
       ELSE_IF (node_value_mutable IS_A MethodCall) THEN
-        IF (node_value_mutable.object IS_A Identifier AND ((node_value_mutable.object.token() != NIL) AND (((node_value_mutable.object.token())?).type() == :TYPE_ID))) THEN
+        IF (node_value_mutable.object IS_A Identifier AND ((locatable__object(node_value_mutable).token() != NIL) AND (((node_value_mutable.object.token())?).type() == :TYPE_ID))) THEN
           FOR MUTABLE rtoc_for_elem_1212 IN node_value_mutable.args() DO
           TRY (ownershipDataflow__collect_ownership_transfers(rtoc_self_view, rtoc_for_elem_1212, &step));
           END
