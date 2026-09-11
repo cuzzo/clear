@@ -240,7 +240,7 @@ PRIVATE FN programMIRFinalizer__indexed_assignment_lowers_through_runtime?(node:
   IF !(node.name IS_A GetIndex) THEN
     RETURN FALSE;
   END
-  MUTABLE target = node.name.target();
+  MUTABLE target = locatable__target(node.name);
   IF !(target IS_A Locatable) THEN
     RETURN FALSE;
   END
@@ -291,7 +291,7 @@ PRIVATE FN programMIRFinalizer__return_expr_needs_allocator?(function: FunctionD
   IF node IS_A CopyNode AS copy_node THEN
     RETURN TRUE;
   END
-  MUTABLE type = TRY (type__success_type((&node.full_type_mut("return allocator expression"))));
+  MUTABLE type = TRY (type__success_type((&aST__full_type_mut(node, "return allocator expression"))));
   IF (type.any_rc?() OR_ELSE type.any_sync?()) THEN
     RETURN FALSE;
   END

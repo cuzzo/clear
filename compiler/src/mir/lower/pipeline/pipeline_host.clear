@@ -424,10 +424,10 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     IF (context.soa_rewrite_active AND aST__soa_placeholder_assignment?(node)) THEN
       MUTABLE assignment: Any@multiowned = COPY CAST(node AS Any@multiowned);
-      MUTABLE target: GetField = CAST(assignment.name() AS GetField);
+      MUTABLE target: GetField = CAST(locatable__name(assignment) AS GetField);
       MUTABLE field = target.field;
       &context.soa_needed_fields.insert(COPY field);
-      MUTABLE value: String = castPipelineHostReturnValueToString(TRY (pipelineHost__visit(&rtoc_self_view, CAST(assignment.value() AS Locatable))));
+      MUTABLE value: String = castPipelineHostReturnValueToString(TRY (pipelineHost__visit(&rtoc_self_view, CAST(aST__node_value(assignment) AS Locatable))));
       RETURN PipelineHostReturnValue{ StringValue: COPY "__soa_${field}[__soa_i] = ${value};" };
     END
     MUTABLE substituted = TRY (pipelineHost__substitute_placeholders(&rtoc_self_view, node));

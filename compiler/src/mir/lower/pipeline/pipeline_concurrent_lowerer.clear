@@ -446,7 +446,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_concurrent_bounded_each(self: Pipeli
   RETURN ScopeBlock{ body: TRY (pipelineConcurrentInvocation__scoped_body(invoke, List[], (COPY source.setup + CAST([Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY call, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable) + source_move))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_bc_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
-  MUTABLE work = %() USE(plan, self) -> {
+  MUTABLE work = %() USE(MUTABLE plan, self) -> {
   rtoc_lambda_result_14 = TRY (pipelineConcurrentLowerer__lower_bc_terminal_plan(self, plan.terminal_kind, &plan));
   rtoc_lambda_result_14
   };
@@ -537,7 +537,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_stream_terminal_plan(MUTABLE self: P
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_list_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
-  MUTABLE work = %() USE(plan, self) -> {
+  MUTABLE work = %() USE(MUTABLE plan, self) -> {
   rtoc_lambda_result_15 = TRY (pipelineConcurrentLowerer__lower_list_terminal_plan(self, plan.terminal_kind, &plan));
   rtoc_lambda_result_15
   };

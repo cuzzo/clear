@@ -225,7 +225,7 @@ PUB FN emit__unique_fsm_ownership_facts(facts: []FsmOwnershipFact) RETURNS ![]Fs
   RETURN facts |> DISTINCT CAST(Tuple{_.name, _.target, _.target_alloc, _.move_guarded} AS Tuple<String, String@symbol, ?String@symbol, Bool>);
 END
 PRIVATE FN emit__collect_required_move_guards(nodes: []Emittable, id: Int64, cleanup_names: []String) RETURNS ![]String ->
-  RETURN CAST((((nodes |> SELECT:? (IF !(_ IS_A TransferMark) THEN NIL ELSE (IF !(((_.target == :owned_sink) OR (_.target == :return))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = emit__normalized_ctx_field_name(CAST(_.name() AS String), id); (IF cleanup_names.contains?(name) THEN
+  RETURN CAST((((nodes |> SELECT:? (IF !(_ IS_A TransferMark) THEN NIL ELSE (IF !(((_.target == :owned_sink) OR (locatable__target(_) == :return))) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = emit__normalized_ctx_field_name(CAST(_.name() AS String), id); (IF cleanup_names.contains?(name) THEN
     name
   ELSE
     NIL

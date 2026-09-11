@@ -1001,7 +1001,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     END
     MUTABLE is_heap: Bool = FALSE;
     IF TRUE THEN
-      is_heap = (node.heap_storage?() == TRUE);
+      is_heap = (aST__node_heap_storage?(node) == TRUE);
     ELSE
       is_heap = FALSE;
     END
@@ -1321,7 +1321,7 @@ PRIVATE FN ownershipDataflow__collect_share_transfers_in(self: OwnershipDataflow
   EFFECTS REENTRANT
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
-    TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, node, FALSE, %(n: Locatable) USE(step, rtoc_self_view) -> {
+    TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, node, FALSE, %(n: Locatable) USE(MUTABLE step, rtoc_self_view) -> {
     IF n IS_A ShareNode AS share_node THEN
         TRY (ownershipDataflow__collect_share_transfer(rtoc_self_view, share_node, &step));
     END
@@ -1357,7 +1357,7 @@ PRIVATE FN ownershipDataflow__collect_bg_capture_places_in_args(self: OwnershipD
 ->
 WITH POLYMORPHIC self AS rtoc_self_view {
     MUTABLE consumed: []PlaceId = List[];
-    MUTABLE args = (stmt.args() OR_ELSE List[]);
+    MUTABLE args = (locatable__args(stmt) OR_ELSE List[]);
     FOR _ IN args DO
     TRY (ownershipDataflow__walk_expr_node(rtoc_self_view, _, FALSE, %(expr: Locatable) USE(MUTABLE consumed, state, rtoc_self_view) -> {
     IF !((expr IS_A BgBlock OR expr IS_A BgStreamBlock)) THEN
@@ -1674,7 +1674,7 @@ PRIVATE FN useAfterMoveChecker__check_share_reads(MUTABLE self: UseAfterMoveChec
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     MUTABLE source = COPY node.value;
     IF source IS_A CopyNode THEN
-      TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, source.value(), state));
+      TRY (useAfterMoveChecker__check_reads_in_expr(&rtoc_self_view, aST__node_value(source), state));
     ELSE_IF source IS_A Identifier AS source_narrowed THEN
       MUTABLE ti:? = TRY (type__from_node_mut(source, "share read"));
       IF type__shared?( UNWRAP (ti)) THEN
