@@ -1583,7 +1583,7 @@ PUB FN loopFrameAnalysis__expression_allocates_frame_value?(node: Locatable, fn_
     RETURN FALSE;
   END
   IF node IS_A FuncCall AS func_call THEN
-    MUTABLE fn: ?FunctionDef = COPY fn_nodes[funcCall__name(func_call)];
+    MUTABLE fn: ?FunctionDef = COPY fn_nodes[CAST(funcCall__name(func_call) AS String)];
     IF fn?.uses_frame THEN
       RETURN TRUE;
     END
@@ -1629,20 +1629,20 @@ PUB FN loopFrameAnalysis__outer_mutating_receiver_call?(node: Locatable, local_n
     IF !(TRY (functionSignature__mutates_receiver?(sig_value_mutable))) THEN
       RETURN FALSE;
     END
-    MUTABLE receiver =     IF node IS_A MethodCall THEN
+    MUTABLE receiver: ?Locatable =     IF node IS_A MethodCall THEN
       locatable__object(node)
     ELSE
-      locatable__args(node).first()
+      (UNWRAP (locatable__args(node))).first()
     END;
-    MUTABLE root = (aST__root_identifier(receiver));
-    IF !((IF root != NIL THEN
-      root.symbol
-    ELSE
-      NIL
-    END)) THEN
+    IF !(receiver EXISTS) THEN
       RETURN FALSE;
     END
-    RETURN !(local_names.contains?(CAST(root.name() AS String)));
+    IF aST__root_identifier(receiver) EXISTS AS root_value THEN
+      IF root_value.symbol EXISTS THEN
+        RETURN !(local_names.contains?(COPY root_value.name));
+      END
+    END
+    RETURN FALSE;
   ELSE
     RETURN FALSE;
   END
@@ -1688,8 +1688,8 @@ PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema
     RETURN FALSE;
   END
 END
-PUB FN loopFrameAnalysis__walk_all_nodes(nodes: ?ControlFlowNodeInput, visited: [Set]Int64 = Set[], block: FN(Locatable) -> Void) RETURNS Void ->
-  aST__each_locatable(nodes, TRUE, %(node: Locatable) USE(MUTABLE visited) -> {
+PUB FN loopFrameAnalysis__walk_all_nodes(nodes: []Locatable, visited: [Set]Int64 = Set[], block: FN(Locatable) -> Void) RETURNS Void ->
+  aST__each_locatable_list(nodes, TRUE, %(node: Locatable) USE(MUTABLE visited) -> {
   IF !(&visited.insert(aST__node_identity(node))) THEN
       RETURN;
   END
@@ -1698,20 +1698,23 @@ PUB FN loopFrameAnalysis__walk_all_nodes(nodes: ?ControlFlowNodeInput, visited: 
   });
 END
 PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {String}FunctionDef) RETURNS !Void ->
-  loopFrameAnalysis__walk_all_nodes(ControlFlowNodeInput{ ArrayValue: COPY body }, Set[], %(node: Locatable) USE(fn_nodes) -> {
+  loopFrameAnalysis__walk_all_nodes(CAST(COPY body AS []Locatable), Set[], %(node: Locatable) USE(fn_nodes) -> {
   MUTABLE dynamic_node = COPY node;
-  IF !((IF node IS_A ConcurrentOp AS concurrent_op THEN dynamic_node.shard_context() ELSE FALSE END)) THEN
+  IF !(node IS_A ConcurrentOp) THEN
       RETURN;
   END
-  MUTABLE ctx: PipelineShardContext = CAST(dynamic_node.shard_context() AS PipelineShardContext);
+  MUTABLE concurrent_op: ConcurrentOp = CAST(COPY node AS ConcurrentOp);
+  IF !(concurrent_op.shard_context EXISTS) THEN
+      RETURN;
+  END
+  MUTABLE ctx: PipelineShardContext = COPY UNWRAP (concurrent_op.shard_context);
   MUTABLE key_allocates_frame = TRY (loopFrameAnalysis__key_allocates_frame?(ctx.key_expr, fn_nodes));
-  MUTABLE each_body = IF ((aST__node_op(node) EXISTS) AND TRUE) THEN
-      dynamic_node.op().body()
-    ELSE
-      NIL
-    END;
-  MUTABLE body_allocates_frame = IF each_body THEN
-      (((TRY (localBindingAnalysis__direct_loop_body_facts(each_body))).frame_decls).length() > 0)
+  MUTABLE each_body: ?[]Locatable = NIL;
+  IF concurrent_op.op EXISTS AS concurrent_pipeline_op THEN
+      each_body = COPY clearParserConcurrentPipelineOp__body(concurrent_pipeline_op);
+  END
+  MUTABLE body_allocates_frame = IF each_body EXISTS AS each_body_value THEN
+      (((TRY (localBindingAnalysis__direct_loop_body_facts(each_body_value))).frame_decls).length() > 0)
     ELSE
       ctx.body_allocates_frame
     END;
@@ -1721,9 +1724,9 @@ PUB FN loopFrameAnalysis__update_shard_contexts_mut(body: []Node, fn_nodes: {Str
 END
 PUB FN loopFrameAnalysis__key_allocates_frame?(expr: Locatable, fn_nodes: {String}FunctionDef) RETURNS !Bool ->
   MUTABLE found: Bool = FALSE;
-  loopFrameAnalysis__walk_all_nodes(castLocatableToOptionalControlFlowNodeInput(expr), Set[], %(node: Locatable) USE(fn_nodes) -> {
+  loopFrameAnalysis__walk_all_nodes(([COPY expr]), Set[], %(node: Locatable) USE(fn_nodes) -> {
   IF node IS_A FuncCall AS func_call THEN
-      MUTABLE fn: ?FunctionDef = COPY fn_nodes[funcCall__name(func_call)];
+      MUTABLE fn: ?FunctionDef = COPY fn_nodes[CAST(funcCall__name(func_call) AS String)];
       IF fn?.uses_frame THEN
         found = TRUE;
       END
