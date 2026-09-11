@@ -2366,7 +2366,7 @@ PRIVATE FN mIRChecker__verify_allocator_metadata_contracts_mut(MUTABLE self: MIR
           MUTABLE rtoc_bound_2690 = alloc_metadata;
           MUTABLE op_alloc: ?String@symbol = inlineAllocMetadata__primary(rtoc_bound_2690);
           IF (op_alloc != container_alloc) THEN
-            &self.errors.append(TRY (mIRChecker__error(self, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${UNWRAP (target)}' is :${container_alloc}")));
+            &self.errors.append(TRY (mIRChecker__error(self, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "operation uses :${UNWRAP (op_alloc)} but container '${target}' is :${container_alloc}")));
           END
       END
       MUTABLE rtoc_bound_2696 = alloc_metadata;
@@ -2380,7 +2380,7 @@ PRIVATE FN mIRChecker__verify_allocator_metadata_contracts_mut(MUTABLE self: MIR
         CONTINUE;
           END
           IF (placement__explicit_frame?(stored_alloc) AND placement__explicit_heap?(container_alloc)) THEN
-              &self.errors.append(TRY (mIRChecker__error(self, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "${rtoc_each_items_52[rtoc_idx_2].label} is :frame but container '${UNWRAP (target)}' is :heap (stored data will dangle after frame rewind)")));
+              &self.errors.append(TRY (mIRChecker__error(self, :INLINE_ALLOC_MISMATCH, ruby_wrap_optional_String_Name(target), "${rtoc_each_items_52[rtoc_idx_2].label} is :frame but container '${target}' is :heap (stored data will dangle after frame rewind)")));
           END
         rtoc_idx_2 = rtoc_idx_2 + 1;
       END

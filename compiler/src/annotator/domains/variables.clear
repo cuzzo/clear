@@ -24,7 +24,7 @@ PUB FN accessPathNode__target(value: AccessPathNode) RETURNS ?Locatable@boxed ->
   END
   RETURN NIL;
 END
-FN castLocatableToAccessPathNode(value: Locatable) RETURNS ?AccessPathNode ->
+FN castLocatableToAccessPathNode__variables(value: Locatable) RETURNS ?AccessPathNode ->
   PARTIAL MATCH value START
     Locatable.Identifier AS item -> RETURN AccessPathNode{ Identifier: COPY item };,
     Locatable.GetField AS item -> RETURN AccessPathNode{ GetField: COPY item };,
