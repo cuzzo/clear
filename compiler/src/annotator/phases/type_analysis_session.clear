@@ -7232,7 +7232,7 @@ PRIVATE FN typeAnalysisSession__effects_init_mut(MUTABLE self: TypeAnalysisSessi
 END
 PRIVATE FN typeAnalysisSession__effect_state(MUTABLE self: TypeAnalysisSession) RETURNS EffectState
   EFFECTS REENTRANT ->
-    RETURN COPY typeAnalysisSession__phase_audit_inputs(&self).effect_state;
+    RETURN COPY UNWRAP (typeAnalysisSession__phase_audit_inputs(&self).effect_state);
 END
 PRIVATE FN typeAnalysisSession__effect_direct_effects(MUTABLE self: TypeAnalysisSession) RETURNS {String}[Set]String@symbol ->
     RETURN COPY typeAnalysisSession__effect_state(&self).direct_effects;
