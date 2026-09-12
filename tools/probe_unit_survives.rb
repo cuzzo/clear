@@ -84,3 +84,41 @@ TracePoint.new(:end) do |tp|
   k.prepend(ProbeUnitSurvives)
   tp.disable
 end.enable
+
+# Catching at compile_file is too LATE to cache: ModuleCache#fetch stores only
+# what its block returns, and a block that raises stores nothing -- so a unit
+# with a blocker is recompiled, together with everything it drags in, on every
+# single round. That is why a warm round never got faster than a cold one.
+#
+# Catching INSIDE the block turns the failure into a value the cache can store.
+# The diagnostics are recorded beside it by probe_error_replay and replayed on
+# the hit, so a warm round stays honest about the blocker while costing
+# nothing to rediscover it.
+module ProbeUnitCacheable
+  def fetch(unit_key, member_paths, &block)
+    super(unit_key, member_paths) do
+      begin
+        block.call
+      rescue StandardError => e
+        raise if e.is_a?(SystemExit) || e.is_a?(SignalException)
+        raise if e.class.name.to_s.include?('CircularDependency')
+
+        ProbeUnitSurvives::FAILED << {
+          'unit' => unit_key,
+          'class' => e.class.name.to_s,
+          'message' => e.message.to_s.gsub(/\e\[[0-9;]*m/, '').lines.first(3).join.strip[0, 400],
+        }
+        ProbeUnitSurvives.blank_module(File.dirname(member_paths.first.to_s))
+      end
+    end
+  end
+end
+
+TracePoint.new(:end) do |tp|
+  k = tp.self
+  next unless k.is_a?(Class)
+  own = k.instance_methods(false) + k.private_instance_methods(false)
+  next unless own.include?(:fetch) && own.include?(:reuse)
+  k.prepend(ProbeUnitCacheable)
+  tp.disable
+end.enable
