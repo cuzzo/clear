@@ -1927,7 +1927,7 @@ END
 PRIVATE FN capabilityAuditSession__compute_needs_rt_mut(MUTABLE self: CapabilityAuditSession) RETURNS !Void ->
     MUTABLE fn_nodes = TRY (capabilityAuditSession__function_node_map(self));
     MUTABLE needs_rt = TRY (capabilityAuditSession__initial_needs_rt_map(self, fn_nodes));
-    TRY (capabilityAuditSession__seed_imported_needs_rt_mut(&self, needs_rt));
+    TRY (capabilityAuditSession__seed_imported_needs_rt_mut(&self, &needs_rt));
     TRY (capabilityAuditSession__propagate_needs_rt_mut(&self, &needs_rt));
 END
 PRIVATE FN capabilityAuditSession__initial_needs_rt_map(self: CapabilityAuditSession, fn_nodes: {String}FunctionDef) RETURNS !{String}Bool ->
@@ -1952,7 +1952,7 @@ PRIVATE FN capabilityAuditSession__function_needs_runtime_directly?(self: Capabi
     MUTABLE yield_uses_rt = capabilityAuditSession__recursion_yield_needed?(self, fn_node);
     RETURN ((((((((functionDef__uses_runtime?(fn_node) OR heap_return) OR (TRY (capabilityAuditSession__function_has_fnptr_call?(self, name)))) OR has_takes_heap) OR has_catch) OR has_raise) OR thunk_uses_rt) OR yield_uses_rt) OR (name == name));
 END
-PRIVATE FN capabilityAuditSession__seed_imported_needs_rt_mut(MUTABLE self: CapabilityAuditSession, needs_rt: {String}Bool) RETURNS !Void
+PRIVATE FN capabilityAuditSession__seed_imported_needs_rt_mut(MUTABLE self: CapabilityAuditSession, MUTABLE needs_rt: {String}Bool) RETURNS !Void
   REQUIRES self: LOCAL
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
