@@ -238,7 +238,11 @@ module ParserCompat
     begin
       source = File.join(dir, 'parser_compat.clear')
       binary = File.join(dir, 'parser_compat')
-      File.write(source, clear_harness_source(cases, options[:generated_root]))
+      # The annotator comparison reuses every piece of this harness and differs
+      # only in what the generated CLEAR program does before it encodes, so the
+      # builder is swappable.
+      builder = options[:harness] || method(:clear_harness_source)
+      File.write(source, builder.call(cases, options[:generated_root]))
 
       env = {
         'CLEAR_DISABLE_BUILD_ZIG' => '1',
