@@ -394,7 +394,7 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
     RETURN FsmTail{ FsmTailJump: COPY FsmTailJump{ next_step: loop_back.target_index } };
   ELSE_IF tail IS_A CondBranch AS cond_branch THEN
     MUTABLE condition = COPY cond_branch.cond_ast;
-    RETURN FsmTail{ FsmTailCondJump: COPY FsmTailCondJump{ condition: condition, then_step: cond_branch.then_index, else_step: cond_branch.else_index } };
+    RETURN FsmTail{ FsmTailCondJump: COPY FsmTailCondJump{ condition: CAST(condition AS Emittable), then_step: cond_branch.then_index, else_step: cond_branch.else_index } };
   ELSE_IF tail IS_A IoSuspend AS io_suspend THEN
     IF desc EXISTS AS desc_value THEN
       MUTABLE explicit_next:? = io_suspend.next_index;

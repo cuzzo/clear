@@ -12065,9 +12065,9 @@ PRIVATE FN typeAnalysisSession__promote_pipe_to_observable_dest_mut(MUTABLE self
 END
 PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode, mutable_flag: Bool) RETURNS !Void ->
     MUTABLE value = UNWRAP (declarationNode__value(node));
-    TRY (typeAnalysisSession__verify_unrestricted_mut(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
-    TRY (typeAnalysisSession__handle_assign_move(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
-    TRY (typeAnalysisSession__handle_assign_borrow(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
+    TRY (typeAnalysisSession__verify_unrestricted_mut(&self, castDeclarationNodeToNode__type_analysis_session(node)));
+    TRY (typeAnalysisSession__handle_assign_move(&self, castDeclarationNodeToNode__type_analysis_session(node)));
+    TRY (typeAnalysisSession__handle_assign_borrow(&self, castDeclarationNodeToNode__type_analysis_session(node)));
     MUTABLE declared_type: ?Type = NIL;
     MATCH node START
       DeclarationNode.VarDecl AS item ->
@@ -12115,7 +12115,7 @@ PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysi
     MUTABLE storage = TRY (typeAnalysisSession__finalize_decl_storage_mut(&self, castDeclarationNodeToAllocDeclarationNode(node), castTypeToFinalType(COPY rtoc_final)));
     TRY (typeAnalysisSession__propagate_collection_metadata_mut(&self, &node, castTypeToAnnotationTypeShape(COPY rtoc_final)));
     typeAnalysisSession__propagate_call_flags_mut(&self, castDeclarationNodeToAnnotationNode(node));
-    TRY (typeAnalysisSession__set_cleanup_alloc_mut(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
+    TRY (typeAnalysisSession__set_cleanup_alloc_mut(&self, castDeclarationNodeToNode__type_analysis_session(node)));
     MUTABLE resource_result = TRY (typeAnalysisSession__resolve_resource_close(&self, UNWRAP (castDeclarationNodeToLocatable(node))));
     MATCH node START
       DeclarationNode.VarDecl AS item ->
@@ -12614,7 +12614,7 @@ PRIVATE FN typeAnalysisSession__finalize_ownership_transport_facts_mut(MUTABLE s
       MUTABLE node: DeclarationNode = COPY rtoc_decision.alias_fact.declaration;
       declarationNode__set_ownership_transport_plan_mut(&node, COPY rtoc_decision.plan);
       IF (rtoc_decision.plan.action == :move) THEN
-          TRY (typeAnalysisSession__handle_assign_move(&self, UNWRAP (castDeclarationNodeToNode__type_analysis_session(node))));
+          TRY (typeAnalysisSession__handle_assign_move(&self, castDeclarationNodeToNode__type_analysis_session(node)));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
@@ -13034,7 +13034,7 @@ PRIVATE FN typeAnalysisSession__interior_mutable_access_path?(MUTABLE self: Type
       IF !(((curr IS_A GetField OR curr IS_A GetIndex) OR curr IS_A OptionalUnwrap)) THEN
         BREAK;
       END
-      curr = UNWRAP (castLocatableToAccessPathNode(UNWRAP (accessPathNode__target(curr))));
+      curr = castLocatableToAccessPathNode(UNWRAP (accessPathNode__target(curr)));
     END
     RETURN FALSE;
 END
@@ -13226,7 +13226,7 @@ PRIVATE FN typeAnalysisSession__visit_assignment_field(MUTABLE self: TypeAnalysi
         assignment_node.auto_lock = AutoLockPlan{ var: COPY UNWRAP (var_name), sync: COPY UNWRAP (syn)};
       END
     ELSE
-      MUTABLE target: AccessPathNode = UNWRAP (COPY castLocatableToAccessPathNode(field_node.target));
+      MUTABLE target: AccessPathNode = COPY castLocatableToAccessPathNode(field_node.target);
       MUTABLE root: ?String = typeAnalysisSession__chain_root_name(&self, castAccessPathNodeToLocatable(target));
       IF root EXISTS AS root_value THEN
         IF ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_391 = TRY (typeAnalysisSession__current_scope(&self));

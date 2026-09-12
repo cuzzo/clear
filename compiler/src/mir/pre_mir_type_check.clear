@@ -3211,7 +3211,7 @@ FN rtocChildrenOfWalkNodeFieldCleanup(v: FieldCleanup) RETURNS []WalkNode ->
     &out.append(WalkNode{ StringValue: COPY rtoc_opt_child });
   END
   IF v.field EXISTS AS rtoc_opt_child THEN
-    &out.append(castLocatableToWalkNode(rtoc_opt_child));
+    &out.append(castLocatableToWalkNode( CAST(rtoc_opt_child AS Locatable)));
   END
   IF v.alloc EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });

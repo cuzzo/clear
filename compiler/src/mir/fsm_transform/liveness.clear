@@ -174,12 +174,12 @@ PRIVATE FN liveness__collect_defs(stmt: Locatable, MUTABLE into: {String}?Type) 
     MUTABLE rtoc_each_items_4 = destructuringAssignment__targets(destructuring_assignment_mutable);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_4.length() DO
-    IF (emittable__name(UNWRAP (rtoc_each_items_4[rtoc_idx])) == "_") THEN
+    IF (emittable__name( CAST(UNWRAP (rtoc_each_items_4[rtoc_idx]) AS Emittable)) == "_") THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
     MUTABLE rtoc_key_1: String = COPY UNWRAP (rtoc_each_items_4[rtoc_idx]).name;
-    into[rtoc_key_1] = (into[emittable__name(UNWRAP (rtoc_each_items_4[rtoc_idx]))] OR_ELSE TRY (liveness__stmt_decl_type(BindingStmt{ DestructureTarget: COPY rtoc_each_items_4[rtoc_idx]? })));
+    into[rtoc_key_1] = (into[emittable__name( CAST(UNWRAP (rtoc_each_items_4[rtoc_idx]) AS Emittable))] OR_ELSE TRY (liveness__stmt_decl_type(BindingStmt{ DestructureTarget: COPY rtoc_each_items_4[rtoc_idx]? })));
   rtoc_idx = rtoc_idx + 1;
     END
   END

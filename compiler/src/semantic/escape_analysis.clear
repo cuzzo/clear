@@ -1775,7 +1775,7 @@ PUB FN escapeAnalysis__borrowed_return?(fn_value: FunctionDef, expr: Locatable) 
   END
   MUTABLE returned: [Set]String = Set[];
   TRY (escapeAnalysis__collect_identifier_names_mut(expr, &returned));
-  IF ((IF fn_value.return_lifetime IS_A String@symbol AS fn_valuereturn_lifetime_payload THEN ((type__resolved(fn_valuereturn_lifetime_payload) == :wildcard)) ELSE FALSE END)) THEN
+  IF ((IF fn_value.return_lifetime IS_A String@symbol AS fn_valuereturn_lifetime_payload THEN ((type__resolved( CAST(fn_valuereturn_lifetime_payload AS Type)) == :wildcard)) ELSE FALSE END)) THEN
     MUTABLE param_names: [Set]String = Set[];
     FOR _ IN fn_value.params DO
     &param_names.insert(COPY _.name);
