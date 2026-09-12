@@ -89,7 +89,7 @@ FN ownershipNode__set_full_type(MUTABLE self: OwnershipNode, val: Type) RETURNS 
   self.type_info = COPY val;
   RETURN val;
 END
-STRUCT Edge {
+PUB STRUCT Edge {
   from: String,
   to: String,
   kind: String@symbol

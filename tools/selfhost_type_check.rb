@@ -82,6 +82,13 @@ units.each do |name, members|
   end
   # Types as they appear in signatures: after `:` or `RETURNS`, stripped of
   # capability sigils, optional markers and collection wrappers.
+  # A struct or union LITERAL names its type too: `Name{ field: ... }`. Scanning
+  # only type positions misses every constructor call.
+  src.scan(/(?<![\w.])([A-Z]\w*)\s*\{/).flatten.each do |t|
+    next if BUILTIN.include?(t) || visible.include?(t) || !all_types.include?(t)
+
+    missing[t] << name
+  end
   src.scan(/(?::|RETURNS|AS)\s+([?!]?[\[\]{}A-Za-z0-9_@<>, ]+)/).flatten.each do |raw|
     raw.scan(/\b([A-Z]\w*)/).flatten.each do |t|
       next if BUILTIN.include?(t) || visible.include?(t) || !all_types.include?(t)
