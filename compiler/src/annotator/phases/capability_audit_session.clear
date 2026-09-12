@@ -1748,7 +1748,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN capabilityAuditSession__effect_state(self: CapabilityAuditSession) RETURNS EffectState
   EFFECTS REENTRANT ->
-    RETURN COPY capabilityAuditSession__phase_audit_inputs(self).effect_state;
+    RETURN COPY UNWRAP (capabilityAuditSession__phase_audit_inputs(self).effect_state);
 END
 PRIVATE FN capabilityAuditSession__effect_direct_effects(self: CapabilityAuditSession) RETURNS {String}[Set]String@symbol ->
     RETURN COPY capabilityAuditSession__effect_state(self).direct_effects;
