@@ -471,7 +471,7 @@ PUB FN pipelineHost__lower_execution_plan(MUTABLE self: PipelineHost, execution:
     ELSE_IF (execution == PipelineExecutionKind.BatchWindow) THEN
       RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_batch_window(self, &plan.site, castLocatableToBatchWindowOp(plan.rhs))) };
     ELSE_IF (execution == PipelineExecutionKind.SetIndex) THEN
-      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_index(self, &plan.site, UNWRAP (castLocatableToIndexOp(plan.rhs).expression))) };
+      RETURN PipelineLoweringResult{ MIRBlockExpr: COPY TRY (pipelineHost__lower_index(self, &plan.site, castLocatableToIndexOp(plan.rhs).expression)) };
     ELSE_IF (execution == PipelineExecutionKind.Each) THEN
       RETURN castOptionalPipelineEachResultToOptionalPipelineLoweringResult(TRY (pipelineHost__lower_each(self, &plan.site, castLocatableToEachOp__pipeline_host(plan.rhs))));
     ELSE_IF (execution == PipelineExecutionKind.Concurrent) THEN

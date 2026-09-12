@@ -4043,7 +4043,7 @@ PRIVATE FN mIRLowering__lower_require(MUTABLE self: MIRLowering, node: RequireNo
       MUTABLE pkg_mod: ?CompiledModule = NIL;
       IF importer != NIL THEN
         pkg_mod = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_146 = importer;
-      TRY (moduleImporter__compile_package(&rtoc_mutable_receiver_146, node.path, UNWRAP (mIRLowering__program_state(self).source_dir))) };
+      TRY (moduleImporter__compile_package(&rtoc_mutable_receiver_146, node.path, mIRLowering__program_state(self).source_dir)) };
       END
       IF pkg_mod EXISTS AS pkg_mod_value THEN
         mIRLowering__merge_module_schemas_mut(&self, pkg_mod_value);
@@ -4071,9 +4071,9 @@ PRIVATE FN mIRLowering__lower_require(MUTABLE self: MIRLowering, node: RequireNo
         MUTABLE importer_value_mutable = COPY importer_value;
         MUTABLE mod_branch_value: ?CompiledModule = NIL;
         IF pkg_inline THEN
-          mod_branch_value = TRY (moduleImporter__compile_package(&importer_value_mutable, node.path, UNWRAP (mIRLowering__program_state(self).source_dir)));
+          mod_branch_value = TRY (moduleImporter__compile_package(&importer_value_mutable, node.path, mIRLowering__program_state(self).source_dir));
         ELSE
-          mod_branch_value = TRY (moduleImporter__compile_file(&importer_value_mutable, node.path, UNWRAP (mIRLowering__program_state(self).source_dir)));
+          mod_branch_value = TRY (moduleImporter__compile_file(&importer_value_mutable, node.path, mIRLowering__program_state(self).source_dir));
         END
         MUTABLE mod: ?CompiledModule = mod_branch_value;
         mIRLowering__merge_module_schemas_mut(&self, mod?);
@@ -15699,7 +15699,7 @@ END
 PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !Emittable ->
     MUTABLE special_result: ?Stmt = TRY (mIRLowering__special_assignment_result(&self, &node));
     IF special_result EXISTS AS special_result_value THEN
-      RETURN castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(UNWRAP (castStmtToEmittable(special_result_value))) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable));
+      RETURN castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(castStmtToEmittable(special_result_value)) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable));
     END
     MUTABLE plan = TRY (mIRLowering__assignment_target_plan(&self, node));
     MUTABLE kept_value: ?Emittable = TRY (mIRLowering__kept_assignment_field_value(&self, node));

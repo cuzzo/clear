@@ -1748,7 +1748,7 @@ WITH POLYMORPHIC self AS rtoc_self_view {
 END
 PRIVATE FN capabilityAuditSession__effect_state(self: CapabilityAuditSession) RETURNS EffectState
   EFFECTS REENTRANT ->
-    RETURN COPY UNWRAP (capabilityAuditSession__phase_audit_inputs(self).effect_state);
+    RETURN COPY capabilityAuditSession__phase_audit_inputs(self).effect_state;
 END
 PRIVATE FN capabilityAuditSession__effect_direct_effects(self: CapabilityAuditSession) RETURNS {String}[Set]String@symbol ->
     RETURN COPY capabilityAuditSession__effect_state(self).direct_effects;
@@ -1765,7 +1765,7 @@ PRIVATE FN capabilityAuditSession__effect_call_site_arg_families(self: Capabilit
 END
 PRIVATE FN capabilityAuditSession__effect_call_site_context_for(MUTABLE self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS {String@symbol}Bool ->
     capabilityAuditSession__set_call_site_context_mut(&self, caller_name, (capabilityAuditSession__effect_call_site_context(self)[caller_name] OR_ELSE {}));
-    MUTABLE caller_context = COPY UNWRAP (capabilityAuditSession__effect_call_site_context(self)[caller_name]);
+    MUTABLE caller_context = COPY capabilityAuditSession__effect_call_site_context(self)[caller_name];
     caller_context[callee_name] = (caller_context[callee_name] OR_ELSE {:loop: FALSE, :cond: FALSE});
     MUTABLE rtoc_result = COPY UNWRAP (caller_context[callee_name]);
     capabilityAuditSession__set_call_site_context_mut(&self, caller_name, COPY caller_context);
@@ -1773,7 +1773,7 @@ PRIVATE FN capabilityAuditSession__effect_call_site_context_for(MUTABLE self: Ca
 END
 PRIVATE FN capabilityAuditSession__effect_call_site_arg_families_for(MUTABLE self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS ![][][Set]String@symbol ->
     capabilityAuditSession__set_call_site_arg_families_mut(&self, caller_name, (capabilityAuditSession__effect_call_site_arg_families(self)[caller_name] OR_ELSE {}));
-    MUTABLE caller_families = COPY UNWRAP (capabilityAuditSession__effect_call_site_arg_families(self)[caller_name]);
+    MUTABLE caller_families = COPY capabilityAuditSession__effect_call_site_arg_families(self)[caller_name];
     IF !(caller_families.contains?(callee_name)) THEN
       caller_families[callee_name] = [];
     END
@@ -2639,7 +2639,7 @@ PRIVATE FN capabilityAuditSession__validate_fiber_stack_mut(MUTABLE self: Capabi
       END
     END
     IF (user_size == :stack) THEN
-      capabilityAuditSession__warning_mut(&self, UNWRAP (castAsyncValidationNodeToLocatable(node)), UNWRAP (TRY (diagnosticRegistry__format(:STACK_SAFETY_STACK_ALIAS, List[], CAST({:computed: UNWRAP (castDiagnosticKwValueToString(DiagnosticKwValue{ SymbolValue: COPY computed }))} AS {String@symbol}String)))));
+      capabilityAuditSession__warning_mut(&self, castAsyncValidationNodeToLocatable(node), UNWRAP (TRY (diagnosticRegistry__format(:STACK_SAFETY_STACK_ALIAS, List[], CAST({:computed: UNWRAP (castDiagnosticKwValueToString(DiagnosticKwValue{ SymbolValue: COPY computed }))} AS {String@symbol}String)))));
       RETURN;
     END
     IF ((user_size != NIL) AND ((effectTracker__tier_order()[user_size] OR_ELSE 0) < (effectTracker__tier_order()[computed] OR_ELSE 0))) THEN
