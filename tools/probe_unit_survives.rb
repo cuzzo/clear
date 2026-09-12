@@ -95,7 +95,13 @@ end.enable
 # the hit, so a warm round stays honest about the blocker while costing
 # nothing to rediscover it.
 module ProbeUnitCacheable
+  # Caching a FAILED unit poisons every dependent: the stored module exports
+  # nothing, so they report undefined symbols, and the round reads as green
+  # because the unit never recompiles to fail again. Opt in only when the
+  # closure is known to compile.
   def fetch(unit_key, member_paths, &block)
+    return super unless ENV['CLEAR_PROBE_CACHE_FAILURES']
+
     super(unit_key, member_paths) do
       begin
         block.call
