@@ -25,6 +25,13 @@ DEF  = /^(PUB |PRIVATE )?FN\s+([a-zA-Z_]\w*[?!]?)\s*(?:<[^>]*>)?\s*\(/
 # ruling on.
 CALL = /(?<![\w.])([a-z]\w*[?!]?)\s*\(/
 
+
+# A name inside a string literal is not a call. Without this the gate reports
+# `fixableError__levels()` because a diagnostic message quotes it.
+def strip_strings(text)
+  text.gsub(/"(?:\\.|[^"\\])*"/, '""')
+end
+
 groups = ParserCompat.package_groups(GEN)
 pkg_paths = {}
 groups.each { |n, m| pkg_paths[n] = m.map { |r| File.join(GEN, r) }.join(',') }
@@ -55,7 +62,7 @@ units.each do |name, members|
   # SEPARATE -- emitted as its own Zig module -- exports just its PUB surface.
   merged = PackageSource.merge(members.map { |r| File.join(GEN, r) },
                                resolve_pkg: ->(n) { pkg_paths[n] })
-  src = merged.source
+  src = strip_strings(merged.source)
   visible = src.scan(DEF).map { |_vis, fn| fn }.to_set
   # Transitively: a unit sees the PUB surface of everything its requires reach.
   # Without this the gate claims a call is unresolved whenever the exporter is

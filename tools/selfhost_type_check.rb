@@ -18,6 +18,13 @@ BUILTIN = %w[
   Byte Char Self T U K V R E List Set Map Pool HashMap Runtime Allocator NoReturn
 ].to_set
 
+
+# A name inside a string literal is not a call. Without this the gate reports
+# `fixableError__levels()` because a diagnostic message quotes it.
+def strip_strings(text)
+  text.gsub(/"(?:\\.|[^"\\])*"/, '""')
+end
+
 groups = ParserCompat.package_groups(GEN)
 pkg_paths = {}
 groups.each { |n, m| pkg_paths[n] = m.map { |r| File.join(GEN, r) }.join(',') }
@@ -35,7 +42,7 @@ units = groups.map { |n, m| [n, m] } +
 missing = Hash.new { |h, k| h[k] = [] }
 units.each do |name, members|
   merged = PackageSource.merge(members.map { |r| File.join(GEN, r) }, resolve_pkg: ->(n) { pkg_paths[n] })
-  src = merged.source
+  src = strip_strings(merged.source)
   visible = src.scan(TYPE_DECL).map { |_v, _k, t| t }.to_set
   # Transitively: a unit sees the PUB surface of everything its requires reach,
   # not just its direct ones.
