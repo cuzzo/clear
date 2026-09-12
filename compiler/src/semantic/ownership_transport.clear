@@ -1,7 +1,6 @@
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
 REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172" AS symbol_entry
-PUB UNION Slot { Int64Value: Int64, StringValue: String }
 PUB STRUCT OwnershipTransportPlan {
   action: String@symbol,
   source: String,

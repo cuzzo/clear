@@ -74,6 +74,9 @@ require_relative 'probe_lowering_survives'
 # A cache hit skips a unit's diagnostics as well as its compilation; replaying
 # them is what lets a 52s warm run answer the same question as a 10m cold one.
 require_relative 'probe_error_replay'
+# Everything that raises before a statement -- a duplicate declaration, an
+# annotation-boundary assertion -- ends the run and leaves 181 units unmeasured.
+require_relative 'probe_unit_survives'
 require_relative '../compiler/ruby/compiler/compiler_frontend'
 
 dir = File.join(ROOT, 'tmp', 'stage2')

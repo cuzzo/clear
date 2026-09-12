@@ -1,7 +1,7 @@
 REQUIRE "pkg:rtoc_6173742f747970652e636c656172" AS type
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172" AS ast
 REQUIRE "pkg:rtoc_73656d616e7469632f6361706162696c6974795f706c616e2e636c656172" AS capability_plan
-PUB UNION Field { SymbolValue: String@symbol, StringValue: String }
+PUB UNION PipelineContextField { SymbolValue: String@symbol, StringValue: String }
 PUB UNION PipelineSoaFieldSetItem { SymbolValue: String@symbol, StringValue: String }
 PUB STRUCT PipelineContextState {
   placeholder_name: ?String,
@@ -599,10 +599,10 @@ PUB FN pipelinePlaceholderRewriter__new(context: PipelineContextState) RETURNS P
   pipelinePlaceholderRewriter__initialize(&self, context);
   RETURN self @multiowned;
 END
-FN castFieldToPipelineSoaFieldSetItem(value: Field) RETURNS PipelineSoaFieldSetItem ->
+FN castFieldToPipelineSoaFieldSetItem(value: PipelineContextField) RETURNS PipelineSoaFieldSetItem ->
   PARTIAL MATCH value START
-    Field.SymbolValue AS cast_payload -> RETURN PipelineSoaFieldSetItem{ SymbolValue: COPY cast_payload };,
-    Field.StringValue AS cast_payload -> RETURN PipelineSoaFieldSetItem{ StringValue: COPY cast_payload };,
+    PipelineContextField.SymbolValue AS cast_payload -> RETURN PipelineSoaFieldSetItem{ SymbolValue: COPY cast_payload };,
+    PipelineContextField.StringValue AS cast_payload -> RETURN PipelineSoaFieldSetItem{ StringValue: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to PipelineSoaFieldSetItem");
   END
   panic("Invalid cast to PipelineSoaFieldSetItem");

@@ -13,6 +13,7 @@
 # inlined unit only exists in the merged text. So the check merges exactly what
 # the compiler merges and reads that.
 $PROGRAM_NAME = 'selfhost_dup_check_support'
+require 'set'
 require_relative 'parser_compat'
 require_relative '../compiler/ruby/compiler/module_importer'
 
@@ -24,8 +25,15 @@ pkg_paths = {}
 groups.each { |n, m| pkg_paths[n] = m.map { |r| File.join(GEN, r) }.join(',') }
 ParserCompat.generated_relatives(GEN).each { |r| pkg_paths[ParserCompat.package_name(r)] = File.join(GEN, r) }
 
+# Every unit, not just the 5 groups: a single-file unit collides with the PUB
+# surface it imports exactly the same way, and that is where the STRUCT Slot /
+# UNION Slot pair hid.
+in_group = groups.values.flatten.to_set
+units = groups.map { |n, m| [n, m] } +
+        ParserCompat.generated_relatives(GEN).reject { |r| in_group.include?(r) }.map { |r| [r, [r]] }
+
 total = 0
-groups.each do |name, members|
+units.each do |name, members|
   merged = PackageSource.merge(members.map { |r| File.join(GEN, r) },
                                resolve_pkg: ->(n) { pkg_paths[n] })
   seen = Hash.new { |h, k| h[k] = [] }
@@ -36,7 +44,7 @@ groups.each do |name, members|
       next
     end
     d = DECL.match(line) or next
-    seen[[d[1], d[2]]] << "#{current} (merged line #{i + 1})"
+    seen[d[2]] << "#{d[1]} #{current} (merged line #{i + 1})"
   end
   # A group also collides with the PUB surface of any package it imports: the
   # merged source declares its own copy of a helper another unit exports, and
@@ -51,18 +59,27 @@ groups.each do |name, members|
       next unless line.start_with?('PUB ')
 
       d = DECL.match(line) or next
-      imported[[d[1], d[2]]] ||= "#{path.sub("#{GEN}/", '')}:#{i + 1}"
+      (imported[d[2]] ||= []) << "#{d[1]} #{path.sub("#{GEN}/", '')}:#{i + 1}"
     end
   end
-  imported.each do |key, where|
-    seen[key] << "#{where} (PUB, imported)" if seen.key?(key)
+  imported.each do |key, wheres|
+    seen[key].concat(wheres.uniq.map { |w| "#{w} (PUB, imported)" }) if seen.key?(key)
   end
+
+  # Two IMPORTED packages exporting the same name collide in whatever unit
+  # imports both, even though that unit declares neither -- which is where the
+  # STRUCT Slot / UNION Slot pair actually broke.
+  by_name = Hash.new { |h, k| h[k] = [] }
+  imported.each { |sym, wheres| by_name[sym].concat(wheres.uniq) }
+  seen.each_key { |sym| by_name[sym] << 'declared here' }
+  cross = by_name.select { |_s, v| v.length > 1 && v.uniq.length > 1 }
+  cross.each { |sym, where| seen[sym] = where unless seen[sym]&.length.to_i > 1 }
 
   dups = seen.select { |_k, v| v.length > 1 }
   next if dups.empty?
 
   puts "#{name}: #{dups.length} collisions in the merged source"
-  dups.sort_by { |k, _v| k[1] }.each { |(kind, sym), where| puts "  #{kind} #{sym}\n    #{where.join("\n    ")}" }
+  dups.sort.each { |sym, where| puts "  #{sym}\n    #{where.join("\n    ")}" }
   total += dups.length
 end
 puts "total collisions: #{total}"
