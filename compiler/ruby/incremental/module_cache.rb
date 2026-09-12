@@ -27,8 +27,16 @@ module Incremental
     # A unit image is large (whole annotated AST) and every compiler edit
     # starts a fresh generation, so cap the directory and drop the coldest
     # records rather than filling the disk. One self-hosted-parser generation
-    # is ~330MB, so this holds a few and no more.
-    MAX_BYTES = T.let(512 * 1024 * 1024, Integer)
+    # is ~330MB, so the default holds a few and no more.
+    #
+    # A whole-compiler generation is several times that, and a cap below one
+    # generation evicts records as fast as they are written: the run stays
+    # permanently cold and the cache costs time instead of saving it. Raise it
+    # when caching a corpus this size.
+    MAX_BYTES = T.let(
+      Integer(ENV.fetch('CLEAR_MODULE_CACHE_MAX_BYTES', (512 * 1024 * 1024).to_s)),
+      Integer,
+    )
 
     SourceDigests = T.type_alias { T::Hash[String, String] }
 
