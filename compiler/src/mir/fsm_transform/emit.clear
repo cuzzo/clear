@@ -91,13 +91,13 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   rtoc_idx = rtoc_idx + 1;
   END
   MUTABLE body_fn_names_by_index: {Int64}String = {};
-  MUTABLE member_fns = segment_specs |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE body: []FsmBodyItem = List[]; { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.prologue_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE incoming_bind: ?[]FsmBodyItem = COPY bind_for_index[_.index]; { MUTABLE rtoc_value_block_marker = 0; MUTABLE fn_name: ?String = COPY _.fn_name; { MUTABLE rtoc_value_block_marker = 0; IF incoming_bind EXISTS AS incoming_bind_value THEN
+  MUTABLE member_fns = (segment_specs |> SELECT:? { MUTABLE rtoc_value_block_marker = 0; MUTABLE body: []FsmBodyItem = List[]; { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.prologue_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE incoming_bind: ?[]FsmBodyItem = COPY bind_for_index[_.index]; { MUTABLE rtoc_value_block_marker = 0; MUTABLE fn_name: ?String = COPY _.fn_name; { MUTABLE rtoc_value_block_marker = 0; IF incoming_bind EXISTS AS incoming_bind_value THEN
     fn_name = (fn_name OR_ELSE "runSeg${_.index.toString()}");
     body = ruby_array_concat_FsmBodyItem(body, CAST(incoming_bind_value AS []FsmBodyItem));
   END (IF (fn_name == NIL) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; body_fn_names_by_index[_.index] = fn_name; { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_FsmBodyItem(body, _.body_stmts); { MUTABLE rtoc_value_block_marker = 0; MUTABLE d: ?SuspendDescriptor = COPY _.descriptor;
   IF d EXISTS AS d_value THEN
     body = ruby_array_concat_FsmBodyItem(body, TRY (emit__fsm_body_mir_items(d_value.setup_stmts)));
-  END FsmMemberFn{ fn_name: fn_name, ctx_id: id, bg_rt: COPY bg_rt, suppress_runtime_ref: _.suppress_runtime_ref, body_stmts: TRY (emit__fsm_body_emit_values(body)), extra_prologue_stmts: _.extra_prologue_stmts } } } } END) } } } } } |> WHERE _ != NIL;
+  END FsmMemberFn{ fn_name: fn_name, ctx_id: id, bg_rt: COPY bg_rt, suppress_runtime_ref: _.suppress_runtime_ref, body_stmts: TRY (emit__fsm_body_emit_values(body)), extra_prologue_stmts: _.extra_prologue_stmts } } } } END) } } } } } |> WHERE _ != NIL).compact();
   MUTABLE arms = segment_specs |> SELECT {
   MUTABLE tail = TRY (emit__build_dispatch_tail(_));
   FsmStateArm{ index: _.index, pre_body_skip: CAST(COPY _.pre_body_skip AS ?FsmPreBodySkip), pre_body_stmts: COPY _.pre_body_stmts, body_fn_name: UNWRAP (COPY body_fn_names_by_index[_.index]), err_cleanups: COPY _.err_cleanups, tail: tail }
@@ -157,7 +157,7 @@ PRIVATE FN emit__ordered_fsm_destroy_actions(ctx: FsmEmitContext) RETURNS ![]Fsm
   MUTABLE rtoc_indexed_output_5 = [];
   MUTABLE rtoc_indexed_i_4 = 0;
   WHILE rtoc_indexed_i_4 < rtoc_indexed_items_3.length() DO
-    &rtoc_indexed_output_5.append(Tuple{COPY UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), [fsmDestroyAction__destroy_order_bucket(UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4])), UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]).destroy_order_index(rtoc_indexed_i_4)]});
+    &rtoc_indexed_output_5.append(Tuple{COPY UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), [fsmDestroyAction__destroy_order_bucket(UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4])), UNWRAP fsmDestroyAction__destroy_order_index(rtoc_indexed_items_3[rtoc_indexed_i_4], rtoc_indexed_i_4)]});
     rtoc_indexed_i_4 = rtoc_indexed_i_4 + 1;
   END
   rtoc_indexed_output_5 |> ORDER_BY _._1 |> SELECT _._0
