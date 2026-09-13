@@ -22,6 +22,7 @@ PUB UNION ContextFieldListItem { ContextFieldDecl: ContextFieldDecl, ArrayValue:
 PUB UNION ContextInitListItem { StructInitField: StructInitField, ArrayValue: []StructInitField }
 PUB UNION PromotedDeclListItem { Emittable: Emittable, ArrayValue: []Emittable }
 PUB UNION ContextFieldInput { ContextFieldDecl: ContextFieldDecl, ArrayValue: []ContextFieldListItem }
+PUB UNION FsmContextFieldRaw { ContextFieldDecl: ContextFieldDecl, ArrayValue: []ContextFieldListItem }
 PUB UNION ContextInitInput { StructInitField: StructInitField, ArrayValue: []ContextInitListItem }
 PUB UNION PromotedDeclInput { Emittable: Emittable, ArrayValue: []PromotedDeclListItem }
 PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?TransformValue, MUTABLE lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
@@ -82,7 +83,7 @@ PUB FN fsmTransform__coerce_context_fields(raw: ?ContextFieldInput) RETURNS ![]C
     RETURN CAST(List[] AS []ContextFieldDecl);
   END
 END
-PUB FN fsmTransform__coerce_context_field(raw: Raw) RETURNS ![]ContextFieldDecl EFFECTS REENTRANT ->
+PUB FN fsmTransform__coerce_context_field(raw: FsmContextFieldRaw) RETURNS ![]ContextFieldDecl EFFECTS REENTRANT ->
   IF raw IS_A ContextFieldDecl AS context_field_decl THEN
     RETURN CAST([context_field_decl] AS []ContextFieldDecl);
   END
@@ -237,11 +238,11 @@ FN castContextFieldListItemToOptionalContextFieldInput(value: ContextFieldListIt
   END
   panic("Invalid cast to ?ContextFieldInput");
 END
-FN castContextFieldListItemToRaw(value: ContextFieldListItem) RETURNS Raw ->
+FN castContextFieldListItemToRaw(value: ContextFieldListItem) RETURNS FsmContextFieldRaw ->
   PARTIAL MATCH value START
-    DEFAULT -> panic("Invalid cast to Raw");
+    DEFAULT -> panic("Invalid cast to FsmContextFieldRaw");
   END
-  panic("Invalid cast to Raw");
+  panic("Invalid cast to FsmContextFieldRaw");
 END
 FN castContextInitListItemToOptionalContextInitInput(value: ContextInitListItem) RETURNS ?ContextInitInput ->
   PARTIAL MATCH value START
