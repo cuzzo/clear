@@ -392,7 +392,7 @@ PUB FN typeAnalysisSession__leave_loop_context_mut(MUTABLE self: TypeAnalysisSes
       self.traversal_state.loop_depth=((self.traversal_state.loop_depth - 1));
     END
 END
-PUB FN typeAnalysisSession__analyze_loop_control_flow_branches(MUTABLE self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool) RETURNS !?[]DeferredDrop ->
+PUB FN typeAnalysisSession__analyze_loop_control_flow_branches(MUTABLE self: TypeAnalysisSession, branches: []FN() -> ?[]DeferredDrop, merge_to_parent: Bool) RETURNS ![]?[]DeferredDrop ->
     RETURN typeAnalysisSession__with_loop_context(&self, %() USE(branches, merge_to_parent, MUTABLE self) -> TRY (typeAnalysisSession__analyze_control_flow_branches( &self, branches, merge_to_parent)));
 END
 PUB FN typeAnalysisSession__with_smooth_context<RESULT>(MUTABLE self: TypeAnalysisSession, blk: FN() -> RESULT) RETURNS RESULT
