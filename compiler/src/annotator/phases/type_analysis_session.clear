@@ -1764,7 +1764,15 @@ PRIVATE FN typeAnalysisSession__emit_foreign_index_needs_unsafe_view_mut(MUTABLE
       MUTABLE inner = body.trimStart();
       MUTABLE index = COPY node.index;
       MUTABLE length: String = "";
-      IF ((IF index IS_A Literal AS literal THEN (IF literal.value EXISTS AS value_present THEN value_present IS_A Int64 ELSE FALSE END) ELSE FALSE END) AND (UNWRAP (literal__value_int(UNWRAP (castLocatableToLiteral(index)))) >= 0)) THEN
+      MUTABLE rtoc_len_ok = FALSE;
+      IF index IS_A Literal AS rtoc_len_lit THEN
+        IF rtoc_len_lit.value EXISTS AS rtoc_len_val THEN
+          IF (rtoc_len_val IS_A Int64 AND (UNWRAP (literal__value_int(rtoc_len_lit)) >= 0)) THEN
+            rtoc_len_ok = TRUE;
+          END
+        END
+      END
+      IF rtoc_len_ok THEN
         length = COPY CAST(((tokenValue__to_f(UNWRAP (UNWRAP (castLocatableToLiteral(index)).value)) + 1.0)) AS String);
       ELSE
         length = "0";
