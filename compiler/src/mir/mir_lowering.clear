@@ -5091,7 +5091,7 @@ PRIVATE FN mIRLowering__fsm_result_transfer_facts(MUTABLE self: MIRLowering, res
       &facts.append(FsmResultTransferFact{ name: COPY safe, target_alloc: COPY binding_entry.alloc(), move_guarded: guarded });
     rtoc_idx = rtoc_idx + 1;
     END
-    MUTABLE rtoc_each_items_199 = (TRY (mIR__nodes(NodeRoot{ Emittable: COPY result_mir }))).grep(MIR.Ident);
+    MUTABLE rtoc_each_items_199 = (TRY (mIR__nodes(NodeRoot{ Emittable: COPY result_mir }))) |> WHERE (_ IS_A Ident);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_199.length() DO
       MUTABLE name = COPY CAST(UNWRAP (rtoc_each_items_199[rtoc_idx]).name() AS String);
@@ -6867,7 +6867,7 @@ PRIVATE FN mIRLowering__cleanup_entry_for_ownership_effect(MUTABLE self: MIRLowe
     IF mir IS_A MIRBlockExpr AS mir_block_expr THEN
       MUTABLE transferred: ?String = COPY effect.target_var;
       IF transferred EXISTS AS transferred_value THEN
-        MUTABLE let = (TRY (blockExpr__body(mir_block_expr))).grep(MIR.Let) |> FIND (CAST(_.name() AS String) == transferred_value);
+        MUTABLE let = (TRY (blockExpr__body(mir_block_expr))) |> WHERE (_ IS_A Let) |> FIND (CAST(_.name() AS String) == transferred_value);
         IF let THEN
           RETURN TRY (mIRLowering__hoist_cleanup_entry(&self, let.init, NIL));
         END
@@ -6920,7 +6920,7 @@ PRIVATE FN mIRLowering__mir_ident_names(self: MIRLowering, node: ?Emittable) RET
     END
     NIL
       });
-      MUTABLE last = (TRY (blockExpr__body(mir_block_expr))).reverse().grep(MIR.BreakStmt).first();
+      MUTABLE last = ((TRY (blockExpr__body(mir_block_expr))).reverse() |> WHERE (_ IS_A BreakStmt)).first();
       IF last THEN
         RETURN (mIRLowering__mir_ident_names(self, aST__node_value( CAST(last AS Locatable)))) |> WHERE !((local_names.contains?(_) OR transferred_names.contains?(_)));
       ELSE
