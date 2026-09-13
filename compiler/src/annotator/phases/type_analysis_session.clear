@@ -8300,7 +8300,7 @@ PRIVATE FN typeAnalysisSession__record_capture_site_mut(MUTABLE self: TypeAnalys
     IF ctx EXISTS AS MUTABLE ctx_value THEN
       MUTABLE root: ?Identifier = (aST__root_identifier( UNWRAP (captureSiteNode__value(node))));
       MUTABLE name: ?String = COPY (IF root != NIL THEN
-        (identifier__name(root) OR_ELSE "")
+        identifier__name(root)
       ELSE
         NIL
       END);

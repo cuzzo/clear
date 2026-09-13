@@ -44,7 +44,7 @@ PUB FN fsmTransform__transform(bg_block: BgBlockInput, ctx: {String@symbol}?Tran
   FOR rtoc_capture_name IN (captured_map + promoted_names) DO
     promo_capture_map[COPY rtoc_capture_name] = "__ctx_${ctx_id.toString()}.${rtoc_capture_name}";
   END
-  MUTABLE rec_segs: ?SegmentList = mIRLowering__with_fiber_capture_map(&lowering, promo_capture_map, {}, (castOptionalTransformValueToString(ctx[:bg_rt]) OR_ELSE "__rt"), %() USE(block_source, ctx, MUTABLE lowering) -> {
+  MUTABLE rec_segs: ?SegmentList = mIRLowering__with_fiber_capture_map(&lowering, promo_capture_map, {}, (castOptionalTransformValueToString(ctx[:bg_rt])), %() USE(block_source, ctx, MUTABLE lowering) -> {
     MUTABLE rtoc_split_result: ?SegmentList = TRY (fsmRecursiveSplitter__split(UNWRAP (locatable__body(CAST(block_source AS Locatable))), &lowering, ctx));
     rtoc_split_result
   });
