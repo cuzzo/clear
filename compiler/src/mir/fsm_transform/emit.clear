@@ -154,7 +154,7 @@ PRIVATE FN emit__ordered_fsm_destroy_actions(ctx: FsmEmitContext) RETURNS ![]Fsm
   RETURN ({
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_3: []FsmDestroyAction = TRY (emit__fsm_destroy_actions(ctx));
-  MUTABLE rtoc_indexed_output_5 = [];
+  MUTABLE rtoc_indexed_output_5: []Tuple<FsmDestroyAction, []?Int64> = [];
   MUTABLE rtoc_indexed_i_4 = 0;
   WHILE rtoc_indexed_i_4 < rtoc_indexed_items_3.length() DO
     &rtoc_indexed_output_5.append(Tuple{COPY UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), [fsmDestroyAction__destroy_order_bucket(UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4])), UNWRAP fsmDestroyAction__destroy_order_index(rtoc_indexed_items_3[rtoc_indexed_i_4], rtoc_indexed_i_4)]});
