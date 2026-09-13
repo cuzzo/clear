@@ -103,7 +103,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   FsmStateArm{ index: _.index, pre_body_skip: CAST(COPY _.pre_body_skip AS ?FsmPreBodySkip), pre_body_stmts: COPY _.pre_body_stmts, body_fn_name: UNWRAP (COPY body_fn_names_by_index[_.index]), err_cleanups: COPY _.err_cleanups, tail: tail }
   };
   MUTABLE dispatch = FsmDispatch{ ctx_id: id, arms: arms, uses_loop_label: TRUE };
-  MUTABLE extra_field_decls = [emit__ctx_field_decl("step", "u8", Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } })];
+  MUTABLE extra_field_decls: []ContextFieldDecl = [emit__ctx_field_decl("step", "u8", Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } })];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segment_specs.length() DO
     MUTABLE d: ?SuspendDescriptor = COPY segment_specs[rtoc_idx]?.descriptor;
