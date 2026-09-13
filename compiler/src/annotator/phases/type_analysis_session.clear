@@ -5723,7 +5723,7 @@ PRIVATE FN typeAnalysisSession__analyze_concurrent_bounded_select_family_op(MUTA
       MUTABLE rtoc_mutable_receiver_157 = TRY (typeAnalysisSession__current_scope(&self));
       TRY (scope__declare(&rtoc_mutable_receiver_157, "_", NIL, (IF item_type EXISTS AS rtoc_wrap_6915 THEN SymbolEntryTypeInput{ Type: COPY rtoc_wrap_6915 } ELSE NIL END), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(&self, node, UNWRAP (item_type), %() USE(node, MUTABLE self) -> {
-        TRY (typeAnalysisSession__visit(&self, clearParserConcurrentPipelineOp__expression(castLocatableToConcurrentOp__type_analysis_session(node.right).op)));
+        TRY (typeAnalysisSession__visit(&self, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
         rubyToClearVoid__type_analysis_session()
       }))
     });
@@ -5749,7 +5749,7 @@ PRIVATE FN typeAnalysisSession__analyze_concurrent_bounded_each_op(MUTABLE self:
       MUTABLE rtoc_mutable_receiver_160 = TRY (typeAnalysisSession__current_scope(&self));
       TRY (scope__declare(&rtoc_mutable_receiver_160, "_", NIL, (IF item_type EXISTS AS rtoc_wrap_6945 THEN SymbolEntryTypeInput{ Type: COPY rtoc_wrap_6945 } ELSE NIL END), ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(&self, node, UNWRAP (item_type), %() USE(node, MUTABLE self) -> {
-        FOR _ IN clearParserConcurrentPipelineOp__body(castLocatableToConcurrentOp__type_analysis_session(node.right).op) DO
+        FOR _ IN clearParserConcurrentPipelineOp__body(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op)) DO
         TRY (typeAnalysisSession__visit(&self, _));
         END
         NIL
@@ -5771,7 +5771,7 @@ PRIVATE FN typeAnalysisSession__analyze_concurrent_stream_select_family_op(MUTAB
       MUTABLE rtoc_mutable_receiver_161 = TRY (typeAnalysisSession__current_scope(&self));
       TRY (scope__declare(&rtoc_mutable_receiver_161, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(&self, node, item_type, %() USE(node, MUTABLE self) -> {
-        TRY (typeAnalysisSession__visit(&self, clearParserConcurrentPipelineOp__expression(castLocatableToConcurrentOp__type_analysis_session(node.right).op)));
+        TRY (typeAnalysisSession__visit(&self, clearParserConcurrentPipelineOp__expression(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op))));
         rubyToClearVoid__type_analysis_session()
       }))
     });
@@ -5823,7 +5823,7 @@ PRIVATE FN typeAnalysisSession__analyze_concurrent_stream_each_op(MUTABLE self: 
       MUTABLE rtoc_mutable_receiver_164 = TRY (typeAnalysisSession__current_scope(&self));
       TRY (scope__declare(&rtoc_mutable_receiver_164, "_", NIL, castTypeToOptionalSymbolEntryTypeInput__type_analysis_session(item_type), ScopeMutabilityInput{ BoolValue: TRUE }, FALSE, NIL, :stack));
       TRY (typeAnalysisSession__with_soa_tracking(&self, node, item_type, %() USE(node, MUTABLE self) -> {
-        FOR _ IN clearParserConcurrentPipelineOp__body(castLocatableToConcurrentOp__type_analysis_session(node.right).op) DO
+        FOR _ IN clearParserConcurrentPipelineOp__body(UNWRAP (castLocatableToConcurrentOp__type_analysis_session(node.right).op)) DO
         TRY (typeAnalysisSession__visit(&self, _));
         END
         NIL
