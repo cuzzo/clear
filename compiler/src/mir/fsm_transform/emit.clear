@@ -157,11 +157,11 @@ PRIVATE FN emit__ordered_fsm_destroy_actions(ctx: FsmEmitContext) RETURNS ![]Fsm
   MUTABLE rtoc_indexed_output_5: []Tuple<FsmDestroyAction, []?Int64> = [];
   MUTABLE rtoc_indexed_i_4 = 0;
   WHILE rtoc_indexed_i_4 < rtoc_indexed_items_3.length() DO
-    &rtoc_indexed_output_5.append(Tuple{COPY UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), [fsmDestroyAction__destroy_order_bucket(UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4])), UNWRAP fsmDestroyAction__destroy_order_index(UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), rtoc_indexed_i_4)]});
+    &rtoc_indexed_output_5.append(Tuple{COPY UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), [UNWRAP fsmDestroyAction__destroy_order_bucket(UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4])), UNWRAP fsmDestroyAction__destroy_order_index(UNWRAP (rtoc_indexed_items_3[rtoc_indexed_i_4]), rtoc_indexed_i_4)]});
     rtoc_indexed_i_4 = rtoc_indexed_i_4 + 1;
   END
   rtoc_indexed_output_5 |> ORDER_BY _._1 |> SELECT _._0
-  }) |> SELECT _.first();
+  });
 END
 PUB FN emit__fsm_destroy_cleanup_names(actions: []FsmDestroyAction) RETURNS ![]String ->
   RETURN (actions |> SELECT:? fsmDestroyAction__cleanup_name(_) |> WHERE _ != NIL).compact() |> DISTINCT _ |> SELECT COPY _;
@@ -259,7 +259,7 @@ PRIVATE FN emit__collect_move_guard_writes(nodes: []Emittable, id: Int64) RETURN
       END
     END
   END
-  RETURN out |> DISTINCT _;
+  RETURN out |> DISTINCT _ |> SELECT COPY _;
 END
 PUB FN emit__normalized_ctx_field_name(name: String, id: Int64) RETURNS String ->
   RETURN name.deletePrefix("__ctx_${id.toString()}.");
