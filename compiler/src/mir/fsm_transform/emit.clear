@@ -217,7 +217,7 @@ PRIVATE FN emit__fsm_body_emit_values(items: []FsmBodyItem) RETURNS ![]Emittable
   RETURN items |> SELECT fsmBodyItem__emit_value(_);
 END
 PRIVATE FN emit__mir_nodes_reference_ident?(nodes: []Emittable, name: String) RETURNS !Bool ->
-  RETURN (TRY (mIR__nodes(NodeRoot{ ArrayValue: COPY nodes }))).grep(MIR.Ident) |> ANY (_.name() == name);
+  RETURN (TRY (mIR__nodes(NodeRoot{ ArrayValue: COPY nodes }))) |> ANY (IF _ IS_A Ident AS rtoc_ident THEN (rtoc_ident.name == name) ELSE FALSE END);
 END
 PRIVATE FN emit__prior_lock_release_stmts(ctx_id: Int64, lock_index: Int64, lock_ref: String, unlock_method: String) RETURNS ![]Emittable ->
   RETURN CAST([Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${ctx_id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "__lock_held_${lock_index.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY lock_ref, lowered_node_id: NIL, ownership_consumption: NIL } }, method: COPY unlock_method, args: List[], try_wrap: FALSE, callable_contract: NIL, owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable);
