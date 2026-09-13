@@ -2889,7 +2889,7 @@ PRIVATE FN typeAnalysisSession__resolve_call(MUTABLE self: TypeAnalysisSession, 
           END
           TRY (typeAnalysisSession__stamp_resolved_call_result_mut(&self, &node, CAST(functionSignature__return_type(signature) AS Type), functionSignature__recoverable_result?(signature)));
         END
-      ELSE_IF (IF fsig != NIL THEN fsig ELSE fn_type END) THEN
+      ELSE_IF ((fsig != NIL) OR (fn_type != NIL)) THEN
         IF node IS_A FuncCall AS MUTABLE func_call THEN
           func_call.fn_var_call = TRUE;
         END
