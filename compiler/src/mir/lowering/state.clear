@@ -30,7 +30,7 @@ STRUCT MIRLoweringInput {
   target: String@symbol,
   function_counter_seeds: {String}MIRLoweringCounterSnapshot
 }
-STRUCT MIRLoweringRuntimeState {
+PUB STRUCT MIRLoweringRuntimeState {
   rt_name: String,
   emitter: ?MIREmitter@multiowned
 }

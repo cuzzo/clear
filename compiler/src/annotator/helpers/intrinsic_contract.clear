@@ -4,7 +4,7 @@ REQUIRE "pkg:rtoc_616e6e6f7461746f722f68656c706572732f696e7472696e7369635f656d69
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
 PUB ENUM IntrinsicTemplateKind { Zig, NumericZig, ShardedZig, ShardDirectZig }
 PUB ENUM IntrinsicAllocationKind { Alloc, ReturnAlloc, ValAlloc, KeyAlloc, ShardAlloc, ShardedAlloc }
-STRUCT IntrinsicTemplateContract {
+PUB STRUCT IntrinsicTemplateContract {
   zig: ?IntrinsicEmitStrOrSym,
   numeric_zig: ?IntrinsicEmitStrOrSym,
   sharded_zig: ?IntrinsicEmitStrOrSym,
@@ -46,7 +46,7 @@ PUB FN intrinsicTemplateContract__bc_op_or(self: IntrinsicTemplateContract, defa
   RETURN default_name;
   END
 END
-STRUCT IntrinsicAllocationContract {
+PUB STRUCT IntrinsicAllocationContract {
   allocates: Bool,
   alloc: ?String@symbol,
   return_alloc: ?String@symbol,
@@ -77,7 +77,7 @@ PUB FN intrinsicAllocationContract__placeholder(self: IntrinsicAllocationContrac
   END
   RETURN NIL;
 END
-STRUCT IntrinsicOwnershipContract {
+PUB STRUCT IntrinsicOwnershipContract {
   mutates_receiver: Bool,
   takes_value: Bool,
   takes_indices: [Set]Int64,
@@ -88,7 +88,7 @@ STRUCT IntrinsicOwnershipContract {
 PUB FN intrinsicOwnershipContract__takes_any?(self: IntrinsicOwnershipContract) RETURNS Bool ->
   RETURN (self.takes_value OR !(self.takes_indices.empty?()));
 END
-STRUCT IntrinsicBehaviorContract {
+PUB STRUCT IntrinsicBehaviorContract {
   is_method: Bool,
   suspends: Bool,
   fsm_setup_present: Bool,

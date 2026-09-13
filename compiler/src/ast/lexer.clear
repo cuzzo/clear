@@ -59,7 +59,7 @@ IMPLEMENTATION Scanner {
 }
 
 PUB UNION TokenValue { StringValue: String, Int64Value: Int64, Float64Value: Float64, BoolValue: Bool }
-STRUCT Lexer {
+PUB STRUCT Lexer {
   base_offset: Int64,
   budget: FrontendResourceBudget@multiowned,
   column: Int64,

@@ -79,7 +79,7 @@ FN autoMapShapeEntry__new(key: AutoSlotId, value: AutoSlotId) RETURNS AutoMapSha
   autoMapShapeEntry__initialize(&self, key, value);
   RETURN self @multiowned;
 END
-STRUCT AutoConstraintCollector {
+PUB STRUCT AutoConstraintCollector {
   fn_nodes: {String}FunctionDef@multiowned,
   local_decls: {String}AutoConstraintCollectorLocalDeclEntry,
   slots: {AutoSlotId}Slot@multiowned
@@ -388,7 +388,7 @@ FN autoShapeSlots__new(list: ?Slot, key: ?Slot, value: ?Slot) RETURNS AutoShapeS
   autoShapeSlots__initialize(&self, list, key, value);
   RETURN self @multiowned;
 END
-STRUCT AutoUnifier {
+PUB STRUCT AutoUnifier {
   slots: {AutoSlotId@multiowned}Slot@multiowned,
   type_of: FN(Locatable) -> ?AutoConstraintCollectorObservedType
 }
@@ -611,7 +611,7 @@ PUB FN autoUnifier__new(slots: {AutoSlotId}Slot@multiowned, type_of: ?FN(Locatab
   autoUnifier__initialize(&self, slots, type_of);
   RETURN self @multiowned;
 END
-STRUCT ShapeEvidenceCollector {
+PUB STRUCT ShapeEvidenceCollector {
   fn_nodes: {String}FunctionDef,
   slots: {AutoSlotId@multiowned}Slot@multiowned
 }
@@ -767,7 +767,7 @@ PUB FN shapeEvidenceCollector__new(slots: {AutoSlotId}Slot@multiowned, fn_nodes:
   shapeEvidenceCollector__initialize(&self, slots, fn_nodes);
   RETURN self @multiowned;
 END
-STRUCT OperatorEvidenceCollector {
+PUB STRUCT OperatorEvidenceCollector {
   evidence: {AutoSlotId}[Set]String@symbol,
   fn_nodes: {String}FunctionDef,
   slots: {AutoSlotId@multiowned}Slot@multiowned

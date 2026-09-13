@@ -19,10 +19,10 @@ END
 
 PUB UNION Input { SymbolValue: String@symbol, Type: Type }
 UNION Schema { StructSchemaMultiowned: StructSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, StructSchema: StructSchema, ResourceSchema: ResourceSchema }
-STRUCT TypePlacementUnset {
+PUB STRUCT TypePlacementUnset {
 
 }
-STRUCT TypePlacement {
+PUB STRUCT TypePlacement {
   provenance: ?String@symbol
 }
 
@@ -420,7 +420,7 @@ PUB STRUCT ObservablePublishSpec {
   expr: String@symbol,
   gate: String@symbol
 }
-STRUCT ObservableTerminalSpec {
+PUB STRUCT ObservableTerminalSpec {
   ast_class: ?String@symbol,
   publish: ?ObservablePublishSpec
 }

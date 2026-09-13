@@ -39,7 +39,7 @@ PUB STRUCT MIREmitter {
   uses_c_callback: Bool
 }
 
-STRUCT EmissionState {
+PUB STRUCT EmissionState {
   symbol_literals: {String}String,
   uses_c_callback: Bool,
   if_bind_counter: ?Int64,
@@ -48,7 +48,7 @@ STRUCT EmissionState {
   items_block_counter: Int64,
   owned_slice_counter: Int64
 }
-UNION MIREmitterShardedMapNode { ShardedMapPut: ShardedMapPut, ShardedMapGet: ShardedMapGet }
+PUB UNION MIREmitterShardedMapNode { ShardedMapPut: ShardedMapPut, ShardedMapGet: ShardedMapGet }
 FN mIREmitter__initialize(MUTABLE self: MIREmitter, state: ?EmissionState = NIL) RETURNS Void ->
     self.indent = 0;
     self.rt_name = "rt";

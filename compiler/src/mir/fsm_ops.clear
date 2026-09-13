@@ -19,7 +19,7 @@ PUB STRUCT ErrDeferCall {
 PUB STRUCT ErrDeferFreeField {
   field: String
 }
-STRUCT DeferFreeField {
+PUB STRUCT DeferFreeField {
   field: String
 }
 PUB STRUCT StmtCall {
@@ -44,17 +44,17 @@ PUB STRUCT ArgRef {
 PUB STRUCT StateField {
   name: String
 }
-STRUCT SubField {
+PUB STRUCT SubField {
   base: StateField,
   name: String
 }
-STRUCT LocalRef {
+PUB STRUCT LocalRef {
   name: String
 }
 STRUCT AddrOf {
   expr: StateField
 }
-STRUCT IntCast {
+PUB STRUCT IntCast {
   zig_type: String,
   expr: Expr@boxed
 }
@@ -63,7 +63,7 @@ PUB STRUCT CallExpr {
   args: []Expr,
   is_try: Bool
 }
-STRUCT FunctionPath {
+PUB STRUCT FunctionPath {
   root: String@symbol,
   parts: []String
 }
@@ -87,7 +87,7 @@ PUB STRUCT AllocExpr {
   elem_type: String,
   count: LocalRef
 }
-STRUCT SliceUntilIntCast {
+PUB STRUCT SliceUntilIntCast {
   base: StateField,
   end_expr: SubField
 }
@@ -189,7 +189,7 @@ PUB STRUCT StateFieldDecl {
   zig_type: String,
   default_value: Emittable
 }
-STRUCT Lowerer {
+PUB STRUCT Lowerer {
   arg_mirs: []Emittable,
   ctx_id: Int64
 }

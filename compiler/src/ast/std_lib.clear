@@ -4,12 +4,12 @@ REQUIRE "pkg:rtoc_6d69722f6d69722e636c656172"
 REQUIRE "pkg:rtoc_6173742f7374727563745f6669656c642e636c656172"
 REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
 MUTABLE string_list_type: Type = TRY (type__array_of(TypeTypeInput{ SymbolValue: COPY :String }));
-STRUCT StdLibGlobalBinding {
+PUB STRUCT StdLibGlobalBinding {
   name: String,
   type: TypeTypeInput,
   storage: String@symbol
 }
-STRUCT StdLibTypeBinding {
+PUB STRUCT StdLibTypeBinding {
   name: String@symbol,
   schema_factory: FN() -> Any
 }

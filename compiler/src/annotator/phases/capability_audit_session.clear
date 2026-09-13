@@ -46,8 +46,8 @@ EXTERN FN compilerRegexEscape(value: String) RETURNS String EFFECTS :safe FROM "
 EXTERN FN compilerRegexCapture(scanner: CompilerRegexScanner, index: Int64) RETURNS scanner:String EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerRegexPosition(scanner: CompilerRegexScanner) RETURNS Int64 EFFECTS :safe FROM "compiler_regex";
 EXTERN FN compilerStringChomp(value: String, separator: String) RETURNS String EFFECTS :safe FROM "compiler_regex";
-UNION CapabilityAuditBodyFacts { BodyScanSummary: BodyScanSummary, FunctionBodySummary: FunctionBodySummary }
-UNION CapabilityAuditCall { FuncCall: FuncCall, MethodCall: MethodCall }
+PUB UNION CapabilityAuditBodyFacts { BodyScanSummary: BodyScanSummary, FunctionBodySummary: FunctionBodySummary }
+PUB UNION CapabilityAuditCall { FuncCall: FuncCall, MethodCall: MethodCall }
 UNION CapabilityAuditCodeOrMessage { StringValue: String, SymbolValue: String@symbol }
 UNION CapabilityAuditReg { VarDecl: VarDecl, DestructureTarget: DestructureTarget }
 # Ruby module Annotator

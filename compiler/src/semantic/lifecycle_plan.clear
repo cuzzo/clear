@@ -306,7 +306,7 @@ PUB STRUCT LifecycleRegistry {
   plans: {String}LifecyclePlan
 }
 
-UNION SemanticLifecycleRegistryBindingNode { VarDecl: VarDecl, BindExpr: BindExpr, DestructureTarget: DestructureTarget }
+PUB UNION SemanticLifecycleRegistryBindingNode { VarDecl: VarDecl, BindExpr: BindExpr, DestructureTarget: DestructureTarget }
 PUB FN lifecycleRegistry__empty() RETURNS LifecycleRegistry@multiowned ->
   RETURN lifecycleRegistry__new({}, {});
 END

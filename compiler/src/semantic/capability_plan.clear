@@ -3,7 +3,7 @@ REQUIRE "pkg:rtoc_6173742f6173742e636c656172"
 REQUIRE "pkg:rtoc_6173742f73636f70652e636c656172"
 REQUIRE "pkg:rtoc_6173742f73796d626f6c5f656e7472792e636c656172"
 # Ruby module CapabilityPlan
-STRUCT CapabilityRequest {
+PUB STRUCT CapabilityRequest {
   source: Capability,
   capability: String@symbol,
   var_node: Locatable,
