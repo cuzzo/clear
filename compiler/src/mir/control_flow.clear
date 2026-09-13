@@ -357,7 +357,7 @@ PUB FN ownershipDataflow__state_from_names(state: {String}OwnerEntry) RETURNS !{
   RETURN entries;
 END
 PUB FN ownershipDataflow__place_for_binding_node(name: String, node: Node) RETURNS PlaceId ->
-  MUTABLE sym:? = aST__node__symbol( UNWRAP (castNodeToLocatable(node)));
+  MUTABLE sym: ?SymbolEntry@multiowned = aST__node__symbol( UNWRAP (castNodeToLocatable(node)));
   RETURN placeId__from_symbol(Path{ StringValue: COPY name }, sym);
 END
 PUB FN ownershipDataflow__resolve_state_place(state: {PlaceId}OwnerEntry, place: Place) RETURNS PlaceId ->
@@ -389,7 +389,7 @@ PUB FN ownershipDataflow__analyze_mut(MUTABLE self: OwnershipDataflow) RETURNS !
     self.block_out[_.id] = NIL;
     END
     self.block_in[(COPY self.cfg.entry).id] = TRY (ownershipDataflow__init_entry_state(&self));
-    MUTABLE order_index:? = TRY (ownershipDataflow__reverse_postorder_index(self));
+    MUTABLE order_index: ?{Int64}Int64 = TRY (ownershipDataflow__reverse_postorder_index(self));
     MUTABLE worklist: []BasicBlock@multiowned = self.cfg.blocks |> ORDER_BY (order_index[_.id] OR_ELSE self.cfg.blocks.length());
     MUTABLE in_worklist = {};
     FOR _ IN worklist DO
@@ -514,7 +514,7 @@ PUB FN ownershipDataflow__cleanup_decisions_mut(MUTABLE self: OwnershipDataflow,
     MUTABLE rtoc_each_items_11 = (TRY (ownershipDataflow__cleanup_entry_pairs(self, fn_node, facts)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_11.length() DO
-      MUTABLE var:? = COPY emittable__name( CAST(UNWRAP (rtoc_each_items_11[rtoc_idx]) AS Emittable));
+      MUTABLE var: ?String = COPY emittable__name( CAST(UNWRAP (rtoc_each_items_11[rtoc_idx]) AS Emittable));
       MUTABLE entry:? = COPY KEEP rtoc_each_items_11[rtoc_idx]?.entry;
       IF !(cleanupEntry__needs_cleanup?( UNWRAP (entry))) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -557,7 +557,7 @@ PUB FN ownershipDataflow__cleanup_entry_pairs(self: OwnershipDataflow, fn_node: 
     IF !((node IS_A VarDecl OR ((IF node IS_A BindExpr AS bind_expr THEN (bind_expr.mode != :assign) ELSE FALSE END)))) THEN
         RETURN;
     END
-    MUTABLE entry:? = aST__node_mir_binding_entry(node);
+    MUTABLE entry: ?CleanupEntry@multiowned = aST__node_mir_binding_entry(node);
     IF !(entry) THEN
         RETURN;
     END
@@ -708,7 +708,7 @@ PRIVATE FN ownershipDataflow__cleanup_decision_facts(self: OwnershipDataflow, bo
       MUTABLE frame = UNWRAP (&stack.pop());
       FOR _ IN frame.body DO
     IF (IF _ IS_A MatchStatement AS match_statement THEN match_statement.takes ELSE FALSE END) THEN
-          MUTABLE expr:? = locatable__expr(_);
+          MUTABLE expr: ?Locatable@boxed = locatable__expr(_);
           IF expr IS_A Identifier THEN
             &match_takes_vars.insert(COPY CAST(locatable__name(UNWRAP (expr)) AS String));
           END
@@ -863,7 +863,7 @@ PRIVATE FN ownershipDataflow__ownership_tracked_type?(self: OwnershipDataflow, t
 END
 PUB FN ownershipDataflow__resource_captures(self: OwnershipDataflow, node: Locatable) RETURNS ![Set]String
   EFFECTS REENTRANT ->
-    MUTABLE analysis:? = aST__node_capture_analysis(node);
+    MUTABLE analysis: ?CaptureAnalysis = aST__node_capture_analysis(node);
     IF analysis EXISTS AS analysis_value THEN
       RETURN COPY analysis_value.resource_captures;
     END
@@ -1125,7 +1125,7 @@ PRIVATE FN ownershipDataflow__collect_share_transfer(self: OwnershipDataflow, no
       RETURN;
     END
     IF source IS_A Identifier THEN
-      MUTABLE ti:? = TRY (type__from_node_mut(source, "share transfer"));
+      MUTABLE ti: ?Type = TRY (type__from_node_mut(source, "share transfer"));
       IF type__shared?( UNWRAP (ti)) THEN
         RETURN;
       END
@@ -1422,7 +1422,7 @@ PRIVATE FN useAfterMoveChecker__check_share_reads(MUTABLE self: UseAfterMoveChec
     IF source IS_A CopyNode THEN
       TRY (useAfterMoveChecker__check_reads_in_expr(&self, aST__node_value(source), state));
     ELSE_IF source IS_A Identifier AS source_narrowed THEN
-      MUTABLE ti:? = TRY (type__from_node_mut(source, "share read"));
+      MUTABLE ti: ?Type = TRY (type__from_node_mut(source, "share read"));
       IF type__shared?( UNWRAP (ti)) THEN
         useAfterMoveChecker__check_identifier_node_read(&self, source_narrowed, state);
       END
@@ -1678,7 +1678,7 @@ END
 PUB FN loopFrameAnalysis__loop_capture_frame_alloc?(loop_node: Locatable, schema_lookup: ?FN(String@symbol) -> ?TypeSchemaLookupResult = NIL) RETURNS !Bool ->
   IF loop_node IS_A WhileBindLoop AS while_bind_loop THEN
     MUTABLE cond_t = TRY (aST__full_type_mut(while_bind_loop.condition));
-    MUTABLE inner:? = TRY (type__wrapped_type(cond_t));
+    MUTABLE inner: ?Type = TRY (type__wrapped_type(cond_t));
     IF !(inner IS_A Type) THEN
       RETURN FALSE;
     END
@@ -1955,7 +1955,7 @@ PRIVATE FN borrowChecker__check_explicit_moves(MUTABLE self: BorrowChecker, stmt
     END
 END
 PRIVATE FN borrowChecker__check_borrowed_move(MUTABLE self: BorrowChecker, name: String, token: Token, state: BorrowState) RETURNS Void ->
-    MUTABLE borrow_kind:? = borrowState__kind_for(state, name);
+    MUTABLE borrow_kind: ?String@symbol = borrowState__kind_for(state, name);
     IF !(borrow_kind) THEN
       RETURN;
     END

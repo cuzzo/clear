@@ -460,7 +460,7 @@ PRIVATE FN mIRPass__stamp_reassign_cleanup_mut(MUTABLE self: MIRPass, stmt: Loca
     END
 END
 PRIVATE FN mIRPass__cleanup_entry_for_binding_node(self: MIRPass, node: Locatable, facts: FrozenCleanupFacts) RETURNS CleanupEntry@multiowned ->
-    MUTABLE symbol:? = aST__node__symbol(node);
+    MUTABLE symbol: ?SymbolEntry@multiowned = aST__node__symbol(node);
     MUTABLE decl: ?Locatable = NIL;
     IF symbol?.reg EXISTS AS rtoc_reg THEN
       decl = castSymbolEntryRegInputToLocatable(rtoc_reg);
@@ -534,7 +534,7 @@ PRIVATE FN mIRPass__stamp_while_bind_cleanup_mut(MUTABLE self: MIRPass, stmt: Lo
     IF stmt IS_A WhileBindLoop AS while_bind_loop THEN
       MUTABLE while_bind_loop_mutable = COPY while_bind_loop;
       frozenCleanupFacts__with_live_entry_for(facts, while_bind_loop_mutable.binding_name, %(MUTABLE entry: CleanupEntry) USE(MUTABLE while_bind_loop_mutable, self) -> {
-    MUTABLE cond_type:? = TRY (type__from_node_mut(while_bind_loop_mutable.condition, "while-bind allocation marker"));
+    MUTABLE cond_type: ?Type = TRY (type__from_node_mut(while_bind_loop_mutable.condition, "while-bind allocation marker"));
     MUTABLE item_type_branch_value: ?Type = NIL;
         IF TRY (type__stream_step?( UNWRAP (cond_type))) THEN
           item_type_branch_value = TRY (type__stream_step_item_type( UNWRAP (cond_type)));
