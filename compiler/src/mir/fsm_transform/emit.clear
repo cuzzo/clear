@@ -452,7 +452,14 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE arena_init_stmt: Set = arena_init_stmt_branch_value?;
   TRY (emit__register_recursive_destroy_actions_mut(&ctx));
   MUTABLE conservative_promoted = COPY recursive_promoted_names;
-  MUTABLE done_idx = segment_nodes.find_index(%(s: Segment) -> s.tail IS_A Done);
+  MUTABLE done_idx: ?Int64 = NIL;
+  MUTABLE rtoc_done_i = 0;
+  WHILE rtoc_done_i < segment_nodes.length() DO
+    IF ((done_idx == NIL) AND UNWRAP (segment_nodes[rtoc_done_i]).tail IS_A Done) THEN
+      done_idx = rtoc_done_i;
+    END
+    rtoc_done_i = rtoc_done_i + 1;
+  END
   MUTABLE result_seg_indices = (%(rtoc_indexed_items_11: []Segment) -> {
   MUTABLE rtoc_indexed_acc_13 = Set[];
   MUTABLE rtoc_indexed_i_12 = 0;
