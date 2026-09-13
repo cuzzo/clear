@@ -526,13 +526,13 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     ELSE
       {
     MUTABLE rtoc_value_block_marker = 0;
-    MUTABLE want_result = (!(is_void) AND result_seg_indices.contains?(UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).indexOf()));
+    MUTABLE want_result = (!(is_void) AND result_seg_indices.contains?(UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).index));
     MUTABLE inherited_capture_names: [Set]String = ((TRY (emit__fsm_destroy_actions(ctx))) |> SELECT:? _.ctx_cleanup_target_name() |> WHERE _ != NIL) |> DISTINCT _;
     FOR _ IN captured.keys() DO
   &inherited_capture_names.insert("__ctx_${id.toString()}.${_}");
   END
     MUTABLE lowering_api = COPY lowering;
-    MUTABLE seg_overrides: ?{String}String = TRY (segmentList__alias_overrides_for(segment_list, UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).indexOf()));
+    MUTABLE seg_overrides: ?{String}String = TRY (segmentList__alias_overrides_for(segment_list, UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).index));
     MUTABLE eff_capture_map: {String}String = {};
     IF seg_overrides EXISTS AS seg_overrides_value THEN
       eff_capture_map = seg_overrides_value.keys() |> REDUCE(COPY capture_map) { acc[_] = COPY (seg_overrides_value[_] OR_ELSE CAST(panic("missing hash key") AS String)); acc };
@@ -548,7 +548,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     NIL
   }));
     MUTABLE facts: []FsmResultTransferFact = CAST(TRY (mIRLowering__last_fsm_result_transfer_facts(&lowering_api)) AS []FsmResultTransferFact);
-    seg_result_facts[UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).indexOf()] = facts;
+    seg_result_facts[UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).index] = facts;
     IF (lowered_mir == NIL) THEN
       RETURN NIL;
   END
@@ -591,7 +591,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE tail = UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail;
   MUTABLE descriptor_branch_value: ?SuspendDescriptor = NIL;
     IF (tail IS_A IoSuspend OR tail IS_A NextSuspend) THEN
-      descriptor_branch_value = TRY (emit__build_segment_descriptor(UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]), ctx, lowering, capture_map, sp_indices[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()]));
+      descriptor_branch_value = TRY (emit__build_segment_descriptor(UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]), ctx, lowering, capture_map, sp_indices[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index]));
     ELSE
       descriptor_branch_value = NIL;
     END
@@ -630,7 +630,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   ruby_array_concat_Emittable__emit(rt_roots, CAST((descriptor?.setup_stmts OR_ELSE List[]) AS []Emittable));
   MUTABLE rt_used = TRY (emit__mir_nodes_reference_ident?(rt_roots, bg_rt));
   MUTABLE suppress_runtime_ref = !(rt_used);
-  FsmSegmentSpec{ index: UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf(), prologue_stmts: COPY prologue_stmts, body_stmts: COPY body_stmts, tail: COPY UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail, descriptor: COPY descriptor, fsm_result_transfer_facts: COPY (seg_result_facts[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()] OR_ELSE List[]), fn_name: "runSeg${UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).indexOf()}", suppress_runtime_ref: suppress_runtime_ref, structure_stmts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() }
+  FsmSegmentSpec{ index: UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index, prologue_stmts: COPY prologue_stmts, body_stmts: COPY body_stmts, tail: COPY UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail, descriptor: COPY descriptor, fsm_result_transfer_facts: COPY (seg_result_facts[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index] OR_ELSE List[]), fn_name: "runSeg${UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index}", suppress_runtime_ref: suppress_runtime_ref, structure_stmts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() }
   });
     rtoc_indexed_i_23 = rtoc_indexed_i_23 + 1;
   END
