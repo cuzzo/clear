@@ -129,7 +129,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
   &extra_field_names.insert(COPY _.name);
   END
   promoted_field_decls = promoted_field_decls |> WHERE !(extra_field_names.contains?(_.name));
-  MUTABLE ctx_struct = FsmGenericCtxStruct{ type_name: COPY ctx.ctx_type, promise_zig: COPY ctx.promise_zig, capture_fields: COPY ctx.capture_fields, extra_field_decls: extra_field_decls, promoted_field_decls: promoted_field_decls, member_fns: UNWRAP (member_fns), dispatch: dispatch, destroy_actions: destroy_actions };
+  MUTABLE ctx_struct = FsmGenericCtxStruct{ type_name: COPY ctx.ctx_type, promise_zig: COPY ctx.promise_zig, capture_fields: COPY ctx.capture_fields, extra_field_decls: extra_field_decls, promoted_field_decls: promoted_field_decls, member_fns: member_fns, dispatch: dispatch, destroy_actions: destroy_actions };
   MUTABLE spawn_setup = TRY (emit__build_spawn_setup(ctx));
   MUTABLE fsm_body = FsmGenericBody{ blk_label: COPY ctx.blk_label, ctx_struct: ctx_struct, spawn_setup: spawn_setup, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
   RETURN FsmLoweringResult{ body: FsmBody{ FsmGenericBody: COPY fsm_body }, structure: COPY TRY (emit__build_fsm_structure(ctx, segment_specs, destroy_actions, id)) };
