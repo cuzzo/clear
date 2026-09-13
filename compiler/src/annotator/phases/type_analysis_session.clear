@@ -16763,20 +16763,10 @@ PRIVATE FN typeAnalysisSession__handle_assignment_identifier_move_mut(MUTABLE se
     TRY (scope__resolve_type(rtoc_local_receiver_480, UNWRAP (rhs_name))) };
     MUTABLE rhs_info: ?SymbolEntry@multiowned = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_481 = TRY (typeAnalysisSession__current_scope(&self));
     scope__resolve_entry(rtoc_local_receiver_481, UNWRAP (rhs_name)) };
-    IF (IF (IF rhs_info != NIL THEN
-      symbolEntry__rc_stored?(rhs_info)
-    ELSE
-      NIL
-    END) != NIL THEN (IF rhs_info != NIL THEN
-      symbolEntry__rc_stored?(rhs_info)
-    ELSE
-      NIL
-    END) ELSE (IF rhs_info != NIL THEN
-      symbolEntry__sync(rhs_info)
-    ELSE
-      NIL
-    END) END) THEN
-      RETURN;
+    IF rhs_info EXISTS AS rtoc_rc_info THEN
+      IF (symbolEntry__rc_stored?(rtoc_rc_info) OR (symbolEntry__sync(rtoc_rc_info) != NIL)) THEN
+        RETURN;
+      END
     END
     MUTABLE type_obj = rhs_type;
     MUTABLE is_copy = (TRY (type__implicitly_copyable?(type_obj, %(t: String@symbol) USE(MUTABLE self) -> TRY (typeAnalysisSession__schema_lookup_result(&self, t)))) AND ((!(TRY (type__string?(type_obj))) OR type__symbol?(type_obj))));
