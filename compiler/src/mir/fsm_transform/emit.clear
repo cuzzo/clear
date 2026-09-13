@@ -477,20 +477,18 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     END
     rtoc_done_i = rtoc_done_i + 1;
   END
-  MUTABLE result_seg_indices = (%(rtoc_indexed_items_11: []Segment) -> {
   MUTABLE rtoc_indexed_acc_13 = Set[];
   MUTABLE rtoc_indexed_i_12 = 0;
-  WHILE rtoc_indexed_i_12 < rtoc_indexed_items_11.length() DO
-    IF UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).stmts.empty?() THEN
+  WHILE rtoc_indexed_i_12 < segment_nodes.length() DO
+    IF UNWRAP (segment_nodes[rtoc_indexed_i_12]).stmts.empty?() THEN
         CONTINUE;
     END
-    IF (UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).tail IS_A Done OR ((UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).tail IS_A Goto AND (UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).tail.target_index == done_idx)))) THEN
-        &rtoc_indexed_acc_13.append(UNWRAP (rtoc_indexed_items_11[rtoc_indexed_i_12]).indexOf());
+    IF (UNWRAP (segment_nodes[rtoc_indexed_i_12]).tail IS_A Done OR ((UNWRAP (segment_nodes[rtoc_indexed_i_12]).tail IS_A Goto AND (UNWRAP (segment_nodes[rtoc_indexed_i_12]).tail.target_index == done_idx)))) THEN
+        &rtoc_indexed_acc_13.append(UNWRAP (segment_nodes[rtoc_indexed_i_12]).indexOf());
     END
     rtoc_indexed_i_12 = rtoc_indexed_i_12 + 1;
   END
-  rtoc_indexed_acc_13
-  })(segment_nodes);
+  MUTABLE result_seg_indices = rtoc_indexed_acc_13;
   MUTABLE owned_result_guards = TRY (emit__fsm_owned_result_guards(segment_nodes, lowering));
   MUTABLE seg_result_facts: {Int64}[]FsmResultTransferFact = {};
   MUTABLE seg_mir_codes: [][]Emittable = List[];
