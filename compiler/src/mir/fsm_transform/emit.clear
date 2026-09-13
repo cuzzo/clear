@@ -483,8 +483,17 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     IF UNWRAP (segment_nodes[rtoc_indexed_i_12]).stmts.empty?() THEN
         CONTINUE;
     END
-    IF (UNWRAP (segment_nodes[rtoc_indexed_i_12]).tail IS_A Done OR ((UNWRAP (segment_nodes[rtoc_indexed_i_12]).tail IS_A Goto AND (UNWRAP (segment_nodes[rtoc_indexed_i_12]).tail.target_index == done_idx)))) THEN
-        &rtoc_indexed_acc_13.append(UNWRAP (segment_nodes[rtoc_indexed_i_12]).indexOf());
+    MUTABLE rtoc_seg = UNWRAP (segment_nodes[rtoc_indexed_i_12]);
+    MUTABLE rtoc_is_result = FALSE;
+    IF rtoc_seg.tail IS_A Done THEN
+      rtoc_is_result = TRUE;
+    ELSE_IF rtoc_seg.tail IS_A Goto AS rtoc_goto THEN
+      IF done_idx EXISTS AS rtoc_done_idx THEN
+        rtoc_is_result = (rtoc_goto.target_index == rtoc_done_idx);
+      END
+    END
+    IF rtoc_is_result THEN
+      &rtoc_indexed_acc_13.append(rtoc_seg.index);
     END
     rtoc_indexed_i_12 = rtoc_indexed_i_12 + 1;
   END
