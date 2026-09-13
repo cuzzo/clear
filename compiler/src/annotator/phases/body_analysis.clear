@@ -182,6 +182,7 @@ PUB FN castAsyncBodyNodeToAsyncValidationNode(value: AsyncBodyNode) RETURNS ?Asy
   END
   RETURN NIL;
 END
+PUB UNION AsyncSpawnNode { BgBlock: BgBlock, BgStreamBlock: BgStreamBlock }
 FN castAsyncBodyNodeToAsyncSpawnNode(value: AsyncBodyNode) RETURNS ?AsyncSpawnNode ->
   PARTIAL MATCH value START
     AsyncBodyNode.BgBlock AS item -> RETURN AsyncSpawnNode{ BgBlock: COPY item };,
