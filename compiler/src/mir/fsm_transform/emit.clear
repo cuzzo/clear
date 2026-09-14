@@ -517,14 +517,11 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
       &ast_stmts.append(COPY ast_stmt);
   END
   END
-  (  IF (ast_stmts.length() == 0) THEN
-      {
-    MUTABLE rtoc_value_block_marker = 0;
+  MUTABLE seg_items: []FsmBodyItem = List[];
+  IF (ast_stmts.length() == 0) THEN
     seg_mir_codes[rtoc_indexed_i_17] = mir_stmts;
-    TRY (emit__fsm_body_mir_items(mir_stmts))
-  }
-    ELSE
-      {
+    seg_items = TRY (emit__fsm_body_mir_items(mir_stmts));
+  ELSE
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE want_result = (!(is_void) AND result_seg_indices.contains?(UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).index));
     MUTABLE inherited_capture_names: [Set]String = ((TRY (emit__fsm_destroy_actions(ctx))) |> SELECT:? fsmDestroyAction__ctx_cleanup_target_name(_) |> WHERE _ != NIL).compact() |> DISTINCT _;
@@ -557,9 +554,9 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
       lowered_mir = TRY (emit__lift_ctx_cleanups_to_destroy_mut(lowered_mir, promoted_names, "__ctx_${id.toString()}", &ctx));
   END
     seg_mir_codes[rtoc_indexed_i_17] = lowered_mir;
-    TRY (emit__fsm_body_mir_items(lowered_mir))
-  }
-    END)
+    seg_items = TRY (emit__fsm_body_mir_items(lowered_mir));
+  END
+  seg_items
   });
     rtoc_indexed_i_17 = rtoc_indexed_i_17 + 1;
   END
