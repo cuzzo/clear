@@ -99,7 +99,7 @@ PRIVATE FN pipelineListLowerer__lower_select(self: PipelineListLowerer, site: Pi
     ELSE
       body = List[];
     END
-  ruby_array_concat_Emittable__pipeline_list_lowerer(body, head.pending);
+  body = ruby_array_concat_Emittable__pipeline_list_lowerer(body, head.pending);
   IF element_owned THEN
       &body.append(pipelineListLowerer__append_fresh_owned_value_stmt_call(self, res, alloc, head.value, res_type));
   ELSE

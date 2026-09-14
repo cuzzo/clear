@@ -111,7 +111,7 @@ PRIVATE FN emit__build_fsm_unified(ctx: FsmEmitContext, segment_specs_input: []F
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    ruby_array_concat_ContextFieldDecl(extra_field_decls, CAST(d.ctx_field_decls AS []ContextFieldDecl));
+    extra_field_decls = ruby_array_concat_ContextFieldDecl(extra_field_decls, CAST(d.ctx_field_decls AS []ContextFieldDecl));
   rtoc_idx = rtoc_idx + 1;
   END
   extra_field_decls = ruby_array_concat_ContextFieldDecl(extra_field_decls, ctx.extra_ctx_fields);
@@ -539,7 +539,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     ELSE
       eff_capture_map = capture_map;
     END
-    MUTABLE lowered_mir = mIRLowering__with_fsm_segment_lowering_context(&lowering_api, pointer_captures, inherited_capture_names, inherited_capture_names, owned_result_guards, %() USE(ast_stmts, bg_rt, ctx, eff_capture_map, id, MUTABLE lowering_api, want_result) -> mIRLowering__with_fiber_capture_map(&lowering_api, eff_capture_map, {}, bg_rt, %() USE(ast_stmts, ctx, id, MUTABLE lowering_api, want_result) -> {
+    MUTABLE lowered_mir: []Emittable = mIRLowering__with_fsm_segment_lowering_context(&lowering_api, pointer_captures, inherited_capture_names, inherited_capture_names, owned_result_guards, %() USE(ast_stmts, bg_rt, ctx, eff_capture_map, id, MUTABLE lowering_api, want_result) -> mIRLowering__with_fiber_capture_map(&lowering_api, eff_capture_map, {}, bg_rt, %() USE(ast_stmts, ctx, id, MUTABLE lowering_api, want_result) -> {
     IF want_result THEN
       RETURN TRY (mIRLowering__lower_finalized_fsm_step_mir( &lowering_api, ast_stmts, FALSE, id, ctx.async_result_shape));
     ELSE
@@ -619,9 +619,9 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   END
   MUTABLE prologue_stmts = (prologue OR_ELSE List[]);
   MUTABLE rt_roots: []Emittable = List[];
-  ruby_array_concat_Emittable__emit(rt_roots, TRY (emit__fsm_body_mir_nodes(body_stmts)));
-  ruby_array_concat_Emittable__emit(rt_roots, TRY (emit__fsm_body_mir_nodes(prologue_stmts)));
-  ruby_array_concat_Emittable__emit(rt_roots, CAST((descriptor?.setup_stmts OR_ELSE List[]) AS []Emittable));
+  rt_roots = ruby_array_concat_Emittable__emit(rt_roots, TRY (emit__fsm_body_mir_nodes(body_stmts)));
+  rt_roots = ruby_array_concat_Emittable__emit(rt_roots, TRY (emit__fsm_body_mir_nodes(prologue_stmts)));
+  rt_roots = ruby_array_concat_Emittable__emit(rt_roots, CAST((descriptor?.setup_stmts OR_ELSE List[]) AS []Emittable));
   MUTABLE rt_used = TRY (emit__mir_nodes_reference_ident?(rt_roots, bg_rt));
   MUTABLE suppress_runtime_ref = !(rt_used);
   FsmSegmentSpec{ index: UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index, prologue_stmts: COPY prologue_stmts, body_stmts: COPY body_stmts, tail: COPY UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail, descriptor: COPY descriptor, fsm_result_transfer_facts: COPY (seg_result_facts[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index] OR_ELSE List[]), fn_name: "runSeg${UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index}", suppress_runtime_ref: suppress_runtime_ref, structure_stmts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() }

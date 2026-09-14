@@ -585,7 +585,7 @@ END
 PRIVATE FN resolutionSession__all_known_type_names(MUTABLE self: ResolutionSession) RETURNS ![]String ->
     MUTABLE names = List[];
     FOR _ IN (resolutionSession__scope_stack_for_helper(self)) DO
-    ruby_array_concat_Any__resolution_phase(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
+    names = ruby_array_concat_Any__resolution_phase(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
     END
     RETURN CAST((names |> DISTINCT _) AS []Any);
 END

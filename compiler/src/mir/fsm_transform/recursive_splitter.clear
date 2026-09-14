@@ -422,7 +422,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_
     END
     rtoc_indexed_output_19
   }).reverse()[_] OR_ELSE panic("missing hash key"));
-      ruby_array_concat_Emittable__recursive_splitter(release_stmts, TRY (fsmRecursiveSplitter__lock_release_stmts(ctx_id, UNWRAP (lock_indices[i]), CAST((UNWRAP (_[:lock_field_ref])) AS String), CAST((UNWRAP (_[:unlock_method])) AS String))));
+      release_stmts = ruby_array_concat_Emittable__recursive_splitter(release_stmts, TRY (fsmRecursiveSplitter__lock_release_stmts(ctx_id, UNWRAP (lock_indices[i]), CAST((UNWRAP (_[:lock_field_ref])) AS String), CAST((UNWRAP (_[:unlock_method])) AS String))));
       };
       builder__fill(&builder, release_idx, fsmRecursiveSplitter__as_mir_body(release_stmts), SegmentTail{ Goto: COPY Goto{ target_index: COPY after_idx } });
       RETURN UNWRAP (cap_indices.first());

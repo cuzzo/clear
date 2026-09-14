@@ -1722,7 +1722,7 @@ END
 PRIVATE FN capabilityAuditSession__all_known_type_names(self: CapabilityAuditSession) RETURNS ![]String ->
     MUTABLE names = List[];
     FOR _ IN (capabilityAuditSession__scope_stack_for_helper(self)) DO
-    ruby_array_concat_Any__capability_audit_session(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
+    names = ruby_array_concat_Any__capability_audit_session(names, CAST(_.types.keys() |> SELECT _.toString() AS []Any));
     END
     RETURN CAST((names |> DISTINCT _) AS []Any);
 END
@@ -2865,7 +2865,7 @@ PRIVATE FN capabilityAuditSession__emit_mutual_thunk_unsupported_mut(MUTABLE sel
           nl_ok = FALSE;
           BREAK;
       END
-      ruby_array_concat_Any__capability_audit_session(edits_nl, CAST(eff AS []Any));
+      edits_nl = ruby_array_concat_Any__capability_audit_session(edits_nl, CAST(eff AS []Any));
       MUTABLE rt: ?Type = functionDef__declared_return_type(cycle_thunk_fns[rtoc_idx]);
       IF rt EXISTS AS rt_value THEN
         IF type__error_union?(rt_value) THEN
@@ -2894,7 +2894,7 @@ PRIVATE FN capabilityAuditSession__emit_mutual_thunk_unsupported_mut(MUTABLE sel
           md_ok = FALSE;
           BREAK;
       END
-      ruby_array_concat_Any__capability_audit_session(edits_md, CAST(eff AS []Any));
+      edits_md = ruby_array_concat_Any__capability_audit_session(edits_md, CAST(eff AS []Any));
       MUTABLE rt: ?Type = functionDef__declared_return_type(cycle_thunk_fns[rtoc_idx]);
       IF rt EXISTS AS rt_value THEN
         IF type__error_union?(rt_value) THEN
