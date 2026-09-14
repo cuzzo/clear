@@ -667,11 +667,11 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     IF !((suspend_result_vars.contains?(rtoc_csv_key) OR conservative_names.contains?(rtoc_csv_key))) THEN
       MUTABLE rtoc_csv_info = COPY UNWRAP (liveness.cross_segment_vars[rtoc_csv_key]);
       MUTABLE type_info: ?Type = rtoc_csv_info.type_info;
-      &promoted_value_decls.append(emit__ctx_field_decl(CAST(rtoc_csv_key AS String), IF type_info THEN
-          TRY (type__zig_type(type_info))
-        ELSE
-          "anyopaque"
-        END, Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }));
+      MUTABLE rtoc_zig_type: String = "anyopaque";
+      IF type_info EXISTS AS rtoc_type_info THEN
+        rtoc_zig_type = TRY (type__zig_type(rtoc_type_info));
+      END
+      &promoted_value_decls.append(emit__ctx_field_decl(CAST(rtoc_csv_key AS String), rtoc_zig_type, Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }));
     END
   END
   MUTABLE promoted_guard_decls = fsm_promoted_names |> SELECT emit__ctx_field_decl("${_}_moved", "bool", Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } });
