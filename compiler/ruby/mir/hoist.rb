@@ -412,6 +412,16 @@ module Hoist
     else
       Type.from_node!(concat, context: "AST hoist temp")
     end
+    # The temp holds the VALUE; the optional wrap happens where it is consumed.
+    # Stamping it with an optional destination type makes the emitter declare
+    # `var __hoist_1 = ?CheatLib.Set(Symbol){};`, and Zig cannot default-
+    # initialize an optional from a struct literal. Seen passing `Set[]` to a
+    # `?[Set]T = NIL` parameter. Only narrow when the value itself is not
+    # optional -- a genuinely nilable value keeps the optional type.
+    if ti.optional? && ti.wrapped_type
+      own = Type.from_node!(concat, context: "AST hoist temp")
+      ti = T.must(ti.wrapped_type) unless own.optional?
+    end
     storage = if owned_fallback_temp?(concat, schema_lookup)
       :heap
     elsif ast_borrow_expr?(concat, moved) || (concat.respond_to?(:container_borrow) && concat.container_borrow)

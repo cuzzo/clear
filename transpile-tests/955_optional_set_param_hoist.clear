@@ -1,0 +1,27 @@
+# A non-optional value passed to an OPTIONAL parameter must hoist and construct
+# as the value's own type. Stamping the temp with the destination's optional
+# type made the emitter write `?CheatLib.Set(Symbol){}`, and Zig cannot use an
+# optional as a struct literal.
+FN count_effects(effects: ?[Set]String@symbol = NIL) RETURNS Int64 ->
+  IF effects EXISTS AS present THEN
+    RETURN present.length();
+  END
+  RETURN -1;
+END
+
+FN join_names(names: ?[]String = NIL) RETURNS String ->
+  IF names EXISTS AS present THEN
+    RETURN "[${present.join(",")}]";
+  END
+  RETURN "none";
+END
+
+PUB FN main() RETURNS !Void ->
+  print("empty_set=${count_effects(Set[]).toString()}\n");
+  print("two_set=${count_effects(Set[:yield, :io]).toString()}\n");
+  print("no_set=${count_effects().toString()}\n");
+  print("empty_list=${join_names([])}\n");
+  print("two_list=${join_names(["a", "b"])}\n");
+  print("no_list=${join_names()}\n");
+  RETURN;
+END

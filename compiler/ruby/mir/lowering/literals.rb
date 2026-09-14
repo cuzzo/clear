@@ -193,11 +193,16 @@ module MIRLoweringLiterals
       )
     end
 
+    # An empty literal CONSTRUCTS the container. When the destination is
+    # optional -- `?[Set]T` parameter, `?[]T` field -- the optional wrap happens
+    # at the assignment, so the container's own Zig type is the payload.
+    # Rendering the optional here emits `?CheatLib.Set(T){}`, which Zig cannot
+    # use as a struct literal ("type ... is not a struct").
     if node.items.empty?
       # Empty list: MIR expression depends on collection type
       if plan.list_collection?
         inner_ti = list_literal_capability_wrap_needed?(ti) ? ti.bare_data_type : ti
-        inner = MIR::ContainerInit.new(transpile_type(inner_ti), :array_list_empty, list_alloc, nil)
+        inner = MIR::ContainerInit.new(transpile_type(container_literal_type(inner_ti)), :array_list_empty, list_alloc, nil)
         return wrap_list_literal_capability(inner, ti, list_alloc)
       end
       # Empty SET literal (`Set[]` in rvalue position, e.g. stored into a
@@ -205,7 +210,7 @@ module MIRLoweringLiterals
       # destination's Zig type is Set.
       if ti.set_collection?
         inner_ti = list_literal_capability_wrap_needed?(ti) ? ti.bare_data_type : ti
-        inner = MIR::ContainerInit.new(transpile_type(inner_ti), :set_empty, list_alloc, nil)
+        inner = MIR::ContainerInit.new(transpile_type(container_literal_type(inner_ti)), :set_empty, list_alloc, nil)
         return wrap_list_literal_capability(inner, ti, list_alloc)
       end
       # Dynamic empty list: use makeList with empty items
@@ -616,5 +621,11 @@ module MIRLoweringLiterals
   private :striped_hash_literal_capability_plan
   private :unwrapped_hash_literal_capability_plan
   private :wrap_list_literal_capability
+
+  sig { params(type_info: Type).returns(Type) }
+  def container_literal_type(type_info)
+    wrapped = type_info.optional? ? type_info.wrapped_type : nil
+    wrapped.is_a?(Type) ? wrapped : type_info
+  end
 
 end
