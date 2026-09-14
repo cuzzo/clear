@@ -9468,7 +9468,7 @@ PRIVATE FN mIRLowering__lower_lambda(MUTABLE self: MIRLowering, node: LambdaLit)
     MUTABLE p_type = _.type;
     MUTABLE type_str: String = "";
       IF TRUE THEN
-        type_str = TRY (type__zig_type(p_type, CAST({:is_param: TRUE} AS Bool)));
+        type_str = TRY (type__zig_type(p_type, TRUE));
       ELSE
         type_str = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ SymbolValue: :Any }, TRUE));
       END
@@ -10890,7 +10890,7 @@ PRIVATE FN mIRLowering__bg_capture_materialization(MUTABLE self: MIRLowering, na
     MUTABLE capture_frees = captured |> SELECT:? {
     MUTABLE close_plan: ?ResourceClosePlan = COPY capture_close_plans[_._0];
     (  IF close_plan THEN
-        CaptureCleanupAction{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${names.id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY _._0, lowered_node_id: NIL, ownership_consumption: NIL } }, cleanup_entry: cleanupEntry__build(:resource, :heap, FALSE, {:resource_close_plan: close_plan}), allocator: NIL }
+        CaptureCleanupAction{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${names.id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY _._0, lowered_node_id: NIL, ownership_consumption: NIL } }, cleanup_entry: cleanupEntry__build(:resource, :heap, FALSE, close_plan), allocator: NIL }
       ELSE
         NIL
       END)

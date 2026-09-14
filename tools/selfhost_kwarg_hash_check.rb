@@ -32,17 +32,39 @@ end
 bad = []
 Dir.glob("#{root}/**/*.clear").sort.each do |path|
   File.readlines(path).each_with_index do |line, idx|
-    line.scan(/(\w+)\s*\(([^\n]*)/) do
-      callee = Regexp.last_match(1)
-      rest = Regexp.last_match(2)
+    # Scan by POSITION, not with a greedy trailing group: `([^\n]*)` consumes
+    # the rest of the line, so String#scan finds only the FIRST call on it and
+    # every nested call is invisible. That produced a false CLEAN while
+    # emit.clear:542 -- a 433-character line whose SECOND call carried the
+    # packed kwarg -- was broken.
+    offset = 0
+    while (m = /(\w+)\s*\(/.match(line, offset))
+      callee = m[1]
+      rest = line[m.end(0)..] || ''
+      offset = m.end(0)
       names = params[callee]
       next if names.empty?
 
-      rest.scan(/\{\s*:(\w+)\s*:/) do
-        key = Regexp.last_match(1)
-        next unless names.include?(key)
+      # Only literals in THIS call's own argument list count. A nested call's
+      # literal is its own business: fix__new(fix_description(..., {:description:
+      # DiagnosticKwValue{...}})) is a legitimate diagnostic kwargs MAP, and
+      # attributing it to fix__new (which has a `description` parameter) made it
+      # look like a packed kwarg.
+      depth = 0
+      j = 0
+      while j < rest.length
+        c = rest[j]
+        depth += 1 if '(['.include?(c)
+        if ')]'.include?(c)
+          break if c == ')' && depth.zero?
 
-        bad << [path.sub("#{root}/", ''), idx + 1, callee, key, line.strip[0, 110]]
+          depth -= 1
+        end
+        if depth.zero? && c == '{' && (m2 = /\A\{\s*:(\w+)\s*:/.match(rest[j..]))
+          key = m2[1]
+          bad << [path.sub("#{root}/", ''), idx + 1, callee, key, line.strip[0, 110]] if names.include?(key)
+        end
+        j += 1
       end
     end
   end

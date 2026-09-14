@@ -226,7 +226,7 @@ END
 PRIVATE FN mIRPass__recurse_expr_body_mut(MUTABLE self: MIRPass, MUTABLE val: ?Locatable, ctx: WalkCtx) RETURNS !Void
   EFFECTS REENTRANT ->
     IF (((val != NIL) AND (val IS_A BgBlock)) AND locatable__body(val)) THEN
-      val.body = TRY (mIRPass__transform_body(&self, UNWRAP (locatable__body(val)), walkCtx__with(ctx, CAST({:cleanup_facts: mIRPass__bg_inner_facts(self, castOptionalLocatableToBgNode(val), ctx.cleanup_facts)} AS FrozenCleanupFacts))));
+      val.body = TRY (mIRPass__transform_body(&self, UNWRAP (locatable__body(val)), walkCtx__with(ctx, mIRPass__bg_inner_facts(self, castOptionalLocatableToBgNode(val), ctx.cleanup_facts))));
     ELSE_IF ((val != NIL) AND (val IS_A BlockExpr)) THEN
       val.body = TRY (mIRPass__transform_body(&self, UNWRAP (locatable__body(val)), ctx));
     END
