@@ -53,7 +53,18 @@ module SelfhostCheckUnit
       # the same component taken all the way to an executable, which is what
       # CLEAR_UNIT_STAGE=2c asks for.
       stage_2c = ENV['CLEAR_UNIT_STAGE'] == '2c'
+      # CLEAR_UNIT_CENSUS=1 loads the function-level accumulator, so one run of
+      # an expensive component reports EVERY broken function instead of the
+      # first. That is the difference between one fix per run and a whole work
+      # list per run -- and scc_annotator_54, 54 mutually recursive files, costs
+      # ~50 minutes a run no matter what, because an SCC is one compilation unit.
+      probes = []
+      probes << "-r#{File.join(ROOT, 'tools', 'probe_multi_error')}" if ENV['CLEAR_UNIT_CENSUS'] == '1'
+      probes << "-r#{ENV['CLEAR_UNIT_TIMER']}" if ENV['CLEAR_UNIT_TIMER']
       env = {
+        'RUBYOPT' => ([ENV['RUBYOPT'], *probes].compact.join(' ') if probes.any?),
+        'CLEAR_PROBE_ERROR_CAP' => (ENV['CLEAR_UNIT_CENSUS'] == '1' ? '200000' : nil),
+        'CLEAR_PROBE_CENSUS_FILE' => ENV['CLEAR_UNIT_CENSUS_FILE'],
         'CLEAR_TRANSPILE_ONLY' => stage_2c ? nil : '1',
         'CLEAR_DISABLE_BUILD_ZIG' => stage_2c ? nil : '1',
         'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8',
