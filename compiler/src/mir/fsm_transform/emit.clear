@@ -990,7 +990,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   END
   rtoc_ternary_value_42? };
   MUTABLE has_step_work = (!((spec.prologue_stmts.length() == 0)) OR !((spec.body_stmts.length() == 0)));
-  MUTABLE lock_try_spec = FsmSegmentSpec{ index: spec.index, prologue_stmts: COPY spec.prologue_stmts, body_stmts: COPY spec.body_stmts, structure_stmts: COPY spec.structure_stmts, tail: EmitSegmentTail{ FsmTailLockTry: COPY FsmTailLockTry{ try_method: CAST(UNWRAP (meta)[:try_method] AS String), lock_field_ref: CAST(UNWRAP (meta)[:lock_field_ref] AS String), ok_step: try_success_idx, wait_step: woken_idx, error_step: retry_idx } }, descriptor: NIL, fsm_result_transfer_facts: COPY spec.fsm_result_transfer_facts, fn_name: COPY IF has_step_work THEN
+  MUTABLE lock_try_spec = FsmSegmentSpec{ index: spec.index, prologue_stmts: COPY spec.prologue_stmts, body_stmts: COPY spec.body_stmts, structure_stmts: COPY spec.structure_stmts, tail: EmitSegmentTail{ FsmTailLockTry: COPY FsmTailLockTry{ try_method: CAST(meta[:try_method] AS String), lock_field_ref: CAST(meta[:lock_field_ref] AS String), ok_step: try_success_idx, wait_step: woken_idx, error_step: retry_idx } }, descriptor: NIL, fsm_result_transfer_facts: COPY spec.fsm_result_transfer_facts, fn_name: COPY IF has_step_work THEN
     spec.fn_name
   ELSE
     NIL
@@ -1015,8 +1015,8 @@ PRIVATE FN emit__build_segment_descriptor(seg: Segment, ctx: FsmEmitContext, MUT
   END
   MUTABLE bg_rt = COPY ctx.bg_rt;
   MUTABLE pointer_captures = COPY ctx.pointer_captures;
-  MUTABLE result = mIRLowering__with_bg_fiber_body_context(&lowering_api, pointer_captures, %() USE(bg_rt, capture_map, ctx, lowering_api, seg, sp_idx) -> {
-  rtoc_lambda_result_48 = mIRLowering__with_fiber_capture_map(&lowering_api, capture_map, {}, bg_rt, %() USE(ctx, lowering_api, seg, sp_idx) -> {
+  MUTABLE result = mIRLowering__with_bg_fiber_body_context(&lowering_api, pointer_captures, %() USE(bg_rt, capture_map, ctx, MUTABLE lowering_api, seg, sp_idx) -> {
+  rtoc_lambda_result_48 = mIRLowering__with_fiber_capture_map(&lowering_api, capture_map, {}, bg_rt, %() USE(ctx, MUTABLE lowering_api, seg, sp_idx) -> {
   MUTABLE eff_sp = (sp_idx OR_ELSE ((seg.index + 1)));
   TRY (suspendResolvers__resolve(seg, ctx, &lowering_api, eff_sp))
   });
@@ -1034,11 +1034,12 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
     IF !(idx) THEN
       BREAK;
     END
-    IF visited[idx] THEN
+    MUTABLE idx_value: Int64 = UNWRAP (idx);
+    IF visited[idx_value] THEN
       CONTINUE;
     END
-    visited[idx] = TRUE;
-    MUTABLE seg: ?Segment = COPY segments[idx];
+    visited[idx_value] = TRUE;
+    MUTABLE seg: ?Segment = COPY segments[idx_value];
     IF seg EXISTS AS seg_value THEN
       IF (seg_value.tail IS_A IoSuspend OR seg_value.tail IS_A NextSuspend) THEN
         out[seg_value.index] = counter;
@@ -1085,15 +1086,17 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
   RETURN out;
 END
 PRIVATE FN emit__build_spawn_setup(ctx: FsmEmitContext) RETURNS !FsmSpawnSetup ->
-  MUTABLE is_local_pin = PARTIAL MATCH ctx.pin_mode START
-    TransformValue.BoolValue AS rtoc_pin_bool -> rtoc_pin_bool,
-    TransformValue.SymbolValue AS rtoc_pin_sym -> (rtoc_pin_sym == :local),
-    DEFAULT -> FALSE
-  END;
-  MUTABLE pin_mode_false = PARTIAL MATCH ctx.pin_mode START
-    TransformValue.BoolValue AS rtoc_pin_unset -> !(rtoc_pin_unset),
-    DEFAULT -> FALSE
-  END;
+  MUTABLE is_local_pin: Bool = FALSE;
+  PARTIAL MATCH ctx.pin_mode START
+    TransformValue.BoolValue AS rtoc_pin_bool -> is_local_pin = rtoc_pin_bool;,
+    TransformValue.SymbolValue AS rtoc_pin_sym -> is_local_pin = (rtoc_pin_sym == :local);,
+    DEFAULT -> is_local_pin = FALSE;
+  END
+  MUTABLE pin_mode_false: Bool = FALSE;
+  PARTIAL MATCH ctx.pin_mode START
+    TransformValue.BoolValue AS rtoc_pin_unset -> pin_mode_false = !(rtoc_pin_unset);,
+    DEFAULT -> pin_mode_false = FALSE;
+  END
   MUTABLE is_default_local = (((ctx.pin_mode == NIL) OR pin_mode_false) AND !(ctx.parallel));
   MUTABLE is_local_dispatch = (is_local_pin OR is_default_local);
   MUTABLE dispatch = IF is_local_dispatch THEN
