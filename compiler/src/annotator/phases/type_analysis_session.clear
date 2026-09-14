@@ -2590,9 +2590,46 @@ PRIVATE FN typeAnalysisSession__collect_routine_returns(MUTABLE self: TypeAnalys
     END
     RETURN found_returns;
 END
-PRIVATE FN typeAnalysisSession__build_lambda_signature(MUTABLE self: TypeAnalysisSession, params: []Param, return_type: String@symbol) RETURNS !FunctionSignature@multiowned ->
+PRIVATE FN typeAnalysisSession__lambda_inferred_return(MUTABLE self: TypeAnalysisSession, node: LambdaLit, return_type: String@symbol) RETURNS !TypeConstructionInput EFFECTS REENTRANT ->
+  MUTABLE recovered: ?Type = TRY (typeAnalysisSession__lambda_block_return_type(&self, node.body, return_type));
+  IF recovered EXISTS AS rtoc_recovered THEN
+    RETURN TypeConstructionInput{ Type: COPY rtoc_recovered };
+  END
+  RETURN TypeConstructionInput{ SymbolValue: COPY return_type };
+END
+PRIVATE FN typeAnalysisSession__lambda_block_return_type(MUTABLE self: TypeAnalysisSession, body: LambdaBody, return_type: String@symbol) RETURNS !?Type EFFECTS REENTRANT ->
+  MUTABLE found: ?Type = NIL;
+  FOR rtoc_stmt IN castLambdaBodyToRoutineBody(body) DO
+    IF found == NIL THEN
+      found = TRY (typeAnalysisSession__lambda_return_type_in(&self, rtoc_stmt, return_type));
+    END
+  END
+  RETURN found;
+END
+PRIVATE FN typeAnalysisSession__lambda_return_type_in(MUTABLE self: TypeAnalysisSession, node: Locatable, return_type: String@symbol) RETURNS !?Type EFFECTS REENTRANT ->
+  IF node IS_A LambdaLit THEN
+    RETURN NIL;
+  END
+  IF node IS_A ReturnNode AS rtoc_ret THEN
+    IF rtoc_ret.value EXISTS AS rtoc_value THEN
+      MUTABLE candidate = TRY (aST__full_type_mut(rtoc_value));
+      IF ((type__resolved(candidate) == return_type) OR (TRY (type__surface_name_type(candidate)) == return_type.toString())) THEN
+        RETURN candidate;
+      END
+    END
+  END
+  MUTABLE nested: ?Type = NIL;
+  aST__each_child_node(node, %(child: Locatable) USE(MUTABLE nested, MUTABLE self, return_type) -> {
+    IF nested == NIL THEN
+      nested = typeAnalysisSession__lambda_return_type_in(&self, child, return_type) OR_ELSE NIL;
+    END
+    NIL
+  });
+  RETURN nested;
+END
+PRIVATE FN typeAnalysisSession__build_lambda_signature(MUTABLE self: TypeAnalysisSession, params: []Param, return_type: TypeConstructionInput) RETURNS !FunctionSignature@multiowned ->
     MUTABLE normalized_params = params |> SELECT Param{ name: COPY _.name, type: COPY _.type, required: (_.default == NIL), default: _.default, mutable: ( { MUTABLE rtoc_optional_or_source_44: ?Bool = _.mutable; MUTABLE rtoc_optional_or_result_45: ?Bool = NIL; IF rtoc_optional_or_source_44 != NIL THEN rtoc_optional_or_result_45 = COPY rtoc_optional_or_source_44; ELSE rtoc_optional_or_result_45 = FALSE; END rtoc_optional_or_result_45 } ), takes: ( { MUTABLE rtoc_optional_or_source_46: ?Bool = _.takes; MUTABLE rtoc_optional_or_result_47: ?Bool = NIL; IF rtoc_optional_or_source_46 != NIL THEN rtoc_optional_or_result_47 = COPY rtoc_optional_or_source_46; ELSE rtoc_optional_or_result_47 = FALSE; END rtoc_optional_or_result_47 } ), comptime: NIL, name_token: NIL, sync: NIL, symbol: NIL, carrier_contract: NIL };
-    RETURN TRY (functionSignature__new(normalized_params, castTypeToOptionalTypeTypeInput__type_analysis_session(TRY (type__new(TypeConstructionInput{ SymbolValue: COPY return_type }))), NIL, NIL, List[], {}, FALSE, FALSE, NIL, NIL, NIL, List[], NIL, List[]));
+    RETURN TRY (functionSignature__new(normalized_params, castTypeToOptionalTypeTypeInput__type_analysis_session(TRY (type__new(return_type))), NIL, NIL, List[], {}, FALSE, FALSE, NIL, NIL, NIL, List[], NIL, List[]));
 END
 PRIVATE FN typeAnalysisSession__signature_from_function_type(MUTABLE self: TypeAnalysisSession, fn_type: FunctionType) RETURNS !FunctionSignature@multiowned ->
     MUTABLE params: []Param = List[];
@@ -2609,7 +2646,7 @@ PRIVATE FN typeAnalysisSession__visit_LambdaLit(MUTABLE self: TypeAnalysisSessio
     typeAnalysisSession__push_function_context_mut( &self, lambda_ctx);
     DEFER typeAnalysisSession__pop_function_context_mut( &self);
     MUTABLE return_type: ?String@symbol = TRY (typeAnalysisSession__with_body_fact_nested_body(&self, %() USE(MUTABLE node, MUTABLE self) -> TRY (typeAnalysisSession__with_body_fact_lambda_body(&self, node, %() USE(node, MUTABLE self) -> TRY (typeAnalysisSession__analyze_routine(&self, RoutineNode{ LambdaLit: COPY node }, castLambdaBodyToRoutineBody(node.body), TypeTypeInput{ SymbolValue: :Any }, TRUE))))));
-    RETURN TRY (typeAnalysisSession__stamp_type_mut(&self, Locatable{ LambdaLit: COPY node }, TRY (typeAnalysisSession__build_lambda_signature(&self, (node.params OR_ELSE List[]), CAST(return_type AS String@symbol)))));
+    RETURN TRY (typeAnalysisSession__stamp_type_mut(&self, Locatable{ LambdaLit: COPY node }, TRY (typeAnalysisSession__build_lambda_signature(&self, (node.params OR_ELSE List[]), TRY (typeAnalysisSession__lambda_inferred_return(&self, node, CAST(return_type AS String@symbol)))))));
 END
 PRIVATE FN typeAnalysisSession__visit_FunctionDef(MUTABLE self: TypeAnalysisSession, MUTABLE node: FunctionDef) RETURNS !?FunctionContext@multiowned ->
     TRY (typeAnalysisSession__effects_begin_function(&self, node.name));
@@ -4776,7 +4813,7 @@ PRIVATE FN typeAnalysisSession__analyze_join_op(MUTABLE self: TypeAnalysisSessio
       IF !((key_result_type == :Bool)) THEN
         TRY (typeAnalysisSession__error_mut(&self, DiagnosticAnchor{ Locatable: COPY key_expr }, TypeAnalysisCodeOrMessage{ SymbolValue: :JOIN_LAMBDA_NEEDS_BOOL }, [], CAST({:got: key_result_type} AS {String@symbol}Any)));
       END
-      TRY (typeAnalysisSession__stamp_type_mut(&self, &key_expr, TRY (typeAnalysisSession__build_lambda_signature(&self, params, :Bool))));
+      TRY (typeAnalysisSession__stamp_type_mut(&self, &key_expr, TRY (typeAnalysisSession__build_lambda_signature(&self, params, TypeConstructionInput{ SymbolValue: :Bool }))));
     ELSE
       typeAnalysisSession__with_new_scope(&self, NIL, %() USE(key_expr, left_type, MUTABLE self) -> {
     MUTABLE rtoc_mutable_receiver_124 = TRY (typeAnalysisSession__current_scope(&self));
