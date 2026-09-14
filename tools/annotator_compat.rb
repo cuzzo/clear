@@ -100,5 +100,9 @@ module AnnotatorCompat
 end
 
 # $PROGRAM_NAME is reassigned above (the requires key off it), so the usual
-# "am I the script" guard cannot use it.
-exit(AnnotatorCompat.main(ARGV)) if File.basename(__FILE__) == 'annotator_compat.rb' && $0 != 'irb'
+# `__FILE__ == $0` guard cannot be used. __FILE__ alone is NOT a substitute: it
+# names this file whether the file was run or required, so the old guard ran
+# main() -- a full CLEAR build -- on `require_relative "tools/annotator_compat"`.
+# At the top level of the entry script `caller` is empty; inside a require it
+# is not.
+exit(AnnotatorCompat.main(ARGV)) if caller.empty?
