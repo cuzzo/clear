@@ -504,7 +504,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE rtoc_indexed_result_15 = {
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_16: []Segment = segment_nodes;
-  MUTABLE rtoc_indexed_output_20 = [];
+  MUTABLE rtoc_indexed_output_20: [][]FsmBodyItem = List[];
   MUTABLE rtoc_indexed_i_17 = 0;
   WHILE rtoc_indexed_i_17 < rtoc_indexed_items_16.length() DO
     &rtoc_indexed_output_20.append({
