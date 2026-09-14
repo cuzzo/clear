@@ -21,6 +21,7 @@
 # SCCs cannot be split: scc_annotator_54 is 54 mutually recursive files. They
 # condense into single components, which is why N is ~125 and not 177.
 $PROGRAM_NAME = 'selfhost_components_support'
+require 'digest'
 require 'json'
 require 'open3'
 require 'optparse'
@@ -92,11 +93,60 @@ module SelfhostComponents
     level
   end
 
+  # A component's verdict depends on its own sources AND on its dependencies'
+  # sources, because what it is being checked against is their SIGNATURES. So
+  # the reuse key is a digest over the whole dependency closure -- the same
+  # thing the module cache keys its records on. Changing a level-0 file
+  # legitimately invalidates everything above it; changing a leaf invalidates
+  # only itself.
+  def file_digest(path)
+    @file_digests ||= {}
+    @file_digests[path] ||= Digest::SHA256.file(path).hexdigest
+  rescue Errno::ENOENT
+    'missing'
+  end
+
+  def transitive_deps(deps, name, memo = {}, stack = Set.new)
+    return memo[name] if memo.key?(name)
+    return Set.new unless stack.add?(name)
+
+    acc = Set.new
+    deps[name].each do |d|
+      acc << d
+      acc.merge(transitive_deps(deps, d, memo, stack))
+    end
+    stack.delete(name)
+    memo[name] = acc
+  end
+
+  def closure_digest(comps, deps, name, memo = {})
+    names = [name] + transitive_deps(deps, name, memo).to_a
+    files = names.flat_map { |n| comps[n] || [] }.uniq.sort
+    Digest::SHA256.hexdigest(files.map { |r| "#{r}:#{file_digest(File.join(GEN, r))}" }.join("\n"))
+  end
+
+  # Prior verdicts, newest wins (the journal is append-only).
+  def load_prior(journal)
+    return {} unless File.exist?(journal)
+
+    File.readlines(journal).each_with_object({}) do |line, acc|
+      row = begin
+        JSON.parse(line)
+      rescue JSON::ParserError
+        next
+      end
+      acc[row['component']] = row if row['component']
+    end
+  end
+
   def check(component, members)
     rel = members.first
     out, status = nil
+    # Through bundler: the child requires parser_compat, which needs msgpack from
+    # the bundle. A bare ruby child dies on LoadError instead of checking anything.
     child_env = { 'CLEAR_UNIT_STAGE' => ENV.fetch('CLEAR_UNIT_STAGE', '2b') }
-    Open3.popen2e(child_env, RbConfig.ruby, File.join(ROOT, 'tools', 'selfhost_check_unit.rb'), rel, chdir: ROOT) do |i, oe, t|
+    cmd = ['bundle', 'exec', 'ruby', File.join(ROOT, 'tools', 'selfhost_check_unit.rb'), rel]
+    Open3.popen2e(child_env, *cmd, chdir: ROOT) do |i, oe, t|
       i.close
       out = oe.read
       status = t.value
@@ -116,6 +166,7 @@ module SelfhostComponents
       p.on('--only NAME', 'Check a single component') { |v| opts[:only] = v }
       p.on('--out PATH') { |v| opts[:out] = v }
       p.on('--stage S', '2b (transpile only, default) or 2c (build an executable)') { |v| ENV['CLEAR_UNIT_STAGE'] = v }
+      p.on('--force', 'Re-check every component, ignoring unchanged verdicts') { opts[:force] = true }
     end.parse!(argv)
 
     comps = components
@@ -138,13 +189,54 @@ module SelfhostComponents
     targets = targets.select { |n| level[n] <= opts[:max_level] } if opts[:max_level]
     targets = [opts[:only]] if opts[:only]
 
-    results = []
-    targets.each_slice(opts[:jobs]) do |batch|
-      batch.map { |name| Thread.new { check(name, comps[name]) } }.each { |t| results << t.value }
-      done = results.length
-      ok = results.count { |r| r['ok'] }
-      warn "  #{done}/#{targets.length} checked, #{ok} clear 2b"
+    # A worker QUEUE, not batches: each_slice joins a whole slice, so one giant
+    # SCC (scc_annotator_54 is 54 files, ~30 min) stalls every fast component
+    # sharing its slice and nothing is reported until it lands. Shallow levels
+    # first, so the foundation reports while the blobs grind.
+    targets = targets.sort_by { |n| [level[n], -comps[n].length] }
+
+    journal = "#{opts[:out]}.jsonl"
+    prior = opts[:force] ? {} : load_prior(journal)
+    digest_memo = {}
+    digests = targets.to_h { |n| [n, closure_digest(comps, deps, n, digest_memo)] }
+    reused = []
+    stale = targets.reject do |n|
+      old_row = prior[n]
+      next false unless old_row && old_row['digest'] == digests[n]
+
+      reused << old_row
+      true
     end
+    warn "  #{reused.length} unchanged (reused), #{stale.length} to check" unless opts[:force]
+
+    queue = Queue.new
+    stale.each { |n| queue << n }
+    results = reused.dup
+    lock = Mutex.new
+    File.write(journal, reused.map { |r| "#{JSON.generate(r)}\n" }.join)
+    stage = ENV.fetch('CLEAR_UNIT_STAGE', '2b')
+    workers = Array.new(opts[:jobs].clamp(1, targets.length)) do
+      Thread.new do
+        while (name = (begin
+          queue.pop(true)
+        rescue ThreadError
+          nil
+        end))
+          r = check(name, comps[name])
+          lock.synchronize do
+            results << r
+            # Append as it completes: a killed sweep still leaves its denominator.
+            File.open(journal, 'a') do |f|
+              f.puts(JSON.generate(r.merge('level' => level[name], 'digest' => digests[name])))
+            end
+            warn "  #{results.length}/#{targets.length} (#{reused.length} reused), " \
+                 "#{results.count { |x| x['ok'] }} clear #{stage}  " \
+                 "(last: L#{level[name]} #{name[0, 30]} #{r['ok'] ? 'ok' : 'FAIL'})"
+          end
+        end
+      end
+    end
+    workers.each(&:join)
 
     ok = results.count { |r| r['ok'] }
     payload = { 'total' => targets.length, 'passing' => ok,
