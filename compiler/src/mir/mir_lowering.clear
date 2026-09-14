@@ -16041,7 +16041,7 @@ PRIVATE FN mIRLowering__lower_template_indexed_assignment(MUTABLE self: MIRLower
       END
     END
     MUTABLE ownership_operands = TRY (mIRLowering__ownership_operands_for_value(&self, &val, &val_node, "indexed assignment", dispatch.sink_alloc));
-    MUTABLE consumed_names: []String = ownership_operands |> SELECT:? (IF !((_.kind == :owned_binding)) THEN NIL ELSE _.name END) |> WHERE _ != NIL;
+    MUTABLE consumed_names: []String = (ownership_operands |> SELECT:? (IF !((_.kind == :owned_binding)) THEN NIL ELSE _.name END) |> WHERE _ != NIL).compact();
     MUTABLE entry: FunctionSignature@multiowned = op;
     MUTABLE ownership_contract = TRY (ownershipContract__consume_operands(ownership_operands));
     MUTABLE setAt_stmt = ExprStmt{ expr: Emittable{ IndexedStore: COPY IndexedStore{ target: COPY target, index: COPY idx, value: COPY val, entry: entry, template_kind: COPY dispatch.template_kind, map_kind: COPY kind, ownership_contract: ownership_contract, allocs: KEEP dispatch.resolved_allocs, target_var: COPY TRY (mIRLowering__extract_root_var_name(&self, &target_node)), key_type: COPY dispatch.key_type, value_type: COPY dispatch.value_type } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
