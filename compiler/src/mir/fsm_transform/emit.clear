@@ -565,9 +565,6 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   END
   rtoc_indexed_output_20
   };
-  IF rtoc_indexed_result_15 == NIL THEN
-    RETURN NIL;
-  END
   MUTABLE seg_codes = rtoc_indexed_result_15;
   TRY (emit__check_fsm_cleanup_invariant_mut(seg_mir_codes, segment_nodes, liveness, captured, conservative_promoted));
   MUTABLE void_assign_stmt_branch_value: ?Set = NIL;
