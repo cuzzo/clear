@@ -20080,6 +20080,15 @@ PUB FN fsmDestroyAction__destroy_order_index(value: FsmDestroyAction, index_valu
   END
   RETURN NIL;
 END
+PUB FN fsmDestroyAction__ctx_cleanup_target_name(value: FsmDestroyAction) RETURNS ?String EFFECTS REENTRANT ->
+  PARTIAL MATCH value START
+    FsmDestroyAction.FsmDestroyCleanup AS item -> RETURN fsmDestroyCleanup__ctx_cleanup_target_name(item);,
+    FsmDestroyAction.FsmDestroyStmt AS item -> RETURN fsmDestroyStmt__ctx_cleanup_target_name(item);,
+    FsmDestroyAction.FsmDestroyLockRelease AS item -> RETURN fsmDestroyLockRelease__ctx_cleanup_target_name(item);,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
 FN castLocatableToEmittable(value: Locatable) RETURNS ?Emittable ->
   PARTIAL MATCH value START
 
