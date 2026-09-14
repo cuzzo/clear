@@ -85,7 +85,11 @@ module AnnotatedEncode
   # Unlike the parser encoder this keeps STAMP_FIELDS: they are the payload.
   def ruby_object(value, seen)
     fields = if value.is_a?(Struct)
-               value.members.to_h { |member| [member.to_s, value[member]] }
+               # value.class.members, not value.members: AST nodes are Structs,
+               # and some of them (protocol/impl bodies) have their OWN `members`
+               # field holding FunctionDefs, which shadows Struct#members. The
+               # class-level reader is never shadowed.
+               value.class.members.to_h { |member| [member.to_s, value[member]] }
              elsif value.class.respond_to?(:props)
                value.class.props.keys.to_h { |name| [name.to_s, value.public_send(name)] }
              else
