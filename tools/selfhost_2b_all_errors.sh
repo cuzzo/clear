@@ -16,6 +16,17 @@ S=/tmp/claude-1000/-home-yahn-cheat/7ed765ab-7265-4fd7-87dd-cf01db5c8e57/scratch
 ENTRY=tmp/stage2/stage2_entry.clear
 [ -f "$ENTRY" ] || { echo "no $ENTRY" >&2; exit 1; }
 
+# .clear-cache is the ZIG build dir, not the module cache -- cheap to drop.
+# NEVER drop zig/.clear-module-cache: it holds the per-package compiled units
+# keyed by source digest, and it is what keeps an unchanged package from being
+# recompiled every round.
+#
+# The cap matters as much as the cache. module_cache.rb says it outright: "a
+# cache too small for one generation evicts records as fast as they are
+# written: the run stays permanently cold and the cache costs time instead of
+# saving it." The corpus needs ~400MB+ per generation, so a 512MB cap (the
+# default, which this script used to pass explicitly) thrashes. 6GB holds
+# several generations.
 rm -rf zig/.clear-cache
 mapfile -t PKGS < <(bundle exec ruby -e '
 $PROGRAM_NAME = "selfhost_stage2_support"
@@ -29,9 +40,15 @@ ARGS=(); for p in "${PKGS[@]}"; do ARGS+=(--pkg "$p"); done
 
 RUBYOPT="-r/home/yahn/cheat/tools/probe_multi_error" \
 CLEAR_PROBE_ERROR_CAP="${CAP:-4000}" \
-CLEAR_MODULE_CACHE_MAX_BYTES="${CACHEMAX:-536870912}" \
+CLEAR_MODULE_CACHE_MAX_BYTES="${CACHEMAX:-6442450944}" \
   timeout "${T:-5400}" ./clear build "$ENTRY" "${ARGS[@]}" --no-stack-check 2>&1 \
   | tee "$S/2b_all.log" | grep -c "Compiler Error" || true
+
+echo "=== FUNCTION CENSUS (the denominator):"
+grep "@@CENSUS" "$S/2b_all.log" | tail -1
+echo "--- failing functions:"
+grep "@@FN" "$S/2b_all.log" | sed 's/@@FN //' | cut -c1-150 | head -40
+echo "--- failing function count: $(grep -c '@@FN' "$S/2b_all.log")"
 
 echo "--- distinct blockers:"
 grep 'Compiler Error' "$S/2b_all.log" | sed 's/@@PL=[0-9]*@@PC=[0-9]*//' | sort | uniq -c | sort -rn | head -25
