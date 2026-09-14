@@ -582,7 +582,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE tail = UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail;
   MUTABLE descriptor_branch_value: ?SuspendDescriptor = NIL;
     IF (tail IS_A IoSuspend OR tail IS_A NextSuspend) THEN
-      descriptor_branch_value = TRY (emit__build_segment_descriptor(UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]), ctx, lowering, capture_map, sp_indices[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index]));
+      descriptor_branch_value = TRY (emit__build_segment_descriptor(UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]), ctx, &lowering, capture_map, sp_indices[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index]));
     ELSE
       descriptor_branch_value = NIL;
     END
@@ -990,7 +990,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   END
   rtoc_ternary_value_42? };
   MUTABLE has_step_work = (!((spec.prologue_stmts.length() == 0)) OR !((spec.body_stmts.length() == 0)));
-  MUTABLE lock_try_spec = FsmSegmentSpec{ index: spec.index, prologue_stmts: COPY spec.prologue_stmts, body_stmts: COPY spec.body_stmts, structure_stmts: COPY spec.structure_stmts, tail: EmitSegmentTail{ FsmTailLockTry: COPY FsmTailLockTry{ try_method: COPY meta[:try_method], lock_field_ref: COPY meta[:lock_field_ref], ok_step: try_success_idx, wait_step: woken_idx, error_step: retry_idx } }, descriptor: NIL, fsm_result_transfer_facts: COPY spec.fsm_result_transfer_facts, fn_name: COPY IF has_step_work THEN
+  MUTABLE lock_try_spec = FsmSegmentSpec{ index: spec.index, prologue_stmts: COPY spec.prologue_stmts, body_stmts: COPY spec.body_stmts, structure_stmts: COPY spec.structure_stmts, tail: EmitSegmentTail{ FsmTailLockTry: COPY FsmTailLockTry{ try_method: CAST(UNWRAP (meta)[:try_method] AS String), lock_field_ref: CAST(UNWRAP (meta)[:lock_field_ref] AS String), ok_step: try_success_idx, wait_step: woken_idx, error_step: retry_idx } }, descriptor: NIL, fsm_result_transfer_facts: COPY spec.fsm_result_transfer_facts, fn_name: COPY IF has_step_work THEN
     spec.fn_name
   ELSE
     NIL
@@ -1007,7 +1007,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   &ctx.destroy_actions.append(FsmDestroyAction{ FsmDestroyLockRelease: COPY FsmDestroyLockRelease{ name: COPY CAST(meta[:lock_field_ref] AS String), ctx_id: id, guard_index: UNWRAP (cap_idx), lock_ref: Emittable{ Ident: COPY Ident{ name: COPY CAST(meta[:lock_field_ref] AS String), lowered_node_id: NIL, ownership_consumption: NIL } }, unlock_method: COPY CAST(meta[:unlock_method] AS String) } });
   RETURN ExpandedLockSegment{ lock_try_spec: COPY lock_try_spec, appended_specs: [woken_spec, retry_spec, fail_spec, held_set_spec], extra_fields: COPY extra_fields };
 END
-PRIVATE FN emit__build_segment_descriptor(seg: Segment, ctx: FsmEmitContext, lowering: MIRLowering, capture_map: {String}String, sp_idx: ?Int64 = NIL) RETURNS !?SuspendDescriptor ->
+PRIVATE FN emit__build_segment_descriptor(seg: Segment, ctx: FsmEmitContext, MUTABLE lowering: MIRLowering, capture_map: {String}String, sp_idx: ?Int64 = NIL) RETURNS !?SuspendDescriptor ->
   MUTABLE lowering_api = COPY lowering;
   MUTABLE tail = seg.tail;
   IF !(segments__suspend_tail?(tail)) THEN
@@ -1044,18 +1044,24 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
         out[seg_value.index] = counter;
         counter = (counter + 1);
       END
-      IF (seg_value.tail IS_A Goto) OR (seg_value.tail IS_A LoopBack) THEN
-        &stack.push(seg_value.tail.target_index);
-      ELSE_IF (seg_value.tail IS_A CondBranch) THEN
-        &stack.push(seg_value.tail.then_index);
-        &stack.push(seg_value.tail.else_index);
-      ELSE_IF (seg_value.tail IS_A LockSuspend) THEN
-        IF seg_value.tail.next_index THEN
-          &stack.push(seg_value.tail.next_index);
+      IF seg_value.tail IS_A Goto AS rtoc_goto THEN
+        &stack.push(rtoc_goto.target_index);
+      ELSE_IF seg_value.tail IS_A LoopBack AS rtoc_loopback THEN
+        &stack.push(rtoc_loopback.target_index);
+      ELSE_IF seg_value.tail IS_A CondBranch AS rtoc_cond THEN
+        &stack.push(rtoc_cond.then_index);
+        &stack.push(rtoc_cond.else_index);
+      ELSE_IF seg_value.tail IS_A LockSuspend AS rtoc_locksusp THEN
+        IF rtoc_locksusp.next_index EXISTS AS rtoc_lock_next THEN
+          &stack.push(rtoc_lock_next);
         END
-      ELSE
-        IF (segments__suspend_tail?(seg_value.tail) AND seg_value.tail.next_index) THEN
-          &stack.push(seg_value.tail.next_index);
+      ELSE_IF seg_value.tail IS_A IoSuspend AS rtoc_iosusp THEN
+        IF rtoc_iosusp.next_index EXISTS AS rtoc_io_next THEN
+          &stack.push(rtoc_io_next);
+        END
+      ELSE_IF seg_value.tail IS_A NextSuspend AS rtoc_nextsusp THEN
+        IF rtoc_nextsusp.next_index EXISTS AS rtoc_next_next THEN
+          &stack.push(rtoc_next_next);
         END
       END
     ELSE
