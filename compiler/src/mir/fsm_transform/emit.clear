@@ -602,7 +602,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
       prologue = parts;
     END
   END
-  MUTABLE body_stmts = seg_codes[rtoc_indexed_i_23];
+  MUTABLE body_stmts: []FsmBodyItem = seg_codes[rtoc_indexed_i_23] OR_ELSE List[];
   IF void_assign_stmt THEN
   IF UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail IS_A Done THEN
       body_stmts = (body_stmts + [emit__fsm_body_mir_item(Emittable{ Set: COPY void_assign_stmt })]);
