@@ -666,7 +666,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   FOR rtoc_csv_key IN liveness.cross_segment_vars.keys() DO
     IF !((suspend_result_vars.contains?(rtoc_csv_key) OR conservative_names.contains?(rtoc_csv_key))) THEN
       MUTABLE rtoc_csv_info = COPY UNWRAP (liveness.cross_segment_vars[rtoc_csv_key]);
-      MUTABLE type_info = rtoc_csv_info.type_info;
+      MUTABLE type_info: ?Type = rtoc_csv_info.type_info;
       &promoted_value_decls.append(emit__ctx_field_decl(CAST(rtoc_csv_key AS String), IF type_info THEN
           TRY (type__zig_type(type_info))
         ELSE
