@@ -12615,7 +12615,7 @@ END
 PRIVATE FN mIRLowering__tense_map_cleanup_entry(self: MIRLowering, type_info: Type, lifecycle: LifecyclePlan) RETURNS !CleanupEntry@multiowned ->
     MUTABLE entry_branch_value: ?CleanupEntry = NIL;
     IF (lifecycle.drop_strategy == :resource_close) THEN
-      entry_branch_value = cleanupEntry__build(:resource, :heap, FALSE, CAST({:resource_close_plan: UNWRAP (lifecycle.resource_close_plan)} AS ?ResourceClosePlan));
+      entry_branch_value = cleanupEntry__build(:resource, :heap, FALSE, UNWRAP (lifecycle.resource_close_plan));
     ELSE
       entry_branch_value = cleanupEntry__build(:uniform, :heap, FALSE, NIL, TRY (type__zig_type(type_info)));
     END

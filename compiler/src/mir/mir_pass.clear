@@ -188,7 +188,7 @@ PRIVATE FN mIRPass__recurse_branches_mut(MUTABLE self: MIRPass, MUTABLE stmt: Lo
   EFFECTS REENTRANT ->
     MUTABLE branch_ctx_branch_value: ?WalkCtx = NIL;
     IF (stmt IS_A BgBlock OR stmt IS_A BgStreamBlock) THEN
-      branch_ctx_branch_value = walkCtx__with(ctx, CAST({:cleanup_facts: mIRPass__bg_inner_facts(self, castLocatableToBgNode__mir_pass(stmt), ctx.cleanup_facts)} AS FrozenCleanupFacts));
+      branch_ctx_branch_value = walkCtx__with(ctx, mIRPass__bg_inner_facts(self, castLocatableToBgNode__mir_pass(stmt), ctx.cleanup_facts));
     ELSE
       branch_ctx_branch_value = COPY ctx;
     END
