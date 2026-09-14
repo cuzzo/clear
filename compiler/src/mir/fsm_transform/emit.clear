@@ -982,11 +982,11 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
     rtoc_group_idx = (rtoc_group_idx - 1);
   END
   MUTABLE fail_body_stmts = (prior_release_flat + err.body_stmts);
-  MUTABLE fail_tail = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_42: ?Done = NIL;
+  MUTABLE fail_tail = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_42: ?EmitSegmentTail = NIL;
   IF (err.exit_kind == :done) THEN
-    rtoc_ternary_value_42 = Done{ _: NIL };
+    rtoc_ternary_value_42 = EmitSegmentTail{ Done: COPY Done{ _: NIL } };
   ELSE
-    rtoc_ternary_value_42 = Goto{ target_index: UNWRAP (after_idx)};
+    rtoc_ternary_value_42 = EmitSegmentTail{ Goto: COPY Goto{ target_index: UNWRAP (after_idx)} };
   END
   rtoc_ternary_value_42? };
   MUTABLE has_step_work = (!((spec.prologue_stmts.length() == 0)) OR !((spec.body_stmts.length() == 0)));
