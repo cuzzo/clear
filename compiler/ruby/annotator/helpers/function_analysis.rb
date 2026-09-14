@@ -327,8 +327,57 @@ module FunctionAnalysis
       body_type = T.unsafe(node.body).full_type!(context: "lambda body")
       inferred = body_type if body_type.is_a?(Type) && body_type.resolved == return_type
     end
+    if inferred.is_a?(Symbol)
+      # Still a bare symbol: either a block body (analyze_routine takes
+      # `found_returns.first.type`, and ReturnFact carries only a Symbol), or a
+      # BlockExpr whose VALUE is the trailing NIL rather than what the RETURNs
+      # produced -- so the guard above saw :NIL and declined.
+      #
+      # The name is lossy: `Type.new(:"[]Int64")` is a named type with array?
+      # false and no collection, so assigning it to a real `[]Int64` fails with
+      # both sides printing `[]Int64`. Recover the structured Type from the
+      # RETURN that produced the name.
+      recovered = lambda_block_return_type(node.body, inferred)
+      inferred = recovered if recovered
+    end
     stamp_type!(node, build_lambda_signature(node.params, inferred))
   end
+
+  # The full Type behind a block-bodied lambda's inferred return name. Nested
+  # lambdas are skipped: their RETURNs belong to them, not to this body.
+  sig { params(body: T.untyped, return_type: Symbol).returns(T.nilable(Type)) }
+  def lambda_block_return_type(body, return_type)
+    found = T.let(nil, T.nilable(Type))
+    walk = T.let(nil, T.untyped)
+    walk = lambda do |n|
+      return if found || n.nil? || n.is_a?(AST::LambdaLit)
+
+      if n.is_a?(AST::ReturnNode) && n.value
+        candidate = begin
+          T.unsafe(n.value).full_type!(context: "lambda block return")
+        rescue StandardError
+          nil
+        end
+        # Match on the SURFACE name, not `resolved`: the recorded symbol is the
+        # lossy rendering of this very type (`:"[]Int64"` for a type whose
+        # `resolved` is `:"Int64[]"`), so comparing `resolved` never matches.
+        if candidate.is_a?(Type) &&
+           (candidate.resolved == return_type ||
+            Type.surface_name_type(candidate).to_s == return_type.to_s)
+          found = candidate
+          return
+        end
+      end
+      AST.each_child_node(n) { |child| walk.call(child) }
+    end
+    if body.is_a?(Array)
+      body.each { |stmt| walk.call(stmt) }
+    else
+      walk.call(body)
+    end
+    found
+  end
+  private :lambda_block_return_type
 
   sig { params(node: AST::FunctionDef).returns(T.nilable(FunctionContext)) }
   def visit_FunctionDef(node)

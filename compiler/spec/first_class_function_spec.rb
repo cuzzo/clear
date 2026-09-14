@@ -704,6 +704,52 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    describe "block-bodied lambda return type" do
+      it "binds a generic to the ARRAY type a block body returns, not its lossy name" do
+        # A block lambda's value is its trailing expression, so full_type! sees
+        # the NIL and the inferred return type survives as the bare symbol
+        # :"[]Int64". Type.new on that name yields array? false, which then
+        # cannot be assigned to a real []Int64 -- and the error prints both
+        # sides as "[]Int64".
+        code = <<~CLEAR
+          FN fallible(flag: Bool) RETURNS ![]Int64 EFFECTS REENTRANT ->
+            RETURN [1, 2];
+          END
+          FN helper<RESULT>(blk: FN() -> RESULT) RETURNS RESULT EFFECTS REENTRANT ->
+            RETURN blk();
+          END
+          PUB FN run(want: Bool) RETURNS !Int64 EFFECTS REENTRANT ->
+            MUTABLE x: []Int64 = helper(%() USE(want) -> {
+              IF want THEN
+                RETURN TRY (fallible(TRUE));
+              ELSE
+                RETURN TRY (fallible(FALSE));
+              END
+              NIL
+            });
+            RETURN x.length();
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+
+      it "keeps inferring an expression-bodied lambda's return type" do
+        code = <<~CLEAR
+          FN fallible(flag: Bool) RETURNS ![]Int64 EFFECTS REENTRANT ->
+            RETURN [1, 2];
+          END
+          FN helper<RESULT>(blk: FN() -> RESULT) RETURNS RESULT EFFECTS REENTRANT ->
+            RETURN blk();
+          END
+          PUB FN run() RETURNS !Int64 EFFECTS REENTRANT ->
+            MUTABLE x: []Int64 = helper(%() -> TRY (fallible(TRUE)));
+            RETURN x.length();
+          END
+        CLEAR
+        expect { run(code) }.not_to raise_error
+      end
+    end
+
   end
 
 end
