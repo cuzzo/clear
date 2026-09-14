@@ -837,7 +837,7 @@ PUB FN emit__promoted_fsm_field_name(name: String, promoted_names: []String) RET
   RETURN NIL;
 END
 PRIVATE FN emit__lift_ctx_cleanups_to_destroy_mut(body: []Emittable, promoted_names: []String, ctx_ref: String, MUTABLE ctx: FsmEmitContext) RETURNS ![]Emittable ->
-  RETURN body |> SELECT:? {
+  RETURN (body |> SELECT:? {
   MUTABLE rtoc_keep: ?Emittable = COPY _;
   IF (_ IS_A Cleanup OR _ IS_A ErrCleanup) THEN
       MUTABLE promoted_name: ?String = emit__promoted_fsm_field_name(CAST(emittable__name(_) AS String), promoted_names);
@@ -847,23 +847,29 @@ PRIVATE FN emit__lift_ctx_cleanups_to_destroy_mut(body: []Emittable, promoted_na
       END
   END
   rtoc_keep
-  } |> WHERE _ != NIL;
+  } |> WHERE _ != NIL).compact();
 END
 PRIVATE FN emit__fsm_owned_result_guards(segments: []Segment, lowering: MIRLowering) RETURNS !{String}String ->
   MUTABLE guards = {};
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segments.length() DO
-    MUTABLE tail = segments[rtoc_idx]?.tail;
-    IF !((UNWRAP (tail) IS_A IoSuspend OR UNWRAP (tail) IS_A NextSuspend)) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+    MUTABLE seg_tail = UNWRAP (segments[rtoc_idx]).tail;
+    MUTABLE result_var: ?String = NIL;
+    MUTABLE result_type: ?Type = NIL;
+    IF seg_tail IS_A IoSuspend AS rtoc_io THEN
+      result_var = COPY rtoc_io.result_var;
+      result_type = TRY (ioSuspend__result_type(rtoc_io));
+    ELSE_IF seg_tail IS_A NextSuspend AS rtoc_next THEN
+      result_var = COPY rtoc_next.result_var;
+      result_type = TRY (nextSuspend__result_type(rtoc_next));
+    ELSE
+      rtoc_idx = rtoc_idx + 1;
+      CONTINUE;
     END
-    MUTABLE result_var = tail.result_var;
     IF !((result_var AND (result_var != "_"))) THEN
-        rtoc_idx = rtoc_idx + 1;
-  CONTINUE;
+      rtoc_idx = rtoc_idx + 1;
+      CONTINUE;
     END
-    MUTABLE result_type = tail.result_type();
     IF !(suspendResolvers__ownership_bearing_result_type?(result_type, lowering)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
@@ -959,7 +965,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   MUTABLE prior_release_stmts = ({
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_38: []{String@symbol}FsmCapMetadataValue = prior_meta;
-  MUTABLE rtoc_indexed_output_40 = [];
+  MUTABLE rtoc_indexed_output_40: [][]Emittable = List[];
   MUTABLE rtoc_indexed_i_39 = 0;
   WHILE rtoc_indexed_i_39 < rtoc_indexed_items_38.length() DO
     &rtoc_indexed_output_40.append(TRY (emit__prior_lock_release_stmts(id, CAST(tail.prior_lock_indices[rtoc_indexed_i_39] AS Int64), CAST(UNWRAP (rtoc_indexed_items_38[rtoc_indexed_i_39])[:lock_field_ref] AS String), CAST(UNWRAP (rtoc_indexed_items_38[rtoc_indexed_i_39])[:unlock_method] AS String))));
