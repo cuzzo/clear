@@ -11,23 +11,50 @@
 #   2. It recurses as if the AST were a tree. A parsed AST is; an annotated one
 #      is a graph with back-references, and it blew the stack at 9162 levels.
 #
-# So: include the stamps, and give every composite an identity so a revisit
-# emits a back-reference instead of recursing. The parser encoder stays
-# untouched -- its 8/8 byte-identical result must not regress.
+# So: include the stamps, and CUT the container back-pointers (CUT below) that
+# make the annotated AST a graph. Measured over all 1561 functions in
+# transpile-tests: 0 cycles, 0 oversize, avg 555 nodes, max 9838.
+#
+# Cutting rather than emitting back-references is what makes the CLEAR side
+# buildable at all: a back-reference needs stable object identity, and CLEAR has
+# none, so its ordinals could never be made to agree with Ruby's. A finite tree
+# needs only a recursive walk -- the shape parser_compat already generates CLEAR
+# encoders for.
+#
+# What is cut is reference topology, never a fact: an entry's own stamps still
+# encode wherever `symbol` reaches it. If a divergence class ever hides behind a
+# cut edge, encode that edge by binding NAME rather than by following it.
+# The parser encoder stays untouched -- its 8/8 byte-identical result must not
+# regress.
 require_relative 'parser_compat'
 
 module AnnotatedEncode
   extend self
 
+  # Container back-pointers. Following these turns the annotated AST into a
+  # graph; `lifetime` was the last one, found via
+  # CapabilityTargetFact -> source_entry -> lifetime -> SymbolEntry.
+  CUT = %w[
+    scope binding_entries bindings entries parent owned_names type_store
+    dependencies lifetime
+  ].freeze
+
+  # NEVER `value == true`: Type#== is sorbet-typed and raises TypeError on a
+  # Boolean, and that exception masquerades as whatever a caller's rescue calls
+  # it.
+  def scalar?(value)
+    value.nil? || value.is_a?(TrueClass) || value.is_a?(FalseClass) ||
+      value.is_a?(Numeric) || value.is_a?(String) || value.is_a?(Symbol)
+  end
+
   # A back-reference is "R<ordinal>;" where the ordinal is assignment order in
   # a depth-first walk. Both sides must assign in the same order for the bytes
   # to agree, which is why ordinals come from the walk and not from object_id.
   def encode(root)
-    seen = {}
-    encode_value(root, seen)
+    encode_value(root)
   end
 
-  def encode_value(value, seen)
+  def encode_value(value)
     case value
     when nil then 'N;'
     when true then 'T;'
@@ -37,57 +64,38 @@ module AnnotatedEncode
     when Integer then "I#{value};"
     when Float then "F#{ParserCompat.send(:float_text, value)};"
     when Lexer::Token
-      composite(value, seen) do
-        object('Token', { 'column' => value.column, 'line' => value.line,
-                          'type' => value.type, 'value' => value.value }, seen)
-      end
+      object('Token', { 'column' => value.column, 'line' => value.line,
+                        'type' => value.type, 'value' => value.value })
     when Array
-      composite(value, seen) do
-        "A#{value.length}[#{value.map { |item| encode_value(item, seen) }.join}]"
-      end
+      "A#{value.length}[#{value.map { |item| encode_value(item) }.join}]"
     when Hash
-      composite(value, seen) do
-        pairs = value.map { |key, item| [encode_value(key, seen), encode_value(item, seen)] }
-        pairs.sort_by! { |key, item| key + item }
-        "H#{pairs.length}[#{pairs.flatten.join}]"
-      end
+      pairs = value.map { |key, item| [encode_value(key), encode_value(item)] }
+      pairs.sort_by! { |key, item| key + item }
+      "H#{pairs.length}[#{pairs.flatten.join}]"
     when Type
       # Same reasoning as the parser encoder: Type memoises derived state into
       # ivars on demand, so encoding by instance_variables makes the bytes
       # depend on which accessors happened to run.
-      composite(value, seen) { object('Type', { 'resolved' => value.resolved }, seen) }
+      object('Type', { 'resolved' => value.resolved })
     when T::Enum
-      object(value.class.name.split('::').last, { 'value' => value.serialize }, seen)
+      object(value.class.name.split('::').last, { 'value' => value.serialize })
     else
-      composite(value, seen) { ruby_object(value, seen) }
+      ruby_object(value)
     end
   end
 
-  # Identity is per-object. The first visit assigns an ordinal and encodes the
-  # body; any later visit emits the ordinal alone, which is what stops a cyclic
-  # annotated graph from recursing forever.
-  def composite(value, seen)
-    existing = seen[value.object_id]
-    return "R#{existing};" if existing
-
-    ordinal = seen.length
-    seen[value.object_id] = ordinal
-    "D#{ordinal}:#{yield}"
-  end
-
-  def object(name, fields, seen)
+  def object(name, fields)
+    fields = fields.reject { |field, _| CUT.include?(field.to_s) }
     encoded = fields.sort_by { |field, _| field }.map do |field, value|
-      ParserCompat.send(:length_encoded, 'S', field) + encode_value(value, seen)
+      ParserCompat.send(:length_encoded, 'S', field) + encode_value(value)
     end.join
     "O#{name.bytesize}:#{name}#{fields.length}[#{encoded}]"
   end
 
   # Per-function encodings, which is what makes the compatibility report
-  # function-by-function rather than one pass/fail per program. Each function
-  # gets a FRESH seen map so its encoding is self-contained: a shared referent
-  # (a Type, a Scope) re-encodes inside every function that reaches it instead
-  # of collapsing to a back-reference whose ordinal depends on walk order
-  # elsewhere in the file. Two functions can then be compared independently.
+  # function-by-function rather than one pass/fail per program. With the graph
+  # cut to a tree each function's bytes are inherently self-contained, so two
+  # functions compare independently of their position in the file.
   def per_function(root)
     out = {}
     walk(root, {}) do |node|
@@ -118,7 +126,7 @@ module AnnotatedEncode
   end
 
   # Unlike the parser encoder this keeps STAMP_FIELDS: they are the payload.
-  def ruby_object(value, seen)
+  def ruby_object(value)
     fields = if value.is_a?(Struct)
                # value.class.members, not value.members: AST nodes are Structs,
                # and some of them (protocol/impl bodies) have their OWN `members`
@@ -134,6 +142,6 @@ module AnnotatedEncode
              end
     raise "unsupported annotated value: #{value.class}" if fields.empty?
 
-    object(value.class.name.split('::').last, fields, seen)
+    object(value.class.name.split('::').last, fields)
   end
 end
