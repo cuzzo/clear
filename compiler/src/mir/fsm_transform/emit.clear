@@ -615,7 +615,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   rt_roots = ruby_array_concat_Emittable__emit(rt_roots, CAST((descriptor?.setup_stmts OR_ELSE List[]) AS []Emittable));
   MUTABLE rt_used = TRY (emit__mir_nodes_reference_ident?(rt_roots, bg_rt));
   MUTABLE suppress_runtime_ref = !(rt_used);
-  FsmSegmentSpec{ index: UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index, prologue_stmts: COPY prologue_stmts, body_stmts: COPY body_stmts, tail: COPY UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail, descriptor: COPY descriptor, fsm_result_transfer_facts: COPY (seg_result_facts[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index] OR_ELSE List[]), fn_name: "runSeg${UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index}", suppress_runtime_ref: suppress_runtime_ref, structure_stmts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() }
+  FsmSegmentSpec{ index: UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index, prologue_stmts: COPY prologue_stmts, body_stmts: COPY body_stmts, tail: COPY castSegmentTailToEmitSegmentTail(UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail), descriptor: COPY descriptor, fsm_result_transfer_facts: COPY (seg_result_facts[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index] OR_ELSE List[]), fn_name: "runSeg${UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index}", suppress_runtime_ref: suppress_runtime_ref, structure_stmts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() }
   });
     rtoc_indexed_i_23 = rtoc_indexed_i_23 + 1;
   END
@@ -1131,6 +1131,23 @@ FN castPromotableFsmValueToEmittable(value: PromotableFsmValue) RETURNS Emittabl
     RETURN cast_payload;
   END
   RETURN panic("Invalid cast to Emittable");
+END
+# emit.rb:44 defines its OWN SegmentTail = Segments' seven tails PLUS FsmTail,
+# and rtoc names that wider union EmitSegmentTail to avoid the clash with
+# segments.clear's SegmentTail. Ruby needs no conversion because T.any is
+# structural and the narrow alias is simply a subset; CLEAR unions are nominal,
+# so widening is an explicit re-wrap of the same payload.
+FN castSegmentTailToEmitSegmentTail(value: SegmentTail) RETURNS EmitSegmentTail ->
+  PARTIAL MATCH value START
+    SegmentTail.Done AS cast_payload -> RETURN EmitSegmentTail{ Done: COPY cast_payload };,
+    SegmentTail.Goto AS cast_payload -> RETURN EmitSegmentTail{ Goto: COPY cast_payload };,
+    SegmentTail.LoopBack AS cast_payload -> RETURN EmitSegmentTail{ LoopBack: COPY cast_payload };,
+    SegmentTail.CondBranch AS cast_payload -> RETURN EmitSegmentTail{ CondBranch: COPY cast_payload };,
+    SegmentTail.IoSuspend AS cast_payload -> RETURN EmitSegmentTail{ IoSuspend: COPY cast_payload };,
+    SegmentTail.NextSuspend AS cast_payload -> RETURN EmitSegmentTail{ NextSuspend: COPY cast_payload };,
+    SegmentTail.LockSuspend AS cast_payload -> RETURN EmitSegmentTail{ LockSuspend: COPY cast_payload };,
+  END
+  panic("segment tail has no emit-tail form");
 END
 FN castSegmentTailToLockSuspend(value: EmitSegmentTail) RETURNS LockSuspend ->
   IF value IS_A LockSuspend AS cast_payload THEN
