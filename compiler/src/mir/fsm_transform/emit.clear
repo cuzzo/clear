@@ -650,8 +650,10 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE ctx_with_extras = fsmEmitContext__with_extra_ctx_fields(ctx, deduped);
   MUTABLE suspend_result_vars = segment_nodes |> SELECT:? {
   MUTABLE tail = _.tail;
-  (IF (tail IS_A IoSuspend OR tail IS_A NextSuspend) THEN
-      tail.result_var
+  (IF tail IS_A IoSuspend AS rtoc_io_tail THEN
+      rtoc_io_tail.result_var
+    ELSE_IF tail IS_A NextSuspend AS rtoc_next_tail THEN
+      rtoc_next_tail.result_var
     ELSE
       NIL
     END)
