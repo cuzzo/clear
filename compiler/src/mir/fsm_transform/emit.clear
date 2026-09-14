@@ -527,7 +527,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
       {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE want_result = (!(is_void) AND result_seg_indices.contains?(UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).index));
-    MUTABLE inherited_capture_names: [Set]String = ((TRY (emit__fsm_destroy_actions(ctx))) |> SELECT:? fsmDestroyAction__ctx_cleanup_target_name(_) |> WHERE _ != NIL) |> DISTINCT _;
+    MUTABLE inherited_capture_names: [Set]String = ((TRY (emit__fsm_destroy_actions(ctx))) |> SELECT:? fsmDestroyAction__ctx_cleanup_target_name(_) |> WHERE _ != NIL).compact() |> DISTINCT _;
     FOR _ IN captured.keys() DO
   &inherited_capture_names.insert("__ctx_${id.toString()}.${_}");
   END
