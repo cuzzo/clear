@@ -98,6 +98,56 @@ units.each do |name, members|
   end
 end
 
+# A required package is INLINED into its consumer, so a unit that is only ever
+# compiled inside a consumer sees whatever that consumer's closure supplies.
+# Judging every unit standalone reported 11 types in capability_evidence.clear
+# that resolve fine because its consumers require ownership_graph -- and the
+# build agrees. So: keep a type only if NO consumer context resolves it.
+consumers = Hash.new { |h, k| h[k] = [] }
+pkg_paths.each do |name, paths|
+  paths.to_s.split(',').each do |path|
+    next unless File.file?(path)
+
+    File.read(path).scan(/^REQUIRE "pkg:([A-Za-z0-9_]+)"/).flatten.each { |dep| consumers[dep] << name }
+  end
+end
+
+def closure_types(start, pkg_paths)
+  seen = Set.new
+  found = Set.new
+  queue = [start]
+  until queue.empty?
+    dep = queue.shift
+    next unless seen.add?(dep)
+
+    pkg_paths[dep].to_s.split(',').each do |path|
+      next unless File.file?(path)
+
+      text = File.read(path)
+      text.each_line { |l| (m = TYPE_DECL.match(l)) && found << m[3] }
+      queue.concat(text.scan(/^REQUIRE "pkg:([A-Za-z0-9_]+)"/).flatten)
+    end
+  end
+  found
+end
+
+closures = {}
+missing.each do |type, where|
+  where.uniq.each do |unit|
+    pkg = unit.include?('/') ? ParserCompat.package_name(unit) : unit
+    consumers[pkg].each do |c|
+      closures[c] ||= closure_types(c, pkg_paths)
+    end
+  end
+end
+missing = missing.reject do |type, where|
+  where.uniq.all? do |unit|
+    pkg = unit.include?('/') ? ParserCompat.package_name(unit) : unit
+    cs = consumers[pkg]
+    cs.any? && cs.all? { |c| closures[c].include?(type) }
+  end
+end
+
 missing.sort_by { |k, _v| k }.each do |type, where|
   puts "#{type}  not visible in: #{where.uniq.first(3).join(', ')}"
 end
