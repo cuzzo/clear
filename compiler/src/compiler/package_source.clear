@@ -30,7 +30,7 @@ PUB FN packageSource__merge(member_paths: []String, resolve_pkg: FN(String) -> ?
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      m_value = UNWRAP (m);
+      m_value = m;
       MUTABLE target = COPY (CAST(compilerRegexCapture(m_value, 1) AS String));
       MUTABLE alias_name: ?String = NIL;
       MUTABLE alias_match: ?CompilerRegexScanner = compilerRegexMatchData(line, (compilerRegexCompile("\\s+AS\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*;?\\s*\\z")));

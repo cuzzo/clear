@@ -155,7 +155,7 @@ PRIVATE FN translator__collect_aliases_mut(MUTABLE self: Translator) RETURNS Voi
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      match_value = UNWRAP (match);
+      match_value = match;
       MUTABLE name = COPY compilerRegexCapture(match_value, 1);
       MUTABLE rhs = compilerRegexCapture(match_value, 2).trim();
       self.aliases[name] = rhs;
@@ -183,7 +183,7 @@ PRIVATE FN translator__translate_structs(MUTABLE self: Translator) RETURNS ![]St
                   rtoc_idx = rtoc_idx + 1;
             CONTINUE;
               END
-              match_value = UNWRAP (match);
+              match_value = match;
               MUTABLE field_type: ?String = TRY (translator__map_type(&self, compilerRegexCapture(match_value, 2), :field));
               IF (field_type == NIL) THEN
                   rtoc_idx = rtoc_idx + 1;
