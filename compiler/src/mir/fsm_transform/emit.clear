@@ -446,7 +446,7 @@ PRIVATE FN emit__build_dispatch_tail(spec: FsmSegmentSpec) RETURNS !FsmTail ->
     panic("Unsupported segment tail {} in segment {}");
   END
 END
-PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentList, liveness: LivenessResult, lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
+PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentList, liveness: LivenessResult, MUTABLE lowering: MIRLowering) RETURNS !?FsmLoweringResult ->
   MUTABLE segment_nodes = COPY segment_list.segments;
   IF (segment_nodes.length() == 0) THEN
     RETURN NIL;
