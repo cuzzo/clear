@@ -48,6 +48,35 @@ test "Set.initCapacity reserves buckets without inserting values" {
     try std.testing.expect(set.contains(7));
 }
 
+test "Set.equals compares membership, not identity or insertion order" {
+    const allocator = std.testing.allocator;
+    var a = CheatLib.Set(u64){};
+    defer a.deinit(allocator);
+    var b = CheatLib.Set(u64){};
+    defer b.deinit(allocator);
+
+    // Two empty sets are equal.
+    try std.testing.expect(a.equals(&b));
+
+    _ = try a.insert(allocator, 1);
+    _ = try a.insert(allocator, 2);
+    // Same members, opposite insertion order.
+    _ = try b.insert(allocator, 2);
+    _ = try b.insert(allocator, 1);
+    try std.testing.expect(a.equals(&b));
+    try std.testing.expect(b.equals(&a));
+
+    // A strict superset is not equal, in either direction.
+    _ = try b.insert(allocator, 3);
+    try std.testing.expect(!a.equals(&b));
+    try std.testing.expect(!b.equals(&a));
+
+    // Same size, different member.
+    _ = try a.insert(allocator, 9);
+    try std.testing.expectEqual(a.inner.count(), b.inner.count());
+    try std.testing.expect(!a.equals(&b));
+}
+
 const PromiseTestState = struct {
     promise: CheatLib.Promise(f64),
     result: f64 = 0.0,

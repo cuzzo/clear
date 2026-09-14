@@ -1815,6 +1815,10 @@ BUILTIN_OPS = T.let({
   # handles from `symbol(runtime_string)` -- so identity alone is wrong.
   # std.mem.eql keeps the pointer/length fast path and falls back to content.
   symbolEql: { zig: "CheatLib.eql({0}, {1})", bc: true, borrows: :all },
+  # Ruby compares Sets with `==` (membership, order-independent). Zig has no
+  # `==` for structs, so the comparison lowers to SetImpl.equals rather than
+  # to an operator the backend cannot emit.
+  setEquals: { zig: "{0}.equals(&{1})", bc: true, borrows: :all },
 
   # --- String indexing ---
   charAt: { zig: "CheatLib.charAt({0}, {1})", bc: true, borrows: :all },

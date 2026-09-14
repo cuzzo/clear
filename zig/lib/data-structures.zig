@@ -2602,6 +2602,19 @@ pub fn bind(comptime deps: type) type {
                 return self.inner.contains(value);
             }
 
+            // Set equality, the way Ruby's Set#== compares: same size and every
+            // member of one present in the other. Zig has no `==` for structs,
+            // so a CLEAR `setA == setB` lowers to this rather than to an
+            // operator the backend cannot emit.
+            pub fn equals(self: *const Self, other: *const Self) bool {
+                if (self.inner.count() != other.inner.count()) return false;
+                var it = self.inner.keyIterator();
+                while (it.next()) |key| {
+                    if (!other.inner.contains(key.*)) return false;
+                }
+                return true;
+            }
+
             // Union another set into this one, the way Ruby's Set#merge and
             // Rust's HashSet::extend do. Each element is COPIED, because both
             // sets keep owning their own: insert takes ownership of what it is

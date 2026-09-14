@@ -569,6 +569,9 @@ module MIRLoweringExpressions
 
     string_plan = classify_string_binary_operation(facts)
     return string_plan if string_plan
+
+    set_plan = classify_set_binary_comparison(facts)
+    return set_plan if set_plan
     return BinaryOperationPlan.new(kind: :builtin, facts: facts, builtin: :intDiv) if integer_division?(facts)
 
     builtin = direct_binary_builtin(facts)
@@ -594,6 +597,24 @@ module MIRLoweringExpressions
   sig { params(facts: BinaryOperandFacts).returns(T::Boolean) }
   def signed_integer_modulo?(facts)
     facts.op == :MOD && facts.left_type.resolved == :Int64
+  end
+
+  # Ruby's Set#== compares membership. Zig forbids `==` on structs, so the
+  # comparison has to become a call -- exactly as symbol equality does.
+  sig { params(facts: BinaryOperandFacts).returns(T.nilable(BinaryOperationPlan)) }
+  def classify_set_binary_comparison(facts)
+    return nil unless facts.op == :EQ || facts.op == :NEQ
+    return nil unless facts.left_type.set_collection? && facts.right_type.set_collection?
+
+    BinaryOperationPlan.new(kind: :set_comparison, facts: facts)
+  end
+
+  sig { params(plan: BinaryOperationPlan).returns(MIR::Node) }
+  def emit_set_binary_comparison(plan)
+    T.bind(self, MIRLowering)
+    facts = plan.facts
+    cmp = emit_builtin(:setEquals, [facts.left, facts.right])
+    facts.op == :NEQ ? MIR::UnaryOp.new("!", cmp) : cmp
   end
 
   sig { params(facts: BinaryOperandFacts).returns(T.nilable(BinaryOperationPlan)) }
@@ -696,6 +717,7 @@ module MIRLoweringExpressions
     when :builtin then emit_builtin_binary_plan(plan)
     when :optional_comparison then emit_optional_comparison_plan(plan)
     when :symbol_comparison then emit_symbol_binary_plan(plan)
+    when :set_comparison then emit_set_binary_comparison(plan)
     when :string_comparison then emit_string_binary_comparison(plan)
     when :unit_variant_comparison then emit_unit_variant_comparison(plan)
     when :union_equality_error then raise_union_equality_error(plan)

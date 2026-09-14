@@ -1,0 +1,19 @@
+# Ruby compares Sets with `==` (membership, order-independent). Zig forbids `==`
+# on structs, so the comparison must lower to a call, the way symbol equality
+# already does -- not to an operator the backend cannot emit.
+PUB FN main() RETURNS !Void ->
+  MUTABLE a: [Set]String@symbol = Set[:x, :y];
+  MUTABLE b: [Set]String@symbol = Set[:y, :x];
+  MUTABLE c: [Set]String@symbol = Set[:x, :y, :z];
+  MUTABLE d: [Set]String@symbol = Set[:x, :q];
+  MUTABLE e: [Set]String@symbol = Set[];
+  MUTABLE f: [Set]String@symbol = Set[];
+
+  print("order_insensitive=${(IF (a == b) THEN "true" ELSE "false" END)}\n");
+  print("superset=${(IF (a == c) THEN "true" ELSE "false" END)}\n");
+  print("same_size_diff=${(IF (a == d) THEN "true" ELSE "false" END)}\n");
+  print("both_empty=${(IF (e == f) THEN "true" ELSE "false" END)}\n");
+  print("empty_vs_full=${(IF (e == a) THEN "true" ELSE "false" END)}\n");
+  print("neq=${(IF (a != c) THEN "true" ELSE "false" END)}\n");
+  RETURN;
+END
