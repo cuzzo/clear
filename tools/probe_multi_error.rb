@@ -100,10 +100,15 @@ module ProbeMultiError
         UNITS << $CLEAR_PROBE_UNIT
         # Attribute to the enclosing function: the statement-level catch fires
         # first, so without this the function census never sees the failure.
-        if CURRENT[0]
-          FN_FAILED << [CURRENT[0], e]
-          ProbeMultiError.journal("FAIL\t#{CURRENT[0]}\t#{e.message.to_s.gsub(/\e\[[0-9;]*m/, '').lines.map(&:strip).reject(&:empty?).first}")
-        end
+        # Attribute to the enclosing function when there is one. An error raised
+        # OUTSIDE a body -- at a declaration, or in a phase that does not run
+        # through analyze_program_bodies! -- still has to be counted, or the
+        # census reports "0 failures" for a component the build rejects. That
+        # happened on scc_annotator_54: 10282 functions, 0 body failures, and a
+        # FIELD_TYPE_MISMATCH the census never saw.
+        owner = CURRENT[0] || '<outside-any-body>'
+        FN_FAILED << [owner, e]
+        ProbeMultiError.journal("FAIL\t#{owner}\t#{e.message.to_s.gsub(/\e\[[0-9;]*m/, '').lines.map(&:strip).reject(&:empty?).first}")
         # A whole-closure run has thousands of statements and wants the whole
         # list; a single-function probe wants to stop before cascade noise
         # buries the real one.
