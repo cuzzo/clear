@@ -119,10 +119,27 @@ module SelfhostComponents
     memo[name] = acc
   end
 
+  # The COMPILER is an input too. A verdict says "this component compiles with
+  # this compiler"; fixing a lowering bug in compiler/ruby or a helper in the Zig
+  # runtime can turn a failure into a pass, and keying only on compiler/src
+  # would keep serving the stale verdict. Hashing every compiler source on each
+  # run is far too slow, so use the newest mtime across the compiler trees --
+  # cheap, and it moves whenever anything there is edited.
+  def compiler_stamp
+    @compiler_stamp ||= begin
+      newest = %w[compiler/ruby zig/lib zig/runtime].flat_map do |dir|
+        Dir.glob(File.join(ROOT, dir, '**', '*.{rb,zig}'))
+      end.map { |f| File.mtime(f).to_i }.max || 0
+      newest.to_s
+    end
+  end
+
   def closure_digest(comps, deps, name, memo = {})
     names = [name] + transitive_deps(deps, name, memo).to_a
     files = names.flat_map { |n| comps[n] || [] }.uniq.sort
-    Digest::SHA256.hexdigest(files.map { |r| "#{r}:#{file_digest(File.join(GEN, r))}" }.join("\n"))
+    parts = files.map { |r| "#{r}:#{file_digest(File.join(GEN, r))}" }
+    parts << "compiler:#{compiler_stamp}"
+    Digest::SHA256.hexdigest(parts.join("\n"))
   end
 
   # Prior verdicts, newest wins (the journal is append-only).
