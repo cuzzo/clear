@@ -35,6 +35,7 @@ module ProbeMultiError
   def analyze_program_bodies!(declarations, program)
     stmts = declarations.body_statements
     FN_TOTAL << stmts.length
+    ProbeMultiError.journal("UNIT\t#{stmts.length}")
     stmts.each do |stmt|
       CURRENT[0] = ProbeMultiError.label_for(stmt)
       begin
@@ -65,6 +66,18 @@ module ProbeMultiError
 
   # Name the failing function so the census is a work list, not a pile of
   # line numbers in a merged package.
+  # Write each failure as it happens. at_exit does not run if the process dies
+  # hard (a segfault, an OOM kill, an outer timeout), and a census that only
+  # exists at exit is a census you lose exactly when the run was expensive.
+  def self.journal(line)
+    path = ENV['CLEAR_PROBE_CENSUS_FILE']
+    return unless path
+
+    File.open(path, 'a') { |f| f.puts(line) }
+  rescue StandardError
+    nil
+  end
+
   def self.label_for(stmt)
     %i[name fn_name].each do |m|
       next unless stmt.respond_to?(m)
@@ -87,7 +100,10 @@ module ProbeMultiError
         UNITS << $CLEAR_PROBE_UNIT
         # Attribute to the enclosing function: the statement-level catch fires
         # first, so without this the function census never sees the failure.
-        FN_FAILED << [CURRENT[0], e] if CURRENT[0]
+        if CURRENT[0]
+          FN_FAILED << [CURRENT[0], e]
+          ProbeMultiError.journal("FAIL\t#{CURRENT[0]}\t#{e.message.to_s.gsub(/\e\[[0-9;]*m/, '').lines.map(&:strip).reject(&:empty?).first}")
+        end
         # A whole-closure run has thousands of statements and wants the whole
         # list; a single-function probe wants to stop before cascade noise
         # buries the real one.

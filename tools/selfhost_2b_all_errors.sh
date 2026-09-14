@@ -38,7 +38,9 @@ ParserCompat.generated_relatives(GEN).each { |r| puts "#{ParserCompat.package_na
 ')
 ARGS=(); for p in "${PKGS[@]}"; do ARGS+=(--pkg "$p"); done
 
+rm -f "$S/census.tsv"
 RUBYOPT="-r/home/yahn/cheat/tools/probe_multi_error" \
+CLEAR_PROBE_CENSUS_FILE="$S/census.tsv" \
 CLEAR_PROBE_ERROR_CAP="${CAP:-4000}" \
 CLEAR_MODULE_CACHE_MAX_BYTES="${CACHEMAX:-6442450944}" \
   timeout "${T:-5400}" ./clear build "$ENTRY" "${ARGS[@]}" --no-stack-check 2>&1 \
@@ -46,6 +48,12 @@ CLEAR_MODULE_CACHE_MAX_BYTES="${CACHEMAX:-6442450944}" \
 
 echo "=== FUNCTION CENSUS (the denominator):"
 grep "@@CENSUS" "$S/2b_all.log" | tail -1
+# The journal survives a hard death, which at_exit does not.
+if [ -f "$S/census.tsv" ]; then
+  awk -F'\t' '/^UNIT/ { n += $2 } /^FAIL/ { f[$2] = 1 } END {
+    printf "@@JOURNAL functions=%d failed=%d passing=%d rate=%.2f%%\n", n, length(f), n - length(f), (n ? (n - length(f)) * 100.0 / n : 0)
+  }' "$S/census.tsv"
+fi
 echo "--- failing functions:"
 grep "@@FN" "$S/2b_all.log" | sed 's/@@FN //' | cut -c1-150 | head -40
 echo "--- failing function count: $(grep -c '@@FN' "$S/2b_all.log")"
