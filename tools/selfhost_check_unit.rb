@@ -48,9 +48,14 @@ module SelfhostCheckUnit
         END
       CLEAR
 
+      # Stage 2b stops after the CLEAR stage -- every diagnostic is decided during
+      # transpile, so Zig codegen is wasted work in a fixing loop. Stage 2c is
+      # the same component taken all the way to an executable, which is what
+      # CLEAR_UNIT_STAGE=2c asks for.
+      stage_2c = ENV['CLEAR_UNIT_STAGE'] == '2c'
       env = {
-        'CLEAR_TRANSPILE_ONLY' => '1',
-        'CLEAR_DISABLE_BUILD_ZIG' => '1',
+        'CLEAR_TRANSPILE_ONLY' => stage_2c ? nil : '1',
+        'CLEAR_DISABLE_BUILD_ZIG' => stage_2c ? nil : '1',
         'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8',
         'CLEAR_EXTRA_NATIVE_DIRS' => generated_root,
       }
