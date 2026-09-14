@@ -82,6 +82,41 @@ module AnnotatedEncode
     "O#{name.bytesize}:#{name}#{fields.length}[#{encoded}]"
   end
 
+  # Per-function encodings, which is what makes the compatibility report
+  # function-by-function rather than one pass/fail per program. Each function
+  # gets a FRESH seen map so its encoding is self-contained: a shared referent
+  # (a Type, a Scope) re-encodes inside every function that reaches it instead
+  # of collapsing to a back-reference whose ordinal depends on walk order
+  # elsewhere in the file. Two functions can then be compared independently.
+  def per_function(root)
+    out = {}
+    walk(root, {}) do |node|
+      next unless node.is_a?(AST::FunctionDef)
+
+      key = node.name.to_s
+      key = "#{key}##{out.keys.count { |k| k == key || k.start_with?("#{key}#") }}" if out.key?(key)
+      out[key] = encode(node)
+    end
+    out
+  end
+
+  # Structural walk only -- it must not follow the annotator's back-references
+  # or it would revisit forever, so composites are guarded by object_id.
+  def walk(value, seen, &block)
+    return if value.nil?
+
+    case value
+    when Array then value.each { |item| walk(item, seen, &block) }
+    when Hash then value.each { |k, v| walk(k, seen, &block); walk(v, seen, &block) }
+    when Struct
+      return unless seen[value.object_id].nil?
+
+      seen[value.object_id] = true
+      block.call(value)
+      value.class.members.each { |m| walk(value[m], seen, &block) }
+    end
+  end
+
   # Unlike the parser encoder this keeps STAMP_FIELDS: they are the payload.
   def ruby_object(value, seen)
     fields = if value.is_a?(Struct)
