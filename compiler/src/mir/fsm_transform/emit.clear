@@ -628,8 +628,9 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE expanded_specs: []FsmSegmentSpec = List[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segment_specs.length() DO
-  IF (segment_specs[rtoc_idx].tail) IS_A LockSuspend THEN
-      MUTABLE out: ?ExpandedLockSegment = TRY (emit__expand_lock_segment(segment_specs[rtoc_idx]?, &ctx, capture_map, lowering, next_lock_segment_index));
+  MUTABLE spec = UNWRAP (segment_specs[rtoc_idx]);
+  IF (spec.tail) IS_A LockSuspend THEN
+      MUTABLE out: ?ExpandedLockSegment = TRY (emit__expand_lock_segment(spec, &ctx, capture_map, lowering, next_lock_segment_index));
       IF out EXISTS AS out_value THEN
         &expanded_specs.append(COPY out_value.lock_try_spec);
         expanded_specs = ruby_array_concat_FsmSegmentSpec(expanded_specs, out_value.appended_specs);
@@ -639,7 +640,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
         RETURN NIL;
       END
   ELSE
-      &expanded_specs.append(COPY segment_specs[rtoc_idx]?);
+      &expanded_specs.append(COPY spec);
   END
   rtoc_idx = rtoc_idx + 1;
   END
