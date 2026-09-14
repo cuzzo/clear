@@ -67,16 +67,16 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
       function_def.body = body;
     ELSE_IF node IS_A VarDecl AS var_decl THEN
       MUTABLE var_decl_mutable = COPY var_decl;
-      var_decl_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, var_decl_mutable.value));
+      var_decl_mutable.value = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, var_decl_mutable.value)));
     ELSE_IF node IS_A BindExpr AS bind_expr THEN
       MUTABLE bind_expr_mutable = COPY bind_expr;
-      bind_expr_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, bind_expr_mutable.value));
+      bind_expr_mutable.value = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, bind_expr_mutable.value)));
     ELSE_IF node IS_A Assignment AS assignment THEN
       MUTABLE assignment_mutable = COPY assignment;
       assignment_mutable.value = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, assignment_mutable.value)));
     ELSE_IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
       MUTABLE destructuring_assignment_mutable = COPY destructuring_assignment;
-      destructuring_assignment_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, destructuring_assignment_mutable.value));
+      destructuring_assignment_mutable.value = UNWRAP (TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, destructuring_assignment_mutable.value)));
     ELSE_IF node IS_A ReturnNode AS return_node THEN
       MUTABLE return_node_mutable = COPY return_node;
       return_node_mutable.value = TRY (stringConcatRewriter__rewrite_in_node_mut(&rtoc_self_view, return_node_mutable.value));
