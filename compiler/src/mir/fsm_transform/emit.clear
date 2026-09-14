@@ -498,7 +498,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     rtoc_indexed_i_12 = rtoc_indexed_i_12 + 1;
   END
   MUTABLE result_seg_indices = rtoc_indexed_acc_13;
-  MUTABLE owned_result_guards = TRY (emit__fsm_owned_result_guards(segment_nodes, lowering));
+  MUTABLE owned_result_guards = TRY (emit__fsm_owned_result_guards(segment_nodes, &lowering));
   MUTABLE seg_result_facts: {Int64}[]FsmResultTransferFact = {};
   MUTABLE seg_mir_codes: [][]Emittable = List[];
   MUTABLE rtoc_indexed_result_15 = {
@@ -849,7 +849,7 @@ PRIVATE FN emit__lift_ctx_cleanups_to_destroy_mut(body: []Emittable, promoted_na
   rtoc_keep
   } |> WHERE _ != NIL).compact();
 END
-PRIVATE FN emit__fsm_owned_result_guards(segments: []Segment, lowering: MIRLowering) RETURNS !{String}String ->
+PRIVATE FN emit__fsm_owned_result_guards(segments: []Segment, MUTABLE lowering: MIRLowering) RETURNS !{String}String ->
   MUTABLE guards = {};
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segments.length() DO
@@ -870,7 +870,7 @@ PRIVATE FN emit__fsm_owned_result_guards(segments: []Segment, lowering: MIRLower
       rtoc_idx = rtoc_idx + 1;
       CONTINUE;
     END
-    IF !(suspendResolvers__ownership_bearing_result_type?(result_type, lowering)) THEN
+    IF !(suspendResolvers__ownership_bearing_result_type?(result_type, &lowering)) THEN
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -972,7 +972,8 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
     rtoc_indexed_i_39 = rtoc_indexed_i_39 + 1;
   END
   rtoc_indexed_output_40
-  }).reverse().flatten();
+  });
+  prior_release_stmts = prior_release_stmts.reverse().flatten();
   MUTABLE fail_body_stmts = (prior_release_stmts + err.body_stmts);
   MUTABLE fail_tail = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_42: ?Done = NIL;
   IF (err.exit_kind == :done) THEN
