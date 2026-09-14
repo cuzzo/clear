@@ -549,9 +549,6 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   }));
     MUTABLE facts: []FsmResultTransferFact = CAST(TRY (mIRLowering__last_fsm_result_transfer_facts(&lowering_api)) AS []FsmResultTransferFact);
     seg_result_facts[UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).index] = facts;
-    IF (lowered_mir == NIL) THEN
-      RETURN NIL;
-  END
     lowered_mir = (mir_stmts + lowered_mir);
     MUTABLE all_promoted = (fsm_promoted_names + (captured.keys() |> SELECT _.toString()));
     IF (all_promoted).any?() THEN
