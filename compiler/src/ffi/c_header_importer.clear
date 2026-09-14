@@ -155,8 +155,9 @@ PRIVATE FN translator__collect_aliases_mut(MUTABLE self: Translator) RETURNS Voi
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE name = COPY compilerRegexCapture(match, 1);
-      MUTABLE rhs = compilerRegexCapture(match, 2).trim();
+      match_value = UNWRAP (match);
+      MUTABLE name = COPY compilerRegexCapture(match_value, 1);
+      MUTABLE rhs = compilerRegexCapture(match_value, 2).trim();
       self.aliases[name] = rhs;
     rtoc_idx = rtoc_idx + 1;
     END
@@ -182,13 +183,14 @@ PRIVATE FN translator__translate_structs(MUTABLE self: Translator) RETURNS ![]St
                   rtoc_idx = rtoc_idx + 1;
             CONTINUE;
               END
-              MUTABLE field_type: ?String = TRY (translator__map_type(&self, compilerRegexCapture(match, 2), :field));
+              match_value = UNWRAP (match);
+              MUTABLE field_type: ?String = TRY (translator__map_type(&self, compilerRegexCapture(match_value, 2), :field));
               IF (field_type == NIL) THEN
                   rtoc_idx = rtoc_idx + 1;
             CONTINUE;
               END
               MUTABLE field_type_value: String = COPY UNWRAP (field_type);
-              &fields.append("${compilerRegexCapture(match, 1)}: ${field_type_value}");
+              &fields.append("${compilerRegexCapture(match_value, 1)}: ${field_type_value}");
             rtoc_idx = rtoc_idx + 1;
           END
           IF ((fields.length() == 0) AND !(((CAST(COPY compilerRegexCapture(rtoc_scan_scanner_11, 2) AS String)).trim().length() == 0))) THEN
