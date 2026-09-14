@@ -57,10 +57,25 @@ module SelfhostCheckUnit
       cmd = [File.join(ROOT, 'clear'), 'build', source, '-o', File.join(dir, 'probe'),
              '--no-stack-check', '--main-tier', 'service',
              *ParserCompat.package_flags(generated_root)]
-      out, err, status = Open3.capture3(env, *cmd, chdir: ROOT)
-      text = "#{out}\n#{err}"
+      # STREAM, do not capture3: capture3 buffers until the child exits, so a
+      # run killed by an outer timeout yields NOTHING -- 25 minutes of work lost
+      # to an IOError from its reader threads. Streaming means a kill still
+      # leaves every diagnostic printed so far.
       noise = /^\e\[(33|36|90)m|^\s*from |^\t/
-      lines = text.lines.reject { |l| l.match?(noise) }
+      lines = []
+      status = nil
+      Open3.popen2e(env, *cmd, chdir: ROOT) do |stdin, out_err, wait_thr|
+        stdin.close
+        out_err.each_line do |line|
+          lines << line
+          next if line.match?(noise)
+
+          $stdout.puts(line)
+          $stdout.flush
+        end
+        status = wait_thr.value
+      end
+      lines = lines.reject { |l| l.match?(noise) }
       if status.success?
         puts "selfhost_check_unit: #{relative} type-checks"
         return 0
