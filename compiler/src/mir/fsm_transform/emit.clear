@@ -973,8 +973,15 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   END
   rtoc_indexed_output_40
   });
-  prior_release_stmts = prior_release_stmts.reverse().flatten();
-  MUTABLE fail_body_stmts = (prior_release_stmts + err.body_stmts);
+  MUTABLE prior_release_flat: []Emittable = List[];
+  MUTABLE rtoc_group_idx = (prior_release_stmts.length() - 1);
+  WHILE rtoc_group_idx >= 0 DO
+    FOR rtoc_group_stmt IN UNWRAP (prior_release_stmts[rtoc_group_idx]) DO
+      &prior_release_flat.append(COPY rtoc_group_stmt);
+    END
+    rtoc_group_idx = (rtoc_group_idx - 1);
+  END
+  MUTABLE fail_body_stmts = (prior_release_flat + err.body_stmts);
   MUTABLE fail_tail = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_42: ?Done = NIL;
   IF (err.exit_kind == :done) THEN
     rtoc_ternary_value_42 = Done{ _: NIL };
