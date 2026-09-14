@@ -593,24 +593,18 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   IF (((tail IS_A IoSuspend OR tail IS_A NextSuspend)) AND (descriptor == NIL)) THEN
       RETURN NIL;
   END
-  MUTABLE prologue: ?[]FsmBodyItem =   IF (rtoc_indexed_i_23 == 0) THEN
-      {
-    MUTABLE rtoc_value_block_marker = 0;
-    parts = List[];
+  MUTABLE prologue: ?[]FsmBodyItem = NIL;
+  IF (rtoc_indexed_i_23 == 0) THEN
+    MUTABLE parts: []FsmBodyItem = List[];
     IF arena_init_stmt THEN
       &parts.append(emit__fsm_body_mir_item(Emittable{ Set: COPY arena_init_stmt }));
-  END
-    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_29: ?Void = NIL;
-    IF (parts.length() == 0) THEN
-      rtoc_ternary_value_29 = NIL;
-    ELSE
-      rtoc_ternary_value_29 = parts;
     END
-    rtoc_ternary_value_29? })
-  }
+    IF (parts.length() == 0) THEN
+      prologue = NIL;
     ELSE
-      NIL
-    END;
+      prologue = parts;
+    END
+  END
   MUTABLE body_stmts = seg_codes[rtoc_indexed_i_23];
   IF void_assign_stmt THEN
   IF UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail IS_A Done THEN
