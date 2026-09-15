@@ -5546,7 +5546,7 @@ PRIVATE FN mIRLowering__lower_stub_decl(MUTABLE self: MIRLowering, MUTABLE node:
       MUTABLE cap_name: ?StubValue@boxed = COPY node.value;
       MUTABLE rtoc_index_receiver_236 = COPY mIRLowering__test_state(&self).active_stubs;
       rtoc_index_receiver_236[fn_name] = StubInfo{ kind: :captures, var: CAST(cap_name AS String) };
-      RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: CAST(COPY cap_name AS String), init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "i64" })), suppression: "_ = &${cap_name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
+      RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: CAST(COPY cap_name AS String), init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "i64" })), suppression: "_ = &${CAST(cap_name AS String)};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
     ELSE_IF (node.kind == :sequence) THEN
       MUTABLE values: ?StubValue@boxed = COPY node.value;
       MUTABLE items_mir: []Any = List[];
@@ -10998,8 +10998,8 @@ PRIVATE FN mIRLowering__bg_body_materialization(MUTABLE self: MIRLowering, MUTAB
     MUTABLE emit_body: []Emittable = List[];
     mIRLowering__with_bg_fiber_body_context(&self, pointer_captures, %() USE(analysis, bg_rt, caps, capture_close_plans, id, inner_t, is_void, MUTABLE node, MUTABLE run_body, MUTABLE self) -> mIRLowering__with_fiber_capture_map(&self, caps.capture_map, caps.capture_symbols, bg_rt, %() USE(analysis, caps, capture_close_plans, id, inner_t, is_void, node, MUTABLE run_body, MUTABLE self) -> {
     MUTABLE lowered = TRY (mIRLowering__lower_bg_body_steps(&self, &node, id, is_void, inner_t));
-    run_body = TRY (mIRLowering__finalized_boundary_body_for_emit(&self, ((TRY (mIRLowering__capture_ownership_mirror_nodes(self, caps, analysis, "__ctx_${id}", capture_close_plans)) + TRY (mIRLowering__capture_cleanup_stmts(self, caps.specs, "__ctx_${id}"))) + lowered.run_body)));
-    emit_body = run_body |> WHERE !(mIRLowering__capture_ownership_mirror_node?(self, _, "__ctx_${id}"));
+    run_body = TRY (mIRLowering__finalized_boundary_body_for_emit(&self, ((TRY (mIRLowering__capture_ownership_mirror_nodes(self, caps, analysis, "__ctx_${mIRLoweringGeneratedId__to_s(id)}", capture_close_plans)) + TRY (mIRLowering__capture_cleanup_stmts(self, caps.specs, "__ctx_${mIRLoweringGeneratedId__to_s(id)}"))) + lowered.run_body)));
+    emit_body = run_body |> WHERE !(mIRLowering__capture_ownership_mirror_node?(self, _, "__ctx_${mIRLoweringGeneratedId__to_s(id)}"));
     NIL
     }));
     RETURN BgBodyMaterialization{ run_body: COPY run_body, emit_body: COPY emit_body };
@@ -11079,7 +11079,7 @@ PRIVATE FN mIRLowering__lower_bg_value_result(MUTABLE self: MIRLowering, step: B
       last_mir = TRY (mIRLowering__hoist_alloc(&self, &last_mir, step.expr, TRUE));
     END
     MUTABLE last_pending = TRY (mIRLowering__flush_pending(&self));
-    MUTABLE result_target = FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${id}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "result", lowered_node_id: NIL, ownership_consumption: NIL };
+    MUTABLE result_target = FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${mIRLoweringGeneratedId__to_s(id)}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "result", lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE shape = TRY (asyncResultShape__promise(inner_t));
     MUTABLE stored_value = mIRLowering__async_payload_storage_value(&self, last_mir, shape);
     MUTABLE produced = ((last_pending + TRY (mIRLowering__ownership_marks_for_transferred_temp(&self, last_mir, :heap))) + [Emittable{ Set: COPY Set{ target: Emittable{ FieldGet: COPY result_target }, value: COPY stored_value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
