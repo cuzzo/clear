@@ -208,7 +208,7 @@ PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@
       END
       IF node_value_mutable IS_A []Node AS rtoc_walk_items THEN
         FOR _ IN rtoc_walk_items DO
-        preMirTypeCheck__walk(_, &violations, &seen);
+        preMirTypeCheck__walk(CAST(_ AS WalkNode), &violations, &seen);
         END
       ELSE_IF node_value_mutable IS_A {Any@multiowned}Any@multiowned AS hash THEN
         FOR _ IN hash.values() DO
