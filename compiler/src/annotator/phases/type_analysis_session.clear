@@ -4365,7 +4365,7 @@ PRIVATE FN typeAnalysisSession__mark_observable_terminal_mut(MUTABLE self: TypeA
     RETURN CAST(TRY (typeAnalysisSession__lift_to_observable_if_terminal_mut(&self, node, terminal, raw, collection)) AS ?Type);
 END
 PRIVATE FN typeAnalysisSession__bounded_stream_source?(MUTABLE self: TypeAnalysisSession, node: Locatable) RETURNS !Bool ->
-    RETURN TRY (type__bounded_stream?((TRY (aST__full_type_mut(node)))));
+    RETURN TRY (type__bounded_stream?((TRY (aST__full_type_mut(CAST(node AS Locatable))))));
 END
 PRIVATE FN typeAnalysisSession__pipeline_source_fact(MUTABLE self: TypeAnalysisSession, source: Locatable, source_type: Type, include_inf_stream: Bool = FALSE) RETURNS !PipelineSourceFact ->
     IF (include_inf_stream AND TRY (type__inf_stream?(source_type))) THEN
