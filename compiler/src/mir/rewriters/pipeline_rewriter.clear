@@ -947,7 +947,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
     MUTABLE actions = PARTIAL MATCH terminal START
       Locatable.SumOp AS sum_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        MUTABLE expr = pipelineRewriter__replace_placeholder(self, sumOp__expression(sum_op), current_val);
+        MUTABLE expr = pipelineRewriter__replace_placeholder(self, UNWRAP (sumOp__expression(sum_op)), current_val);
         MUTABLE assign = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: Locatable{ BinaryOp: COPY BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY res_ident }, op: :ADD, right: COPY expr, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_62: Locatable = Locatable{ Assignment: COPY assign };
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_62, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
@@ -957,7 +957,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       },
       Locatable.CountOp AS count_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        expr = pipelineRewriter__replace_placeholder(self, countOp__expression(count_op), current_val);
+        expr = pipelineRewriter__replace_placeholder(self, UNWRAP (countOp__expression(count_op)), current_val);
         MUTABLE one = Literal{ token: COPY token, type: :INT64, value: TokenValue{ Int64Value: 1 }, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
         MUTABLE increment = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: Locatable{ BinaryOp: COPY BinaryOp{ token: COPY token, left: Locatable{ Identifier: COPY res_ident }, op: :ADD, right: Locatable{ Literal: COPY one }, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_63: Locatable = Locatable{ Assignment: COPY increment };
@@ -973,7 +973,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       },
       Locatable.AverageOp AS average_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        expr = pipelineRewriter__replace_placeholder(self, averageOp__expression(average_op), current_val);
+        expr = pipelineRewriter__replace_placeholder(self, UNWRAP (averageOp__expression(average_op)), current_val);
         MUTABLE sum_ident = Identifier{ token: COPY token, name: "${res_var}_sum", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
         MUTABLE cnt_ident = Identifier{ token: COPY token, name: "${res_var}_cnt", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
         MUTABLE rtoc_union_writeback_65: Locatable = Locatable{ Identifier: COPY sum_ident };
@@ -988,7 +988,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       },
       Locatable.AnyOp AS any_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        expr = pipelineRewriter__replace_placeholder(self, anyOp__expression(any_op), current_val);
+        expr = pipelineRewriter__replace_placeholder(self, UNWRAP (anyOp__expression(any_op)), current_val);
         MUTABLE set_true = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: Locatable{ Literal: COPY Literal{ token: COPY token, type: :BOOLEAN, value: TokenValue{ BoolValue: TRUE }, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_67: Locatable = Locatable{ Assignment: COPY set_true };
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_67, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
@@ -1003,7 +1003,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       },
       Locatable.AllOp AS all_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        expr = pipelineRewriter__replace_placeholder(self, allOp__expression(all_op), current_val);
+        expr = pipelineRewriter__replace_placeholder(self, UNWRAP (allOp__expression(all_op)), current_val);
         MUTABLE set_false = Assignment{ token: COPY token, name: AssignmentName{ Identifier: COPY res_ident }, value: Locatable{ Literal: COPY Literal{ token: COPY token, type: :BOOLEAN, value: TokenValue{ BoolValue: FALSE }, storage: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } }, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, auto_lock: NIL, field_pre_cleanup: NIL, field_lifecycle_plan: NIL, auto_atomic_op: NIL };
         MUTABLE rtoc_union_writeback_69: Locatable = Locatable{ Assignment: COPY set_false };
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_69, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
@@ -1018,7 +1018,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       },
       Locatable.ReduceOp AS reduce_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        expr = pipelineRewriter__replace_placeholder(self, reduceOp__expression(reduce_op), current_val);
+        expr = pipelineRewriter__replace_placeholder(self, UNWRAP (reduceOp__expression(reduce_op)), current_val);
         expr = pipelineRewriter__replace_named_placeholder(self, expr, "acc", res_ident);
         assign = BindExpr{ token: COPY token, name: COPY res_var, type: NIL, value: expr, compound_op: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mode: NIL, reassign_cleanup: NIL, mir_binding_entry: NIL, auto_atomic_op: NIL, ownership_transport_plan: NIL };
         assign.mode = :assign;
@@ -1031,7 +1031,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       },
       Locatable.FindOp AS find_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        expr = pipelineRewriter__replace_placeholder(self, findOp__expression(find_op), current_val);
+        expr = pipelineRewriter__replace_placeholder(self, UNWRAP (findOp__expression(find_op)), current_val);
         MUTABLE acc_symbol: ?SymbolEntry@multiowned = COPY self.reduce_acc_symbols[res_var];
         MUTABLE found: Locatable = Locatable{ Identifier: COPY current_val };
         IF acc_symbol EXISTS AS acc_symbol_value THEN
@@ -1054,7 +1054,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       },
       Locatable.MinOp AS min_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        expr = pipelineRewriter__replace_placeholder(self, minOp__expression(min_op), current_val);
+        expr = pipelineRewriter__replace_placeholder(self, UNWRAP (minOp__expression(min_op)), current_val);
         MUTABLE op = :LT;
         MUTABLE found_ident = Identifier{ token: COPY token, name: "${res_var}_found", can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
         MUTABLE rtoc_union_writeback_74: Locatable = Locatable{ Identifier: COPY found_ident };
@@ -1092,7 +1092,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       },
       Locatable.MaxOp AS max_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        expr = pipelineRewriter__replace_placeholder(self, maxOp__expression(max_op), current_val);
+        expr = pipelineRewriter__replace_placeholder(self, UNWRAP (maxOp__expression(max_op)), current_val);
         op = IF max_op IS_A MinOp THEN
           :LT
         ELSE
@@ -1135,7 +1135,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       Locatable.EachOp AS each_op -> each_op.body |> SELECT pipelineRewriter__replace_placeholder(self, _, current_val),
       Locatable.UnnestOp AS unnest_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        MUTABLE inner_expr = pipelineRewriter__replace_placeholder(self, unnestOp__expression(unnest_op), current_val);
+        MUTABLE inner_expr = pipelineRewriter__replace_placeholder(self, UNWRAP (unnestOp__expression(unnest_op)), current_val);
         MUTABLE inner_it_var = pipelineRewriter__next_var(&self, "__it");
         MUTABLE inner_it = Identifier{ token: COPY token, name: COPY inner_it_var, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, fn_ref: NIL, heap_dupe_result: NIL, atomic_borrow: NIL, ownership_pending_transfer: NIL };
         MUTABLE et: ?Type = TRY (type__element_type((TRY (type__new(&inner_expr.full_type_mut("pipeline unnest inner expression"))))));
@@ -1156,7 +1156,7 @@ PRIVATE FN pipelineRewriter__build_terminal_action(MUTABLE self: PipelineRewrite
       },
       Locatable.DistinctOp AS distinct_op -> {
         MUTABLE rtoc_value_block_marker = 0;
-        MUTABLE key_expr = pipelineRewriter__replace_placeholder(self, distinctOp__expression(distinct_op), current_val);
+        MUTABLE key_expr = pipelineRewriter__replace_placeholder(self, UNWRAP (distinctOp__expression(distinct_op)), current_val);
         MUTABLE insert_call = TRY (pipelineRewriter__synthetic_set_insert_call(self, token, Locatable{ Identifier: COPY res_ident }, key_expr));
         [insert_call]
       },

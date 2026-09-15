@@ -2054,7 +2054,7 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
     IF !(idx) THEN
       BREAK;
     END
-    MUTABLE idx_value: Int64 = UNWRAP (idx);
+    MUTABLE idx_value: Int64 = idx;
     IF visited[idx_value] THEN
       CONTINUE;
     END
