@@ -2091,7 +2091,7 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
   END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segments.length() DO
-    IF out.contains?(segments[rtoc_idx]?.index) THEN
+    IF out.contains?(UNWRAP (segments[rtoc_idx]?.index)) THEN
       rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
@@ -2099,7 +2099,7 @@ PRIVATE FN emit__compute_sp_indices(segments: []Segment) RETURNS !{Int64}Int64 -
         rtoc_idx = rtoc_idx + 1;
   CONTINUE;
     END
-    out[segments[rtoc_idx]?.index] = counter;
+    out[UNWRAP (segments[rtoc_idx]?.index)] = counter;
     counter = (counter + 1);
   rtoc_idx = rtoc_idx + 1;
   END
@@ -2137,10 +2137,10 @@ PRIVATE FN emit__build_spawn_setup(ctx: FsmEmitContext) RETURNS !FsmSpawnSetup -
     {
   MUTABLE rtoc_value_block_marker = 0;
   sched = MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY ctx.rt_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "getSched", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-  FieldGet{ object: Emittable{ MIRMethodCall: COPY sched }, field: "allocator", lowered_node_id: NIL, ownership_consumption: NIL }
+  Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ MIRMethodCall: COPY sched }, field: "allocator", lowered_node_id: NIL, ownership_consumption: NIL } }
   }
   ELSE
-    MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY ctx.rt_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "heapAlloc", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL }
+    Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY ctx.rt_name, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "heapAlloc", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }
   END;
   MUTABLE capture_inits = ctx.capture_inits |> WHERE !(((CAST(_.name AS String) == "inner") OR (CAST(_.name AS String) == "alloc")));
   MUTABLE ctx_init_fields = ([StructInitField{ name: :task, value: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL }, StructInitField{ name: :rt, value: Emittable{ Undef: COPY Undef{ zig_type: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL }, StructInitField{ name: :inner, value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY ctx.promise_var, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "inner", lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL }, StructInitField{ name: :alloc, value: Emittable{ Ident: COPY Ident{ name: COPY ctx.alloc_var, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: NIL }] + capture_inits);

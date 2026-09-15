@@ -36,9 +36,9 @@ PUB FN liveness__analyze(segments: []Segment, ctx: {String@symbol}?TransformValu
   defs_by_seg[seg.index] = seg_defs;
   uses_by_seg[seg.index] = seg_uses;
   liveness__collect_tail_uses(seg, &uses_by_seg);
-  IF ((((seg.tail IS_A NextSuspend OR seg.tail IS_A IoSuspend)) AND seg.tail.result_var) AND (seg.tail.kind() != :io)) THEN
+  IF ((((seg.tail IS_A NextSuspend OR seg.tail IS_A IoSuspend)) AND (segmentTail__result_var(seg.tail) != NIL)) AND (segmentTail__kind(seg.tail) != :io)) THEN
       MUTABLE tail_defs: {String}?Type = UNWRAP (defs_by_seg[seg.index]);
-      tail_defs[seg.tail.result_var] = NIL;
+      tail_defs[UNWRAP (segmentTail__result_var(seg.tail))] = NIL;
       defs_by_seg[seg.index] = tail_defs;
   END
   END
@@ -82,23 +82,26 @@ PUB FN liveness__analyze(segments: []Segment, ctx: {String@symbol}?TransformValu
   RETURN LivenessResult{ cross_segment_vars: cross };
 END
 PRIVATE FN liveness__compute_cyclic_segments(segments: []Segment) RETURNS ![Set]Int64 ->
-  MUTABLE adj = {};
+  MUTABLE adj: {Int64}[]Int64 = {};
   FOR _ IN segments DO
   adj[_.index] = TRY (liveness__tail_targets(_));
   END
   MUTABLE cyclic = Set[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segments.length() DO
-    MUTABLE stack: ?Any = COPY (adj[segments[rtoc_idx]?.index]);
+    MUTABLE seg_index: Int64 = UNWRAP (segments[rtoc_idx]?.index);
+    MUTABLE stack: []Int64 = COPY (UNWRAP (adj[seg_index]));
     MUTABLE visited = Set[];
     WHILE !(stack.empty?()) DO
         MUTABLE cur = &stack.shift();
-        IF (cur == segments[rtoc_idx]?.index) THEN
-          &cyclic.insert(segments[rtoc_idx]?.index);
+        IF (cur == seg_index) THEN
+          &cyclic.insert(seg_index);
           BREAK;
         END
+        # Ruby's `next unless visited.add?(cur)` continues the INNER
+        # `until stack.empty?` loop; advancing the outer counter here would
+        # skip segments.
         IF !(&visited.insert(cur)) THEN
-          rtoc_idx = rtoc_idx + 1;
   CONTINUE;
         END
         FOR _ IN ((adj[cur] OR_ELSE List[])) DO
@@ -112,10 +115,12 @@ END
 PRIVATE FN liveness__tail_targets(seg: Segment) RETURNS ![]Int64 ->
   IF (seg.tail IS_A Done) THEN
     RETURN CAST(List[] AS []Int64);
-  ELSE_IF (seg.tail IS_A Goto) OR (seg.tail IS_A LoopBack) THEN
-    RETURN CAST([seg.tail.target_index] AS []Int64);
-  ELSE_IF (seg.tail IS_A CondBranch) THEN
-    RETURN CAST([seg.tail.then_index, seg.tail.else_index] AS []Int64);
+  ELSE_IF seg.tail IS_A Goto AS goto THEN
+    RETURN CAST([goto.target_index] AS []Int64);
+  ELSE_IF seg.tail IS_A LoopBack AS loop_back THEN
+    RETURN CAST([loop_back.target_index] AS []Int64);
+  ELSE_IF seg.tail IS_A CondBranch AS cond_branch THEN
+    RETURN CAST([cond_branch.then_index, cond_branch.else_index] AS []Int64);
   ELSE_IF (seg.tail IS_A LockSuspend) THEN
     RETURN CAST([(seg.index + 1)] AS []Int64);
   ELSE

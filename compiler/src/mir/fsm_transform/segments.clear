@@ -136,6 +136,25 @@ END
 PUB STRUCT SplitResult {
   segments: []Segment
 }
+# Ruby reads `tail.result_var` and `tail.kind` straight off whichever suspend
+# Struct the tail holds. CLEAR needs the variant named, so the duck-typing is
+# modelled the way suspendTail__with_next_index already models it.
+PUB FN segmentTail__result_var(self: SegmentTail) RETURNS ?String ->
+  PARTIAL MATCH self START
+    SegmentTail.IoSuspend AS item -> RETURN COPY item.result_var;,
+    SegmentTail.NextSuspend AS item -> RETURN COPY item.result_var;,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+PUB FN segmentTail__kind(self: SegmentTail) RETURNS String@symbol ->
+  PARTIAL MATCH self START
+    SegmentTail.IoSuspend AS item -> RETURN ioSuspend__kind(item);,
+    SegmentTail.NextSuspend AS item -> RETURN nextSuspend__kind(item);,
+    DEFAULT -> RETURN :done;
+  END
+  RETURN :done;
+END
 PUB FN segments__suspend_tail?(tail: ?SegmentTail) RETURNS Bool ->
   RETURN ((((tail != NIL) AND (tail IS_A IoSuspend)) OR ((tail != NIL) AND (tail IS_A NextSuspend))) OR ((tail != NIL) AND (tail IS_A LockSuspend)));
 END
