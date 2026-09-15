@@ -8841,7 +8841,9 @@ FN rtocChildrenOfWalkNodeTestThat(v: TestThat) RETURNS []WalkNode ->
   IF v.zig_pattern EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ SymbolValue: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: COPY v.synthetic_fn });
+  IF v.synthetic_fn EXISTS AS rtoc_synthetic_fn THEN
+    &out.append(WalkNode{ FunctionDefMultiowned: COPY rtoc_synthetic_fn });
+  END
   IF v.pending EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
