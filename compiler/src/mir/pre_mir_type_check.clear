@@ -166,13 +166,13 @@ PUB FN preMirTypeCheck__verify_mut(program: Program) RETURNS !Void ->
   MUTABLE rtoc_sample_i: Int64 = 0;
   WHILE ((rtoc_sample_i < violations.length()) AND (rtoc_sample_i < 30)) DO
     MUTABLE rtoc_v = UNWRAP (violations[rtoc_sample_i]);
-    &rtoc_sample_lines.append("  - ${rtoc_v[:cls]} @ ${rtoc_v[:loc]}");
+    &rtoc_sample_lines.append("  - ${(rtoc_v[:cls] OR_ELSE "")} @ ${(rtoc_v[:loc] OR_ELSE "")}");
     rtoc_sample_i = (rtoc_sample_i + 1);
   END
   MUTABLE sample = rtoc_sample_lines.join("\n");
   MUTABLE more: String = "";
   IF (violations.length() > 30) THEN
-    more = "\n  ... (+${(violations.length() - 30)} more)";
+    more = "\n  ... (+${(violations.length() - 30).toString()} more)";
   ELSE
     more = "";
   END
@@ -181,7 +181,7 @@ END
 PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@symbol}String, MUTABLE seen: {Int64}Bool) RETURNS Void EFFECTS REENTRANT ->
   IF node EXISTS AS node_value THEN
     MUTABLE node_value_mutable = COPY node_value;
-    IF (node_value_mutable IS_A String@symbol OR node_value_mutable IS_A String OR node_value_mutable IS_A Float64 OR node_value_mutable IS_A Bool OR node_value_mutable IS_A Bool OR node_value_mutable IS_A Void OR node_value_mutable IS_A Token OR node_value_mutable IS_A SymbolEntry OR node_value_mutable IS_A Scope OR node_value_mutable IS_A EnumSchema OR node_value_mutable IS_A InlineStructVariant OR node_value_mutable IS_A ResourceSchema OR node_value_mutable IS_A StructSchema OR node_value_mutable IS_A UnionSchema OR node_value_mutable IS_A [Set]Any) THEN
+    IF FALSE THEN  # leaf types are not WalkNode variants; see rb:82
       RETURN;
     ELSE
       IF TRUE THEN
@@ -189,7 +189,7 @@ PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@
         RETURN;
       END
       END
-      MUTABLE oid = node_value_mutable.object_id();
+      MUTABLE oid = aST__node_identity(CAST(node_value_mutable AS Locatable));
       IF seen[oid] THEN
         RETURN;
       END

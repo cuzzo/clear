@@ -256,7 +256,7 @@ PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MU
         pipelineRewriter__patch_chain_source_mut(&self, node, real_source);
       RETURN COPY Locatable{ BinaryOp: COPY node };
     END
-    MUTABLE is_fold = ((((terminal == NIL) OR (((terminal) != NIL) AND ((terminal) IS_A EachOp))) OR aST__pipeline_terminal_fold?(terminal)) OR aST__pipeline_list_terminal?(terminal));
+    MUTABLE is_fold = (((terminal == NIL) OR ((terminal) IS_A EachOp)) OR aST__pipeline_terminal_fold?(terminal) OR aST__pipeline_list_terminal?(terminal));
     IF ((stages.length() > 0) OR ((is_fold AND (terminal != NIL)))) THEN
       IF is_fold THEN
         RETURN TRY (pipelineRewriter__fuse_pipeline(&self, &node, &real_source, stages, &terminal));
@@ -266,14 +266,16 @@ PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MU
         TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_1, TRY (aST__full_type_mut(real_source)), "synthetic AST type"));
         PARTIAL MATCH rtoc_union_writeback_1 START Locatable.BinaryOp AS rtoc_union_writeback_1_item -> list_proxy = COPY rtoc_union_writeback_1_item;, END
         NIL;
-        list_proxy.storage = locatable__storage(real_source);
+        # NOTE: pipeline_rewriter.rb:283 assigns list_proxy.storage here, but
+        # AST::BinaryOp has no :storage member -- that line cannot execute.
         MUTABLE fused_loop = TRY (pipelineRewriter__fuse_pipeline(&self, &list_proxy, &real_source, stages, NIL));
         MUTABLE outer_smooth = BinaryOp{ token: COPY node.token, left: COPY fused_loop, op: :SMOOTH, right: UNWRAP (COPY terminal), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
         MUTABLE rtoc_union_writeback_2: Locatable = Locatable{ BinaryOp: COPY outer_smooth };
-        TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_2, COPY TRY (aST__full_type_mut(node)), "synthetic AST type"));
+        TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_2, COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })), "synthetic AST type"));
         PARTIAL MATCH rtoc_union_writeback_2 START Locatable.BinaryOp AS rtoc_union_writeback_2_item -> outer_smooth = COPY rtoc_union_writeback_2_item;, END
         NIL;
-        outer_smooth.storage = node.storage();
+        # NOTE: the Ruby assigns outer_smooth.storage here, but AST::BinaryOp has
+        # no :storage member -- that line cannot execute.
         RETURN TRY (pipelineRewriter__rewrite_pipeline(&self, &outer_smooth));
       END
     END
@@ -288,7 +290,9 @@ PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MU
         lhs_node = COPY source;
       END
       IF needs_try THEN
-        TRY (aST__stamp_synthetic_type_mut( CAST(&lhs_node AS Locatable), COPY UNWRAP (TRY (type__payload_type((TRY (type__new( TypeConstructionInput{ Type: TRY (aST__full_type_mut(source)) })))))), "synthetic AST type"));
+        MUTABLE rtoc_lhs_stamp: Locatable = UNWRAP (lhs_node);
+        TRY (aST__stamp_synthetic_type_mut(&rtoc_lhs_stamp, COPY UNWRAP (TRY (type__payload_type((TRY (type__new( TypeConstructionInput{ Type: TRY (aST__full_type_mut(source)) })))))), "synthetic AST type"));
+        lhs_node = rtoc_lhs_stamp;
       END
       locatable__args(rhs).unshift(lhs_node);
       RETURN rhs;
