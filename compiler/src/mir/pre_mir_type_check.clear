@@ -216,9 +216,6 @@ PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@
         END
       ELSE_IF TRUE THEN
         FOR rtoc_walk_child_2 IN rtocChildrenWalkNode(node_value_mutable) DO
-  IF (((node_value_mutable IS_A FunctionDef OR node_value_mutable IS_A ExternFnDecl)) AND (member == :return_lifetime)) THEN
-    CONTINUE;
-  END
   preMirTypeCheck__walk(rtoc_walk_child_2, &violations, &seen);
         END
       END
@@ -3074,7 +3071,7 @@ FN rtocChildrenOfWalkNodeExternFnDecl(v: ExternFnDecl) RETURNS []WalkNode ->
     &out.append(WalkNode{ SymbolValue: COPY rtoc_arr_child });
   END
   # extern_source: ?ExternSource holds no Locatable -- Ruby's walk stops at its leaves.
-  &out.append(WalkNode{ ArrayValue: CAST(COPY v.return_lifetime AS []Node)});
+  # return_lifetime is skipped (pre_mir_type_check.rb:100).
   IF v.can_fail EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ BoolValue: COPY rtoc_opt_child });
   END
@@ -3727,7 +3724,7 @@ FN rtocChildrenOfWalkNodeFunctionDef(v: FunctionDef) RETURNS []WalkNode ->
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: CAST(COPY v.return_lifetime AS []Node)});
+  # return_lifetime is skipped (pre_mir_type_check.rb:100).
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
@@ -3886,7 +3883,7 @@ FN rtocChildrenOfWalkNodeFunctionDefMultiowned(v: FunctionDef) RETURNS []WalkNod
   IF v.return_type EXISTS AS rtoc_opt_child THEN
     &out.append(WalkNode{ TypeMultiowned: COPY rtoc_opt_child });
   END
-  &out.append(WalkNode{ ArrayValue: CAST(COPY v.return_lifetime AS []Node)});
+  # return_lifetime is skipped (pre_mir_type_check.rb:100).
   FOR rtoc_arr_child IN v.body DO
     &out.append(castLocatableToWalkNode(COPY rtoc_arr_child));
   END
