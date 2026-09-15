@@ -72,6 +72,8 @@ def narrowed_before(lines, i, name):
         # `IF !((x == NIL))` is the same guard rtoc writes for `unless x.nil?`.
         re.compile(r'!\(\(?\s*' + re.escape(name) + r'\s*==\s*NIL'),
         re.compile(r'\b' + re.escape(name) + r'\s*!=\s*NIL'),
+        # Bare truthiness on an optional narrows it too: `IF storage THEN`.
+        re.compile(r'IF\s+' + re.escape(name) + r'\s+THEN\b'),
     )
     for j in range(start, i):
         if any(g.search(lines[j]) for g in guards):
