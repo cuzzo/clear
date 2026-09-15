@@ -156,7 +156,7 @@ PUB UNION WalkNode { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolR
 PUB FN preMirTypeCheck__verify_mut(program: Program) RETURNS !Void ->
   TRY (mIRPassState__class_require_mut(PassStateProgram{ Program: COPY program }, :hoisted, "PreMirTypeCheck"));
   MUTABLE violations: []{String@symbol}String = List[];
-  preMirTypeCheck__walk( CAST(program AS ?WalkNode), &violations, {});
+  TRY (preMirTypeCheck__walk( CAST(program AS ?WalkNode), &violations, {}));
   IF (violations.length() == 0) THEN
     MUTABLE rtoc_mutable_receiver_1 = (mIRPassState__for_mut(PassStateProgram{ Emittable: COPY CAST(program AS Emittable) }));
     TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_1, :premir_type_checked));
@@ -178,7 +178,7 @@ PUB FN preMirTypeCheck__verify_mut(program: Program) RETURNS !Void ->
   END
   RAISE Input, InternalTypeResolutionError, "      Internal Compiler Error: {} AST node(s) reached MIR\n      lowering without a resolved type (full_type is the :Untyped\n      sentinel). Every evaluatable node must be typed (Void for\n      statements / void expressions) by the end of annotation.\n\n      This is a bug in the CLEAR compiler, not an error in your\n      program. Sorry for the inconvenience -- please report it.\n\n{}{}\n";
 END
-PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@symbol}String, MUTABLE seen: {Int64}Bool) RETURNS Void EFFECTS REENTRANT ->
+PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@symbol}String, MUTABLE seen: {Int64}Bool) RETURNS !Void EFFECTS REENTRANT ->
   IF node EXISTS AS node_value THEN
     MUTABLE node_value_mutable = COPY node_value;
     IF FALSE THEN  # leaf types are not WalkNode variants; see rb:82
@@ -208,15 +208,15 @@ PRIVATE FN preMirTypeCheck__walk(node: ?WalkNode, MUTABLE violations: []{String@
       END
       IF node_value_mutable IS_A []Node AS rtoc_walk_items THEN
         FOR _ IN rtoc_walk_items DO
-        preMirTypeCheck__walk(CAST(_ AS WalkNode), &violations, &seen);
+        TRY (preMirTypeCheck__walk(CAST(_ AS WalkNode), &violations, &seen));
         END
       ELSE_IF node_value_mutable IS_A {Any@multiowned}Any@multiowned AS hash THEN
         FOR _ IN hash.values() DO
-        preMirTypeCheck__walk(_, &violations, &seen);
+        TRY (preMirTypeCheck__walk(_, &violations, &seen));
         END
       ELSE_IF TRUE THEN
         FOR rtoc_walk_child_2 IN rtocChildrenWalkNode(node_value_mutable) DO
-  preMirTypeCheck__walk(rtoc_walk_child_2, &violations, &seen);
+  TRY (preMirTypeCheck__walk(rtoc_walk_child_2, &violations, &seen));
         END
       END
     END
