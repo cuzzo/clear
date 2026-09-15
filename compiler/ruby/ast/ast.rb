@@ -3945,6 +3945,12 @@ module AST
     include Locatable
     include HasBodies
 
+    # Set when the subject is an OPTIONAL union. The variant arms still ask a
+    # tag question, so lowering guards each one with a null check and sends
+    # NIL to the DEFAULT arm -- the same contract runtime IS_A uses.
+    sig { returns(T.nilable(T::Boolean)) }
+    attr_accessor :runtime_subject_optional
+
     sig { params(args: InitArgs).void }
     def initialize(*args)
       super

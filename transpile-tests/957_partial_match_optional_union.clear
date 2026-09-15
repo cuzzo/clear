@@ -1,0 +1,54 @@
+# Test: PARTIAL MATCH on an OPTIONAL union subject.
+# `?Shape` names the same union as `Shape`, so the variant arms still bind
+# their payloads, and NIL falls through to DEFAULT the way Ruby's `case nil`
+# reaches its `else`. Before the fix the subject was not recognised as a union
+# at all: the arm binding was silently skipped and the only symptom was an
+# "undefined variable" reported at the use site inside the arm.
+
+STRUCT Circle { r: Int64 }
+STRUCT Square { s: Int64 }
+UNION Shape { Circle: Circle, Square: Square }
+
+FN area(sh: ?Shape) RETURNS Int64 ->
+    RETURN PARTIAL MATCH sh START
+        Shape.Circle AS c -> (c.r * 10),
+        Shape.Square AS q -> q.s,
+        DEFAULT -> -1
+    END;
+END
+
+# A block-form arm has to keep the binding in scope for its whole body.
+FN describe(sh: ?Shape) RETURNS Int64 ->
+    MUTABLE out: Int64 = PARTIAL MATCH sh START
+        Shape.Circle AS c -> {
+            MUTABLE doubled = c.r * 2;
+            (doubled + c.r)
+        },
+        DEFAULT -> -99
+    END;
+    RETURN out;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE none: ?Shape = NIL;
+    MUTABLE circle: ?Shape = Shape{ Circle: Circle{ r: 7 } };
+    MUTABLE square: ?Shape = Shape{ Square: Square{ s: 3 } };
+
+    ASSERT area(circle) == 70, "optional union binds the Circle payload";
+    ASSERT area(square) == 3, "optional union binds the Square payload";
+    ASSERT area(none) == -1, "NIL subject falls through to DEFAULT";
+
+    ASSERT describe(circle) == 21, "block-form arm keeps the binding in scope";
+    ASSERT describe(none) == -99, "NIL subject reaches DEFAULT in a statement MATCH";
+
+    # A present subject still matches when the union is reached through a
+    # non-optional value, so the fix does not disturb the ordinary path.
+    MUTABLE bare = Shape{ Circle: Circle{ r: 4 } };
+    MUTABLE bare_out: Int64 = PARTIAL MATCH bare START
+        Shape.Circle AS c -> c.r,
+        DEFAULT -> -1
+    END;
+    ASSERT bare_out == 4, "non-optional subject is unchanged";
+
+    RETURN;
+END

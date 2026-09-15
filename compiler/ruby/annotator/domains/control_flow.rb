@@ -876,7 +876,15 @@ module Annotator
 
         expr_t = Type.new(node.expr.full_type!(context: "MATCH subject"))
         node.string_match = true if expr_t.string?
-        type_name = T.cast(expr_t.generic_instance? ? expr_t.generic_base : expr_t.resolved, Symbol)
+        # `?Shape` names the same union as `Shape`, so ask the payload's
+        # schema -- otherwise the subject is not seen as a union at all and the
+        # variant arms silently skip their payload binding, leaving only an
+        # "undefined variable" at the use site. PARTIAL MATCH sends NIL to the
+        # DEFAULT arm, the way runtime IS_A answers FALSE for it; an exhaustive
+        # MATCH on an optional stays an error because no arm covers NIL.
+        node.runtime_subject_optional = expr_t.optional?
+        subject_t = expr_t.optional? ? expr_t.non_optional_type : expr_t
+        type_name = T.cast(subject_t.generic_instance? ? subject_t.generic_base : subject_t.resolved, Symbol)
         schema = T.cast(lookup_type_schema(type_name), T.nilable(MatchSchema))
         is_enum = Schemas.enum?(schema)
         is_union = Schemas.union?(schema)
@@ -1187,6 +1195,11 @@ module Annotator
       def check_match_exhaustiveness!(node, plan)
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
         return unless node.exhaustive
+
+        if plan.expr_type.optional?
+          emit_match_partial_fix!(node, :MATCH_NEEDS_ENUM_OR_UNION, type: plan.expr_type.resolved)
+          return
+        end
 
         unless plan.enum? || plan.union?
           emit_match_partial_fix!(node, :MATCH_NEEDS_ENUM_OR_UNION, type: plan.expr_type.resolved)

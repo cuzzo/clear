@@ -20,6 +20,7 @@ module MIRLoweringControlFlow
     const :is_int_match, T::Boolean
     const :is_enum_match, T::Boolean
     const :expr_type_sym, MatchTypeKey
+    const :optional_subject, T::Boolean
   end
 
   class UnionMatchArmPlan < T::Struct
@@ -938,7 +939,7 @@ module MIRLoweringControlFlow
 
     if facts.is_int_match || facts.is_enum_match
       result = lower_switch_match(node, facts)
-    elsif is_union && union_match_switchable?(node)
+    elsif is_union && !facts.optional_subject && union_match_switchable?(node)
       result = lower_union_match(node, facts)
     else
       result = lower_if_chain_match(node, facts)
@@ -958,7 +959,7 @@ module MIRLoweringControlFlow
     T.bind(self, MIRLowering) rescue nil
     body = hoisted_match_case_body(match_case, facts.expr_label)
     return [if_chain_branch(T.cast(lower(match_case.value), MIR::Emittable), body)] if match_case.kind == :when
-    return union_if_chain_match_case(node, match_case, facts.subject, body) if facts.is_union
+    return union_if_chain_match_case(node, match_case, facts.subject, body, facts.optional_subject) if facts.is_union
 
     value_if_chain_match_case(node, match_case, facts.subject, body)
   end
@@ -974,23 +975,26 @@ module MIRLoweringControlFlow
     MIR::IfChainBranch.new(cond: cond, body: body)
   end
 
-  sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, subject: MIR::Emittable, body: MatchBody).returns(T::Array[MIR::IfChainBranch]) }
-  def union_if_chain_match_case(node, match_case, subject, body)
+  sig { params(node: AST::MatchStatement, match_case: AST::MatchCase, subject: MIR::Emittable, body: MatchBody, optional_subject: T::Boolean).returns(T::Array[MIR::IfChainBranch]) }
+  def union_if_chain_match_case(node, match_case, subject, body, optional_subject = false)
     variants = union_match_case_variants(match_case)
     is_mutable = node.expr.is_a?(AST::Identifier) && node.expr.was_moved == true
     has_payload_binding = !!(match_case.binding || match_case.destructure)
+    # The tag test guards on null itself; the payload read happens only after
+    # that guard has passed, so it reads through the unwrapped subject.
+    payload_source = optional_subject ? MIR::OptionalUnwrap.new(subject) : subject
 
     if has_payload_binding && variants.length > 1
       return variants.map do |variant|
         if_chain_branch(
-          union_tag_condition(subject, variant),
-          union_if_chain_payload_bindings(match_case, subject, variant, is_mutable) + body.dup,
+          union_tag_condition(subject, variant, optional_subject: optional_subject),
+          union_if_chain_payload_bindings(match_case, payload_source, variant, is_mutable) + body.dup,
         )
       end
     end
 
-    branch_body = has_payload_binding ? union_if_chain_payload_bindings(match_case, subject, variants.first || "", is_mutable) + body : body
-    [if_chain_branch(disjoin_match_conditions(variants.map { |variant| union_tag_condition(subject, variant) }), branch_body)]
+    branch_body = has_payload_binding ? union_if_chain_payload_bindings(match_case, payload_source, variants.first || "", is_mutable) + body : body
+    [if_chain_branch(disjoin_match_conditions(variants.map { |variant| union_tag_condition(subject, variant, optional_subject: optional_subject) }), branch_body)]
   end
 
   sig { params(match_case: AST::MatchCase, subject: MIR::Emittable, variant: String, is_mutable: T::Boolean).returns(MatchBody) }
@@ -1116,13 +1120,18 @@ module MIRLoweringControlFlow
       is_union: is_union,
       is_int_match: is_int_match,
       is_enum_match: is_enum_match,
-      expr_type_sym: T.cast(is_union ? union_lookup : expr_type_sym, Symbol)
+      expr_type_sym: T.cast(is_union ? union_lookup : expr_type_sym, Symbol),
+      optional_subject: node.runtime_subject_optional == true
     )
   end
 
   sig { params(expression: AST::Node).returns(Symbol) }
   def match_union_lookup(expression)
     type = Type.new(expression.resolved_type || :Any)
+    # `?Shape` names the same union as `Shape`. The annotator binds arm
+    # payloads through the optional, so the lowering has to agree -- a mismatch
+    # here drops the binding and emits Zig that reads an undeclared name.
+    type = type.non_optional_type
     return type.generic_base if type.generic_instance?
 
     type.resolved
