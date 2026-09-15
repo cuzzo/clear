@@ -153,6 +153,14 @@ def main():
                 line = lineno(m.end() + off)
                 core = re.sub(r'^COPY\s+', '', expr)
 
+                # `[Struct{...}]` into a list-of-union field: Ruby writes a
+                # plain array of nodes, which has no variant wrapper.
+                if fty in unions:
+                    lm = re.match(r'\[\s*(\w+)\{', core)
+                    if lm and lm.group(1) in structs and lm.group(1) in unions[fty]:
+                        findings.append((f, line, fld, fty, 'needs-wrap-list', lm.group(1)))
+                        continue
+
                 if not is_opt and not is_list:
                     am = re.fullmatch(r'[\w.?()]*?\.(\w+)', core)
                     if am and am.group(1) in always_opt:
