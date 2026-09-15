@@ -266,16 +266,14 @@ PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MU
         TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_1, TRY (aST__full_type_mut(real_source)), "synthetic AST type"));
         PARTIAL MATCH rtoc_union_writeback_1 START Locatable.BinaryOp AS rtoc_union_writeback_1_item -> list_proxy = COPY rtoc_union_writeback_1_item;, END
         NIL;
-        # NOTE: pipeline_rewriter.rb:283 assigns list_proxy.storage here, but
-        # AST::BinaryOp has no :storage member -- that line cannot execute.
+        list_proxy.storage_override = COPY locatable__storage(real_source);
         MUTABLE fused_loop = TRY (pipelineRewriter__fuse_pipeline(&self, &list_proxy, &real_source, stages, NIL));
         MUTABLE outer_smooth = BinaryOp{ token: COPY node.token, left: COPY fused_loop, op: :SMOOTH, right: UNWRAP (COPY terminal), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
         MUTABLE rtoc_union_writeback_2: Locatable = Locatable{ BinaryOp: COPY outer_smooth };
         TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_2, COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })), "synthetic AST type"));
         PARTIAL MATCH rtoc_union_writeback_2 START Locatable.BinaryOp AS rtoc_union_writeback_2_item -> outer_smooth = COPY rtoc_union_writeback_2_item;, END
         NIL;
-        # NOTE: the Ruby assigns outer_smooth.storage here, but AST::BinaryOp has
-        # no :storage member -- that line cannot execute.
+        outer_smooth.storage_override = (COPY node.storage_override OR_ELSE symbol("stack"));
         RETURN TRY (pipelineRewriter__rewrite_pipeline(&self, &outer_smooth));
       END
     END
@@ -321,9 +319,8 @@ PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MU
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_3, COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_3 START Locatable.FuncCall AS rtoc_union_writeback_3_item -> call = COPY rtoc_union_writeback_3_item;, END
       NIL;
-      # NOTE: the Ruby reads node.storage here, but AST::BinaryOp has no
-      # :storage member -- that line cannot execute.
-      MUTABLE config: ?LookupResult = TRY (intrinsicRegistry__lookup(:std_lib, RegistryKey{ StringValue: COPY CAST(rhs.name() AS String) }));
+      call.storage_override = (COPY node.storage_override OR_ELSE symbol("stack"));
+      MUTABLE config: ?LookupResult = TRY (intrinsicRegistry__lookup(:std_lib, RegistryKey{ StringValue: COPY CAST(UNWRAP (locatable__name(rhs)) AS String) }));
       MUTABLE sig0_branch_value: ?FunctionSignature@multiowned = NIL;
       IF config? IS_A []FunctionSignature@multiowned AS array THEN
         sig0_branch_value = COPY array.first();
@@ -338,12 +335,12 @@ PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MU
       RETURN Locatable{ FuncCall: COPY call };
     END
     IF rhs IS_A RecoverOp AS recover_op THEN
-      MUTABLE op = BinaryOp{ token: COPY recover_op.token, left: COPY source, op: symbol("OR_ELSE"), right: COPY recover_op.default_expr, paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
+      MUTABLE op = BinaryOp{ token: COPY recover_op.token, left: COPY source, op: symbol("OR_ELSE"), right: COPY UNWRAP (recover_op.default_expr), paren_bind: NIL, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, string_concat: NIL, or_fallback_dupe: NIL, error_union_type: NIL, observable_terminal: NIL, observable_dest: NIL, retain_error_channel: NIL };
       MUTABLE rtoc_union_writeback_4: Locatable = Locatable{ BinaryOp: COPY op };
-      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_4, COPY TRY (aST__full_type_mut(node)), "synthetic AST type"));
+      TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_4, COPY TRY (aST__full_type_mut(CAST(node AS Locatable))), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_4 START Locatable.BinaryOp AS rtoc_union_writeback_4_item -> op = COPY rtoc_union_writeback_4_item;, END
       NIL;
-      op.storage = node.storage();
+      op.storage_override = (COPY node.storage_override OR_ELSE symbol("stack"));
       op.tense_plan = COPY UNWRAP (node.tense_plan);
       RETURN Locatable{ BinaryOp: COPY op };
     END
@@ -537,7 +534,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_20, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_20 START Locatable.VarDecl AS rtoc_union_writeback_20_item -> decl = COPY rtoc_union_writeback_20_item;, END
       NIL;
-      decl.storage = :stack;
+      decl.storage_override = :stack;
       decl.slot_size = 1;
       decl.var_used = TRUE;
       decl.var_mutated = TRUE;
@@ -562,7 +559,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_22, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_22 START Locatable.VarDecl AS rtoc_union_writeback_22_item -> decl = COPY rtoc_union_writeback_22_item;, END
       NIL;
-      decl.storage = :stack;
+      decl.storage_override = :stack;
       decl.slot_size = 1;
       decl.var_used = TRUE;
       decl.var_mutated = TRUE;
@@ -573,7 +570,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_23, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_23 START Locatable.VarDecl AS rtoc_union_writeback_23_item -> sum_decl = COPY rtoc_union_writeback_23_item;, END
       NIL;
-      sum_decl.storage = :stack;
+      sum_decl.storage_override = :stack;
       sum_decl.slot_size = 1;
       sum_decl.var_used = TRUE;
       sum_decl.var_mutated = TRUE;
@@ -582,7 +579,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_24, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_24 START Locatable.VarDecl AS rtoc_union_writeback_24_item -> cnt_decl = COPY rtoc_union_writeback_24_item;, END
       NIL;
-      cnt_decl.storage = :stack;
+      cnt_decl.storage_override = :stack;
       cnt_decl.slot_size = 1;
       cnt_decl.var_used = TRUE;
       cnt_decl.var_mutated = TRUE;
@@ -599,7 +596,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_26, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_26 START Locatable.VarDecl AS rtoc_union_writeback_26_item -> decl = COPY rtoc_union_writeback_26_item;, END
       NIL;
-      decl.storage = :stack;
+      decl.storage_override = :stack;
       decl.slot_size = 1;
       decl.var_used = TRUE;
       decl.var_mutated = TRUE;
@@ -616,7 +613,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_28, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_28 START Locatable.VarDecl AS rtoc_union_writeback_28_item -> decl = COPY rtoc_union_writeback_28_item;, END
       NIL;
-      decl.storage = :stack;
+      decl.storage_override = :stack;
       decl.slot_size = 1;
       decl.var_used = TRUE;
       decl.var_mutated = TRUE;
@@ -630,7 +627,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       NIL;
       MUTABLE acc_ty = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(decl)) }));
       MUTABLE owned_acc = (TRY (type__string?(acc_ty)) OR TRY (type__needs_cleanup?(acc_ty, pipelineRewriter__schema_lookup(&self))));
-      decl.storage = IF owned_acc THEN
+      decl.storage_override = IF owned_acc THEN
         :heap
       ELSE
         :stack
@@ -658,7 +655,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       NIL;
       MUTABLE found_ty = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(decl)) }));
       MUTABLE owned_found = (TRY (type__needs_cleanup?(found_ty, pipelineRewriter__schema_lookup(&self))) OR TRY (type__recursive_cleanup_shape?(found_ty, pipelineRewriter__schema_lookup(&self))));
-      decl.storage = IF owned_found THEN
+      decl.storage_override = IF owned_found THEN
         :heap
       ELSE
         :stack
@@ -693,7 +690,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_33, COPY result_type, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_33 START Locatable.VarDecl AS rtoc_union_writeback_33_item -> val_decl = COPY rtoc_union_writeback_33_item;, END
       NIL;
-      val_decl.storage = :stack;
+      val_decl.storage_override = :stack;
       val_decl.slot_size = TRY (type__slot_size(result_type, pipelineRewriter__schema_lookup(&self)));
       val_decl.var_used = TRUE;
       val_decl.var_mutated = TRUE;
@@ -707,7 +704,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_35, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_35 START Locatable.VarDecl AS rtoc_union_writeback_35_item -> found_decl = COPY rtoc_union_writeback_35_item;, END
       NIL;
-      found_decl.storage = :stack;
+      found_decl.storage_override = :stack;
       found_decl.slot_size = 1;
       found_decl.var_used = TRUE;
       found_decl.var_mutated = TRUE;
@@ -733,7 +730,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_37, COPY result_type, "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_37 START Locatable.VarDecl AS rtoc_union_writeback_37_item -> val_decl = COPY rtoc_union_writeback_37_item;, END
       NIL;
-      val_decl.storage = :stack;
+      val_decl.storage_override = :stack;
       val_decl.slot_size = TRY (type__slot_size(result_type, pipelineRewriter__schema_lookup(&self)));
       val_decl.var_used = TRUE;
       val_decl.var_mutated = TRUE;
@@ -747,7 +744,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_39, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Bool })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_39 START Locatable.VarDecl AS rtoc_union_writeback_39_item -> found_decl = COPY rtoc_union_writeback_39_item;, END
       NIL;
-      found_decl.storage = :stack;
+      found_decl.storage_override = :stack;
       found_decl.slot_size = 1;
       found_decl.var_used = TRUE;
       found_decl.var_mutated = TRUE;
@@ -763,7 +760,7 @@ PRIVATE FN pipelineRewriter__build_init(MUTABLE self: PipelineRewriter, terminal
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_41, COPY TRY (aST__full_type_mut(smooth_node)), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_41 START Locatable.VarDecl AS rtoc_union_writeback_41_item -> decl = COPY rtoc_union_writeback_41_item;, END
       NIL;
-      decl.storage = IF (self.dest_storage == :heap) THEN
+      decl.storage_override = IF (self.dest_storage == :heap) THEN
         :heap
       ELSE
         smooth_node.storage()
@@ -805,7 +802,7 @@ PRIVATE FN pipelineRewriter__build_recursive_body(MUTABLE self: PipelineRewriter
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_44, CAST(COPY selected_type AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_44 START Locatable.VarDecl AS rtoc_union_writeback_44_item -> sel_decl = COPY rtoc_union_writeback_44_item;, END
       NIL;
-      sel_decl.storage = IF type__future?(selected_type) THEN
+      sel_decl.storage_override = IF type__future?(selected_type) THEN
         :heap
       ELSE
         :stack
@@ -846,7 +843,7 @@ PRIVATE FN pipelineRewriter__build_recursive_body(MUTABLE self: PipelineRewriter
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_48, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_48 START Locatable.VarDecl AS rtoc_union_writeback_48_item -> cnt_decl = COPY rtoc_union_writeback_48_item;, END
       NIL;
-      cnt_decl.storage = :stack;
+      cnt_decl.storage_override = :stack;
       cnt_decl.slot_size = 1;
       cnt_decl.var_used = TRUE;
       cnt_decl.var_mutated = TRUE;
@@ -892,7 +889,7 @@ PRIVATE FN pipelineRewriter__build_recursive_body(MUTABLE self: PipelineRewriter
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_55, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Int64 })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_55 START Locatable.VarDecl AS rtoc_union_writeback_55_item -> cnt_decl = COPY rtoc_union_writeback_55_item;, END
       NIL;
-      cnt_decl.storage = :stack;
+      cnt_decl.storage_override = :stack;
       cnt_decl.slot_size = 1;
       cnt_decl.var_used = TRUE;
       cnt_decl.var_mutated = TRUE;
@@ -1207,9 +1204,9 @@ PRIVATE FN pipelineRewriter__build_final_result(self: PipelineRewriter, terminal
     MUTABLE sym: ?SymbolEntry@multiowned = COPY self.list_res_symbols[res_var];
     IF sym EXISTS AS sym_value THEN
       res.symbol = sym_value;
-      res.storage = symbolEntry__storage(sym_value);
+      res.storage_override = symbolEntry__storage(sym_value);
     ELSE
-      res.storage = locatable__storage( Locatable{ BinaryOp: COPY smooth_node });
+      res.storage_override = locatable__storage( Locatable{ BinaryOp: COPY smooth_node });
     END
     RETURN res;
 END

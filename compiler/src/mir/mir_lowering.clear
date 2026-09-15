@@ -12208,7 +12208,7 @@ END
 PRIVATE FN mIRLowering__lower_smooth_identifier_call(MUTABLE self: MIRLowering, node: BinaryOp, rhs: Identifier) RETURNS !Emittable ->
     MUTABLE synthetic = FuncCall{ token: COPY rhs.token, name: CallName{ StringValue: COPY rhs.name }, args: COPY [node.left], can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, module_alias: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, fn_var_call: NIL, pipe_lhs: NIL, heap_dupe_result: NIL, arg_families: NIL, collapsed_errors: NIL, error_union_type: NIL, protocol_name: NIL, protocol_operation: NIL, protocol_receiver_index: NIL, retain_error_channel: NIL };
     TRY (aST__stamp_synthetic_type_mut(Locatable{ FuncCall: COPY synthetic }, CAST(COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })) AS Type), "synthetic AST type"));
-    synthetic.storage = locatable__storage( Locatable{ BinaryOp: COPY node });
+    synthetic.storage_override = locatable__storage( Locatable{ BinaryOp: COPY node });
     IF rhs.zig_pattern EXISTS AS zig_pattern_value THEN
       synthetic.zig_pattern = COPY zig_pattern_value;
     END
@@ -12217,7 +12217,7 @@ END
 PRIVATE FN mIRLowering__lower_smooth_func_call(MUTABLE self: MIRLowering, node: BinaryOp, rhs: FuncCall) RETURNS !Emittable ->
     MUTABLE synthetic = FuncCall{ token: COPY rhs.token, name: rhs.name, args: COPY ([node.left] + rhs.args), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, explicit_mutable_argument_tokens: NIL, module_alias: NIL, extern_call: NIL, extern_effects: NIL, extern_source: NIL, generic_type_args: NIL, fn_var_call: NIL, pipe_lhs: NIL, heap_dupe_result: NIL, arg_families: NIL, collapsed_errors: NIL, error_union_type: NIL, protocol_name: NIL, protocol_operation: NIL, protocol_receiver_index: NIL, retain_error_channel: NIL };
     TRY (aST__stamp_synthetic_type_mut(Locatable{ FuncCall: COPY synthetic }, CAST(COPY TRY (aST__full_type_mut(Locatable{ BinaryOp: COPY node })) AS Type), "synthetic AST type"));
-    synthetic.storage = locatable__storage( Locatable{ BinaryOp: COPY node });
+    synthetic.storage_override = locatable__storage( Locatable{ BinaryOp: COPY node });
     IF rhs.zig_pattern EXISTS AS zig_pattern_value THEN
       synthetic.zig_pattern = COPY zig_pattern_value;
     END
@@ -15427,7 +15427,7 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
     IF (node.mode == :decl) THEN
       MUTABLE proxy = VarDecl{ token: COPY node.token, name: node.name, type: COPY node.type, value: node.value, mutable: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, mir_binding_entry: NIL, ownership_transport_plan: NIL, const_visibility: NIL, module_const: NIL };
       TRY (aST__stamp_synthetic_type_mut(Locatable{ VarDecl: COPY proxy }, CAST(COPY TRY (aST__full_type_mut(Locatable{ BindExpr: COPY node })) AS Type), "synthetic AST type"));
-      proxy.storage = locatable__storage( Locatable{ BindExpr: COPY node });
+      proxy.storage_override = locatable__storage( Locatable{ BindExpr: COPY node });
       proxy.slot_size = node.slot_size;
       proxy.resource_close_plan = COPY node.resource_close_plan;
       proxy.var_used = node.var_used;
