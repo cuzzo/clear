@@ -3990,6 +3990,10 @@ PUB STRUCT NextExpr {
 PUB STRUCT MatchStatement {
   token: Token,
   expr: Locatable@boxed,
+  # Set when the subject is an OPTIONAL union. The variant arms still ask a
+  # tag question, so lowering guards each one with a null check and sends NIL
+  # to the DEFAULT arm -- the same contract runtime IS_A uses.
+  runtime_subject_optional: ?Bool,
   cases: []MatchCase,
   default_case: ?[]Locatable,
   case_drops: [][]DeferredDrop,

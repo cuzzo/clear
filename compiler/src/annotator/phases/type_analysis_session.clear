@@ -11446,11 +11446,20 @@ PRIVATE FN typeAnalysisSession__match_subject_plan(MUTABLE self: TypeAnalysisSes
     IF TRY (type__string?(expr_t)) THEN
       node.string_match = TRUE;
     END
+    # `?Shape` names the same union as `Shape`, so ask the payload's schema --
+    # otherwise the subject is not seen as a union at all and the variant arms
+    # silently skip their payload binding, leaving only an "undefined variable"
+    # at the use site.
+    node.runtime_subject_optional = type__optional?(expr_t);
+    MUTABLE subject_t: Type = COPY expr_t;
+    IF type__optional?(expr_t) THEN
+      subject_t = TRY (type__non_optional_type(expr_t));
+    END
     MUTABLE type_name_branch_value: ?String@symbol = NIL;
-    IF type__generic_instance?(expr_t) THEN
-      type_name_branch_value = type__generic_base(expr_t);
+    IF type__generic_instance?(subject_t) THEN
+      type_name_branch_value = type__generic_base(subject_t);
     ELSE
-      type_name_branch_value = type__resolved(expr_t);
+      type_name_branch_value = type__resolved(subject_t);
     END
     MUTABLE type_name: String@symbol = type_name_branch_value?;
     MUTABLE schema: ?MatchSchema = CAST(TRY (typeAnalysisSession__lookup_type_schema(&self, type_name)) AS ?MatchSchema);

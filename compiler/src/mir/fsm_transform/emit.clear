@@ -1955,11 +1955,10 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
     RETURN NIL;
   END
   MUTABLE cap_idx: ?Int64 = tail.lock_index;
-  MUTABLE cap_idx_text: String = IF cap_idx EXISTS AS cap_idx_value THEN
-    cap_idx_value.toString()
-  ELSE
-    ""
-  END;
+  MUTABLE cap_idx_text: String = "";
+  IF cap_idx EXISTS AS cap_idx_value THEN
+    cap_idx_text = cap_idx_value.toString();
+  END
   MUTABLE woken_idx = base_idx;
   MUTABLE retry_idx = (base_idx + 1);
   MUTABLE fail_idx = (base_idx + 2);

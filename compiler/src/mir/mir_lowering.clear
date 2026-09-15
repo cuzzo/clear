@@ -16951,6 +16951,10 @@ PRIVATE FN mIRLowering__match_lowering_facts(MUTABLE self: MIRLowering, node: Ma
 END
 PRIVATE FN mIRLowering__match_union_lookup(self: MIRLowering, expression: Locatable) RETURNS !String@symbol ->
     MUTABLE type = TRY (type__new( TypeConstructionInput{ SymbolValue: COPY (locatable__resolved_type(expression) OR_ELSE :Any) }));
+    # `?Shape` names the same union as `Shape`. The annotator binds arm
+    # payloads through the optional, so the lowering has to agree -- a mismatch
+    # here drops the binding and emits Zig that reads an undeclared name.
+    type = TRY (type__non_optional_type(type));
     IF type__generic_instance?(type) THEN
       RETURN type__generic_base(type);
     END
