@@ -785,8 +785,8 @@ PRIVATE FN pipelineRewriter__build_recursive_body(MUTABLE self: PipelineRewriter
     IF stage IS_A WhereOp AS where_op THEN
       MUTABLE where_op_mutable = COPY where_op;
       MUTABLE pred = pipelineRewriter__replace_placeholder(self, whereOp__expression(where_op_mutable), current_val);
-      MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&self, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
-      MUTABLE if_stmt = IfStatement{ token: COPY where_op_mutable.token, condition: COPY pred, then_branch: COPY then_branch, else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
+      MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&self, remaining, terminal, &current_val, res_var, token, &stage_inits, res_type));
+      MUTABLE if_stmt = IfStatement{ token: COPY where_op_mutable.token, condition: COPY pred, then_branch: CAST(COPY then_branch AS []Locatable), else_branch: COPY List[], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
       MUTABLE rtoc_union_writeback_43: Locatable = Locatable{ IfStatement: COPY if_stmt };
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_43, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_43 START Locatable.IfStatement AS rtoc_union_writeback_43_item -> if_stmt = COPY rtoc_union_writeback_43_item;, END
@@ -814,17 +814,17 @@ PRIVATE FN pipelineRewriter__build_recursive_body(MUTABLE self: PipelineRewriter
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_45, CAST(COPY selected_type AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_45 START Locatable.Identifier AS rtoc_union_writeback_45_item -> sel_ident = COPY rtoc_union_writeback_45_item;, END
       NIL;
-      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&self, UNWRAP (remaining), terminal, &sel_ident, res_var, token, &stage_inits, res_type));
-      RETURN ([sel_decl] + rest);
+      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&self, remaining, terminal, &sel_ident, res_var, token, &stage_inits, res_type));
+      RETURN ([Node{ VarDecl: COPY sel_decl }] + rest);
     ELSE_IF stage IS_A TapOp AS tap_op THEN
       MUTABLE tap_op_mutable = COPY tap_op;
       MUTABLE tap_body = tap_op_mutable.body |> SELECT pipelineRewriter__replace_placeholder(self, _, current_val);
-      RETURN (tap_body + TRY (pipelineRewriter__build_recursive_body(&self, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type)));
+      RETURN (tap_body + TRY (pipelineRewriter__build_recursive_body(&self, remaining, terminal, &current_val, res_var, token, &stage_inits, res_type)));
     ELSE_IF stage IS_A TakeWhileOp AS take_while_op THEN
       MUTABLE take_while_op_mutable = COPY take_while_op;
       MUTABLE pred = pipelineRewriter__replace_placeholder(self, UNWRAP (takeWhileOp__expression(take_while_op_mutable)), current_val);
-      MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&self, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
-      MUTABLE if_stmt = IfStatement{ token: COPY take_while_op_mutable.token, condition: COPY pred, then_branch: COPY then_branch, else_branch: COPY [BreakNode{ token: COPY take_while_op_mutable.token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
+      MUTABLE then_branch = TRY (pipelineRewriter__build_recursive_body(&self, remaining, terminal, &current_val, res_var, token, &stage_inits, res_type));
+      MUTABLE if_stmt = IfStatement{ token: COPY take_while_op_mutable.token, condition: COPY pred, then_branch: CAST(COPY then_branch AS []Locatable), else_branch: COPY [BreakNode{ token: COPY take_while_op_mutable.token, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL }], then_drops: NIL, else_drops: NIL, comptime: FALSE, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, expr_mode: NIL, then_result_type: NIL, else_result_type: NIL };
       MUTABLE rtoc_union_writeback_46: Locatable = Locatable{ IfStatement: COPY if_stmt };
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_46, COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_46 START Locatable.IfStatement AS rtoc_union_writeback_46_item -> if_stmt = COPY rtoc_union_writeback_46_item;, END
@@ -874,8 +874,8 @@ PRIVATE FN pipelineRewriter__build_recursive_body(MUTABLE self: PipelineRewriter
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_53, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_53 START Locatable.IfStatement AS rtoc_union_writeback_53_item -> skip_if = COPY rtoc_union_writeback_53_item;, END
       NIL;
-      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&self, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
-      RETURN (CAST(Tuple{increment, COPY skip_if} AS Tuple<Assignment, IfStatement>) + rest);
+      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&self, remaining, terminal, &current_val, res_var, token, &stage_inits, res_type));
+      RETURN ([Node{ Assignment: COPY increment }, Node{ IfStatement: COPY skip_if }] + rest);
     ELSE_IF stage IS_A LimitOp AS limit_op THEN
       MUTABLE limit_op_mutable = COPY limit_op;
       MUTABLE cnt_var = pipelineRewriter__next_var(&self, "__lim_cnt");
@@ -920,10 +920,10 @@ PRIVATE FN pipelineRewriter__build_recursive_body(MUTABLE self: PipelineRewriter
       TRY (aST__stamp_synthetic_type_mut(&rtoc_union_writeback_60, CAST(COPY TRY (type__new(TypeConstructionInput{ SymbolValue: :Void })) AS Type), "synthetic AST type"));
       PARTIAL MATCH rtoc_union_writeback_60 START Locatable.IfStatement AS rtoc_union_writeback_60_item -> limit_if = COPY rtoc_union_writeback_60_item;, END
       NIL;
-      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&self, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
-      RETURN (CAST(Tuple{increment, COPY limit_if} AS Tuple<Assignment, IfStatement>) + rest);
+      MUTABLE rest = TRY (pipelineRewriter__build_recursive_body(&self, remaining, terminal, &current_val, res_var, token, &stage_inits, res_type));
+      RETURN ([Node{ Assignment: COPY increment }, Node{ IfStatement: COPY limit_if }] + rest);
     ELSE
-      RETURN TRY (pipelineRewriter__build_recursive_body(&self, UNWRAP (remaining), terminal, &current_val, res_var, token, &stage_inits, res_type));
+      RETURN TRY (pipelineRewriter__build_recursive_body(&self, remaining, terminal, &current_val, res_var, token, &stage_inits, res_type));
     END
 END
 PRIVATE FN pipelineRewriter__select_stage_value_type(self: PipelineRewriter, stage: SelectOp) RETURNS !Type ->
