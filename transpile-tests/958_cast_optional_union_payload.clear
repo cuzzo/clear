@@ -1,0 +1,31 @@
+# Test: CAST(union AS PayloadType) when the union arrives OPTIONAL.
+# value_payload_type looks through the optional to find the union's schema, so
+# the narrowing fires -- but the subject handed to the payload read was still
+# the optional, and the emitter switches on whatever it is given. Zig rejected
+# that with "switch on type '?Val'". The same CAST on a non-optional union
+# always worked, so the optional was the trigger.
+
+UNION Val { StringValue: String, Int64Value: Int64 }
+
+FN takesString(s: String) RETURNS Int64 ->
+    RETURN s.length();
+END
+
+FN main() RETURNS Void ->
+    MUTABLE opt: ?Val = Val{ StringValue: COPY "hello" };
+    ASSERT CAST(opt AS String) == "hello", "optional union narrows to its payload";
+    ASSERT takesString(CAST(opt AS String)) == 5, "narrowed payload passes as an argument";
+
+    MUTABLE opt_int: ?Val = Val{ Int64Value: 7 };
+    ASSERT CAST(opt_int AS Int64) == 7, "optional union narrows a non-string payload";
+
+    # The non-optional path is unchanged.
+    MUTABLE bare = Val{ StringValue: COPY "plain" };
+    ASSERT CAST(bare AS String) == "plain", "non-optional union is unaffected";
+
+    # Interpolation reaches the payload through the same narrowing.
+    MUTABLE rendered: String = "got=${CAST(opt AS String)}";
+    ASSERT rendered == "got=hello", "narrowed payload interpolates";
+
+    RETURN;
+END

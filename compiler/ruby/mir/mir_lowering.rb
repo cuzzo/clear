@@ -1745,7 +1745,8 @@ class MIRLowering
   def lower_union_payload_narrowing(mir, node)
     return nil unless mir.is_a?(MIR::Emittable)
 
-    source_type = Type.from_node!(node.value, context: "union payload narrowing source").value_payload_type
+    source_value_type = Type.from_node!(node.value, context: "union payload narrowing source")
+    source_type = source_value_type.value_payload_type
     schema = union_schemas[source_type.resolved]
     return nil unless schema.is_a?(Schemas::UnionSchema)
 
@@ -1755,7 +1756,13 @@ class MIRLowering
     variant_name, _payload_type = unique_mir_union_payload_variant(schema, target_type)
     return nil unless variant_name
 
-    MIR::UnionPayloadGet.new(deref_if_pointer_shaped(mir), variant_name)
+    subject = deref_if_pointer_shaped(mir)
+    # value_payload_type looked through the optional to find the schema, so the
+    # subject can still BE optional here. An absent union has no tag, and the
+    # emitter switches on whatever it is handed, so the payload read goes
+    # through the unwrap -- the same normalisation the pointer case gets.
+    subject = MIR::OptionalUnwrap.new(subject) if source_value_type.optional?
+    MIR::UnionPayloadGet.new(subject, variant_name)
   end
 
   sig { params(schema: Schemas::UnionSchema, actual_type: Type).returns([T.nilable(String), T.nilable(Type)]) }
