@@ -86,7 +86,7 @@ PRIVATE FN liveness__compute_cyclic_segments(segments: []Segment) RETURNS ![Set]
   FOR _ IN segments DO
   adj[_.index] = TRY (liveness__tail_targets(_));
   END
-  MUTABLE cyclic = Set[];
+  MUTABLE cyclic: [Set]Int64 = Set[];
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < segments.length() DO
     MUTABLE seg_index: Int64 = UNWRAP (segments[rtoc_idx]?.index);

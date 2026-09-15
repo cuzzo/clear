@@ -83,7 +83,7 @@ PUB FN builder__reserve_lock_index(MUTABLE self: Builder) RETURNS Int64 ->
     RETURN idx;
 END
 PUB FN builder__fill(MUTABLE self: Builder, idx: Int64, stmts: []SegmentBodyItem, tail: SegmentTail) RETURNS Int64 ->
-    self.segments[idx] = Segment{ index: COPY idx, stmts: stmts, tail: tail };
+    self.segments[idx] = Segment{ index: COPY idx, stmts: COPY stmts, tail: COPY tail };
     builder__stamp_overrides(&self, idx);
     RETURN COPY idx;
 END
@@ -130,13 +130,13 @@ PUB FN fsmRecursiveSplitter__split(body: []Locatable, MUTABLE lowering: MIRLower
     MUTABLE pre_renumber_overrides = COPY finalized.alias_overrides_by_index;
     MUTABLE segments, mapping = fsmRecursiveSplitter__renumber_with_entry(finalized.segments, entry_value_mutable);
     MUTABLE synth = COPY builder.synthetic_fields;
-    MUTABLE alias_table = pre_renumber_overrides.each_with_object({}, %(tuple_param_0: Tuple<Int64,{String}String>, h) USE(mapping) -> {
-  MUTABLE orig = tuple_param_0._0;
-  MUTABLE ov = tuple_param_0._1;
-  MUTABLE new_idx = mapping[orig]?;
-  h[new_idx] = ov;
-  NIL
-    });
+    # Ruby: pre_renumber_overrides.each_with_object({}) { |(orig, ov), h| ... }
+    MUTABLE alias_table: {Int64}{String}String = {};
+    FOR rtoc_alias_key IN pre_renumber_overrides.keys() DO
+      MUTABLE ov = COPY UNWRAP (pre_renumber_overrides[rtoc_alias_key]);
+      MUTABLE new_idx = UNWRAP (mapping[rtoc_alias_key]);
+      alias_table[new_idx] = ov;
+    END
     RETURN SegmentList{ segments: COPY segments, synthetic_fields: COPY synth, alias_overrides_by_index: COPY alias_table };
   ELSE
     RETURN NIL;
