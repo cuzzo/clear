@@ -162,7 +162,14 @@ PUB FN preMirTypeCheck__verify_mut(program: Program) RETURNS !Void ->
     TRY (mIRPassState__mark_mut(&rtoc_mutable_receiver_1, :premir_type_checked));
     RETURN;
   END
-  MUTABLE sample = (violations[0..<min(30, violations.length())] |> SELECT "  - ${_[:cls]} @ ${_[:loc]}").join("\n");
+  MUTABLE rtoc_sample_lines: []String = List[];
+  MUTABLE rtoc_sample_i: Int64 = 0;
+  WHILE ((rtoc_sample_i < violations.length()) AND (rtoc_sample_i < 30)) DO
+    MUTABLE rtoc_v = UNWRAP (violations[rtoc_sample_i]);
+    &rtoc_sample_lines.append("  - ${rtoc_v[:cls]} @ ${rtoc_v[:loc]}");
+    rtoc_sample_i = (rtoc_sample_i + 1);
+  END
+  MUTABLE sample = rtoc_sample_lines.join("\n");
   MUTABLE more: String = "";
   IF (violations.length() > 30) THEN
     more = "\n  ... (+${(violations.length() - 30)} more)";
