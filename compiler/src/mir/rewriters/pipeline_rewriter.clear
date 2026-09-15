@@ -219,7 +219,7 @@ PRIVATE FN pipelineRewriter__rewrite_struct_field(MUTABLE self: PipelineRewriter
 END
 PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MUTABLE node: BinaryOp) RETURNS !Locatable
   EFFECTS REENTRANT ->
-    MUTABLE lhs_node = NIL;
+    MUTABLE lhs_node: ?Locatable = NIL;
     MUTABLE source = COPY node.left;
     MUTABLE rhs = COPY node.right;
     MUTABLE chain = pipelineRewriter__collect_chain(self, node);
@@ -285,7 +285,7 @@ PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MU
     MUTABLE needs_try = type__error_union?((TRY (type__new( TypeConstructionInput{ Type: TRY (aST__full_type_mut(source)) }))));
     IF (IF rhs IS_A FuncCall AS func_call THEN !(result_is_error) ELSE FALSE END) THEN
       IF needs_try THEN
-        lhs_node = UnaryOp{ token: UNWRAP (COPY locatable__token(rhs)), op: :TRY, right: COPY source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+        lhs_node = Locatable{ UnaryOp: COPY UnaryOp{ token: UNWRAP (COPY locatable__token(rhs)), op: :TRY, right: COPY source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } };
       ELSE
         lhs_node = COPY source;
       END
@@ -294,7 +294,15 @@ PRIVATE FN pipelineRewriter__rewrite_pipeline(MUTABLE self: PipelineRewriter, MU
         TRY (aST__stamp_synthetic_type_mut(&rtoc_lhs_stamp, COPY UNWRAP (TRY (type__payload_type((TRY (type__new( TypeConstructionInput{ Type: TRY (aST__full_type_mut(source)) })))))), "synthetic AST type"));
         lhs_node = rtoc_lhs_stamp;
       END
-      locatable__args(rhs).unshift(lhs_node);
+      IF rhs IS_A FuncCall AS rtoc_args_call THEN
+        MUTABLE rtoc_args_call_m = COPY rtoc_args_call;
+        MUTABLE rtoc_new_args: []Locatable = [UNWRAP (lhs_node)];
+        FOR rtoc_existing_arg IN rtoc_args_call_m.args DO
+          &rtoc_new_args.append(COPY rtoc_existing_arg);
+        END
+        rtoc_args_call_m.args = rtoc_new_args;
+        rhs = Locatable{ FuncCall: COPY rtoc_args_call_m };
+      END
       RETURN rhs;
     END
     IF (IF rhs IS_A Identifier AS identifier THEN !(result_is_error) ELSE FALSE END) THEN
