@@ -14,7 +14,7 @@ PUB FN suspendResolvers__resolve(seg: Segment, ctx: FsmEmitContext, MUTABLE lowe
   IF (seg.tail IS_A IoSuspend) THEN
     RETURN TRY (suspendResolvers__resolve_io( CAST(seg.tail AS IoSuspend), ctx, &lowering));
   ELSE_IF (seg.tail IS_A NextSuspend) THEN
-    RETURN TRY (suspendResolvers__resolve_next(seg.tail, ctx, &lowering, (susp_idx OR_ELSE ((seg.index + 1)))));
+    RETURN TRY (suspendResolvers__resolve_next( CAST(seg.tail AS NextSuspend), ctx, &lowering, (susp_idx OR_ELSE ((seg.index + 1)))));
   ELSE
     panic("{}Add a resolve_<kind> branch when introducing a new suspend kind.");
   END
@@ -91,7 +91,7 @@ PRIVATE FN suspendResolvers__resolve_io(io_tail: IoSuspend, ctx: FsmEmitContext,
   END
   RETURN SuspendDescriptor{ setup_stmts: setup_mir, bind_stmts: bind_stmts, tail: FsmTail{ FsmTailYield: COPY FsmTailYield{ next_step: NIL, yield_reason: "WaitForLock" } }, ctx_field_decls: ctx_field_decls, result_var: COPY result_var, result_zig_type: result_zig_type, result_needs_cleanup: result_needs_cleanup };
 END
-PRIVATE FN suspendResolvers__resolve_next(MUTABLE next_tail: NextSuspend, ctx: FsmEmitContext, MUTABLE lowering: MIRLowering, susp_idx: Int64) RETURNS !SuspendDescriptor ->
+PRIVATE FN suspendResolvers__resolve_next(next_tail: NextSuspend, ctx: FsmEmitContext, MUTABLE lowering: MIRLowering, susp_idx: Int64) RETURNS !SuspendDescriptor ->
   MUTABLE id = ctx.id;
   MUTABLE sp_field = "sp_${susp_idx.toString()}";
   MUTABLE promise_expr_mir: ?Emittable = TRY (mIRLowering__lower( &lowering, castLocatableToMIRLoweringLowerableStmt( UNWRAP (next_tail.promise_ast))));
@@ -111,11 +111,11 @@ PRIVATE FN suspendResolvers__resolve_next(MUTABLE next_tail: NextSuspend, ctx: F
   MUTABLE sp_zig = TRY (type__zig_type((TRY (type__new(castTypeToTypeConstructionInput__suspend_resolvers( UNWRAP (promise_ft)))))));
   MUTABLE inner_type_info: ?Type = NIL;
   MUTABLE promise_type = TRY (type__new(castTypeToTypeConstructionInput__suspend_resolvers( UNWRAP (promise_ft))));
-  MUTABLE inner_zig: ?String =   IF (type__future?(promise_type) AND TRY (type__tense_type(promise_type))) THEN
+  MUTABLE inner_zig: ?String =   IF type__future?(promise_type) THEN
     {
   MUTABLE rtoc_value_block_marker = 0;
   inner_type_info = TRY (type__new(castTypeToTypeConstructionInput__suspend_resolvers(TRY (type__tense_type(promise_type)))));
-  TRY (type__zig_type(inner_type_info))
+  TRY (type__zig_type(UNWRAP (inner_type_info)))
   }
   ELSE
     NIL
