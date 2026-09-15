@@ -74,6 +74,9 @@ def narrowed_before(lines, i, name):
         re.compile(r'\b' + re.escape(name) + r'\s*!=\s*NIL'),
         # Bare truthiness on an optional narrows it too: `IF storage THEN`.
         re.compile(r'IF\s+' + re.escape(name) + r'\s+THEN\b'),
+        # Either direction of a NIL comparison narrows: `IF !((x == NIL))` uses
+        # the value after, `IF ((x == NIL) OR ...)` skips when it is absent.
+        re.compile(r'\b' + re.escape(name) + r'\s*==\s*NIL'),
     )
     for j in range(start, i):
         if any(g.search(lines[j]) for g in guards):
