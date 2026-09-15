@@ -4112,7 +4112,10 @@ PRIVATE FN mIRLowering__lower_require(MUTABLE self: MIRLowering, node: RequireNo
             RETURN MIRLoweringLoweredMir{ ArrayValue: helper_fns |> SELECT Emittable{ FnDef: COPY _ } };
           END
         END
-        MUTABLE module_key = (UNWRAP (mod)).object_id();
+        # Ruby keys emitted_require_modules by the CompiledModule's object_id.
+        # CompiledModule carries no id of its own, so identify it by its
+        # program node, which is unique per imported source file.
+        MUTABLE module_key = aST__node_identity(Locatable{ Program: COPY UNWRAP ((UNWRAP (mod)).ast) });
         IF !(&self.state.program.emitted_require_modules.insert(CAST(module_key AS String))) THEN
           RETURN List[];
         END
@@ -11486,7 +11489,7 @@ PRIVATE FN mIRLowering__lower_identifier(MUTABLE self: MIRLowering, MUTABLE node
     IF node.symbol != NIL THEN
       decl_node = COPY ((node.symbol)?).reg;
     END
-    MUTABLE zig_name = (((((decl_node != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(&self))))[decl_node.object_id()] != NIL))) OR (TRY (functionState__rename_map(mIRLowering__function_state(&self))))[mIRLowering__zig_safe_name(self, node.name)]) OR mIRLowering__zig_safe_name(self, node.name));
+    MUTABLE zig_name = (((((decl_node != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(&self))))[aST__node_identity(castSymbolEntryRegInputToLocatable(COPY UNWRAP (decl_node)))] != NIL))) OR (TRY (functionState__rename_map(mIRLowering__function_state(&self))))[mIRLowering__zig_safe_name(self, node.name)]) OR mIRLowering__zig_safe_name(self, node.name));
     MUTABLE ident = Ident{ name: COPY zig_name, lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE symbol: ?SymbolEntry = COPY node.symbol;
     IF (((symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_537 = UNWRAP (symbol);
@@ -14962,7 +14965,7 @@ PRIVATE FN mIRLowering__var_decl_safe_name(MUTABLE self: MIRLowering, node: VarD
       safe_name = mIRLowering__zig_safe_name(self, "${node.name}_L${(mIRLowering__function_relative_line(&self, node.line)).toString()}");
     END
     alloc_marked_names[safe_name] = TRUE;
-    decl_name_map[node.object_id()] = safe_name;
+    decl_name_map[aST__node_identity(Locatable{ VarDecl: COPY node })] = safe_name;
     rename_map[original_safe] = safe_name;
     RETURN safe_name;
 END
@@ -15443,15 +15446,15 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
       proxy.ownership_transport_plan = node.ownership_transport_plan;
       MUTABLE result = TRY (mIRLowering__lower_var_decl(&self, &proxy));
       MUTABLE decl_name_map = TRY (functionState__decl_zig_names(mIRLowering__function_state(&self)));
-      IF decl_name_map.contains?(proxy.object_id()) THEN
-        MUTABLE safe_name = COPY UNWRAP (decl_name_map[proxy.object_id()]);
-        decl_name_map[node.object_id()] = COPY safe_name;
+      IF decl_name_map.contains?(aST__node_identity(Locatable{ VarDecl: COPY proxy })) THEN
+        MUTABLE safe_name = COPY UNWRAP (decl_name_map[aST__node_identity(Locatable{ VarDecl: COPY proxy })]);
+        decl_name_map[aST__node_identity(Locatable{ BindExpr: COPY node })] = COPY safe_name;
         MUTABLE symbol_reg: ?SymbolEntryRegInput = NIL;
         IF node.symbol != NIL THEN
           symbol_reg = COPY ((node.symbol)?).reg;
         END
         IF symbol_reg EXISTS AS symbol_reg_value THEN
-          decl_name_map[symbol_reg_value.object_id()] = COPY safe_name;
+          decl_name_map[aST__node_identity(castSymbolEntryRegInputToLocatable(COPY symbol_reg_value))] = COPY safe_name;
         END
       END
       RETURN result;
@@ -15588,7 +15591,7 @@ PRIVATE FN mIRLowering__lower_destructure_target(MUTABLE self: MIRLowering, targ
       rtoc_index_receiver_684[aST__node_identity(Locatable{ DestructureTarget: COPY target })] = safe_name;
       IF symbol?.reg EXISTS AS reg_value THEN
         MUTABLE rtoc_index_receiver_685 = TRY (functionState__decl_zig_names(mIRLowering__function_state(&self)));
-        rtoc_index_receiver_685[UNWRAP (symbol).reg.object_id()] = safe_name;
+        rtoc_index_receiver_685[aST__node_identity(castSymbolEntryRegInputToLocatable(COPY reg_value))] = safe_name;
       END
     END
     MUTABLE declaration_kind: ?String@symbol = IF declared THEN
@@ -16301,7 +16304,7 @@ PRIVATE FN mIRLowering__payload_binding_name(MUTABLE self: MIRLowering, binding:
     rtoc_index_receiver_715[safe] = TRUE;
     IF decl THEN
       MUTABLE rtoc_index_receiver_716 = TRY (functionState__decl_zig_names(mIRLowering__function_state(&self)));
-      rtoc_index_receiver_716[decl.object_id()] = safe;
+      rtoc_index_receiver_716[aST__node_identity(UNWRAP (decl))] = safe;
     END
     RETURN safe;
 END
