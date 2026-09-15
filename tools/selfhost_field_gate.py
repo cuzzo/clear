@@ -27,6 +27,18 @@ STRUCT_RE = re.compile(r'^(?:PUB )?STRUCT (\w+) \{(.*?)^\}', re.S | re.M)
 UNION_RE = re.compile(r'^(?:PUB )?UNION (\w+) \{(.*?)\}', re.M)
 FIELD_RE = re.compile(r'^  (\w+): (\??)(\[\])?(\w+)(@\w+)?,?\s*$', re.M)
 DECL_RE = re.compile(r'\bMUTABLE\s+(\w+)(?:\s*:\s*\??(\w+))?\s*=\s*(?:COPY\s+)?(\w+)\{')
+# `MUTABLE x = TRY (fn(...))` -- the local's type is fn's declared return type.
+CALL_DECL_RE = re.compile(r'\bMUTABLE\s+(\w+)\s*=\s*(?:COPY\s+)?(?:TRY\s*\()?\s*(\w+)\(')
+FN_RET_RE = re.compile(r'^(?:PUB |PRIVATE )?FN (\w+)\([^\n]*?\)\s*RETURNS\s+!?\??(\w+)', re.M)
+
+
+FN_RETURNS = {}
+
+
+def load_fn_returns():
+    for f in sorted(SRC.rglob('*.clear')):
+        for m in FN_RET_RE.finditer(f.read_text()):
+            FN_RETURNS.setdefault(m.group(1), m.group(2))
 
 
 def load():
@@ -105,10 +117,15 @@ def local_types(lines, upto):
         d = DECL_RE.search(ln)
         if d:
             types[d.group(1)] = d.group(2) or d.group(3)
+            continue
+        c = CALL_DECL_RE.search(ln)
+        if c and c.group(2) in FN_RETURNS:
+            types[c.group(1)] = FN_RETURNS[c.group(2)]
     return types
 
 
 def main():
+    load_fn_returns()
     structs, unions = load()
     # A field name is confidently optional only if every struct declaring it
     # makes it optional; otherwise the name alone does not settle the type.
