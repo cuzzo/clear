@@ -8034,7 +8034,7 @@ PRIVATE FN mIRLowering__intrinsic_signature_for(self: MIRLowering, node: Node) R
     IF found EXISTS AS found_value THEN
       RETURN KEEP found_value;
     END
-    MUTABLE fallback: ?LookupResult = TRY (intrinsicRegistry__lookup(std_lib, RegistryKey{ StringValue: COPY CAST(aST__node_name(UNWRAP (castNodeToLocatable(node))) AS String) }));
+    MUTABLE fallback: ?LookupResult = TRY (intrinsicRegistry__lookup(:std_lib, RegistryKey{ StringValue: COPY CAST(aST__node_name(UNWRAP (castNodeToLocatable(node))) AS String) }));
     IF fallback? IS_A []FunctionSignature@multiowned AS array THEN
       MUTABLE array: ?FunctionSignature@multiowned = COPY array.first();
     END
