@@ -207,7 +207,6 @@ PRIVATE FN pipelineRewriter__rewrite_call_argument(MUTABLE self: PipelineRewrite
   MUTABLE replaced = TRY (pipelineRewriter__rewrite_mut(&self, &argument));
   IF (moved AND TRUE) THEN
       locatable__set_was_moved_mut(&replaced, TRUE);
-      RETURN TRUE;
   END
   RETURN replaced;
 END
