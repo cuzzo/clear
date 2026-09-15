@@ -32,7 +32,7 @@ END
 PUB FN cHeaderImporterParam__mutable(self: CHeaderImporterParam) RETURNS Any@multiowned ->
   RETURN COPY self.mutable;
 END
-PUB FN cHeaderImporter__expand(source: String, source_dir: String) RETURNS !String ->
+PUB FN cHeaderImporter__expand(source: String, source_dir: String) RETURNS !String EFFECTS REENTRANT ->
   RETURN {
   MUTABLE rtoc_value_block_marker = 0;
   rtoc_gsub_scanner_1 = compilerRegexScanner(source);
@@ -53,7 +53,7 @@ PUB FN cHeaderImporter__expand(source: String, source_dir: String) RETURNS !Stri
   rtoc_gsub_output_2
   };
 END
-PUB FN cHeaderImporter__import(header_value: String, library: String, source_dir: String) RETURNS !String ->
+PUB FN cHeaderImporter__import(header_value: String, library: String, source_dir: String) RETURNS !String EFFECTS REENTRANT ->
   MUTABLE header_path: String = TRY (cHeaderImporter__expand(header_value, source_dir));
   IF !(file?(header_path)) THEN
     RAISE Input, Error, "C header not found: {}";
@@ -63,7 +63,7 @@ PUB FN cHeaderImporter__import(header_value: String, library: String, source_dir
   MUTABLE header_source = TRY (read(header_path));
   RETURN { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_4 = (translator__new(stdout, header_value, library, TRY (cHeaderImporter__declaration_names(header_source))));
   TRY (translator__declarations(&rtoc_mutable_receiver_4)) };
-CATCH ENOENT
+CATCH NotFound
   RAISE Input, Error, "Zig is required to import C headers";
 END
 PUB FN cHeaderImporter__declaration_names(header_source: String) RETURNS ![Set]String ->
@@ -189,7 +189,7 @@ PRIVATE FN translator__translate_structs(MUTABLE self: Translator) RETURNS ![]St
                   rtoc_idx = rtoc_idx + 1;
             CONTINUE;
               END
-              MUTABLE field_type_value: String = COPY UNWRAP (field_type);
+              MUTABLE field_type_value: String = COPY field_type;
               &fields.append("${compilerRegexCapture(match_value, 1)}: ${field_type_value}");
             rtoc_idx = rtoc_idx + 1;
           END
@@ -335,7 +335,7 @@ PRIVATE FN translator__map_param(MUTABLE self: Translator, name: String, raw_typ
     END
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\]\\?\\*(.+)$"));
     IF match EXISTS AS match_value THEN
-      MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
+      MUTABLE match_value_capture: ?String = compilerRegexCapture(match_value, 1);
       inner = TRY (translator__map_type(&self, UNWRAP (match_value_capture), :param));
       IF inner EXISTS AS inner_value THEN
         RETURN CHeaderImporterParam{ name: COPY name, type: "?${inner_value}", mutable: TRUE };
@@ -345,7 +345,7 @@ PRIVATE FN translator__map_param(MUTABLE self: Translator, name: String, raw_typ
     END
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\](?!const\\s)(.+)$"));
     IF match EXISTS AS match_value THEN
-      MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
+      MUTABLE match_value_capture: ?String = compilerRegexCapture(match_value, 1);
       inner = TRY (translator__map_type(&self, UNWRAP (match_value_capture), :param));
       IF inner EXISTS AS inner_value THEN
         RETURN CHeaderImporterParam{ name: COPY name, type: COPY inner_value, mutable: TRUE };
@@ -358,7 +358,7 @@ PRIVATE FN translator__map_param(MUTABLE self: Translator, name: String, raw_typ
     END
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\]const\\s+(.+)$"));
     IF match EXISTS AS match_value THEN
-      MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
+      MUTABLE match_value_capture: ?String = compilerRegexCapture(match_value, 1);
       inner = TRY (translator__map_type(&self, UNWRAP (match_value_capture), :param));
       IF inner EXISTS AS inner_value THEN
         RETURN CHeaderImporterParam{ name: COPY name, type: "[]@c ${inner_value}", mutable: FALSE };
@@ -368,7 +368,7 @@ PRIVATE FN translator__map_param(MUTABLE self: Translator, name: String, raw_typ
     END
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\?\\*(.+)$"));
     IF match EXISTS AS match_value THEN
-      MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
+      MUTABLE match_value_capture: ?String = compilerRegexCapture(match_value, 1);
       inner = TRY (translator__map_type(&self, UNWRAP (match_value_capture), :param));
       IF inner EXISTS AS inner_value THEN
         RETURN CHeaderImporterParam{ name: COPY name, type: COPY inner_value, mutable: FALSE };
@@ -400,7 +400,7 @@ PRIVATE FN translator__map_type(MUTABLE self: Translator, raw_type: String, posi
     END
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[(\\d+)\\](.+)$"));
     IF match EXISTS AS match_value THEN
-      MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 2);
+      MUTABLE match_value_capture: ?String = compilerRegexCapture(match_value, 2);
       item = TRY (translator__map_type(&self, UNWRAP (match_value_capture), :field));
       IF item EXISTS AS item_value THEN
         RETURN COPY "[${UNWRAP (match_value_capture)}]${item_value}";
@@ -417,7 +417,7 @@ PRIVATE FN translator__map_type(MUTABLE self: Translator, raw_type: String, posi
     END
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\[\\*c\\]const\\s+(.+)$"));
     IF match EXISTS AS match_value THEN
-      MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
+      MUTABLE match_value_capture: ?String = compilerRegexCapture(match_value, 1);
       item = TRY (translator__map_type(&self, UNWRAP (match_value_capture), :field));
       IF item EXISTS AS item_value THEN
         RETURN COPY "?[]@c ${item_value}";
@@ -427,7 +427,7 @@ PRIVATE FN translator__map_type(MUTABLE self: Translator, raw_type: String, posi
     END
     match = compilerRegexMatchData(raw, compilerRegexCompile("^\\?\\*(.+)$"));
     IF match EXISTS AS match_value THEN
-      MUTABLE match_value_capture: ?String = compilerRegexCapture(COPY match_value, 1);
+      MUTABLE match_value_capture: ?String = compilerRegexCapture(match_value, 1);
       item = TRY (translator__map_type(&self, UNWRAP (match_value_capture), :field));
       IF item EXISTS AS item_value THEN
         RETURN COPY "?${item_value}";
