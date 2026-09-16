@@ -236,7 +236,12 @@ module SelfhostFnProbe
           name = d[/\A(?:PUB |EXTERN )*(?:STRUCT|UNION|ENUM|FN) ([\w?!]+)/, 1]
           impl_owner = d[/\AIMPLEMENTATION ([\w?!]+)/, 1]
           next if impl_owner
-          next if name && inherent_owners(cache).include?(name)
+          # A type with an IMPLEMENTATION block keeps its methods out of the
+          # package, but its DECLARATION still has to be here: other structs
+          # have fields typed by it, and dropping it leaves the backend
+          # emitting a reference to a name nothing declares.
+          next if name && inherent_owners(cache).include?(name) &&
+                  !d[/\A(?:PUB )?(?:STRUCT|UNION|ENUM) /]
           next if name && !seen.add?(name)
 
           # The package has fields typed by EXTERN structs, so it needs the
@@ -363,7 +368,10 @@ module SelfhostFnProbe
     # which is deliberately absent from the stub set. Point it at the copy.
     body = body.gsub(/(?<![\w.])#{Regexp.escape(target.name)}\(/, "#{safe}(")
 
-    head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n), "\n", extern_decls(cache),
+    # The types package already carries the EXTERN block, and the probe
+    # requires it. Declaring the same EXTERN struct in both modules makes the
+    # backend emit a reference to a name neither module exports.
+    head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n), "\n",
             own_implementations(target, cache),
             module_consts(target), "\n# --- stand-ins for what it calls ---\n", stubs.join,
             "\n# --- #{rel(target.file)} : #{target.name} ---\n"].join
