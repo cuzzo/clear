@@ -19,6 +19,7 @@
 require 'json'
 require 'optparse'
 require 'open3'
+require 'fileutils'
 
 ROOT = File.expand_path('..', __dir__)
 SRC  = File.join(ROOT, 'compiler', 'src')
@@ -62,6 +63,11 @@ files.each_with_index do |rel, i|
   cmd = ['bundle', 'exec', 'ruby', File.join(ROOT, 'tools', 'selfhost_fn_probe.rb'),
          '--file', rel, '--stage', opts[:stage], '--jobs', opts[:jobs].to_s,
          '--out', File.join(File.dirname(opts[:out]), "probe_2c_#{i}.json")]
+  # Each stage-zig probe gets its own Zig cache, and the shared build cache
+  # grows by ~10G per file. Left alone this fills the disk mid-run (observed:
+  # 154G to 100% and every write failing with ENOSPC).
+  FileUtils.rm_rf(Dir.glob('/tmp/fn-probe*'))
+  FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-cache'))
   out, err, _st = Open3.capture3({ 'BUNDLE_GEMFILE' => File.join(ROOT, 'Gemfile') }, *cmd, chdir: ROOT)
   # the probe prints its per-file summary on stderr
   line = "#{out}\n#{err}".lines.find { |l| l =~ %r{(\d+)/\s*(\d+) fail} }
