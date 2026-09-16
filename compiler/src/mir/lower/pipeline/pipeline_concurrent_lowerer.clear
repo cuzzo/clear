@@ -257,13 +257,13 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each(self: Pipeline
     RETURN PipelineConcurrentResult{ ShardConcurrentEach: COPY TRY (pipelineConcurrentLowerer__lower_shard_concurrent_each_zig(self, ctx, each_op, conc_op, range_node, id, idx_var, key_var, start_mir, finish_mir)) };
   END
   MUTABLE end_mir = finish_mir;
-  MUTABLE end_expr_branch_value: ?BinOp = NIL;
+  MUTABLE end_expr_branch_value: ?Emittable = NIL;
   IF range_node.inclusive THEN
-    end_expr_branch_value = MIRBinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
+    end_expr_branch_value = Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
   ELSE
     end_expr_branch_value = end_mir;
   END
-  MUTABLE end_expr: BinOp = end_expr_branch_value?;
+  MUTABLE end_expr: Emittable = UNWRAP (end_expr_branch_value);
   MUTABLE head = pipelineConcurrentLowerer__lower_head_with_placeholder_call(self, ctx.key_expr, idx_var);
   MUTABLE body_mir = TRY (pipelineConcurrentLowerer__visit_body_with_placeholder_call(self, each_op.body, key_var));
   MUTABLE inner: []Emittable = List[];
@@ -271,7 +271,7 @@ PRIVATE FN pipelineConcurrentLowerer__lower_shard_concurrent_each(self: Pipeline
     inner = ruby_array_concat_Emittable__pipeline_concurrent_lowerer(inner, TRY (pipelineConcurrentLowerer__shard_loop_mark_pair(self, "__sh${id.toString()}_loop_mark", pipelineConcurrentLowerer__do_rt_name_call(self))));
   END
   inner = ruby_array_concat_Emittable__pipeline_concurrent_lowerer(inner, head.pending);
-  MUTABLE fact: ?PipelineConcurrentAllocationFact = pipelineConcurrentLowerer__pipeline_alloc_mark_fact_call(self, head.value, key_var, :heap, TRY (type__from_node_mut(ctx.key_expr, "SHARD key binding")), ctx.key_expr, TRUE, TRUE);
+  MUTABLE fact: ?PipelineConcurrentAllocationFact = pipelineConcurrentLowerer__pipeline_alloc_mark_fact_call(self, head.value, key_var, :heap, UNWRAP (TRY (type__from_node_mut(ctx.key_expr, "SHARD key binding"))), ctx.key_expr, TRUE, TRUE);
   IF fact EXISTS AS fact_value THEN
     &inner.append(Emittable{ AllocMark: COPY fact_value.mark });
     &inner.append(Emittable{ Let: COPY Let{ name: COPY key_var, init: COPY head.value, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
@@ -535,7 +535,8 @@ PRIVATE FN pipelineConcurrentLowerer__lower_stream_terminal_plan(MUTABLE self: P
   ELSE_IF (terminal_kind == PipelineConcurrentTerminalKind.Each) THEN
     RETURN PipelineConcurrentResult{ ScopeBlock: COPY TRY (pipelineConcurrentLowerer__lower_concurrent_stream_each(self, lhs, plan.conc_op, castLocatableToEachOp__pipeline_concurrent_lowerer(plan.inner))) };
   ELSE
-    RETURN TRY (pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(&self, plan.lhs, TRY (aST__full_type_mut(plan.lhs)), plan.inner));
+    TRY (pipelineConcurrentLowerer__unsupported_concurrent_shape_mut(&self, plan.lhs, TRY (aST__full_type_mut(plan.lhs)), plan.inner));
+    panic("lower_concurrent: unsupported shape");
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__lower_list_plan(self: PipelineConcurrentLowerer, MUTABLE plan: PipelineConcurrentPlan) RETURNS !PipelineConcurrentResult ->
@@ -937,24 +938,16 @@ PRIVATE FN pipelineConcurrentLowerer__list_reduce_kind(self: PipelineConcurrentL
   END
 END
 PRIVATE FN pipelineConcurrentLowerer__each_body_mutates_placeholder?(self: PipelineConcurrentLowerer, body_stmts: []Locatable) RETURNS Bool ->
-  RETURN body_stmts |> ANY pipelineConcurrentLowerer__assignment_targets_placeholder?(self, castLocatableToPipelineConcurrentLowererAssignmentTargetScanNode(_));
+  RETURN body_stmts |> ANY pipelineConcurrentLowerer__assignment_targets_placeholder?(self, _);
 END
 PUB UNION PipelineConcurrentLowererAssignmentTargetScanNode { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecovery: TenseRecovery, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKind: TenseOperationKind, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
-PRIVATE FN pipelineConcurrentLowerer__assignment_targets_placeholder?(self: PipelineConcurrentLowerer, node: PipelineConcurrentLowererAssignmentTargetScanNode) RETURNS Bool EFFECTS REENTRANT ->
+PRIVATE FN pipelineConcurrentLowerer__assignment_targets_placeholder?(self: PipelineConcurrentLowerer, node: Locatable) RETURNS Bool EFFECTS REENTRANT ->
   IF node IS_A Assignment AS assignment THEN
     RETURN pipelineConcurrentLowerer__target_rooted_at_placeholder?(self, castAssignmentNameToLocatable__pipeline_concurrent_lowerer(assignment.name));
   END
-  IF node IS_A Struct AS struct THEN
-    RETURN struct.members |> ANY (IF ([:token, :location]).contains?(_) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE value = COPY struct[_]; (    IF value IS_A []@multiowned Any THEN
-      value |> ANY (_ IS_A Struct AND pipelineConcurrentLowerer__assignment_targets_placeholder?(self, _))
-    ELSE_IF value IS_A Struct THEN
-      pipelineConcurrentLowerer__assignment_targets_placeholder?(self, value)
-    ELSE
-      FALSE
-    END) } END);
-  ELSE
-    RETURN FALSE;
-  END
+  # Ruby walks node.members, skipping :token and :location, and recurses
+  # into Struct values and the Struct elements of arrays.
+  RETURN locatable__child_nodes(node) |> ANY pipelineConcurrentLowerer__assignment_targets_placeholder?(self, _);
 END
 PRIVATE FN pipelineConcurrentLowerer__target_rooted_at_placeholder?(self: PipelineConcurrentLowerer, target: Locatable) RETURNS Bool ->
   RETURN ((aST__root_identifier(target) != NIL) AND (((aST__root_identifier(target))?).name == "_"));
