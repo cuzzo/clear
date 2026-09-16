@@ -14035,6 +14035,16 @@ PUB FN locatable__map_children(value: Locatable, blk: FN(Locatable) -> Locatable
   END
   IF value IS_A IfBind AS rtoc_variant THEN
     MUTABLE item = COPY rtoc_variant;
+    # A binding is not a child node itself, but the expression it tests is
+    # one: `IF _ EXISTS AS y` keeps it there, and a walk that steps over the
+    # binding leaves that expression un-rewritten.
+    MUTABLE rtoc_bindings: []Binding = List[];
+    FOR rtoc_binding IN item.bindings DO
+      MUTABLE rtoc_bound = COPY rtoc_binding;
+      rtoc_bound.expr = blk(COPY rtoc_bound.expr);
+      &rtoc_bindings.append(COPY rtoc_bound);
+    END
+    item.bindings = rtoc_bindings;
     MUTABLE rtoc_else_branch: []Locatable = List[];
     FOR rtoc_child IN item.else_branch DO
       &rtoc_else_branch.append(blk(COPY rtoc_child));

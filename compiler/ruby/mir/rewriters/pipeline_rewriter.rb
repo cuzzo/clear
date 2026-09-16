@@ -995,7 +995,14 @@ class PipelineRewriter
     node.class.members.each do |member|
       val = T.unsafe(node)[member]
       if val.is_a?(Array)
-        T.unsafe(new_node)[member] = val.map { |i| i.is_a?(AST::Locatable) ? replace_placeholder(i, replacement) : i }
+        T.unsafe(new_node)[member] = val.map do |i|
+          # A Binding is not a node itself, but the expression it tests is one:
+          # `IF _ EXISTS AS y` keeps the placeholder there, and stepping over
+          # the binding leaves it bound to a loop variable that is gone.
+          next replace_binding_placeholder(i, replacement) if i.is_a?(AST::Binding)
+
+          i.is_a?(AST::Locatable) ? replace_placeholder(i, replacement) : i
+        end
       elsif val.is_a?(Hash)
         T.unsafe(new_node)[member] = val.transform_values { |v| v.is_a?(AST::Locatable) ? replace_placeholder(v, replacement) : v }
       elsif val.is_a?(AST::Locatable)
@@ -1005,6 +1012,16 @@ class PipelineRewriter
     new_node
   end
 
+
+  sig { params(binding: AST::Binding, replacement: AST::Node).returns(AST::Binding) }
+  def replace_binding_placeholder(binding, replacement)
+    expr = binding.expr
+    return binding unless expr.is_a?(AST::Locatable)
+
+    out = binding.dup
+    out.expr = replace_placeholder(expr, replacement)
+    out
+  end
 
   sig { params(node: AST::Node).returns(AST::Node) }
   def clone_ast_node(node)

@@ -1,0 +1,44 @@
+# Test: the pipeline placeholder inside `IF x EXISTS AS y`.
+# Fusing a pipeline rewrites `_` to the loop's iterator, walking the AST
+# member by member. A binding is not a node itself, so the walk stepped over
+# `IF _.field EXISTS AS tok` and left the `_` inside it pointing at a loop
+# variable that no longer exists -- Zig then rejected the emitted code with
+# "use of undeclared identifier '_'". The tested expression is now rewritten
+# with everything else.
+
+STRUCT Row {
+  owner_token: ?String,
+  name: String
+}
+
+FN labels(rows: []Row) RETURNS []String ->
+    RETURN rows |> SELECT {
+        MUTABLE s: String = (IF _.owner_token EXISTS AS tok THEN COPY tok ELSE COPY _.name END);
+        s
+    };
+END
+
+FN tokenLengths(rows: []Row) RETURNS Int64 ->
+    MUTABLE n = 0_i64;
+    rows |> EACH {
+        IF _.owner_token EXISTS AS tok THEN
+            n = n + tok.length();
+        END
+    };
+    RETURN n;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE a = Row{ owner_token: "tok", name: "a" };
+    MUTABLE b = Row{ owner_token: NIL, name: "b" };
+    MUTABLE rows: []Row = [a, b];
+
+    MUTABLE out = labels(rows);
+    ASSERT out.length() == 2, "two labels";
+    ASSERT UNWRAP (out[0]) == "tok", "the present token is selected";
+    ASSERT UNWRAP (out[1]) == "b", "the absent token falls back to the name";
+
+    ASSERT tokenLengths(rows) == 3_i64, "EACH reads the placeholder through the bind";
+
+    print("pipeline placeholder in exists bind ok");
+END
