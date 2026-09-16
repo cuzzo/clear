@@ -200,11 +200,12 @@ module SelfhostFnProbe
     end
   end
 
-  # The EXTERN block a file declares at its own top: the probe module needs it
-  # verbatim, since the shared types package deliberately carries none.
+  # The EXTERN FN declarations a file makes at its own top: a package does not
+  # export them, so the probe module needs its own copy. EXTERN TYPES come from
+  # the types package -- declaring those twice breaks the backend.
   def own_externs(path, cache)
     cache[path] ||= dissect(path)
-    own = cache[path][1].select { |d| d.start_with?('EXTERN') }
+    own = cache[path][1].select { |d| d.start_with?('EXTERN FN') }
     return '' if own.empty?
 
     "\n# --- EXTERN block from #{rel(path)} ---\n" + own.join
@@ -246,12 +247,12 @@ module SelfhostFnProbe
           name = d[/\A(?:PUB |EXTERN )*(?:STRUCT|UNION|ENUM|FN) ([\w?!]+)/, 1]
           impl_owner = d[/\AIMPLEMENTATION ([\w?!]+)/, 1]
           next if impl_owner
-          # An EXTERN declaration is not PUB, so the package does not export
-          # it and the probe module cannot name it. Every corpus file repeats
-          # the EXTERN block it needs at its own top, so the head carries the
-          # target file's own -- and declaring the same EXTERN struct in both
-          # modules leaves the backend referencing a name neither exports.
-          next if d.start_with?('EXTERN')
+          # An EXTERN FN is not PUB, so the package does not export it and the
+          # probe module cannot call it; the head carries the target file's own
+          # instead. EXTERN TYPES stay here: a stub signature can name one, and
+          # declaring the same EXTERN struct in both modules leaves the backend
+          # referencing a name neither exports.
+          next if d.start_with?('EXTERN FN')
           # A type with an IMPLEMENTATION block keeps its methods out of the
           # package, but its DECLARATION still has to be here: other structs
           # have fields typed by it, and dropping it leaves the backend
@@ -703,7 +704,12 @@ module SelfhostFnProbe
               rescue StandardError
                 nil
               end
-              FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-transpile-cache')) if free && free < 4_000_000
+              # Deleting a cache under a running build fails its compiler_rt
+              # sub-compile, so sweep only when the disk is genuinely about to
+              # end the run, and take the transpile cache first.
+              if free && free < 2_000_000
+                FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-transpile-cache'))
+              end
             end
           end
         end
