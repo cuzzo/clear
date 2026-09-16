@@ -166,28 +166,36 @@ module SelfhostFnProbe
     # out of it carries no AllocMark and the checker blames the TARGET for a
     # hole the stub introduced (TRANSFER_WITHOUT_ALLOC). Build a real value of
     # the declared shape whenever the shape is known.
-    if (built = default_value(payload, Set.new))
+    # A capability-wrapped return (`T@multiowned`) built from a struct literal
+    # crashes the compiler's cleanup hoist. That is a real gap, but it is not
+    # what the probe is measuring, so those stubs keep the panic body.
+    if !payload.include?('@') && (built = default_value(payload, Set.new))
       return %(  MUTABLE rtoc_stub_v: #{payload} = #{built};\n  RETURN rtoc_stub_v;)
     end
 
     %(  panic("stub");)
   end
 
-  # A literal of `type_str`, or nil when the shape cannot be built (a cycle
-  # through a required field, or a type the probe cannot see).
+  # A literal of `type_str`, or nil when the shape cannot be built (a fixed
+  # array, a cycle through a required field, or a type the probe cannot see).
+  # Containers are decided BEFORE scalars: `[Set]String@symbol` is a set, not a
+  # symbol, and reading the suffix first turned every such field into `:stub`.
   def default_value(type_str, seen)
-    bare = type_str.to_s.strip.sub(/@\w+(?::\w+)*\z/, '')
+    bare = type_str.to_s.strip
     return 'NIL' if bare.start_with?('?')
+    return 'Set[]' if bare.start_with?('[Set]')
+    return 'List[]' if bare.start_with?('[]')
+    return '{}' if bare.start_with?('{') || bare.start_with?('HashMap<')
+    return nil if bare =~ /\A\[\d+\]/
+
+    bare = bare.sub(/@\w+(?::\w+)*\z/, '')
+    return ':stub' if type_str.to_s.include?('@symbol')
     return '0' if %w[Int64 UInt64 Int32 UInt32 Int8 UInt8 Int16 UInt16 USize].include?(bare)
     return '0.0' if %w[Float64 Float32].include?(bare)
     return 'FALSE' if bare == 'Bool'
-    return ':stub' if type_str.to_s.include?('@symbol')
     # An owned String has to be ALLOCATED: a literal is rodata, and a caller
     # that transfers the field onward has no allocation to point at.
     return '"stub${1.toString()}"' if bare == 'String'
-    return 'Set[]' if bare.start_with?('[Set]')
-    return 'List[]' if bare.start_with?('[]')
-    return '{}' if bare.start_with?('{')
     return nil if seen.include?(bare)
 
     decl = type_index(@probe_cache || {})[bare] or return nil
