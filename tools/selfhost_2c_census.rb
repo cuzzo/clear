@@ -68,11 +68,16 @@ files.each_with_index do |rel, i|
   # 154G to 100% and every write failing with ENOSPC).
   FileUtils.rm_rf(Dir.glob('/tmp/fn-probe*'))
   FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-cache'))
-  out, err, _st = Open3.capture3({ 'BUNDLE_GEMFILE' => File.join(ROOT, 'Gemfile') }, *cmd, chdir: ROOT)
-  # the probe prints its per-file summary on stderr
-  line = "#{out}\n#{err}".lines.find { |l| l =~ %r{(\d+)/\s*(\d+) fail} }
-  fail_n, total = line ? line.match(%r{(\d+)/\s*(\d+) fail}).captures.map(&:to_i) : [nil, nil]
-  row = { 'file' => rel, 'fail' => fail_n, 'total' => total }
+  probe_out = File.join(File.dirname(opts[:out]), "probe_2c_#{i}.json")
+  FileUtils.rm_f(probe_out)
+  _out, _err, _st = Open3.capture3({ 'BUNDLE_GEMFILE' => File.join(ROOT, 'Gemfile') }, *cmd, chdir: ROOT)
+  # Read the probe's own JSON rather than its stdout: the summary line only
+  # names files that HAVE failures, so parsing text scored every 100%-clean
+  # file as 'no verdict' -- inverting the census.
+  rows = (JSON.parse(File.read(probe_out)) rescue nil)
+  fail_n, total = rows ? [rows.count { |r| !r['ok'] }, rows.length] : [nil, nil]
+  row = { 'file' => rel, 'fail' => fail_n, 'total' => total,
+          'errors' => rows ? rows.reject { |r| r['ok'] }.map { |r| [r['fn'], r['error'].to_s[0, 160]] } : [] }
   results << row
   File.open(journal, 'a') { |f| f.puts(JSON.generate(row)) }
   warn format('  %3d/%-3d %-54s %s', i + 1, files.length, rel,

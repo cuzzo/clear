@@ -382,6 +382,48 @@ module SelfhostFnProbe
     head + body + "\nFN main() RETURNS !Void ->\n#{main_body}END\n"
   end
 
+  # Whole-file mode: every function of ONE file, verbatim, with only the calls
+  # that LEAVE the file stubbed. A clean build settles the entire file at 2c in
+  # a single compile instead of one per function -- 177 builds for the corpus
+  # rather than ~17k -- and a failing build's position maps back to the
+  # function that contains it.
+  def whole_file_source(path, cache, pkg_name)
+    cache[path] ||= dissect(path)
+    fns = cache[path][2]
+    return nil if fns.empty?
+
+    seed = fns.first
+    idx = fn_index(cache)
+    own = fns.map(&:name).to_set
+    scope = module_consts(seed)
+    want = (fns.map(&:text).join + scope).scan(/(?<![\w.])([a-zA-Z_]\w*[?!]?)\(/).flatten.uniq
+    emitted = {}
+    until want.empty?
+      name = want.shift
+      next if own.include?(name) || emitted.key?(name)
+
+      f = idx[name] or next
+      s = stub(f) or next
+
+      emitted[name] = s.sub(/\A(PUB |PRIVATE )?FN /, 'FN ')
+      want.concat(s.scan(/(?<![\w.])([a-zA-Z_]\w*[?!]?)\(/).flatten)
+    end
+
+    head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n), "\n",
+            own_implementations(seed, cache), scope,
+            "\n# --- stand-ins for what it calls ---\n", emitted.values.join,
+            "\n# --- #{rel(path)} ---\n"].join
+    at = head.lines.length + 1
+    spans = []
+    body = +''
+    fns.each do |f|
+      spans << [at, at + f.text.lines.length - 1, f]
+      body << f.text
+      at += f.text.lines.length
+    end
+    [head + body + "\nFN main() RETURNS !Void ->\n  RETURN;\nEND\n", spans]
+  end
+
   def rel(path) = path.sub("#{SRC}/", '')
 
   # Every type declaration in the group, by the name it declares.
@@ -532,6 +574,7 @@ module SelfhostFnProbe
     passing = nil
     all_files_mode = false
     stub_census = nil
+    whole_file = false
     OptionParser.new do |p|
       # Several files at once: the annotator is three of them, and measuring
       # just those skips a hang in an unrelated file that has killed whole runs.
@@ -551,6 +594,7 @@ module SelfhostFnProbe
       # Which functions call nothing internal: those are the ones a recorded-
       # input run can execute today, because they have no stub to trap on.
       p.on('--stub-census PATH') { |v| stub_census = v }
+      p.on('--whole-file', 'One build per FILE with outside calls stubbed') { whole_file = true }
     end.parse!(argv)
 
     group = all_files_mode ? all_files : members
@@ -590,6 +634,69 @@ module SelfhostFnProbe
     pkg_name = 'fnprobe_types'
     pkg_flag = ["--pkg", "#{pkg_name}=#{stub_path}"]
     warn "types package: #{File.read(stub_path).lines.length} lines"
+
+    if whole_file
+      paths = files.map { |f| File.join(SRC, f) }
+      warn "whole-file: #{paths.length} file(s); #{jobs} jobs; stage=#{stage}"
+      wf_queue = Queue.new
+      paths.each_with_index { |pth, i| wf_queue << [i, pth] }
+      rows = Array.new(paths.length)
+      wf_done = 0
+      wf_mutex = Mutex.new
+      wf_out = out_path || File.join(ROOT, '.fn_probe_whole.json')
+      wf_workers = Array.new(jobs) do
+        Thread.new do
+          loop do
+            i, path = begin
+              wf_queue.pop(true)
+            rescue ThreadError
+              break
+            end
+            ok, msg, pcol, fn_name, src_line = begin
+              built = whole_file_source(path, cache, pkg_name)
+              if built.nil?
+                [true, nil, nil, nil, nil]
+              else
+                src, spans = built
+                o, m, l, c = compile(src, stage, pkg_flag)
+                # A probe line sits inside exactly one function's span, and the
+                # function is restated verbatim, so the offset carries straight
+                # back to its line in the real file.
+                span = l ? spans.find { |s, e, _f| l.to_i >= s && l.to_i <= e } : nil
+                [o, m, c, span && span[2].name, span ? span[2].start + (l.to_i - span[0]) : nil]
+              end
+            rescue StandardError => e
+              [false, "probe harness: #{e.class}: #{e.message}"[0, 200], nil, nil, nil]
+            end
+            rows[i] = { 'file' => rel(path), 'fn' => fn_name, 'ok' => ok,
+                        'error' => msg, 'line' => src_line, 'col' => pcol&.to_i }
+            wf_mutex.synchronize do
+              wf_done += 1
+              warn format('  %3d/%-3d %-50s %s', wf_done, paths.length, rel(path),
+                          ok ? 'clean' : "#{fn_name || '?'}: #{msg.to_s.lines.first.to_s.strip[0, 78]}")
+              File.write(wf_out, JSON.pretty_generate(rows.compact))
+            end
+            # Each stage-zig build leaves a cache behind; unswept they fill the
+            # disk mid-run and every later build fails for a reason that has
+            # nothing to do with the file being probed.
+            if stage != :clear
+              free = begin
+                Timeout.timeout(20) { `df -P #{ROOT} | tail -1`.split[3].to_i }
+              rescue StandardError
+                nil
+              end
+              FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-transpile-cache')) if free && free < 4_000_000
+            end
+          end
+        end
+      end
+      wf_workers.each(&:join)
+      got = rows.compact
+      File.write(wf_out, JSON.pretty_generate(got))
+      puts
+      puts "#{got.count { |r| r['ok'] }}/#{got.length} files compile whole with outside calls stubbed"
+      return 0
+    end
 
     queue = Queue.new
     targets.each_with_index { |t, i| queue << [i, t] }
