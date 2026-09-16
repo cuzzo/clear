@@ -1,0 +1,60 @@
+# Test: nested `FOR _ IN` loops.
+# `_` is a discard in Zig, not a binding, so a loop body that reads the
+# placeholder needs a real capture name. Lowering used to emit `@"_"` for
+# every such loop, which is referenceable and so worked one level deep --
+# but two nested placeholder loops both named their capture `@"_"` and Zig
+# rejected the inner one with "capture '_' shadows capture from outer scope".
+# Each placeholder loop now gets its own name, and a body reference resolves
+# to the innermost enclosing loop the way lexical shadowing does.
+
+FN sumNested(rows: [][]Int64) RETURNS Int64 ->
+    MUTABLE sum = 0_i64;
+    FOR _ IN rows DO
+        FOR _ IN _ DO
+            sum = sum + _;
+        END
+    END
+    RETURN sum;
+END
+
+FN countOuter(rows: [][]Int64) RETURNS Int64 ->
+    MUTABLE n = 0_i64;
+    FOR _ IN rows DO
+        # The inner loop discards its capture; the outer one is still read.
+        FOR _ IN _ DO
+            n = n + 1_i64;
+        END
+    END
+    RETURN n;
+END
+
+FN threeDeep(cube: [][][]Int64) RETURNS Int64 ->
+    MUTABLE sum = 0_i64;
+    FOR _ IN cube DO
+        FOR _ IN _ DO
+            FOR _ IN _ DO
+                sum = sum + _;
+            END
+        END
+    END
+    RETURN sum;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE a: []Int64 = [1_i64, 2_i64];
+    MUTABLE b: []Int64 = [3_i64, 4_i64];
+    MUTABLE rows: [][]Int64 = [a, b];
+    ASSERT sumNested(rows) == 10_i64, "inner placeholder sums, outer feeds it";
+    ASSERT countOuter(rows) == 4_i64, "outer placeholder still iterable";
+
+    MUTABLE c: []Int64 = [5_i64, 6_i64];
+    MUTABLE d: []Int64 = [7_i64, 8_i64];
+    MUTABLE plane1: [][]Int64 = [c, d];
+    MUTABLE e: []Int64 = [1_i64, 1_i64];
+    MUTABLE f: []Int64 = [1_i64, 1_i64];
+    MUTABLE plane2: [][]Int64 = [e, f];
+    MUTABLE cube: [][][]Int64 = [plane1, plane2];
+    ASSERT threeDeep(cube) == 30_i64, "three placeholder levels each bind separately";
+
+    print("nested placeholder loops ok");
+END

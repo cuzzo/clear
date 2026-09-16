@@ -650,14 +650,45 @@ module MIRLoweringControlFlow
     !!(struct_schemas.key?(sym) || union_schemas.key?(sym))
   end
 
+  # Scope a placeholder loop capture to its body: `_` uses resolve to this
+  # loop's name while it runs, and the enclosing loop's name comes back after.
+  sig do
+    params(active: T::Boolean, name: String, blk: T.proc.returns(T.untyped))
+      .returns(T.untyped)
+  end
+  def with_placeholder_capture(active, name, &blk)
+    T.bind(self, MIRLowering) rescue nil
+    return yield unless active
+
+    map = function_state.rename_map
+    key = zig_safe_name("_")
+    had = map.key?(key)
+    prev = map[key]
+    map[key] = name
+    begin
+      yield
+    ensure
+      had ? map[key] = prev : map.delete(key)
+    end
+  end
+
   sig { params(node: AST::ForEach).returns(ForEachPlan) }
   def for_each_plan(node)
     T.bind(self, MIRLowering) rescue nil
     var = zig_safe_name(node.var_name)
+    # `_` is a discard in Zig, not a binding, so a body that reads the
+    # placeholder needs a real name -- and two nested `FOR _` loops naming
+    # their capture the same thing collide. Give each placeholder loop its
+    # own name and resolve the body's `_` uses through it, so the innermost
+    # enclosing loop wins the way lexical shadowing does.
+    placeholder = node.var_name.to_s == "_"
+    var = "__for_it_#{lowering_counters.next_tmp_id}" if placeholder
     # FOR MUTABLE captures a struct element as `|*var|`, so inside the body the
     # binding IS the pointer: a `&var` argument must pass it through rather
     # than take the address of the capture slot.
-    body = with_for_each_pointer_capture(node, var) { lower_body(node.body) }
+    body = with_placeholder_capture(placeholder, var) do
+      with_for_each_pointer_capture(node, var) { lower_body(node.body) }
+    end
     finalize_loop_frame_alloc_scopes!(body, node.mark_per_iter)
     rt = MIR::Ident.new(runtime_binding_name)
     # A loop source is not in coercion position: an ambient expected type

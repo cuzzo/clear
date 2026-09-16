@@ -16601,7 +16601,32 @@ PRIVATE FN mIRLowering__lower_for_each(MUTABLE self: MIRLowering, node: ForEach)
 END
 PRIVATE FN mIRLowering__for_each_plan(MUTABLE self: MIRLowering, node: ForEach) RETURNS !ForEachPlan ->
     MUTABLE var = mIRLowering__zig_safe_name(self, node.var_name);
+    # `_` is a discard in Zig, not a binding, so a body that reads the
+    # placeholder needs a real name -- and two nested `FOR _` loops naming
+    # their capture the same thing collide. Give each placeholder loop its
+    # own name and resolve the body's `_` uses through it, so the innermost
+    # enclosing loop wins the way lexical shadowing does.
+    MUTABLE placeholder = (node.var_name == "_");
+    MUTABLE ph_map = TRY (functionState__rename_map(mIRLowering__function_state(&self)));
+    MUTABLE ph_key = mIRLowering__zig_safe_name(self, "_");
+    MUTABLE ph_had = ph_map.contains?(ph_key);
+    MUTABLE ph_prev: String = "";
+    IF placeholder THEN
+      IF ph_had THEN
+        ph_prev = UNWRAP (COPY ph_map[ph_key]);
+      END
+      var = "__for_it_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_ph = mIRLowering__lowering_counters(&self);
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_ph)) }}";
+      ph_map[ph_key] = COPY var;
+    END
     MUTABLE body = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList( CAST(node AS []Locatable)).body));
+    IF placeholder THEN
+      IF ph_had THEN
+        ph_map[ph_key] = COPY ph_prev;
+      ELSE
+        &ph_map.delete(ph_key);
+      END
+    END
     TRY (mIRLowering__finalize_loop_frame_alloc_scopes_mut(&self, body, node.mark_per_iter));
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE coll = mIRLowering__with_expected_type(&self, NIL, %() USE(MUTABLE node, MUTABLE self) -> {
