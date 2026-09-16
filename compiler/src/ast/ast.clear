@@ -280,7 +280,7 @@ PUB STRUCT FunctionDef {
   is_method: Bool,
   alloc_fault: ?Bool,
   can_fail: ?Bool,
-  cleanup_bindings: ?PassStateValue,
+  cleanup_bindings: ?{String}CleanupEntry@multiowned,
   coerced_type_object: ?Type,
   collection_return: ?Type,
   conformance_protocol: ?String,

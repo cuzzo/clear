@@ -68,11 +68,21 @@ PUB FN mIRPass__transform_mut(MUTABLE self: MIRPass, MUTABLE ast: Program) RETUR
     TRY (mIRPassState__mark_mut(&pass_state, :needs_rt_finalized));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < ast.statements.length() DO
-      IF !((ast.statements[rtoc_idx] IS_A FunctionDef AND ast.statements[rtoc_idx].body())) THEN
+      MUTABLE rtoc_stmt: ?Locatable = COPY ast.statements[rtoc_idx];
+      IF !(rtoc_stmt EXISTS) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      TRY (mIRPass__transform_function_mut(&self, &ast.statements[rtoc_idx], mIRPlanningResult__cleanup_plan_for(planning, CAST(ast.statements[rtoc_idx].name() AS String)), planning.can_fail_functions));
+      IF !((rtoc_stmt IS_A FunctionDef)) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE rtoc_fn_def: FunctionDef = CAST(rtoc_stmt AS FunctionDef);
+      IF rtoc_fn_def.body.empty?() THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      TRY (mIRPass__transform_function_mut(&self, &rtoc_fn_def, mIRPlanningResult__cleanup_plan_for(planning, COPY rtoc_fn_def.name), planning.can_fail_functions));
     rtoc_idx = rtoc_idx + 1;
     END
     FOR rtoc_key IN self.fn_nodes.keys() DO
@@ -80,11 +90,7 @@ PUB FN mIRPass__transform_mut(MUTABLE self: MIRPass, MUTABLE ast: Program) RETUR
     IF !((TRUE AND rtoc_key.startsWith?("__test_body_"))) THEN
       CONTINUE;
     END
-    IF !((IF fn_value != NIL THEN
-        fn_value.body
-      ELSE
-        NIL
-      END)) THEN
+    IF fn_value.body.empty?() THEN
         CONTINUE;
     END
     TRY (mIRPass__transform_function_mut(&self, CAST(COPY fn_value AS FunctionDef), mIRPlanningResult__cleanup_plan_for(planning, rtoc_key), planning.can_fail_functions));
@@ -225,10 +231,10 @@ PRIVATE FN mIRPass__recurse_branches_mut(MUTABLE self: MIRPass, MUTABLE stmt: Lo
 END
 PRIVATE FN mIRPass__recurse_expr_body_mut(MUTABLE self: MIRPass, MUTABLE val: ?Locatable, ctx: WalkCtx) RETURNS !Void
   EFFECTS REENTRANT ->
-    IF (((val != NIL) AND (val IS_A BgBlock)) AND locatable__body(val)) THEN
-      val.body = TRY (mIRPass__transform_body(&self, UNWRAP (locatable__body(val)), walkCtx__with(ctx, mIRPass__bg_inner_facts(self, castOptionalLocatableToBgNode(val), ctx.cleanup_facts))));
-    ELSE_IF ((val != NIL) AND (val IS_A BlockExpr)) THEN
-      val.body = TRY (mIRPass__transform_body(&self, UNWRAP (locatable__body(val)), ctx));
+    IF val IS_A BgBlock AS MUTABLE bg_block THEN
+      bg_block.body = TRY (mIRPass__transform_body(&self, COPY bg_block.body, walkCtx__with(ctx, mIRPass__bg_inner_facts(self, castOptionalLocatableToBgNode(val), ctx.cleanup_facts))));
+    ELSE_IF val IS_A BlockExpr AS MUTABLE block_expr THEN
+      block_expr.body = TRY (mIRPass__transform_body(&self, COPY block_expr.body, ctx));
     END
 END
 PRIVATE FN mIRPass__bg_inner_facts(self: MIRPass, bg_node: BgNode, facts: FrozenCleanupFacts) RETURNS FrozenCleanupFacts ->
@@ -252,8 +258,8 @@ PRIVATE FN mIRPass__mark_consumed_cleanup_guards_mut(MUTABLE self: MIRPass, stmt
     RETURN TRY (mIRPass__collect_consumed_names(self, stmt, facts));
 END
 PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, stmt: Locatable, facts: FrozenCleanupFacts) RETURNS ![Set]String ->
-    MUTABLE names = Set[];
-    MUTABLE rhs = NIL;
+    MUTABLE names: [Set]String = Set[];
+    MUTABLE rhs: ?Locatable = NIL;
     PARTIAL MATCH stmt START
       Locatable.VarDecl AS var_decl -> rhs = var_decl.value;,
       Locatable.BindExpr AS bind_expr -> rhs = bind_expr.value;,
@@ -262,13 +268,12 @@ PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, stmt: Locatable, facts
       DEFAULT -> rhs = NIL;
     END
     IF rhs THEN
-      MUTABLE ident = IF rhs IS_A MoveNode THEN
-        rhs.value()
-      ELSE
-        rhs
-      END;
-      IF ident IS_A Identifier THEN
-        TRY (mIRPass__add_if_consumed(self, ident, &names, facts, aST__moved?(ident)));
+      MUTABLE ident: ?Locatable = COPY rhs;
+      IF rhs IS_A MoveNode AS move_node THEN
+        ident = COPY move_node.value;
+      END
+      IF ident IS_A Identifier AS ident_value THEN
+        TRY (mIRPass__add_if_consumed(self, ident_value, &names, facts, aST__moved?(UNWRAP (ident))));
       END
     END
     IF stmt IS_A MoveNode AS move_node THEN
@@ -276,7 +281,7 @@ PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, stmt: Locatable, facts
       TRY (mIRPass__add_if_consumed(self, castLocatableToIdentifier__type_analysis_session(move_node.value), &names, facts, aST__moved?(move_node.value)));
     END
     END
-    MUTABLE value_expr = NIL;
+    MUTABLE value_expr: ?Locatable = NIL;
     PARTIAL MATCH stmt START
       Locatable.VarDecl AS var_decl -> value_expr = var_decl.value;,
       Locatable.BindExpr AS bind_expr -> value_expr = bind_expr.value;,
@@ -284,8 +289,8 @@ PRIVATE FN mIRPass__collect_consumed_names(self: MIRPass, stmt: Locatable, facts
       Locatable.DestructuringAssignment AS destructuring_assignment -> value_expr = destructuring_assignment.value;,
       DEFAULT -> value_expr = stmt;
     END
-    IF value_expr IS_A MoveNode THEN
-      value_expr = value_expr.value();
+    IF value_expr IS_A MoveNode AS value_move_node THEN
+      value_expr = COPY value_move_node.value;
     END
     TRY (mIRPass__walk_consumed(self, value_expr, &names, facts));
     RETURN names;
@@ -404,13 +409,14 @@ PRIVATE FN mIRPass__add_if_consumed(self: MIRPass, ident: Identifier, MUTABLE na
       RETURN NIL;
     END
     MUTABLE is_atomic_ptr = type__atomic_ptr?(ti);
-    IF ((TRUE AND ((TRY (type__any_rc?(ti)) OR_ELSE FALSE))) AND !(is_atomic_ptr)) THEN
+    IF ((TRUE AND (TRY (type__any_rc?(ti)))) AND !(is_atomic_ptr)) THEN
       IF is_move THEN
         &names.insert(name);
       END
       RETURN NIL;
     END
-    RETURN &names.insert(name);
+    &names.insert(name);
+    RETURN NIL;
 END
 PRIVATE FN mIRPass__owning_field_move?(self: MIRPass, node: Locatable) RETURNS !Bool
   REQUIRES self: LOCAL
@@ -489,30 +495,42 @@ PRIVATE FN mIRPass__stamp_match_as_cleanup_mut(MUTABLE self: MIRPass, stmt: Loca
           MUTABLE has_source_cleanup = cleanupEntry__needs_cleanup?(src_entry);
           MUTABLE rtoc_idx = 0;
           WHILE rtoc_idx < match_statement_mutable.cases.length() DO
-      IF !(match_statement_mutable.cases[rtoc_idx].binding) THEN
+      MUTABLE rtoc_case: ?MatchCase = COPY match_statement_mutable.cases[rtoc_idx];
+      IF !(rtoc_case EXISTS) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE binding = match_statement_mutable.cases[rtoc_idx].binding;
-      frozenCleanupFacts__with_live_entry_for(facts, binding, %(as_entry: CleanupEntry) USE(binding, identifier_mutable, has_source_cleanup, match_statement_mutable, rtoc_idx, self) -> {
+      IF !(rtoc_case.binding EXISTS) THEN
+        rtoc_idx = rtoc_idx + 1;
+    CONTINUE;
+      END
+      MUTABLE binding = COPY rtoc_case.binding;
+      frozenCleanupFacts__with_live_entry_for(facts, binding, %(as_entry: CleanupEntry) USE(rtoc_case, binding, identifier_mutable, has_source_cleanup, match_statement_mutable, rtoc_idx, self) -> {
         has_as_cleanup = TRUE;
-        MUTABLE mir_prefix = List[];
+        MUTABLE mir_prefix: []Locatable = List[];
         IF has_source_cleanup THEN
-                  &mir_prefix.append(SuppressCleanup{ token: match_statement_mutable.token, name: COPY identifier__name(identifier_mutable), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL });
+                  &mir_prefix.append(Locatable{ SuppressCleanup: COPY SuppressCleanup{ token: match_statement_mutable.token, name: COPY identifier__name(identifier_mutable), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL } });
         END
-        MUTABLE destructure = match_statement_mutable.cases[rtoc_idx].destructure;
+        MUTABLE destructure = COPY (UNWRAP (rtoc_case)).destructure;
         MUTABLE alloc_type_branch_value: ?Type = NIL;
                 IF destructure THEN
-                  alloc_type_branch_value = TRY (aST__full_type_mut(destructure));
+                  alloc_type_branch_value = TRY (aST__full_type_mut(Locatable{ StructPattern: COPY destructure }));
                 ELSE
-                  alloc_type_branch_value = TRY (type__from_node_mut(identifier_mutable, "match AS allocation marker"));
+                  alloc_type_branch_value = TRY (type__from_node_mut(Locatable{ Identifier: COPY identifier_mutable }, "match AS allocation marker"));
                 END
         MUTABLE alloc_type: Type = alloc_type_branch_value?;
-        &mir_prefix.append(mIRPass__alloc_marker(self, binding, cleanupEntry__alloc(as_entry), alloc_type));
-        MUTABLE drop = Drop{ token: match_statement_mutable.token, name: COPY binding, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, cleanup_entry: NIL };
+        # BLOCKED: Ruby stamps MIR::AllocMark into this AST body, but `Locatable` has
+        # no AllocMark variant and cannot gain one -- the struct lives in mir.clear,
+        # which REQUIREs ast.clear. Drop and SuppressCleanup are the precedent: they
+        # were moved INTO ast.clear for exactly this reason. AllocMark cannot follow
+        # until LoweredNodeId and OwnershipConsumptionFact move with it.
+        &mir_prefix.append(Locatable{ AllocMark: COPY mIRPass__alloc_marker(self, UNWRAP (COPY binding), cleanupEntry__alloc(as_entry), alloc_type) });
+        MUTABLE drop = Drop{ token: match_statement_mutable.token, name: UNWRAP (COPY binding), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, cleanup_entry: NIL };
         drop.cleanup_entry = COPY as_entry;
-        &mir_prefix.append(drop);
-        match_statement_mutable.cases[rtoc_idx].body = (mir_prefix + match_statement_mutable.cases[rtoc_idx].body());
+        &mir_prefix.append(Locatable{ Drop: COPY drop });
+        MUTABLE rtoc_case_mut: MatchCase = UNWRAP (COPY rtoc_case);
+        rtoc_case_mut.body = (COPY mir_prefix + COPY rtoc_case_mut.body);
+        match_statement_mutable.cases[rtoc_idx] = COPY rtoc_case_mut;
         rubyToClearVoid__mir_pass()
       });
     rtoc_idx = rtoc_idx + 1;
