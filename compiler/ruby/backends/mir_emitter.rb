@@ -3644,10 +3644,16 @@ class MIREmitter
       env_head = "const #{LAMBDA_ENV_ARRAY}: *const [#{names.length}]?*const anyopaque = " \
         "@ptrCast(@alignCast(#{MIRLowering::LAMBDA_ENV_PARAM}.?));"
       with_ident_overrides(overrides) do
-        emit_fn_def_with_prologue(fn, [env_head, *prologue])
+        rendered = emit_fn_def(fn)
+        # A capture the body never reads is an unused constant, which Zig
+        # rejects. The environment still carries it -- the slots are positional
+        # -- but nothing binds it here.
+        used = prologue.each_with_index.select { |_line, i| rendered.include?(capture_ptr_name(names[i])) }
+                       .map(&:first)
+        splice_prologue(rendered, [env_head, *used])
       end
     else
-      emit_fn_def_with_prologue(fn, ["_ = #{MIRLowering::LAMBDA_ENV_PARAM};"])
+      splice_prologue(emit_fn_def(fn), ["_ = #{MIRLowering::LAMBDA_ENV_PARAM};"])
     end
     ctx = env ? "@ptrCast(&#{env})" : "null"
     "CheatLib.Closure(#{closure_fn_type(fn)}).bind(#{ctx}, &(struct { #{body_fn} }).#{fn.name})"
@@ -3668,9 +3674,8 @@ class MIREmitter
     "fn(#{params}) #{ret}"
   end
 
-  sig { params(fn: MIR::FnDef, prologue: T::Array[String]).returns(String) }
-  def emit_fn_def_with_prologue(fn, prologue)
-    rendered = emit_fn_def(fn)
+  sig { params(rendered: String, prologue: T::Array[String]).returns(String) }
+  def splice_prologue(rendered, prologue)
     head, rest = rendered.split("{\n", 2)
     "#{head}{\n#{prologue.join("\n")}\n#{rest}"
   end
