@@ -200,14 +200,14 @@ PRIVATE FN pipelineSetIndexLowerer__bc_index_iter(self: PipelineSetIndexLowerer,
   IF range_source IS_A RangeLit THEN
     MUTABLE start_mir = pipelineSetIndexLowerer__visit_mir_call(self, UNWRAP (locatable__start(range_source)));
     MUTABLE end_mir = pipelineSetIndexLowerer__visit_mir_call(self, UNWRAP (locatable__finish(range_source)));
-    MUTABLE end_expr_branch_value: ?BinOp = NIL;
+    MUTABLE end_expr_branch_value: ?Emittable = NIL;
     IF (IF range_source IS_A RangeLit AS rtoc_range THEN rtoc_range.inclusive ELSE FALSE END) THEN
-      end_expr_branch_value = MIRBinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
+      end_expr_branch_value = Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: COPY end_mir, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE
       end_expr_branch_value = end_mir;
     END
-    MUTABLE end_expr: BinOp = end_expr_branch_value?;
-    RETURN Emittable{ IterRange: COPY IterRange{ start: start_mir, end_val: CAST(end_expr AS Emittable), capture_type: :i64, lowered_node_id: NIL, ownership_consumption: NIL } };
+    MUTABLE end_expr: Emittable = UNWRAP (end_expr_branch_value);
+    RETURN Emittable{ IterRange: COPY IterRange{ start: start_mir, end_val: end_expr, capture_type: :i64, lowered_node_id: NIL, ownership_consumption: NIL } };
   END
   IF range_source IS_A Identifier AS identifier THEN
     RETURN pipelineSetIndexLowerer__visit_mir_call(self, Locatable{ Identifier: COPY identifier });
