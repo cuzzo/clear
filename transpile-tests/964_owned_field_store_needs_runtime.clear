@@ -1,0 +1,35 @@
+# Test: storing over an OWNED field frees what was there.
+# A free goes through the allocator, so the function needs the runtime even
+# when it allocates nothing itself. `self.current = NIL` on a `?String` field
+# is a cleanup call and nothing else, and the function was emitted without its
+# runtime parameter -- Zig rejected the body with "use of undeclared
+# identifier 'rt'".
+
+STRUCT LabelState {
+  counter: Int64,
+  current: ?String,
+  names: []String
+}
+
+FN resetState(MUTABLE self: LabelState) RETURNS Void ->
+    self.counter = 0;
+    self.current = NIL;
+END
+
+FN replaceNames(MUTABLE self: LabelState, fresh: []String) RETURNS Void ->
+    self.names = COPY fresh;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE s = LabelState{ counter: 3, current: "x", names: ["a"] };
+
+    resetState(&s);
+    ASSERT s.counter == 0, "scalar field reset";
+    ASSERT !(s.current EXISTS), "owned optional field cleared";
+
+    MUTABLE fresh: []String = ["b", "c"];
+    replaceNames(&s, fresh);
+    ASSERT s.names.length() == 2, "owned list field replaced";
+
+    print("owned field store needs runtime ok");
+END

@@ -1295,6 +1295,14 @@ module Annotator
           assignment_node.value.full_type!(context: "assignment value")
         )
 
+        # Storing over an owned field frees what was there, and a free goes
+        # through the allocator, so the function needs the runtime even when it
+        # allocates nothing itself: `self.label = NIL` on a `?String` field is
+        # a cleanup call and nothing else.
+        if assignment_field_type.needs_cleanup?(->(name) { lookup_type_schema(name) })
+          current_fn_ctx&.mark_runtime_used!
+        end
+
         # Assignments are statements (void), not expressions that produce a value.
         stamp_type!(assignment_node, :Void)
       end

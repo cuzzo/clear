@@ -13300,6 +13300,15 @@ PRIVATE FN typeAnalysisSession__visit_assignment_field(MUTABLE self: TypeAnalysi
       TRY (typeAnalysisSession__keep_param_identity_mut(&self, assignment_node.value, CAST(assignment_field_type AS Type), "${owner}.${field_node.field}"));
     END
     TRY (typeAnalysisSession__validate_assignment_type(&self, Node{ Assignment: COPY assignment_node }, TypeTypeInput{ Type: COPY assignment_field_type }, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(assignment_node.value)) }));
+    # Storing over an owned field frees what was there, and a free goes
+    # through the allocator, so the function needs the runtime even when it
+    # allocates nothing itself.
+    IF TRY (type__needs_cleanup?(assignment_field_type)) THEN
+      MUTABLE rtoc_field_store_ctx: ?FunctionContext@multiowned = typeAnalysisSession__current_fn_ctx(&self);
+      IF rtoc_field_store_ctx EXISTS AS rtoc_field_store_ctx_value THEN
+        functionContext__mark_runtime_used_mut(&rtoc_field_store_ctx_value);
+      END
+    END
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&self, Locatable{ Assignment: COPY assignment_node }, :Void));
 END
 PRIVATE FN typeAnalysisSession__validate_assignment_type(MUTABLE self: TypeAnalysisSession, MUTABLE node: Node, target_type: ?TypeTypeInput, value_type: ?TypeTypeInput) RETURNS !Void ->
