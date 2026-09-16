@@ -200,6 +200,16 @@ module SelfhostFnProbe
     end
   end
 
+  # The EXTERN block a file declares at its own top: the probe module needs it
+  # verbatim, since the shared types package deliberately carries none.
+  def own_externs(path, cache)
+    cache[path] ||= dissect(path)
+    own = cache[path][1].select { |d| d.start_with?('EXTERN') }
+    return '' if own.empty?
+
+    "\n# --- EXTERN block from #{rel(path)} ---\n" + own.join
+  end
+
   def stdlib_requires
     @stdlib_requires ||= begin
       seen = Set.new
@@ -236,6 +246,12 @@ module SelfhostFnProbe
           name = d[/\A(?:PUB |EXTERN )*(?:STRUCT|UNION|ENUM|FN) ([\w?!]+)/, 1]
           impl_owner = d[/\AIMPLEMENTATION ([\w?!]+)/, 1]
           next if impl_owner
+          # An EXTERN declaration is not PUB, so the package does not export
+          # it and the probe module cannot name it. Every corpus file repeats
+          # the EXTERN block it needs at its own top, so the head carries the
+          # target file's own -- and declaring the same EXTERN struct in both
+          # modules leaves the backend referencing a name neither exports.
+          next if d.start_with?('EXTERN')
           # A type with an IMPLEMENTATION block keeps its methods out of the
           # package, but its DECLARATION still has to be here: other structs
           # have fields typed by it, and dropping it leaves the backend
@@ -372,6 +388,7 @@ module SelfhostFnProbe
     # requires it. Declaring the same EXTERN struct in both modules makes the
     # backend emit a reference to a name neither module exports.
     head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n), "\n",
+            own_externs(target.file, cache),
             own_implementations(target, cache),
             module_consts(target), "\n# --- stand-ins for what it calls ---\n", stubs.join,
             "\n# --- #{rel(target.file)} : #{target.name} ---\n"].join
@@ -410,6 +427,7 @@ module SelfhostFnProbe
     end
 
     head = [stdlib_requires, %(REQUIRE "pkg:#{pkg_name}"\n), "\n",
+            own_externs(path, cache),
             own_implementations(seed, cache), scope,
             "\n# --- stand-ins for what it calls ---\n", emitted.values.join,
             "\n# --- #{rel(path)} ---\n"].join
