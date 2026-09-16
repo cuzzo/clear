@@ -182,7 +182,9 @@ module SelfhostFnProbe
     return '0.0' if %w[Float64 Float32].include?(bare)
     return 'FALSE' if bare == 'Bool'
     return ':stub' if type_str.to_s.include?('@symbol')
-    return '"stub"' if bare == 'String'
+    # An owned String has to be ALLOCATED: a literal is rodata, and a caller
+    # that transfers the field onward has no allocation to point at.
+    return '"stub${1.toString()}"' if bare == 'String'
     return 'Set[]' if bare.start_with?('[Set]')
     return 'List[]' if bare.start_with?('[]')
     return '{}' if bare.start_with?('{')
