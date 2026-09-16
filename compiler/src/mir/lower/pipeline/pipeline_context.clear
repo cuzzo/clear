@@ -20,7 +20,9 @@ PUB FN pipelineContextState__with_pipeline_values(self: PipelineContextState, pl
   RETURN PipelineContextState{ placeholder_name: COPY placeholder, acc_placeholder: COPY acc, join_param_map: COPY self.join_param_map, named_bindings: COPY self.named_bindings, soa_each_mode: self.soa_each_mode, soa_rewrite_active: self.soa_rewrite_active, soa_needed_fields: COPY self.soa_needed_fields };
 END
 PUB FN pipelineContextState__with_named_binding(self: PipelineContextState, clear_name: String, zig_var: String) RETURNS PipelineContextState ->
-  RETURN PipelineContextState{ placeholder_name: COPY self.placeholder_name, acc_placeholder: COPY self.acc_placeholder, join_param_map: COPY self.join_param_map, named_bindings: COPY {clear_name: zig_var}.keys() |> REDUCE(COPY self.named_bindings) { acc[_] = COPY ({clear_name: zig_var}[_] OR_ELSE panic("missing hash key")); acc }, soa_each_mode: self.soa_each_mode, soa_rewrite_active: self.soa_rewrite_active, soa_needed_fields: COPY self.soa_needed_fields };
+  MUTABLE rtoc_named_bindings: {String}String = COPY self.named_bindings;
+  rtoc_named_bindings[COPY clear_name] = COPY zig_var;
+  RETURN PipelineContextState{ placeholder_name: COPY self.placeholder_name, acc_placeholder: COPY self.acc_placeholder, join_param_map: COPY self.join_param_map, named_bindings: rtoc_named_bindings, soa_each_mode: self.soa_each_mode, soa_rewrite_active: self.soa_rewrite_active, soa_needed_fields: COPY self.soa_needed_fields };
 END
 PUB FN pipelineContextState__with_join_params(self: PipelineContextState, join_params: ?{String}String) RETURNS PipelineContextState ->
   RETURN PipelineContextState{ placeholder_name: COPY self.placeholder_name, acc_placeholder: COPY self.acc_placeholder, join_param_map: COPY join_params, named_bindings: COPY self.named_bindings, soa_each_mode: self.soa_each_mode, soa_rewrite_active: self.soa_rewrite_active, soa_needed_fields: COPY self.soa_needed_fields };
@@ -365,13 +367,13 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_value_wrapper(MUTABLE self: P
   EFFECTS REENTRANT ->
     MUTABLE value: ?Locatable = NIL;
     IF node IS_A CopyNode AS copy_node THEN
-      value = copy_node.value;
+      value = COPY copy_node.value;
     ELSE_IF node IS_A MoveNode AS move_node THEN
-      value = move_node.value;
+      value = COPY move_node.value;
     ELSE_IF node IS_A KeepNode AS keep_node THEN
-      value = keep_node.value;
+      value = COPY keep_node.value;
     ELSE_IF node IS_A ShareNode AS share_node THEN
-      value = share_node.value;
+      value = COPY share_node.value;
     END
     MUTABLE value_value: Locatable = value?;
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&self, COPY value_value));
@@ -416,7 +418,7 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_with_block(MUTABLE self: Pipe
       MUTABLE rewritten_arms: []WithMatchArm = List[];
       MUTABLE arm_index = 0;
       WHILE (arm_index < arms_value_mutable.length()) DO
-        MUTABLE arm = UNWRAP (arms_value_mutable[arm_index]);
+        MUTABLE arm = UNWRAP (COPY arms_value_mutable[arm_index]);
         MUTABLE arm_body: []Locatable = TRY (withMatchArm__body_nodes(arm));
         MUTABLE new_arm_body = TRY (pipelinePlaceholderRewriter__substitute_body(&self, arm_body));
         MUTABLE rewritten_arm_branch_value: ?WithMatchArm = NIL;

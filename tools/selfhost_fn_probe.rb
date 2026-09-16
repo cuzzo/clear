@@ -162,7 +162,58 @@ module SelfhostFnProbe
             end
     return %(  MUTABLE rtoc_stub_v: #{payload} = #{empty};\n  RETURN rtoc_stub_v;) if empty
 
+    # A stub that panics gives its caller no provenance: a value transferred
+    # out of it carries no AllocMark and the checker blames the TARGET for a
+    # hole the stub introduced (TRANSFER_WITHOUT_ALLOC). Build a real value of
+    # the declared shape whenever the shape is known.
+    if (built = default_value(payload, Set.new))
+      return %(  MUTABLE rtoc_stub_v: #{payload} = #{built};\n  RETURN rtoc_stub_v;)
+    end
+
     %(  panic("stub");)
+  end
+
+  # A literal of `type_str`, or nil when the shape cannot be built (a cycle
+  # through a required field, or a type the probe cannot see).
+  def default_value(type_str, seen)
+    bare = type_str.to_s.strip.sub(/@\w+(?::\w+)*\z/, '')
+    return 'NIL' if bare.start_with?('?')
+    return '0' if %w[Int64 UInt64 Int32 UInt32 Int8 UInt8 Int16 UInt16 USize].include?(bare)
+    return '0.0' if %w[Float64 Float32].include?(bare)
+    return 'FALSE' if bare == 'Bool'
+    return ':stub' if type_str.to_s.include?('@symbol')
+    return '"stub"' if bare == 'String'
+    return 'Set[]' if bare.start_with?('[Set]')
+    return 'List[]' if bare.start_with?('[]')
+    return '{}' if bare.start_with?('{')
+    return nil if seen.include?(bare)
+
+    decl = type_index(@probe_cache || {})[bare] or return nil
+
+    seen = seen + [bare]
+    if (m = decl.match(/\A(?:PUB |PRIVATE )?ENUM #{Regexp.escape(bare)}\s*\{(.*?)\}/m))
+      first = m[1].split(',').map(&:strip).reject(&:empty?).first or return nil
+      return "#{bare}.#{first.split(/\s/).first}"
+    end
+    if (m = decl.match(/\A(?:PUB |PRIVATE )?UNION #{Regexp.escape(bare)}\s*\{(.*?)\}/m))
+      variant, vtype = m[1].split(',').map(&:strip).reject(&:empty?).first.to_s.split(':', 2)
+      return nil unless variant && vtype
+
+      inner = default_value(vtype.strip, seen) or return nil
+      return "#{bare}{ #{variant.strip}: #{inner} }"
+    end
+    if (m = decl.match(/\A(?:PUB |PRIVATE )?STRUCT #{Regexp.escape(bare)}\s*\{(.*?)^\}/m))
+      fields = m[1].split("\n").map(&:strip).reject { |l| l.empty? || l.start_with?('#') }
+      pairs = fields.map do |line|
+        fname, ftype = line.chomp(',').split(':', 2)
+        return nil unless fname && ftype
+
+        value = default_value(ftype.split('=').first.to_s.strip, seen) or return nil
+        "#{fname.strip}: #{value}"
+      end
+      return "#{bare}{ #{pairs.join(', ')} }"
+    end
+    nil
   end
 
   def rewrite_require(line, relative)
@@ -571,9 +622,13 @@ module SelfhostFnProbe
       msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|[^\n]*\berror: [^\n]*/, 0]
       # A Zig diagnostic says almost nothing without the source line under it,
       # and its position is in the EMITTED file, which no CLEAR line maps to.
-      if (zig = text[/^[^\n]*\.zig:\d+:\d+: error: [^\n]*(?:\n[^\n]*){0,2}/, 0])
-        msg = zig.lines.map(&:strip).reject(&:empty?).join(' | ')
-      end
+      # Zig reports every error it finds, and each one is a real codegen defect
+      # -- keeping only the first makes a file look one fix away when it is
+      # several, and hides whole classes behind whichever came first.
+      zig_errors = text.scan(/^[^\n]*\.zig:\d+:\d+: error: [^\n]*(?:\n[^\n]*){0,2}/)
+                       .map { |chunk| chunk.lines.map(&:strip).reject(&:empty?).join(' | ') }
+                       .uniq
+      msg = zig_errors.join("\n") unless zig_errors.empty?
       # A guidance run wants every diagnostic the compiler could reach, not the
       # first one. Measurement never sets this, so the recorded number is
       # unchanged.
@@ -643,6 +698,11 @@ module SelfhostFnProbe
     # --file may name a file outside the package group; dissect whatever is
     # actually going to be probed, not just the group.
     (group | files).each { |m| cache[File.join(SRC, m)] = dissect(File.join(SRC, m)) }
+
+    # Stub bodies need the type declarations to build a value of the declared
+    # shape; warm the index here so worker threads never race to build it.
+    @probe_cache = cache
+    type_index(cache)
 
     targets = files.flat_map { |f| cache[File.join(SRC, f)][2] }
     if passing
