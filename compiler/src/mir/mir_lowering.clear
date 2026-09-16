@@ -7636,7 +7636,7 @@ PRIVATE FN mIRLowering__build_catch_clauses(MUTABLE self: MIRLowering, MUTABLE n
 END
 PRIVATE FN mIRLowering__collect_catch_reassigns(self: MIRLowering, MUTABLE node: FunctionDef) RETURNS ![]CatchReassign ->
     MUTABLE reassigns: []CatchReassign = List[];
-    MUTABLE catch_bodies: [List, List]Locatable = List[];
+    MUTABLE catch_bodies: [][]Locatable = List[];
     FOR _ IN TRY (mIRLowering__function_catch_clauses(self, node)) DO
     IF _.body THEN
       &catch_bodies.append(COPY _.body);

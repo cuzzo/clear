@@ -9,8 +9,8 @@ PUB UNION StubInfoValue { SymbolValue: String@symbol, StringValue: String }
 PUB STRUCT TestBlockCtx {
   lowering: MIRLowering,
   setup_mir: []Emittable,
-  test_after_each_mir: [List, List]Emittable,
-  test_before_each_mir: [List, List]Emittable,
+  test_after_each_mir: [][]Emittable,
+  test_before_each_mir: [][]Emittable,
   test_block: TestBlock,
   test_name: String
 }
@@ -26,11 +26,11 @@ END
 PUB FN testBlockCtx__fresh_preamble(self: TestBlockCtx) RETURNS TestPreamble ->
     RETURN TestPreamble{ unused: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
-PUB FN testBlockCtx__emit_all_hooks(MUTABLE self: TestBlockCtx, bodies: [List, List]Locatable, name_kind: String, desc_prefix: String, MUTABLE tests: []TestDef) RETURNS ![]TestDef ->
+PUB FN testBlockCtx__emit_all_hooks(MUTABLE self: TestBlockCtx, bodies: [][]Locatable, name_kind: String, desc_prefix: String, MUTABLE tests: []TestDef) RETURNS ![]TestDef ->
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < bodies.length() DO
-      MUTABLE name = "${self.test_name}: ${desc_prefix}${name_kind}_${(rtoc_idx + 1)}";
-      &tests.append(TestDef{ name: name, body: COPY ([testBlockCtx__fresh_preamble(self)] + TRY (mIRLowering__lower_body(&self.lowering, bodies[rtoc_idx]?))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL });
+      MUTABLE name = "${self.test_name}: ${desc_prefix}${name_kind}_${(rtoc_idx + 1).toString()}";
+      &tests.append(TestDef{ name: COPY name, body: COPY ([Emittable{ TestPreamble: COPY testBlockCtx__fresh_preamble(self) }] + TRY (mIRLowering__lower_body(&self.lowering, castLocatableListToMIRLoweringLowerableStmtList(bodies[rtoc_idx]?)))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL });
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN COPY tests;
@@ -47,8 +47,8 @@ PUB STRUCT TestThatEnv {
   tag_suffix: String,
   stub_mir: []Emittable,
   when_setup_mir: []Emittable,
-  when_before_each_mir: [List, List]Emittable,
-  when_after_each_mir: [List, List]Emittable,
+  when_before_each_mir: [][]Emittable,
+  when_after_each_mir: [][]Emittable,
   let_ast_map: {String}LetBinding
 }
 # End Ruby module TestLowering
