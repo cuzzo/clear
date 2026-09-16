@@ -40,9 +40,9 @@ PUB FN mIRLoweringRuntimeState__emitter_mut(MUTABLE self: MIRLoweringRuntimeStat
   IF current EXISTS AS current_value THEN
     RETURN KEEP current_value;
   END
-  current = mIREmitter__new();
-  self.emitter = current;
-  RETURN current_value;
+  MUTABLE fresh: MIREmitter@multiowned = mIREmitter__new();
+  self.emitter = KEEP fresh;
+  RETURN fresh;
 END
 FN mIRLoweringRuntimeState__with_rt_name<U>(MUTABLE self: MIRLoweringRuntimeState, rt_name: String, blk: FN() -> U) RETURNS U ->
 MUTABLE previous = COPY self.rt_name;

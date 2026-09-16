@@ -94,19 +94,34 @@ END
 PRIVATE FN programMIRFinalizer__generic_return_needs_runtime?(function: FunctionDef, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   MUTABLE returned: ?String = programMIRFinalizer__generic_returned_parameter_name(function);
   IF returned EXISTS AS returned_value THEN
-    MUTABLE index = function.params.indexOf();
-    IF !(index) THEN
+    # Ruby: `function.params.index { |param| param.name.to_s == returned }`.
+    # ruby-to-clear dropped the block, leaving an argumentless indexOf.
+    MUTABLE index: ?Int64 = NIL;
+    MUTABLE rtoc_param_idx = 0;
+    WHILE rtoc_param_idx < function.params.length() DO
+      IF ((UNWRAP (COPY function.params[rtoc_param_idx])).name == returned_value) THEN
+        index = rtoc_param_idx;
+        rtoc_param_idx = function.params.length();
+      ELSE
+        rtoc_param_idx = rtoc_param_idx + 1;
+      END
+    END
+    IF !(index EXISTS) THEN
       RETURN FALSE;
     END
-    RETURN fn_nodes.values() |> ANY (IF !(_.body()) THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE needs_runtime: Bool = FALSE; { MUTABLE rtoc_value_block_marker = 0; aST__each_locatable_list(_.body(), FALSE, %(node: Locatable) USE(function, index, schema_lookup) -> {
+    RETURN fn_nodes.values() |> ANY (IF _.body.empty?() THEN FALSE ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE needs_runtime: Bool = FALSE; { MUTABLE rtoc_value_block_marker = 0; aST__each_locatable_list(COPY _.body, FALSE, %(node: Locatable) USE(function, index, schema_lookup) -> {
   IF !((IF node IS_A FuncCall AS func_call THEN (CAST(funcCall__name(func_call) AS String) == CAST(function.name AS String)) ELSE FALSE END)) THEN
         RETURN;
   END
-  MUTABLE argument = locatable__args(node)[index];
-  IF !(argument) THEN
+  MUTABLE rtoc_args: ?[]Locatable = locatable__args(node);
+  IF !(rtoc_args EXISTS) THEN
         RETURN;
   END
-  MUTABLE type = TRY (type__success_type((&argument.full_type_mut({:context: "generic return instantiation"}))));
+  MUTABLE argument: ?Locatable = COPY (UNWRAP (rtoc_args))[UNWRAP (index)];
+  IF !(argument EXISTS) THEN
+        RETURN;
+  END
+  MUTABLE type = TRY (type__success_type(TRY (aST__full_type_mut(UNWRAP (argument)))));
   needs_runtime = (needs_runtime OR ((TRY (type__string?(type)) OR TRY (type__collection_value?(type))) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup))));
   rubyToClearVoid__program_mir_facts()
     }); needs_runtime } } END);
@@ -149,17 +164,23 @@ PRIVATE FN programMIRFinalizer__generic_returned_parameter_name(function: Functi
   IF !((returns.length() == 1)) THEN
     RETURN NIL;
   END
-  MUTABLE value:? = (UNWRAP (returns.first())).value;
-  IF !(value IS_A Identifier) THEN
+  MUTABLE value: ?Locatable = COPY (UNWRAP (returns.first())).value;
+  IF !(value EXISTS) THEN
     RETURN NIL;
   END
-  IF !(function.params |> ANY (_.name == CAST(value.name() AS String))) THEN
+  MUTABLE value_name: String = "";
+  IF value IS_A Identifier AS value_identifier THEN
+    value_name = COPY value_identifier.name;
+  ELSE
     RETURN NIL;
   END
-  RETURN COPY CAST(value.name() AS String);
+  IF !(function.params |> ANY (_.name == value_name)) THEN
+    RETURN NIL;
+  END
+  RETURN COPY value_name;
 END
 PRIVATE FN programMIRFinalizer__finalized_runtime_input?(function: FunctionDef) RETURNS Bool ->
-  RETURN (((((((((CAST(function.name AS String) == name) OR !((function.conformance_protocol == NIL))) OR (function.uses_rt == TRUE)) OR programMIRFinalizer__function_error_context?(function)) OR (function.uses_alloc == TRUE)) OR (function.fn_value_ref == TRUE)) OR !((function.thunk_plan == NIL))) OR !((function.mutual_thunk_plan == NIL))) OR aST__recursion_yield_needed?(function));
+  RETURN (((((((((CAST(function.name AS String) == "main") OR !((function.conformance_protocol == NIL))) OR (function.uses_rt == TRUE)) OR programMIRFinalizer__function_error_context?(function)) OR (function.uses_alloc == TRUE)) OR (function.fn_value_ref == TRUE)) OR !((function.thunk_plan == NIL))) OR !((function.mutual_thunk_plan == NIL))) OR aST__recursion_yield_needed?(function));
 END
 PRIVATE FN programMIRFinalizer__function_error_context?(function: FunctionDef) RETURNS Bool ->
   IF function.pre_clauses EXISTS AS pre_clauses_value THEN
@@ -233,18 +254,21 @@ PRIVATE FN programMIRFinalizer__copy_node_lowers_through_runtime?(node: Node, sc
   RETURN ((((((TRY (type__string?(type)) OR TRY (type__heap_ptr?(type))) OR TRY (type__collection_value?(type))) OR type__collection?(type)) OR type__any_sync?(type)) OR TRY (type__needs_cleanup?(type, schema_lookup))) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup)));
 END
 PRIVATE FN programMIRFinalizer__indexed_assignment_lowers_through_runtime?(node: Assignment) RETURNS !Bool ->
-  IF !(node.name IS_A GetIndex) THEN
+  MUTABLE rtoc_get_index: ?GetIndex = NIL;
+  IF node.name IS_A GetIndex AS rtoc_name_index THEN
+    rtoc_get_index = COPY rtoc_name_index;
+  ELSE
     RETURN FALSE;
   END
-  MUTABLE target: ?Locatable@boxed = locatable__target( castAssignmentNameToLocatable__type_analysis_session(node.name));
-  IF !(target IS_A Locatable) THEN
+  MUTABLE target: ?Locatable = COPY (UNWRAP (rtoc_get_index)).target;
+  IF !(target EXISTS) THEN
     RETURN FALSE;
   END
-  IF (node.name.protocol_operation() == :map_put) THEN
+  IF ((UNWRAP (rtoc_get_index)).protocol_operation == :map_put) THEN
     RETURN TRUE;
   END
-  MUTABLE type = &target.full_type_mut({:context: "indexed assignment target"});
-  IF ((type.fixed?() AND !(TRY (type__string?(type)))) AND !(type__collection?(type))) THEN
+  MUTABLE type = TRY (aST__full_type_mut(target));
+  IF ((type__fixed?(type) AND !(TRY (type__string?(type)))) AND !(type__collection?(type))) THEN
     RETURN FALSE;
   END
   MUTABLE key: ?String@symbol = TRY (type__dispatch_key(type));
