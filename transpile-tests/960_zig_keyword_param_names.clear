@@ -1,0 +1,45 @@
+# Test: parameters whose names need Zig escaping.
+# A parameter named `type`, `bool` or `error` is emitted as `@"type"` and so
+# on. Two places in lowering named the RAW identifier instead:
+#   - the unused-parameter discard emitted `_ = &type;` while the parameter
+#     was `@"type"`, so Zig still reported "unused function parameter";
+#   - the MUTABLE-scalar shadow declared `var type = _m_type.*;`, which Zig
+#     rejects with "name shadows primitive 'type'".
+# Both now use the same Zig-safe name the body's uses lower through.
+
+STRUCT Holder {
+  v: Int64
+}
+
+FN ignoresKeywordParam(type: Holder, error: Bool = FALSE) RETURNS Int64 ->
+    RETURN 11_i64;
+END
+
+FN readsKeywordParam(type: Holder) RETURNS Int64 ->
+    RETURN type.v;
+END
+
+FN ignoresMutableKeywords(MUTABLE type: Int64, MUTABLE bool: Bool) RETURNS Int64 ->
+    RETURN 7_i64;
+END
+
+FN usesMutableKeyword(MUTABLE type: Int64) RETURNS Int64 ->
+    type = type + 1_i64;
+    RETURN type;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE h = Holder{ v: 5 };
+    ASSERT ignoresKeywordParam(h) == 11_i64, "unused escaped param";
+    ASSERT readsKeywordParam(h) == 5_i64, "used escaped param still reads";
+
+    MUTABLE n = 3_i64;
+    MUTABLE b = FALSE;
+    ASSERT ignoresMutableKeywords(&n, &b) == 7_i64, "unused escaped MUTABLE params";
+    ASSERT n == 3_i64, "an unused MUTABLE param writes nothing back";
+
+    ASSERT usesMutableKeyword(&n) == 4_i64, "used escaped MUTABLE param";
+    ASSERT n == 4_i64, "write-back lands under the escaped name";
+
+    print("zig keyword param names ok");
+END

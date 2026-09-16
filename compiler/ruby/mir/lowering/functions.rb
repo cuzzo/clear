@@ -889,7 +889,10 @@ module MIRLoweringFunctions
     out = T.let([], T::Array[MIR::Node])
     node.params.each do |p|
       next if used_names.include?(p.name)
-      suppress_name = mutable_scalar_params.include?(p.name) ? "_m_#{p.name}" : p.name
+      # The parameter is emitted under its Zig-safe name (`type` becomes
+      # `@"type"`), so the discard has to name the same thing -- naming the
+      # raw one leaves Zig still seeing the parameter as unused.
+      suppress_name = mutable_scalar_params.include?(p.name) ? "_m_#{p.name}" : zig_safe_name(p.name)
       out << MIR::Suppress.new(suppress_name)
     end
     out
@@ -901,9 +904,13 @@ module MIRLoweringFunctions
     mutable_scalar_params.each do |name|
       next unless used_names.include?(name)
       ptr_name = "_m_#{name}"
-      out << MIR::Let.new(name, MIR::Deref.new(MIR::Ident.new(ptr_name)), true, nil, "_ = &#{name};")
+      # The body's uses lower through zig_safe_name, so the shadow has to be
+      # declared under that same name: `var type = ...` is rejected by Zig for
+      # shadowing a primitive, and a raw `bool` or `error` the same way.
+      local = zig_safe_name(name)
+      out << MIR::Let.new(local, MIR::Deref.new(MIR::Ident.new(ptr_name)), true, nil, "_ = &#{local};")
       out << MIR::DeferStmt.new(MIR::ScopeBlock.new([
-        MIR::Set.new(MIR::Deref.new(MIR::Ident.new(ptr_name)), MIR::Ident.new(name))
+        MIR::Set.new(MIR::Deref.new(MIR::Ident.new(ptr_name)), MIR::Ident.new(local))
       ]))
     end
     out
