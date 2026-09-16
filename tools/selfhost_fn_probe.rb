@@ -548,7 +548,9 @@ module SelfhostFnProbe
     group = all_files_mode ? all_files : members
     files = only_file ? Array(only_file) : group
     cache = {}
-    group.each { |m| cache[File.join(SRC, m)] = dissect(File.join(SRC, m)) }
+    # --file may name a file outside the package group; dissect whatever is
+    # actually going to be probed, not just the group.
+    (group | files).each { |m| cache[File.join(SRC, m)] = dissect(File.join(SRC, m)) }
 
     targets = files.flat_map { |f| cache[File.join(SRC, f)][2] }
     if passing
