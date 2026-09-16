@@ -781,7 +781,7 @@ END
 # rewrites every one holding an Emittable or a list of them. CLEAR has no
 # runtime reflection, so the walk is spelled out per variant, exactly as the
 # read-side emittable__child_exprs dispatcher in mir.clear already is.
-PRIVATE FN emit__rewrite_promoted_fsm_struct_fields_mut(MUTABLE node: Emittable, promoted_names: []String, id: Int64) RETURNS Void ->
+PRIVATE FN emit__rewrite_promoted_fsm_struct_fields_mut(MUTABLE node: Emittable, promoted_names: []String, id: Int64) RETURNS Void EFFECTS REENTRANT ->
   IF node IS_A MIRProgram AS rtoc_v THEN
     MUTABLE rtoc_m = COPY rtoc_v;
     MUTABLE rtoc_items_out: []Emittable = List[];

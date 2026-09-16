@@ -397,7 +397,7 @@ PRIVATE FN fsmRecursiveSplitter__contains_unsupported?(body: ?[]Locatable) RETUR
   END
   RETURN FALSE;
 END
-PRIVATE FN fsmRecursiveSplitter__with_unsupported?(with_node: WithBlock) RETURNS !Bool ->
+PRIVATE FN fsmRecursiveSplitter__with_unsupported?(with_node: WithBlock) RETURNS !Bool EFFECTS REENTRANT ->
   IF TRY (fsmRecursiveSplitter__with_lock_suspend?(with_node)) THEN
     MUTABLE with_plan = TRY (capabilityPlan__require_for(with_node));
     IF !((with_plan.all.length() == (TRY (withCapabilityPlan__locks(with_plan))).length())) THEN
@@ -433,7 +433,7 @@ END
 PRIVATE FN fsmRecursiveSplitter__unsupported_pivot() RETURNS !Int64 ->
   RAISE Input, FsmUnsupportedShape, "Unhandled pivot kind {}";
 END
-PRIVATE FN fsmRecursiveSplitter__emit_pivot(stmt: SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, MUTABLE lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+PRIVATE FN fsmRecursiveSplitter__emit_pivot(stmt: SegmentStmt, after_idx: Int64, MUTABLE builder: Builder, MUTABLE lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 EFFECTS REENTRANT ->
   MUTABLE sus: ?SegmentTail = TRY (segments__classify_suspend(castSegmentStmtToLocatable(stmt)));
   IF sus THEN
     RETURN TRY (fsmRecursiveSplitter__emit_suspend(CAST(sus AS SuspendTail), after_idx, &builder));
@@ -473,7 +473,7 @@ PRIVATE FN fsmRecursiveSplitter__emit_if_fragment(if_stmt: IfStatement, after_id
   MUTABLE _: Tuple<IfStatement, Int64, Builder, MIRLowering, {String@symbol}?TransformValue> = CAST(Tuple{COPY if_stmt, after_idx, COPY builder, COPY lowering, COPY ctx} AS Tuple<IfStatement, Int64, Builder, MIRLowering, {String@symbol}?TransformValue>);
   panic("IfStatement recursive FSM lowering requires structural MIR conditions");
 END
-PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx: Int64, MUTABLE builder: Builder, MUTABLE lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 ->
+PRIVATE FN fsmRecursiveSplitter__emit_with_fragment(with_stmt: WithBlock, after_idx: Int64, MUTABLE builder: Builder, MUTABLE lowering: MIRLowering, ctx: {String@symbol}?TransformValue) RETURNS !Int64 EFFECTS REENTRANT ->
   MUTABLE caps = TRY (withCapabilityPlan__locks((TRY (capabilityPlan__require_for(with_stmt)))));
   IF (caps.length() == 0) THEN
     panic("WITH with no capabilities");
