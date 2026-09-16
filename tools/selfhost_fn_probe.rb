@@ -510,6 +510,22 @@ module SelfhostFnProbe
     end
   end
 
+  # A probe build's cache entry is never reused -- every probe is a different
+  # module -- but `clear` only prunes entries older than an hour, so a corpus
+  # run accumulates gigabytes and ends in ENOSPC. Drop entries old enough that
+  # no concurrent build can still be using them.
+  def prune_probe_cache!
+    cutoff = Time.now - 120
+    Dir.glob(File.join(ROOT, 'zig', '.clear-cache', '*')).each do |path|
+      next unless File.directory?(path)
+      next if File.mtime(path) > cutoff
+
+      FileUtils.rm_rf(path)
+    end
+  rescue StandardError
+    nil
+  end
+
   def compile(source_text, stage, extra_pkg = nil)
     Dir.mktmpdir('fn-probe') do |dir|
       source = File.join(dir, 'probe.clear')
@@ -552,7 +568,12 @@ module SelfhostFnProbe
         return [rstatus.success?, "#{rout}#{rerr}".strip, nil]
       end
       text = "#{out}\n#{err}"
-      msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|error: [^\n]*/, 0]
+      msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|[^\n]*\berror: [^\n]*/, 0]
+      # A Zig diagnostic says almost nothing without the source line under it,
+      # and its position is in the EMITTED file, which no CLEAR line maps to.
+      if (zig = text[/^[^\n]*\.zig:\d+:\d+: error: [^\n]*(?:\n[^\n]*){0,2}/, 0])
+        msg = zig.lines.map(&:strip).reject(&:empty?).join(' | ')
+      end
       # A guidance run wants every diagnostic the compiler could reach, not the
       # first one. Measurement never sets this, so the recorded number is
       # unchanged.
@@ -704,12 +725,11 @@ module SelfhostFnProbe
               rescue StandardError
                 nil
               end
-              # Deleting a cache under a running build fails its compiler_rt
-              # sub-compile, so sweep only when the disk is genuinely about to
-              # end the run, and take the transpile cache first.
+              # The transpile cache has no age-based prune of its own.
               if free && free < 2_000_000
                 FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-transpile-cache'))
               end
+              prune_probe_cache!
             end
           end
         end

@@ -453,17 +453,17 @@ PUB FN pipelineRangeLowerer__lower_range_fold(self: PipelineRangeLowerer, MUTABL
       IF terminal EXISTS AS terminal_value THEN
         MUTABLE terminal_value_mutable = COPY terminal_value;
         MUTABLE fid = runtimeHost__range_next_observable_id(self.host);
-        MUTABLE prefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(self, range_lit, stages, NIL, :heap, "__rt_obs_${fid}", TRUE));
+        MUTABLE prefix: ?PipelineLazyRangePrefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(self, range_lit, stages, NIL, :heap, "__rt_obs_${fid}", TRUE));
         label = runtimeHost__range_next_label(self.host);
         RETURN TRY (pipelineRangeLowerer__lower_range_fold_observable_default(self, UNWRAP (prefix), fold_op, &smooth_node, label, range_lit, terminal_value_mutable, fid));
       ELSE
         RAISE Input, CompilerError, "lower_range_fold: observable_dest set but no terminal registered for {}";
       END
     END
-    MUTABLE prefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(self, range_lit, stages, NIL, NIL, NIL, TRUE));
+    MUTABLE prefix: ?PipelineLazyRangePrefix = TRY (pipelineRangeLowerer__build_lazy_range_prefix(self, range_lit, stages, NIL, NIL, NIL, TRUE));
     label = runtimeHost__range_next_label(self.host);
     MUTABLE names = pipelineRangeFoldNames__for_label(label, runtimeHost__range_bc_target?(self.host));
-    MUTABLE plan = TRY (pipelineRangeLowerer__scalar_fold_plan(self, UNWRAP (prefix), fold_op, &smooth_node, names));
+    MUTABLE plan: ?PipelineRangeFoldPlan = TRY (pipelineRangeLowerer__scalar_fold_plan(self, UNWRAP (prefix), fold_op, &smooth_node, names));
     RETURN TRY (pipelineRangeLowerer__range_accumulating_block(self, range_lit, UNWRAP (prefix), label, UNWRAP (plan), prefix.initial_capture));
 END
 PUB FN pipelineRangeLowerer__lower_range_reduce(self: PipelineRangeLowerer, MUTABLE range_lit: Locatable, stages: []Locatable, reduce_op: ReduceOp, smooth_node: ?BinaryOp = NIL) RETURNS !MIRBlockExpr ->

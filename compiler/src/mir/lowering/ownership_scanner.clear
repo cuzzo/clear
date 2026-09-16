@@ -23,18 +23,18 @@ PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRL
     END
     rubyToClearVoid__ownership_scanner()
   });
-  MUTABLE rtoc_each_items_2 = (((IF selectOp__capture_analysis( CAST(bg_value AS SelectOp)) != NIL THEN
-      (selectOp__capture_analysis( CAST(bg_value AS SelectOp))).move_mark_names()
-    ELSE
-      NIL
-    END) OR_ELSE Set[]));
+  MUTABLE rtoc_capture_analysis_2: ?CaptureAnalysis = selectOp__capture_analysis( CAST(bg_value AS SelectOp));
+  MUTABLE rtoc_each_items_2: [Set]String = Set[];
+  IF rtoc_capture_analysis_2 != NIL THEN
+    rtoc_each_items_2 = COPY rtoc_capture_analysis_2.move_mark_names;
+  END
   MUTABLE rtoc_idx = 0;
   WHILE rtoc_idx < rtoc_each_items_2.length() DO
       IF !(body_names.contains?(CAST(UNWRAP (rtoc_each_items_2[rtoc_idx]) AS String))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE entry = (self.bindings[CAST(UNWRAP (rtoc_each_items_2[rtoc_idx]) AS String)] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
+      MUTABLE entry = (self.bindings[CAST(UNWRAP (rtoc_each_items_2[rtoc_idx]) AS String)] OR_ELSE cleanupEntry__none());
       IF cleanupEntry__present?(entry) THEN
           &names.append(COPY CAST(UNWRAP (rtoc_each_items_2[rtoc_idx]) AS String));
       END
@@ -70,16 +70,16 @@ PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwn
   IF aST__declaration_with_identifier_value?(stmt) THEN
     MUTABLE value: Identifier = CAST(aST__node_value(stmt) AS Identifier);
     MUTABLE ti: ?Type = TRY (type__from_node_mut(Locatable{ Identifier: COPY value }, "moved declaration root"));
-    MUTABLE entry = (self.bindings[value.name] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
+    MUTABLE entry = (self.bindings[value.name] OR_ELSE cleanupEntry__none());
     IF (TRY (mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self, UNWRAP (ti))) AND cleanupEntry__present?(entry)) THEN
       &names.append(COPY value.name);
     END
   END
-  mIRLoweringOwnershipScanner__walk_ast_for_moved_args(self, stmt, %(arg: Locatable) USE(MUTABLE names, stmt, MUTABLE ti, self) -> {
+  mIRLoweringOwnershipScanner__walk_ast_for_moved_args(self, stmt, %(arg: Locatable) USE(MUTABLE names, stmt, self) -> {
   IF mIRLoweringOwnershipScanner__arg_is_call_argument?(self, stmt, arg) THEN
       RETURN;
   END
-  MUTABLE ti = TRY (type__from_node_mut(arg, "moved argument root"));
+  MUTABLE ti: ?Type = TRY (type__from_node_mut(arg, "moved argument root"));
   IF !(TRY (mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self, UNWRAP (ti)))) THEN
       RETURN;
   END
@@ -87,8 +87,8 @@ PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwn
   IF !(root) THEN
       RETURN;
   END
-  MUTABLE ident = (aST__root_identifier(arg));
-  MUTABLE entry = (self.bindings[UNWRAP (root)] OR_ELSE new({:produces_owned: FALSE, :alloc: NIL, :cleanup_kind: NIL, :requires_hoist: FALSE, :target_var: NIL}));
+  MUTABLE ident: ?Identifier = (aST__root_identifier(arg));
+  MUTABLE entry = (self.bindings[UNWRAP (root)] OR_ELSE cleanupEntry__none());
   IF !(((IF ident != NIL THEN
       { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = ident.symbol();
   symbolEntry__heap_storage?(rtoc_local_receiver_5) }
