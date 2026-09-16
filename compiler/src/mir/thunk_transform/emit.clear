@@ -97,7 +97,7 @@ PRIVATE FN emit__bind_frame_refs(mir: Emittable, context: FrameBindingContext) R
   ELSE_IF mir IS_A FieldGet AS field_get THEN
     RETURN Emittable{ FieldGet: COPY FieldGet{ object: COPY emit__bind_frame_refs(field_get.object, context), field: COPY field_get.field, lowered_node_id: NIL, ownership_consumption: NIL } };
   ELSE_IF mir IS_A IndexGet AS index_get THEN
-    RETURN Emittable{ IndexGet: COPY IndexGet{ object: COPY emit__bind_frame_refs(index_get.object, context), index: COPY emit__bind_frame_refs(index_get.indexOf(), context), lowered_node_id: NIL, ownership_consumption: NIL } };
+    RETURN Emittable{ IndexGet: COPY IndexGet{ object: COPY emit__bind_frame_refs(index_get.object, context), index: COPY emit__bind_frame_refs(index_get.index, context), lowered_node_id: NIL, ownership_consumption: NIL } };
   ELSE_IF mir IS_A MIRMethodCall AS mir_method_call THEN
     RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY emit__bind_frame_refs(mir_method_call.receiver, context), method: COPY mir_method_call.method, args: COPY mir_method_call.args |> SELECT emit__bind_frame_refs(_, context), try_wrap: mir_method_call.try_wrap, callable_contract: COPY mir_method_call.callable_contract, owned_result_alloc: COPY mir_method_call.owned_result_alloc, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
   ELSE_IF mir IS_A Call AS call THEN
@@ -188,11 +188,11 @@ PRIVATE FN emit__build_mutual_arm(cf: FunctionDef, ignored_mtp: MutualThunkPlan,
   RETURN MutualThunkArm{ variant_name: COPY cf.name, base_cases: COPY base_cases, target_variant: COPY target_fn, target_arg_inits: COPY arg_inits };
 END
 PRIVATE FN emit__find_cycle_member(cf: FunctionDef, name: String) RETURNS !FunctionDef ->
-  IF ((TRY (emit__mutual_thunk_plan_mut(cf))).cycle_fns) |> FIND (_.name == name) != NIL THEN
-  RETURN CAST(((TRY (emit__mutual_thunk_plan_mut(cf))).cycle_fns) |> FIND (_.name == name) AS FunctionDef);
-  ELSE
-  panic("thunk: cycle member '{}' not found for '{}'");
+  MUTABLE rtoc_found: ?FunctionDef = ((TRY (emit__mutual_thunk_plan_mut(cf))).cycle_fns) |> FIND (_.name == name);
+  IF rtoc_found EXISTS AS rtoc_found_value THEN
+    RETURN COPY rtoc_found_value;
   END
+  RETURN panic("thunk: cycle member '${name}' not found for '${cf.name}'");
 END
 PRIVATE FN emit__thunk_plan_mut(fn_node: FunctionDef) RETURNS !Plan ->
   MUTABLE plan: ?Plan = COPY fn_node.thunk_plan;
