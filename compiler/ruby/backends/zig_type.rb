@@ -16,9 +16,19 @@ class ZigType
     undefined union unreachable usingnamespace var volatile while
   ]).freeze, T::Set[String])
 
+  # Zig refuses to let a binding shadow a primitive type, not only a keyword:
+  # `const bool = ...` is "name shadows primitive 'bool'". The sized integers
+  # and floats are matched by shape below; these are the ones that are not.
+  PRIMITIVE_IDENTIFIERS = T.let(Set.new(%w[
+    bool void noreturn anyerror anyopaque comptime_int comptime_float
+    isize usize c_char c_short c_ushort c_int c_uint c_long c_ulong
+    c_longlong c_ulonglong c_longdouble
+  ]).freeze, T::Set[String])
+
   sig { params(name: String).returns(T::Boolean) }
   def self.reserved_identifier?(name)
-    RESERVED_IDENTIFIERS.include?(name) || primitive_numeric_identifier?(name)
+    RESERVED_IDENTIFIERS.include?(name) || PRIMITIVE_IDENTIFIERS.include?(name) ||
+      primitive_numeric_identifier?(name)
   end
 
   sig { returns(String) }

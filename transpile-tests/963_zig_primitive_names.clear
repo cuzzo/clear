@@ -1,0 +1,43 @@
+# Test: bindings whose names are Zig PRIMITIVE TYPES, not keywords.
+# The reserved-identifier set held Zig's keywords (plus `type`) and matched
+# sized numerics like `i64` by shape, but `bool`, `void`, `usize` and
+# `anyerror` are primitives with neither property. A binding named `bool` was
+# emitted raw and Zig rejected it: "name shadows primitive 'bool'".
+
+UNION Val {
+  BoolValue: Bool,
+  Int64Value: Int64
+}
+
+FN readBool(v: Val) RETURNS Bool ->
+    IF v IS_A Bool AS bool THEN
+        RETURN bool;
+    END
+    RETURN FALSE;
+END
+
+FN countUp(n: Int64) RETURNS Int64 ->
+    MUTABLE usize = 0_i64;
+    MUTABLE anyerror = n;
+    WHILE usize < anyerror DO
+        usize = usize + 1_i64;
+    END
+    RETURN usize;
+END
+
+FN pickVoid(flag: Bool) RETURNS String ->
+    MUTABLE void = COPY "empty";
+    IF flag THEN
+        void = COPY "full";
+    END
+    RETURN void;
+END
+
+FN main() RETURNS Void ->
+    ASSERT readBool(Val{ BoolValue: TRUE }), "narrowing binding named bool";
+    ASSERT !(readBool(Val{ Int64Value: 3 })), "the other variant is not taken";
+    ASSERT countUp(4_i64) == 4_i64, "locals named usize and anyerror";
+    ASSERT pickVoid(TRUE) == "full", "reassigned local named void";
+    ASSERT pickVoid(FALSE) == "empty", "its initial value";
+    print("zig primitive names ok");
+END
