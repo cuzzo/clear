@@ -4808,7 +4808,13 @@ RSpec.describe SemanticAnnotator do
       CLEAR
 
       zig = ZigTranspiler.new.transpile(src)
-      expect(zig).to include("CheatLib.clearList(rt.heapAlloc(), &items)")
+      # `clear` frees through the allocator, so the function takes the runtime
+      # and the allocator comes from the emitter's cached `rt.heapAlloc()`.
+      # This used to assert the bare `rt.heapAlloc()` beside a signature with
+      # no runtime parameter -- Zig rejects that as an undeclared identifier,
+      # which the spec never noticed because it only reads the emitted text.
+      expect(zig).to include("fn clear_items(rt: *Runtime")
+      expect(zig).to include("CheatLib.clearList(__clear_heap_alloc, &items)")
     end
 
     it "does not treat a mutable method on a TRY expression as an identifier access path" do

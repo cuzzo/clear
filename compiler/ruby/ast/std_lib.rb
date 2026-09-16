@@ -138,6 +138,8 @@ STD_LIB = T.let({
     zig: "CheatLib.clearList({alloc}, &{0})",
     bc: true,
     alloc: :receiver_storage,
+    # Frees through the allocator: no allocation, but rt must be in scope.
+    needs_rt: true,
     mutates_receiver: true,
     borrows: :all,
     is_method: true,
@@ -1439,6 +1441,8 @@ SET_METHODS = T.let({
     zig: "{0}.clear({alloc})",
     bc: true,
     alloc: :receiver_storage,
+    # Frees through the allocator: no allocation, but rt must be in scope.
+    needs_rt: true,
     mutates_receiver: true,
     return_type: :Void,
     borrows: :all,
@@ -1449,6 +1453,8 @@ SET_METHODS = T.let({
     zig: "{0}.remove({alloc}, {1})",
     bc: true,
     alloc: :heap,
+    # Frees through the allocator: no allocation, but rt must be in scope.
+    needs_rt: true,
     mutates_receiver: true,
     return_type: :Void,
     borrows: :all,  # set frees the element internally,
@@ -1509,6 +1515,8 @@ MAP_METHODS = T.let({
     zig: "{0}.clear({alloc}, {alloc})",
     bc: true,
     alloc: :receiver_storage,
+    # Frees through the allocator: no allocation, but rt must be in scope.
+    needs_rt: true,
     mutates_receiver: true,
     return_type: :Void,
     borrows: :all,
@@ -1540,6 +1548,8 @@ MAP_METHODS = T.let({
     bc: true,
     zig: "{0}.remove({alloc}, {1})",
     alloc: :receiver_storage,
+    # Frees through the allocator: no allocation, but rt must be in scope.
+    needs_rt: true,
     mutates_receiver: true,
     numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})",
     validate: ->(node, args, obj_type, error_fn) {

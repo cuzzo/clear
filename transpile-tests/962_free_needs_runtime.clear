@@ -1,0 +1,40 @@
+# Test: a collection method that FREES through the allocator.
+# `clear`, `remove` and `delete` name an allocator in their emitted Zig --
+# `CheatLib.clearList(rt.heapAlloc(), ...)` -- but allocate nothing, so they
+# declared neither `allocates` nor `needs_rt` and the enclosing function was
+# emitted without its runtime parameter. Zig then rejected the body with
+# "use of undeclared identifier 'rt'". Naming an allocator is what requires
+# the runtime; allocating is not.
+
+STRUCT Reg {
+  defs: []String,
+  index: {String}Int64,
+  seen: [Set]String
+}
+
+FN clearDefs(MUTABLE self: Reg) RETURNS Void ->
+    &self.defs.clear();
+END
+
+FN dropKey(MUTABLE self: Reg, key: String) RETURNS Void ->
+    &self.index.delete(key);
+END
+
+FN clearSeen(MUTABLE self: Reg) RETURNS Void ->
+    &self.seen.clear();
+END
+
+FN main() RETURNS Void ->
+    MUTABLE r = Reg{ defs: ["a", "b"], index: { "k": 1 }, seen: Set["x"] };
+
+    clearDefs(&r);
+    ASSERT r.defs.length() == 0, "list cleared without a runtime parameter";
+
+    dropKey(&r, "k");
+    ASSERT r.index.length() == 0, "map key deleted";
+
+    clearSeen(&r);
+    ASSERT r.seen.length() == 0, "set cleared";
+
+    print("free needs runtime ok");
+END
