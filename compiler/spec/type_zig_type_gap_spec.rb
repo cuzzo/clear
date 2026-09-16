@@ -15,7 +15,10 @@ RSpec.describe Type, "zig_type gap coverage" do
   it "keeps fallible function return types fallible" do
     sig = FunctionSignature.new(params: [], return_type: Type.new("!Int64"))
 
-    expect(Type.from_function_signature(sig).zig_type).to eq("*const fn(*Runtime) anyerror!i64")
+    # An FN value carries the environment its captures live in, so the code
+    # pointer travels inside a Closure with the environment beside it.
+    expect(Type.from_function_signature(sig).zig_type)
+      .to eq("CheatLib.Closure(fn(*Runtime, ?*anyopaque) anyerror!i64)")
   end
 
   it "wraps shared fixed SOA arrays around the SoaList shape" do

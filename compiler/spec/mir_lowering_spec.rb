@@ -2988,8 +2988,10 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
 
       expect(result).to be_a(MIR::Call)
-      expect(result.callee).to eq("try callback")
-      expect(result.args.map { |a| emit(a) }).to eq(["rt", "5"])
+      # A function VALUE is a closure: the environment its captures live in
+      # travels with the code pointer, so the call names both.
+      expect(result.callee).to eq("try callback.call")
+      expect(result.args.map { |a| emit(a) }).to eq(["rt", "callback.ctx", "5"])
     end
 
     it "uses try for fallible function variable calls" do
@@ -3006,8 +3008,8 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
 
       expect(result).to be_a(MIR::Call)
-      expect(result.callee).to eq("try callback")
-      expect(result.args.map { |a| emit(a) }).to eq(["rt", "5"])
+      expect(result.callee).to eq("try callback.call")
+      expect(result.args.map { |a| emit(a) }).to eq(["rt", "callback.ctx", "5"])
     end
 
     it "wraps heap-duped function results in DupeSlice" do

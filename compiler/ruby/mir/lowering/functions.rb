@@ -968,6 +968,9 @@ module MIRLoweringFunctions
   # Build the inner function for a POST-having FunctionDef. Holds the
   # original body verbatim. Marked :private so callers go through the
   # outer wrapper (which validates).
+  # The closure environment parameter every lambda takes.
+  LAMBDA_ENV_PARAM = "__lam_env"
+
   sig { params(node: AST::FunctionDef, params_mir: T::Array[MIR::Param], return_type_str: String, prologue: T::Array[MIR::Node], body_mir: T::Array[MIR::Node], comptime_params: T::Array[String]).returns(MIR::FnDef) }
   def build_post_inner_fn(node, params_mir, return_type_str, prologue, body_mir, comptime_params)
     T.bind(self, MIRLowering) rescue nil
@@ -1882,14 +1885,17 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
 
     if node.respond_to?(:fn_var_call) && node.fn_var_call
       # fn-type variable call
-      all_args = [MIR::Ident.new(runtime_binding_name)] + args_mir
+      safe = zig_safe_name(node.name)
+      # A function VALUE is a closure: the environment its captures live in
+      # travels with the code pointer, so the call passes both.
+      all_args = [MIR::Ident.new(runtime_binding_name), MIR::Ident.new("#{safe}.ctx")] + args_mir
       contract = callable_contract_for_lowered_args(FunctionSignature.unwrap(node.matched_signature), node.args, args_mir)
       # Function values use CLEAR's uniform callback ABI:
-      #   *const fn (*Runtime, ...) anyerror!R
+      #   fn (*Runtime, ?*anyopaque, ...) anyerror!R
       # even when R itself is not an error union. The indirect call must
       # therefore always consume/propagate the ABI error channel. Omitting
       # `try` produced invalid Zig for ordinary `FN(Int64) -> Bool` values.
-      return MIR::Call.new("try #{node.name}", all_args, false, call_owned_return?(node), contract)
+      return MIR::Call.new("try #{safe}.call", all_args, false, call_owned_return?(node), contract)
     end
 
     # Resolve rt/fail from fn_sigs
@@ -2890,7 +2896,10 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     fn_name = "_lambda_#{lowering_counters.next_lambda_id}"
 
     params_list = T.unsafe(sig).params
-    params_mir = T.let([MIR::Param.new("_rt", "*Runtime", false)] + params_list.map { |p|
+    # Every FN value has the same Zig shape, capturing or not: the closure's
+    # environment pointer comes right after the runtime.
+    params_mir = T.let([MIR::Param.new("_rt", "*Runtime", false),
+                        MIR::Param.new(LAMBDA_ENV_PARAM, "?*anyopaque", false)] + params_list.map { |p|
       p_type = p.type
       type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
       pt_obj = p_type.is_a?(Type) ? p_type : (Type.new(p_type) rescue nil)
@@ -2964,12 +2973,28 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     # variable it aliases, so a capture named for the alias would not match the
     # name the body actually references. Record both.
     alias_owners = capability_state.with_alias_owner_map || {}
-    captures = (node.captures || []).flat_map { |c|
+    capture_entries = (node.captures || []).flat_map { |c|
       name = c.respond_to?(:name) ? c.name.to_s : c.to_s
+      c_type = c.respond_to?(:type) ? c.type : nil
+      zig = c_type.is_a?(Type) ? c_type.zig_type : nil
+      mutable = c.respond_to?(:mutable) && c.mutable == true
       owner = alias_owners[name]
-      owner ? [name, owner.to_s] : [name]
+      owner ? [[name, zig, mutable], [owner.to_s, zig, mutable]] : [[name, zig, mutable]]
     }
-    MIR::LambdaExpr.new(fn_def, captures)
+    captures = capture_entries.map { |e| e[0] }
+    capture_types = capture_entries.map { |e| e[1] }
+    capture_mutables = capture_entries.map { |e| e[2] }
+    # A capture whose type the annotator never resolved cannot be read back
+    # through an opaque pointer. Leave those lambdas without an environment
+    # rather than emitting a cast to a type that is not there.
+    env_name = nil
+    if captures.any? && capture_types.all?
+      env_name = "__lam_env_#{lowering_counters.next_tmp_id}"
+      function_state.pending_stmts << MIR::Let.new(
+        env_name, MIR::CaptureEnv.new(captures.map { |n| zig_safe_name(n) }), true, nil, nil
+      )
+    end
+    MIR::LambdaExpr.new(fn_def, captures, capture_types, env_name, capture_mutables)
   end
 
   # ================================================================

@@ -1,0 +1,71 @@
+# Test: a lambda that reads and writes the scope it was written in.
+# Zig forbids a nested function from touching ANY runtime value of the
+# function enclosing it, so `emit_lambda` emitted a bare function pointer and
+# a `USE(...)` body referenced an outer local directly -- Zig rejected that
+# with "'x' not accessible from here", and a `USE(MUTABLE x)` write had
+# nowhere to land. An FN value now carries the environment its captures live
+# in: one opaque pointer per capture, read back inside the lambda.
+
+FN nothing() RETURNS Void ->
+    RETURN;
+END
+
+FN applyAll(items: []Int64, f: FN(Int64) -> Void) RETURNS !Void ->
+    FOR it IN items DO
+        f(it);
+    END
+END
+
+FN total(items: []Int64) RETURNS !Int64 ->
+    MUTABLE sum = 0_i64;
+    TRY (applyAll(items, %(v: Int64) USE(MUTABLE sum) -> {
+        sum = sum + v;
+        nothing()
+    }));
+    RETURN sum;
+END
+
+FN offsetAll(items: []Int64, by: Int64) RETURNS !Int64 ->
+    MUTABLE sum = 0_i64;
+    TRY (applyAll(items, %(v: Int64) USE(MUTABLE sum, by) -> {
+        sum = sum + v + by;
+        nothing()
+    }));
+    RETURN sum;
+END
+
+FN twoLambdasStayIndependent(items: []Int64) RETURNS !Int64 ->
+    MUTABLE a = 0_i64;
+    MUTABLE b = 0_i64;
+    TRY (applyAll(items, %(v: Int64) USE(MUTABLE a) -> {
+        a = a + v;
+        nothing()
+    }));
+    TRY (applyAll(items, %(v: Int64) USE(MUTABLE b) -> {
+        b = b + (v * 2_i64);
+        nothing()
+    }));
+    ASSERT b == a * 2_i64, "each closure wrote to its own capture";
+    RETURN a + b;
+END
+
+FN double(n: Int64) RETURNS Int64 ->
+    RETURN n * 2_i64;
+END
+
+FN applyOne(n: Int64, f: FN(Int64) -> Int64) RETURNS !Int64 ->
+    RETURN f(n);
+END
+
+FN main() RETURNS !Void ->
+    MUTABLE items: []Int64 = [1_i64, 2_i64, 3_i64];
+
+    ASSERT TRY (total(items)) == 6_i64, "a MUTABLE capture accumulates";
+    ASSERT TRY (offsetAll(items, 10_i64)) == 36_i64, "a read-only capture comes along";
+    ASSERT TRY (twoLambdasStayIndependent(items)) == 18_i64, "two closures, two environments";
+
+    # A named function has no environment and travels as the same FN type.
+    ASSERT TRY (applyOne(21_i64, double)) == 42_i64, "a named function is an FN value";
+
+    print("lambda runtime captures ok");
+END

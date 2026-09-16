@@ -247,7 +247,17 @@ module MIRLoweringExpressions
             "in the same pipeline expression where they are used."
     end
 
-    return MIR::FnRef.new(zig_safe_name(node.name)) if node.respond_to?(:fn_ref) && node.fn_ref
+    if node.respond_to?(:fn_ref) && node.fn_ref
+      fn_t = node.full_type!(context: "function reference").function_type
+      param_types = (fn_t&.params || []).map do |p|
+        pt = p.type
+        zig = pt.is_a?(Type) ? pt.zig_type(is_param: true) : transpile_type(pt || :Any, is_param: true)
+        p.mutable && !zig.start_with?("*") ? "*#{zig}" : zig
+      end
+      ret_zig = fn_t ? fn_t.return_type.zig_type : "void"
+      return MIR::FnRef.new(zig_safe_name(node.name), param_types, ret_zig,
+                            callee_needs_rt?(node.name))
+    end
 
     # Inside a WITH block, use the unwrapped inner alias instead of the Rc handle
     rc_map = capability_state.rc_unwrap_map || {}

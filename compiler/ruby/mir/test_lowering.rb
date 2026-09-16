@@ -385,12 +385,15 @@ module TestLowering
       ])
 
     when :with
-      # WITH-stub lambdas are emitted with `rt: *Runtime` as their
-      # implicit first parameter (same as every other CLEAR fn). The
-      # invocation must thread the runtime through and `try` because
-      # the lambda's return type is `anyerror!T`.
+      # A WITH-stub binds a lambda, which is an FN VALUE: a closure carrying
+      # the environment its captures live in. The invocation threads the
+      # runtime and that environment through, and `try`s because the lambda's
+      # return type is `anyerror!T`.
       args_mir = call_inputs.map { |a| lower(a) }
-      MIR::Call.new(stub_info[:var], [MIR::Ident.new(runtime_binding_name)] + args_mir, true)
+      var = stub_info[:var]
+      MIR::Call.new("#{var}.call",
+                    [MIR::Ident.new(runtime_binding_name), MIR::Ident.new("#{var}.ctx")] + args_mir,
+                    true)
     end
   end
 

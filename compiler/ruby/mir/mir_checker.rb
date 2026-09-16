@@ -142,7 +142,7 @@ class MIRChecker
     MIR::DestructureSet, MIR::DestructureTarget, MIR::DiscardOwned, MIR::DoBlock,
     MIR::DupeSlice, MIR::EnumDef, MIR::EnumOrdinal, MIR::ErrCleanup, MIR::ErrDeferStmt,
     MIR::ExprStmt, MIR::FallibleLockBinding, MIR::FieldCleanupMark, MIR::FieldDef,
-    MIR::FieldGet, MIR::FnDef, MIR::FnRef, MIR::ForStmt, MIR::FrameRestore,
+    MIR::CaptureEnv, MIR::FieldGet, MIR::FnDef, MIR::FnRef, MIR::ForStmt, MIR::FrameRestore,
     MIR::FrameSave, MIR::FreeSlice, MIR::FreezeExpr, MIR::FsmB1Body, MIR::FsmGenericBody,
     MIR::FsmIoBody, MIR::FsmStructure, MIR::HasField, MIR::HeapCreate, MIR::Ident,
     MIR::IfBindStmt, MIR::IfChain, MIR::IfOptional, MIR::IfStmt, MIR::Import,

@@ -222,7 +222,8 @@ class MIREmitter
     when MIR::CapabilityUnwrap then emit_capability_unwrap(node)
     when MIR::CapabilityLockTarget then emit_capability_lock_target(node)
     when MIR::CapabilityLockAddress then emit_capability_lock_address(node)
-    when MIR::FnRef            then "&#{node.name}"
+    when MIR::FnRef            then emit_fn_ref(node)
+    when MIR::CaptureEnv       then emit_capture_env(node)
     when MIR::LockAcquire      then emit_lock_acquire(node)
     when MIR::TypeOf           then "@TypeOf(#{emit(node.expr)})"
     when MIR::TypeEq           then "(#{emit(node.left)} == #{emit(node.right)})"
@@ -3590,11 +3591,88 @@ class MIREmitter
     "@hasField(@TypeOf(#{emit(node.expr)}), \"#{node.field}\")"
   end
 
+  # One opaque pointer per capture, in capture order.
+  sig { params(node: MIR::CaptureEnv).returns(String) }
+  def emit_capture_env(node)
+    slots = node.names.map { |name| "@ptrCast(&#{name})" }.join(", ")
+    "[#{node.names.length}]?*const anyopaque{ #{slots} }"
+  end
+
+  # A named function used as an FN value. It has no environment and no
+  # environment parameter, so it travels wrapped in one that ignores both.
+  sig { params(node: MIR::FnRef).returns(String) }
+  def emit_fn_ref(node)
+    params = node.param_types || []
+    return "&#{node.name}" if node.ret_type.nil?
+
+    names = params.each_with_index.map { |_t, i| "__a#{i}" }
+    # The wrapper is nested inside the function that builds it, and Zig rejects
+    # any shadowing -- including of the runtime parameter.
+    decl = ["__thunk_rt: *Runtime", "_: ?*anyopaque",
+            *names.each_with_index.map { |n, i| "#{n}: #{params[i]}" }].join(", ")
+    ret = ZigType.new(node.ret_type).concrete_fallible_return_type
+    fwd = (node.target_needs_rt ? ["__thunk_rt"] : []) + names
+    unused_rt = node.target_needs_rt ? "" : "_ = __thunk_rt; "
+    "CheatLib.Closure(fn(*Runtime, ?*anyopaque, #{params.join(', ')}) #{ret})" \
+      ".bind(null, &(struct { fn __thunk(#{decl}) #{ret} " \
+      "{ #{unused_rt}return #{node.name}(#{fwd.join(', ')}); } }).__thunk)"
+  end
+
   sig { params(node: MIR::LambdaExpr).returns(String) }
   def emit_lambda(node)
     fn = node.fn_def
-    fn_zig = emit_fn_def(fn)
-    "&(struct { #{fn_zig} }).#{fn.name}"
+    names = node.captures || []
+    types = node.capture_types || []
+    env = node.env_name
+    body_fn = if env
+      # The lambda cannot name the types of the scope it came from, so its
+      # environment arrives as opaque pointers and the types come back here.
+      mutables = node.capture_mutables || []
+      prologue = names.each_with_index.map do |name, i|
+        # An environment slot is const: `USE(x)` only reads. `USE(MUTABLE x)`
+        # writes, and the binding it points at was marked mutated for exactly
+        # that reason, so casting the const away here writes to a `var`.
+        if mutables[i]
+          "const #{capture_ptr_name(name)}: *#{types[i]} = " \
+            "@constCast(@ptrCast(@alignCast(#{LAMBDA_ENV_ARRAY}[#{i}].?)));"
+        else
+          "const #{capture_ptr_name(name)}: *const #{types[i]} = " \
+            "@ptrCast(@alignCast(#{LAMBDA_ENV_ARRAY}[#{i}].?));"
+        end
+      end
+      overrides = names.each_with_index.to_h { |name, _i| [name, "#{capture_ptr_name(name)}.*"] }
+      env_head = "const #{LAMBDA_ENV_ARRAY}: *const [#{names.length}]?*const anyopaque = " \
+        "@ptrCast(@alignCast(#{MIRLowering::LAMBDA_ENV_PARAM}.?));"
+      with_ident_overrides(overrides) do
+        emit_fn_def_with_prologue(fn, [env_head, *prologue])
+      end
+    else
+      emit_fn_def_with_prologue(fn, ["_ = #{MIRLowering::LAMBDA_ENV_PARAM};"])
+    end
+    ctx = env ? "@ptrCast(&#{env})" : "null"
+    "CheatLib.Closure(#{closure_fn_type(fn)}).bind(#{ctx}, &(struct { #{body_fn} }).#{fn.name})"
+  end
+
+  # The array the environment pointers are read out of, named once.
+  LAMBDA_ENV_ARRAY = "__lam_env_slots"
+
+  sig { params(name: String).returns(String) }
+  def capture_ptr_name(name) = "__cap_#{name.gsub(/[^A-Za-z0-9_]/, '_')}"
+
+  # The signature a Closure is parameterised by: what the lambda is, with the
+  # runtime and the environment pointer in front.
+  sig { params(fn: MIR::FnDef).returns(String) }
+  def closure_fn_type(fn)
+    params = fn.params.map(&:zig_type).join(", ")
+    ret = fn.can_fail ? "!#{fn.ret_type}" : fn.ret_type
+    "fn(#{params}) #{ret}"
+  end
+
+  sig { params(fn: MIR::FnDef, prologue: T::Array[String]).returns(String) }
+  def emit_fn_def_with_prologue(fn, prologue)
+    rendered = emit_fn_def(fn)
+    head, rest = rendered.split("{\n", 2)
+    "#{head}{\n#{prologue.join("\n")}\n#{rest}"
   end
 
   sig { params(node: MIR::ItemsAccess).returns(String) }

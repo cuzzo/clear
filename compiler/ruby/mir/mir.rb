@@ -4362,7 +4362,11 @@ module MIR
 
   # Function pointer reference.
   # Zig: &name
-  FnRef = Struct.new(:name) do
+  # A named function used where an FN VALUE is expected. It has no environment
+  # and no environment parameter, so it travels wrapped in a closure whose
+  # code ignores both -- `param_types` and `ret_type` are what that wrapper is
+  # built from, and `target_needs_rt` says whether the runtime is forwarded.
+  FnRef = Struct.new(:name, :param_types, :ret_type, :target_needs_rt) do
     include Expr
   end
 
@@ -5051,14 +5055,34 @@ module MIR
 
   # Lambda expression (anonymous function pointer via struct trick).
   # Zig: &(struct { fn name(params) ret { body } }).name
-  LambdaExpr = Struct.new(:fn_def, :captures) do
+  LambdaExpr = Struct.new(:fn_def, :captures, :capture_types, :env_name, :capture_mutables) do
     include Expr
     # fn_def: MIR::FnDef with the lambda's implementation
     # captures: optional Array<String> — USE-captured variable names
-    # from the AST. The Zig backend ignores these (the synthesized
-    # struct's `fn` accesses outer scope); the BC backend uses them
-    # to emit STORE_NAME at lambda creation and LOAD_NAME inside the
-    # body so the values survive across the BC_CALL boundary.
+    # from the AST. The BC backend uses them to emit STORE_NAME at
+    # lambda creation and LOAD_NAME inside the body so the values
+    # survive across the BC_CALL boundary.
+    # capture_types: parallel Array<String> of Zig types, one per
+    # capture. The lambda receives its environment as opaque pointers
+    # and needs the type back to read through them.
+    # capture_mutables: parallel Array<Boolean>. A USE(MUTABLE x) capture is
+    # written through, so the lambda casts the const away and the binding it
+    # points at is a `var`; a plain USE(x) is only read.
+    # env_name: the enclosing-scope binding holding that environment.
+    # Zig forbids a nested function from touching a runtime value of
+    # the function enclosing it, so the environment has to travel WITH
+    # the closure rather than be reached outward.
+  end
+
+  # The environment a capturing lambda reads through: one opaque pointer per
+  # capture, in capture order. Opaque because the lambda cannot name the types
+  # of the scope it came from; an array because its layout is guaranteed,
+  # unlike an anonymous struct's.
+  CaptureEnv = Struct.new(:names) do
+    extend T::Sig
+    include Expr
+    sig { returns(T::Array[Emittable]) }
+    def child_exprs = []
   end
 
   # Pipeline IR node. Wraps the pre-computed MIR output of a |> chain.

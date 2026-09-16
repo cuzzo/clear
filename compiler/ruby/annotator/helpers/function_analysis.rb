@@ -1647,6 +1647,10 @@ module FunctionAnalysis
 
       # Mark the captured variable as used in its declaring scope.
       owner_scope.mark_read(cap_name)
+      # `USE(MUTABLE x)` writes to x from inside the lambda. The write is not
+      # visible in the declaring scope, so without this the binding is emitted
+      # `const` and the closure's environment pointer cannot be taken.
+      mark_var_mutated(cap_name) if cap.mutable
 
       # Enrich the capture node with the resolved type
       cap.type = entry.type

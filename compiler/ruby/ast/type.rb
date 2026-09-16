@@ -5685,9 +5685,13 @@ class Type
       if fn_raw.abi == :c
         return "*const fn(#{param_types_zig.join(', ')}) callconv(.c) #{ret_zig}"
       end
-      all_params = ["*Runtime"] + param_types_zig
+      # A CLEAR FN value carries the environment its `USE(...)` captures live
+      # in: Zig forbids a nested function from touching a runtime value of the
+      # function enclosing it, so a capturing lambda cannot be a bare pointer.
+      # Every FN value of this type is one Zig type, capturing or not.
+      all_params = ["*Runtime", "?*anyopaque"] + param_types_zig
       ret_str = ZigType.new(ret_zig).concrete_fallible_return_type
-      return "*const fn(#{all_params.join(', ')}) #{ret_str}"
+      return "CheatLib.Closure(fn(#{all_params.join(', ')}) #{ret_str})"
     end
 
     # 2b. Derive Zig type from ownership × sync dimensions

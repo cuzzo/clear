@@ -181,12 +181,12 @@ RSpec.describe SemanticAnnotator do
 
       it "emits *const fn(*Runtime, i64) anyerror!bool for FN(Int64) -> Bool" do
         t = fn_type_for("cb: FN(Int64) -> Bool = %(n: Int64) -> n > 0;")
-        expect(t.zig_type).to eq("*const fn(*Runtime, i64) anyerror!bool")
+        expect(t.zig_type).to eq("CheatLib.Closure(fn(*Runtime, ?*anyopaque, i64) anyerror!bool)")
       end
 
       it "emits *const fn(*Runtime, i64, i64) anyerror!i64 for FN(Int64, Int64) -> Int64" do
         t = fn_type_for("add: FN(Int64, Int64) -> Int64 = %(a: Int64, b: Int64) -> a + b;")
-        expect(t.zig_type).to eq("*const fn(*Runtime, i64, i64) anyerror!i64")
+        expect(t.zig_type).to eq("CheatLib.Closure(fn(*Runtime, ?*anyopaque, i64, i64) anyerror!i64)")
       end
 
       it "emits *const fn(*Runtime) anyerror!void for FN() -> Void" do
@@ -194,7 +194,7 @@ RSpec.describe SemanticAnnotator do
         tokens = Lexer.new("FN() -> Void").tokenize
         # Parse just the type annotation directly via the parser
         t = Type.from_function_signature(FunctionSignature.new(params: [], return_type: Type.new(:Void)))
-        expect(t.zig_type).to eq("*const fn(*Runtime) anyerror!void")
+        expect(t.zig_type).to eq("CheatLib.Closure(fn(*Runtime, ?*anyopaque) anyerror!void)")
       end
 
       it "emits ?*const fn(*Runtime) anyerror!bool for ?FN() -> Bool" do
@@ -202,7 +202,7 @@ RSpec.describe SemanticAnnotator do
         ast = ClearParser.new(tokens, "").parse
         t = ast.statements.first.type
 
-        expect(t.zig_type).to eq("?*const fn(*Runtime) anyerror!bool")
+        expect(t.zig_type).to eq("?CheatLib.Closure(fn(*Runtime, ?*anyopaque) anyerror!bool)")
       end
     end
 
@@ -314,7 +314,7 @@ RSpec.describe SemanticAnnotator do
         }
         it "emits *const fn(*Runtime, i64) anyerror!bool type annotation" do
           zig = transpile(source)
-          expect(zig).to include("*const fn(*Runtime, i64) anyerror!bool")
+          expect(zig).to include("CheatLib.Closure(fn(*Runtime, ?*anyopaque, i64) anyerror!bool)")
         end
 
         it "emits a lambda struct wrapper" do
@@ -333,7 +333,7 @@ RSpec.describe SemanticAnnotator do
         }
         it "emits *const fn(*Runtime, i64) anyerror!bool as the parameter type" do
           zig = transpile(source)
-          expect(zig).to include("cb: *const fn(*Runtime, i64) anyerror!bool")
+          expect(zig).to include("cb: CheatLib.Closure(fn(*Runtime, ?*anyopaque, i64) anyerror!bool)")
         end
       end
     end
@@ -412,7 +412,7 @@ RSpec.describe SemanticAnnotator do
         }
         it "emits try cb(rt, ...)" do
           zig = transpile(source)
-          expect(zig).to match(/try cb\(rt,/)
+          expect(zig).to match(/try cb\.call\(rt, cb\.ctx,/)
         end
       end
 
@@ -427,7 +427,7 @@ RSpec.describe SemanticAnnotator do
         }
         it "emits try add(rt, ...)" do
           zig = transpile(source)
-          expect(zig).to match(/try add\(rt,/)
+          expect(zig).to match(/try add\.call\(rt, add\.ctx,/)
         end
       end
     end
@@ -553,12 +553,13 @@ RSpec.describe SemanticAnnotator do
 
       it "emits &isPositive as the argument" do
         zig = transpile(source)
-        expect(zig).to include("&isPositive")
+        # A named function has no environment, so it travels wrapped in one.
+        expect(zig).to include("return isPositive(")
       end
 
       it "emits try apply(rt, &isPositive, ...)" do
         zig = transpile(source)
-        expect(zig).to match(/try apply\(rt, &isPositive,/)
+        expect(zig).to match(/try apply\(rt, CheatLib\.Closure\(/)
       end
     end
 
