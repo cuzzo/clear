@@ -1,0 +1,27 @@
+# Test: a top-level constant whose initializer HOISTS.
+# A nested list literal inside a fixed-array initializer hoists a temp, and at
+# container scope there is no statement list to hold it: the temp was dropped
+# and the declaration emitted a reference to a name nothing declared. A CONST
+# runs its initializer in the program's init prologue, which is where such a
+# statement belongs. The same binding written WITHOUT `CONST` is now rejected
+# as MODULE_SCOPE_OWNED_VALUE rather than miscompiled.
+
+STRUCT Conflict {
+  set_a: []String@symbol,
+  message: String
+}
+
+CONST CONFLICTS: [1]Conflict = [Conflict{ set_a: [:soa], message: "incompatible" }];
+
+FN describe() RETURNS String ->
+    MUTABLE out = COPY "";
+    FOR c IN CONFLICTS DO
+        out = COPY c.message;
+    END
+    RETURN out;
+END
+
+FN main() RETURNS Void ->
+    ASSERT describe() == "incompatible", "module-level constant with a nested list";
+    print("ok");
+END

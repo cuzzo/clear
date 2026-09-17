@@ -13,11 +13,11 @@ PUB STRUCT Conflict {
   set_b: []String@symbol,
   message: String
 }
-conflicts: [1]Conflict = [Conflict{ set_a: [:soa], set_b: [:shared, :multiowned], message: "SOA layout is incompatible with reference-counted ownership" }];
+CONST CONFLICTS: [1]Conflict = [Conflict{ set_a: [:soa], set_b: [:shared, :multiowned], message: "SOA layout is incompatible with reference-counted ownership" }];
 PUB FN capabilities__errors_for(type: Type) RETURNS ![]String ->
   MUTABLE errors = List[];
   MUTABLE caps = TRY (capabilities__active_capabilities(type));
-  FOR rtoc_conflict IN conflicts DO
+  FOR rtoc_conflict IN CONFLICTS DO
   MUTABLE has_a = rtoc_conflict.set_a |> ANY caps.contains?(_);
   MUTABLE has_b = rtoc_conflict.set_b |> ANY caps.contains?(_);
   IF (has_a AND has_b) THEN

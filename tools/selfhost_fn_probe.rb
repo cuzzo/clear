@@ -377,7 +377,10 @@ module SelfhostFnProbe
     loose = (@module_scope[target.file] ||= dissect(target.file)[3])
     decls = loose.select do |line|
       line.match?(/\A(?:PUB )?MUTABLE [a-z_]\w*(?:: [^=\n]+)? = /) ||
-        line.match?(/\A[a-z_]\w*(?:: [^=\n]+)? = /)
+        line.match?(/\A[a-z_]\w*(?:: [^=\n]+)? = /) ||
+        # A module CONST is module scope too, and a function in the same file
+        # reads it by name.
+        line.match?(/\A(?:PUB )?CONST [A-Z_][A-Z0-9_]*(?:: [^=\n]+)? = /)
     end
     return '' if decls.empty?
 

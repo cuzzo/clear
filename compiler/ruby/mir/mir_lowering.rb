@@ -3570,6 +3570,24 @@ class MIRLowering
   # This applies to root programs and REQUIRE'd modules alike: every top-level
   # binding is emitted at Zig container scope, where only comptime-pure
   # constants are representable.
+  sig { params(stmt: AST::Node).void }
+  def reject_module_scope_pending!(stmt)
+    return unless stmt.is_a?(AST::VarDecl) || stmt.is_a?(AST::BindExpr)
+    return if stmt.respond_to?(:module_const) && stmt.module_const
+    return if program_state.module_global_names.include?(stmt.name.to_s)
+    return if function_state.pending_stmts.empty?
+
+    name = stmt.respond_to?(:name) ? T.unsafe(stmt).name : "value"
+    raise CompilerError.new(
+      stmt.token,
+      "[MODULE_SCOPE_OWNED_VALUE] Top-level binding '#{name}' needs statements hoisted out of its " \
+      "initializer, but CLEAR has no module initialization/termination lifetime to run them in. " \
+      "Declare it CONST, or construct it inside a function.",
+      nil,
+      code: :MODULE_SCOPE_OWNED_VALUE
+    )
+  end
+
   sig { params(stmt: AST::Node, lowered: T.nilable(LoweredMir)).void }
   def reject_module_scope_cleanup!(stmt, lowered)
     return unless stmt.is_a?(AST::VarDecl) || stmt.is_a?(AST::BindExpr)
@@ -3746,6 +3764,11 @@ class MIRLowering
     # is the heap and that nothing drops it.
     program_state.module_global_names.add(stmt.name.to_s) if stmt.is_a?(AST::VarDecl) && !stmt.module_const
     lowered = lower(stmt)
+    # An initializer that HOISTS has the same problem an owned one does: the
+    # temps go into a pending list nothing at container scope drains, so they
+    # are dropped and the declaration is left naming a temp nothing declares.
+    # Reject it the same way rather than emitting Zig that cannot compile.
+    reject_module_scope_pending!(stmt)
     # A container-scope declaration cannot carry a statement suffix: Zig reads
     # `var x: i64 = 11; _ = &x;` at module scope as a malformed field list.
     # The unused-binding suppression only belongs inside a function body.
