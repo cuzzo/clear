@@ -25,21 +25,20 @@ PUB FN liveness__analyze(segments: []Segment, ctx: {String@symbol}?TransformValu
   FOR seg IN segments DO
   defs_by_seg[seg.index] = {};
   uses_by_seg[seg.index] = (uses_by_seg[seg.index] OR_ELSE Set[]);
-  MUTABLE seg_defs: {String}?Type = UNWRAP (defs_by_seg[seg.index]);
-  MUTABLE seg_uses: [Set]String = UNWRAP (uses_by_seg[seg.index]);
+  MUTABLE seg_defs: {String}?Type = {};
+  MUTABLE seg_uses: [Set]String = (uses_by_seg[seg.index] OR_ELSE Set[]);
   FOR stmt IN seg.stmts DO
     IF stmt IS_A SegmentBodyItem.Locatable AS ast_stmt THEN
       TRY (liveness__collect_defs(ast_stmt, &seg_defs));
     END
     TRY (liveness__collect_uses(stmt, seg_uses));
   END
-  defs_by_seg[seg.index] = seg_defs;
-  uses_by_seg[seg.index] = seg_uses;
+  defs_by_seg[seg.index] = COPY seg_defs;
+  uses_by_seg[seg.index] = COPY seg_uses;
   TRY (liveness__collect_tail_uses(seg, &uses_by_seg));
   IF ((((seg.tail IS_A NextSuspend OR seg.tail IS_A IoSuspend)) AND (segmentTail__result_var(seg.tail) != NIL)) AND (segmentTail__kind(seg.tail) != :io)) THEN
-      MUTABLE tail_defs: {String}?Type = UNWRAP (defs_by_seg[seg.index]);
-      tail_defs[UNWRAP (segmentTail__result_var(seg.tail))] = NIL;
-      defs_by_seg[seg.index] = tail_defs;
+      seg_defs[UNWRAP (segmentTail__result_var(seg.tail))] = NIL;
+      defs_by_seg[seg.index] = COPY seg_defs;
   END
   END
   MUTABLE first_def: {String}Int64 = {};
@@ -351,7 +350,7 @@ PUB FN liveness__walk_idents(node: ?AstIdentWalkRoot, block: FN(String) -> Void)
   IF node EXISTS AS node_value THEN
     MUTABLE stack: []CollectValue = List[];
     IF node_value IS_A []Node AS array THEN
-      MUTABLE rtoc_reverse_items_6: []Node = array;
+      MUTABLE rtoc_reverse_items_6: []Node = COPY array;
       MUTABLE rtoc_reverse_i_7 = rtoc_reverse_items_6.length() - 1;
       WHILE rtoc_reverse_i_7 >= 0 DO
   IF TRUE THEN

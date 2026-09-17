@@ -760,7 +760,11 @@ PRIVATE FN pipelineConcurrentLowerer__shard_key_type(self: PipelineConcurrentLow
   RETURN TRY (type__key_type(map_type));
 END
 PRIVATE FN pipelineConcurrentLowerer__shard_capture_map(self: PipelineConcurrentLowerer, map_var_name: String, caps: FiberCtxBuilderResult) RETURNS !{String}String ->
-  RETURN {map_var_name: "ctx.__shard_map.*"}.keys() |> REDUCE(COPY caps.capture_map) { acc[_] = COPY ({map_var_name: "ctx.__shard_map.*"}[_] OR_ELSE panic("missing hash key")); acc };
+  # Ruby's `capture_map.merge(name => value)` is one added entry, not a fold
+  # over a freshly-built literal map keyed by the same name.
+  MUTABLE merged: {String}String = COPY caps.capture_map;
+  merged[COPY map_var_name] = COPY "ctx.__shard_map.*";
+  RETURN merged;
 END
 PRIVATE FN pipelineConcurrentLowerer__shard_direct_context(self: PipelineConcurrentLowerer, map_var_name: String, key_var: String) RETURNS !{String@symbol}String ->
   RETURN CAST({:map: map_var_name, :idx: "ctx.shard", :key: key_var, :hash: "0"} AS {String@symbol}String);
