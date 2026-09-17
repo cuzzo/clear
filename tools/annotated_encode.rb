@@ -33,11 +33,16 @@ module AnnotatedEncode
   extend self
 
   # Container back-pointers. Following these turns the annotated AST into a
-  # graph; `lifetime` was the last one, found via
-  # CapabilityTargetFact -> source_entry -> lifetime -> SymbolEntry.
+  # graph; `lifetime` was found via CapabilityTargetFact -> source_entry ->
+  # lifetime -> SymbolEntry, and `reg` and `cycle_fns` once accessor stamps
+  # were followed too -- `SymbolEntry.reg` returns to the declaring node, and
+  # a MutualThunkPlan lists the functions that each point back at it. Cutting
+  # `cycle_fns` rather than `mutual_thunk_plan` keeps more: every function
+  # still names its plan, and the membership list only repeats statements the
+  # program already encodes.
   CUT = %w[
     scope binding_entries bindings entries parent owned_names type_store
-    dependencies lifetime reg
+    dependencies lifetime reg cycle_fns
   ].freeze
 
   # NEVER `value == true`: Type#== is sorbet-typed and raises TypeError on a
