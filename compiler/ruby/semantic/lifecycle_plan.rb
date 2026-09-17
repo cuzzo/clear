@@ -480,6 +480,15 @@ module Semantic
         wrapped = type_info.optional? ? type_info.wrapped_type : nil
         if wrapped
           payload = @plans[wrapped.lifecycle_type_key]
+          # The LAYOUT in the key belongs to the optional, not to the value:
+          # `?T` is laid out indirectly where `T` is direct whenever the payload
+          # is boxed. It changes nothing about what the value owns, so a plan
+          # that matches on everything else is still T's plan.
+          payload ||= begin
+            want = wrapped.lifecycle_type_key.sub(/\|layout=[^|]+/, '')
+            _, found = @plans.find { |candidate, _| candidate.sub(/\|layout=[^|]+/, '') == want }
+            found
+          end
           return payload.with_type_key(key) if payload
         end
 
