@@ -61,7 +61,7 @@ END
 FN emit__lower_frame_expr(ast_expr: Locatable, lowering: MIRLowering, context: FrameBindingContext) RETURNS !Emittable ->
   MUTABLE lowering_api = COPY lowering;
   MUTABLE mir: ?Emittable = TRY (mIRLowering__lower( &lowering_api, castLocatableToMIRLoweringLowerableStmt(ast_expr)));
-  RETURN emit__bind_frame_refs(CAST(mir AS Emittable), context);
+  RETURN emit__bind_frame_refs(UNWRAP (mir), context);
 END
 FN emit__frame_init(field_name: String, value: Emittable) RETURNS ThunkFrameInit ->
   RETURN ThunkFrameInit{ field_name: COPY field_name, value: COPY value };

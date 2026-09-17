@@ -336,7 +336,7 @@ PRIVATE FN fsmRecursiveSplitter__stmt_introduces_split?(stmt: ?SegmentStmt) RETU
       IF !(segmentStmt__locatable?(stmt_value)) THEN
         RETURN FALSE;
       END
-      RETURN (aST__child_bodies(castSegmentStmtToLocatable(stmt_value))) |> ANY TRY (fsmRecursiveSplitter__contains_suspend_anywhere?( CAST(Stmts{ ArrayValue: _ |> SELECT castNodeToSegmentStmt( castLocatableToNode__auto_inference(_)) } AS ?[]Locatable)));
+      RETURN (aST__child_bodies(castSegmentStmtToLocatable(stmt_value))) |> ANY TRY (fsmRecursiveSplitter__contains_suspend_anywhere?(_));
     END
   ELSE
     RETURN FALSE;
