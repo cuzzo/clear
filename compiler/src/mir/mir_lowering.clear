@@ -5632,13 +5632,13 @@ PRIVATE FN mIRLowering__lower_scoped(MUTABLE self: MIRLowering, blk: FN() -> Emi
     END
     RETURN Emittable{ MIRBlockExpr: COPY block };
 END
-PUB FN mIRLowering__lower_head(MUTABLE self: MIRLowering, blk: FN() -> ?Emittable) RETURNS ?Emittable ->
+PUB FN mIRLowering__lower_head(MUTABLE self: MIRLowering, blk: FN() -> ?Emittable) RETURNS Tuple<?Emittable, []Emittable> ->
     MUTABLE prev = COPY mIRLowering__function_state(&self).pending_stmts;
     self.state.function_state.pending_stmts = List[];
     MUTABLE result:? = blk();
     MUTABLE produced = COPY mIRLowering__function_state(&self).pending_stmts;
     self.state.function_state.pending_stmts = prev;
-    RETURN [result, produced];
+    RETURN Tuple{result, produced};
 END
 PRIVATE FN mIRLowering__with_pending(self: MIRLowering, pending_value: []Emittable, node: Emittable) RETURNS Emittable ->
     IF (pending_value.length() == 0) THEN

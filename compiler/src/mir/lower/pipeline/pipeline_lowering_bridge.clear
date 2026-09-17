@@ -77,8 +77,9 @@ PUB FN pipelineLoweringBridge__emit_builtin(MUTABLE self: PipelineLoweringBridge
 END
 PUB FN pipelineLoweringBridge__lower_head(MUTABLE self: PipelineLoweringBridge, blk: FN() -> Emittable) RETURNS PipelineLowerHeadResult
   EFFECTS REENTRANT ->
-    MUTABLE value, pending = self.mIRLowering__lower_head(lowering, %() USE(blk) -> blk());
-    MUTABLE typed_pending: []Emittable = COPY pending;
+    MUTABLE rtoc_head = mIRLowering__lower_head(&self.lowering, %() USE(blk) -> blk());
+    MUTABLE value: ?Emittable = COPY rtoc_head._0;
+    MUTABLE typed_pending: []Emittable = COPY rtoc_head._1;
     RETURN PipelineLowerHeadResult{ value: COPY CAST(value AS Emittable), pending: COPY typed_pending };
 END
 PUB FN pipelineLoweringBridge__append_ownership_transfers_for_mir_body(MUTABLE self: PipelineLoweringBridge, body: []Emittable) RETURNS ![]Emittable
@@ -137,7 +138,10 @@ PUB FN pipelineLoweringBridge__with_shard_context<U>(MUTABLE self: PipelineLower
 ->
 WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
   MUTABLE previous: ?{String@symbol}String = TRY (mIRLowering__shard_context(rtoc_self_view.lowering));
-  DEFER (mIRLowering__set_shard_context( &rtoc_self_view.lowering, previous));
+  # Ruby's `ensure` restores by reference. The setter COPIES the map, and an
+  # allocation makes the call fallible -- which a DEFER body may not be. The
+  # saved value is already ours, so move it back into the field directly.
+  DEFER rtoc_self_view.lowering.state.program.shard_context = previous;
   (mIRLowering__set_shard_context( &rtoc_self_view.lowering, context));
   RETURN blk();
 }
