@@ -1210,7 +1210,11 @@ module ParserCompat
 
   class CanonicalDecoder
     def initialize(source)
-      @source = source
+      # Positions are BYTE offsets -- `length_encoded` writes bytesize -- but
+      # `String#index` answers in CHARACTERS. On any program containing a
+      # multibyte character (an em dash in a test's message) the two diverge
+      # and the decode lands mid-string. Binary makes them the same thing.
+      @source = source.dup.force_encoding(Encoding::BINARY)
       @pos = 0
     end
 
