@@ -3156,6 +3156,15 @@ class MIRLowering
     return [MIR::OwnershipOperandFact.non_owning(ti, source)] if rodata_ownership_ast?(ast_value)
     return [MIR::OwnershipOperandFact.non_owning(ti, source)] if non_consuming_owned_value_expr?(value_mir)
 
+    # A COPY hands over a NEW buffer; the source keeps the one it had. The
+    # operand is that fresh value -- naming the copied BINDING transfers it,
+    # and the next read of it is then a use after transfer. `ownership_root_
+    # name` reaches through COPY on purpose (a reassignment's provenance is
+    # its source), so the check has to come before it.
+    if ast_value.is_a?(AST::CopyNode)
+      return [MIR::OwnershipOperandFact.owned_result(ti, source, target_alloc)]
+    end
+
     if borrowed_ownership_ast?(ast_value)
       return [MIR::OwnershipOperandFact.borrowed_access(ownership_root_name(ast_value), ti, source, target_alloc)]
     end

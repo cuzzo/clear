@@ -1,0 +1,40 @@
+# A COPY hands over a NEW buffer; the source keeps the one it had. Naming the
+# copied BINDING as the consumed operand transferred it, so the second COPY of
+# the same local read a binding the first had moved.
+STRUCT Ident {
+  name: String
+}
+
+STRUCT Binding {
+  name: String,
+  init: Node@boxed
+}
+
+UNION Node {
+  Ident: Ident,
+  Binding: Binding
+}
+
+FN make_expr(seed: String) RETURNS !Node ->
+  RETURN Node{ Ident: COPY Ident{ name: COPY seed } };
+END
+
+FN build(seed: String, typed: Bool, early: Bool) RETURNS ![]Node ->
+  init_expr = TRY (make_expr(COPY seed));
+  MUTABLE body: []Node = List[];
+  IF typed THEN
+    body = [Node{ Ident: COPY Ident{ name: COPY "t" } }];
+  ELSE
+    body = [Node{ Binding: COPY Binding{ name: COPY "a", init: COPY init_expr } }];
+  END
+  IF early THEN
+    RETURN [Node{ Binding: COPY Binding{ name: COPY "b", init: COPY init_expr } }];
+  END
+  RETURN COPY body;
+END
+
+FN main() RETURNS !Void ->
+  got = TRY (build(COPY "i", FALSE, FALSE));
+  ASSERT got.length() == 1, "one binding";
+  print("ok");
+END
