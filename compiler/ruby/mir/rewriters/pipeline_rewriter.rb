@@ -956,6 +956,11 @@ class PipelineRewriter
     if node.is_a?(AST::Identifier) && node.name == name
       return replacement.dup
     end
+    # A DECLARATION SITE cannot be duplicated: lowering decides whether a
+    # destructure target declares its name by asking whether the symbol's
+    # declaration node IS this object. Copy it and the target silently becomes
+    # an assignment to a name nothing declared.
+    return node if node.is_a?(AST::DestructureTarget)
     new_node = node.dup
     node.class.members.each do |member|
       val = T.unsafe(node)[member]
@@ -991,6 +996,11 @@ class PipelineRewriter
       return new_node
     end
 
+    # A DECLARATION SITE cannot be duplicated: lowering decides whether a
+    # destructure target declares its name by asking whether the symbol's
+    # declaration node IS this object. Copy it and the target silently becomes
+    # an assignment to a name nothing declared.
+    return node if node.is_a?(AST::DestructureTarget)
     new_node = node.dup
     node.class.members.each do |member|
       val = T.unsafe(node)[member]

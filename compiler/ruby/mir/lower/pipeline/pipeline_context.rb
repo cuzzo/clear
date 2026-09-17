@@ -169,6 +169,7 @@ class PipelinePlaceholderRewriter
     when AST::VarDecl then substitute_var_decl(node)
     when AST::BindExpr then substitute_bind_expr(node)
     when AST::Assignment then substitute_assignment(node)
+    when AST::DestructuringAssignment then substitute_destructuring_assignment(node)
     when AST::UnaryOp then substitute_unary_op(node)
     when AST::OptionalUnwrap then substitute_optional_unwrap(node)
     when AST::IsA then substitute_is_a(node)
@@ -558,6 +559,19 @@ class PipelinePlaceholderRewriter
     new_if.else_result_type = node.else_result_type if node.respond_to?(:else_result_type)
     copy_type_info(node, new_if)
     new_if
+  end
+
+  # `k, v = _` inside a pipeline block. Without a case here the dispatch falls
+  # through to `else node`, the placeholder survives into the emitted Zig, and
+  # the loop capture it should have named is not in scope.
+  sig { params(node: AST::DestructuringAssignment).returns(AST::Node) }
+  def substitute_destructuring_assignment(node)
+    new_value = substitute(node.value)
+    return node if new_value == node.value
+
+    new_node = AST::DestructuringAssignment.new(node.token, node.targets, new_value)
+    copy_type_info(node, new_node)
+    new_node
   end
 
   sig { params(src: AST::PipelineRewriteNode, dst: AST::PipelineRewriteNode).void }
