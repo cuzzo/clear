@@ -1223,12 +1223,12 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
 END
 PUB FN escapeAnalysis__loop_body_declared_names(body: []Node) RETURNS ![Set]String ->
   MUTABLE names: [Set]String = Set[];
-  TRY (escapeAnalysis__each_loop_body_node(body, %(node) USE(MUTABLE names) -> {
+  TRY (escapeAnalysis__each_loop_body_node(body, %(node: Locatable) USE(MUTABLE names) -> {
   MUTABLE name: ?String = localBindingAnalysis__binding_decl_name(node);
   IF name EXISTS AS name_value THEN
-    RETURN &names.insert(name_value);
+    &names.insert(COPY name_value);
   END
-  NIL
+  rubyToClearVoid__escape_analysis()
   }));
   RETURN names;
 END

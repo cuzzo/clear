@@ -96,31 +96,32 @@ PUB FN bgFsmTransformContext__to_transform_hash(self: BgFsmTransformContext) RET
   result[:async_result_shape] = BgTransformValue{ AsyncResultShape: COPY self.types.async_shape };
   result[:id] = BgTransformValue{ Int64Value: self.names.id };
   result[:bg_rt] = BgTransformValue{ StringValue: COPY self.names.bg_rt };
-  result[:capture_fields] = BgTransformValue{ ArrayValue: COPY self.capture.capture_fields };
-  result[:captured] = BgTransformValue{ HashMapValue: COPY self.captured };
-  result[:capture_close_plans] = BgTransformValue{ HashMapValue: COPY self.capture_close_plans };
+  result[:capture_fields] = BgTransformValue{ ArrayValue2: COPY self.capture.capture_fields };
+  result[:captured] = BgTransformValue{ HashMapValue3: COPY self.captured };
+  result[:capture_close_plans] = BgTransformValue{ HashMapValue2: COPY self.capture_close_plans };
   result[:pointer_captures] = BgTransformValue{ ArrayValue: COPY self.pointer_captures };
-  result[:capture_frees] = BgTransformValue{ ArrayValue: COPY self.capture.capture_frees };
-  result[:capture_finalizers] = BgTransformValue{ ArrayValue: COPY self.capture.capture_finalizers };
-  result[:fresh_heap_cleanup_names] = BgTransformValue{ ArrayValue: COPY self.capture.fresh_heap_cleanup_names };
+  result[:capture_frees] = BgTransformValue{ ArrayValue5: COPY self.capture.capture_frees };
+  result[:capture_finalizers] = BgTransformValue{ ArrayValue6: COPY self.capture.capture_finalizers };
+  result[:fresh_heap_cleanup_names] = BgTransformValue{ ArrayValue4: COPY self.capture.fresh_heap_cleanup_names };
   result[:is_void] = BgTransformValue{ BoolValue: self.types.is_void };
   result[:alloc_var] = BgTransformValue{ StringValue: COPY self.names.alloc_var };
   result[:promise_var] = BgTransformValue{ StringValue: COPY self.names.promise_var };
   result[:ctx_var] = BgTransformValue{ StringValue: COPY self.names.ctx_var };
-  result[:promoted_decls] = BgTransformValue{ ArrayValue: COPY self.capture.promoted_decls };
-  result[:capture_inits] = BgTransformValue{ ArrayValue: COPY self.capture.capture_inits };
+  result[:promoted_decls] = BgTransformValue{ ArrayValue6: COPY self.capture.promoted_decls };
+  result[:capture_inits] = BgTransformValue{ ArrayValue3: COPY self.capture.capture_inits };
   result[:rt_name] = BgTransformValue{ StringValue: COPY self.rt_name };
-  result[:pin_mode] = PARTIAL MATCH self.scheduler.pin_mode START
+  MUTABLE pin_mode_value: ?BgTransformValue = PARTIAL MATCH self.scheduler.pin_mode START
     PinMode.BoolValue AS rtoc_pin_bool -> BgTransformValue{ BoolValue: rtoc_pin_bool },
     PinMode.SymbolValue AS rtoc_pin_sym -> BgTransformValue{ SymbolValue: COPY rtoc_pin_sym },
     DEFAULT -> NIL
   END;
-  result[:parallel] = (self.node.parallel == TRUE);
+  result[:pin_mode] = pin_mode_value;
+  result[:parallel] = BgTransformValue{ BoolValue: (self.node.parallel == TRUE) };
   result[:profile_site_id] = BgTransformValue{ Int64Value: self.scheduler.site_id };
   result[:profile_line] = BgTransformValue{ Int64Value: self.scheduler.site_line };
   result[:profile_column] = BgTransformValue{ Int64Value: self.scheduler.site_col };
   result[:inner_zig] = BgTransformValue{ StringValue: COPY self.types.inner_zig };
-  result[:arena_init_flag] = (self.node.arena_mode == TRUE);
+  result[:arena_init_flag] = BgTransformValue{ BoolValue: (self.node.arena_mode == TRUE) };
   RETURN result;
 END
 # End Ruby module MIRLoweringConcurrency
