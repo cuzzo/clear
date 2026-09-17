@@ -26,6 +26,7 @@
 # cut edge, encode that edge by binding NAME rather than by following it.
 # The parser encoder stays untouched -- its 8/8 byte-identical result must not
 # regress.
+require 'set'
 require_relative 'parser_compat'
 
 module AnnotatedEncode
@@ -36,7 +37,7 @@ module AnnotatedEncode
   # CapabilityTargetFact -> source_entry -> lifetime -> SymbolEntry.
   CUT = %w[
     scope binding_entries bindings entries parent owned_names type_store
-    dependencies lifetime
+    dependencies lifetime reg
   ].freeze
 
   # NEVER `value == true`: Type#== is sorbet-typed and raises TypeError on a
@@ -72,6 +73,12 @@ module AnnotatedEncode
                         'type' => value.type, 'value' => value.value })
     when Array
       "A#{value.length}[#{value.map { |item| encode_value(item) }.join}]"
+    when Set
+      # A set has no order to preserve, so the ENCODINGS are sorted: that is
+      # the only ordering both implementations can agree on without sharing a
+      # hash function.
+      encoded = value.map { |item| encode_value(item) }.sort
+      "E#{encoded.length}[#{encoded.join}]"
     when Hash
       pairs = value.map { |key, item| [encode_value(key), encode_value(item)] }
       pairs.sort_by! { |key, item| key + item }

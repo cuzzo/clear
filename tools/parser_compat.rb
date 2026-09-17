@@ -653,7 +653,26 @@ module ParserCompat
     # is no wire format to match. Panic rather than invent one; the smoke
     # corpus leaves these slots empty, and a mismatch should be loud.
     if bare.start_with?('[Set]')
-      return ["  panic(\"parser compat: no wire format for #{bare}\");", '""']
+      epre, eexp = clear_value_encoder(bare.sub('[Set]', ''), "#{slot}_e", fields, "#{slot}e")
+      # The parse tree never populates a set, so the parser comparison keeps
+      # panicking rather than inventing a format it cannot exercise. Stage 3
+      # reaches sets through the annotator's stamps and needs the real thing:
+      # element encodings, SORTED, because a set has no order to preserve.
+      unless eexp && stage3_sets?
+        return ["  panic(\"parser compat: no wire format for #{bare}\");", '""']
+      end
+
+      ebody = epre.empty? ? "" : epre + "\n"
+      return [
+        "  MUTABLE #{slot}_items: String[] = [];\n" \
+        "  #{expr} |> EACH {\n" \
+        "    #{slot}_e = _;\n#{ebody}" \
+        "    &#{slot}_items.append(#{eexp});\n" \
+        "  };\n" \
+        "  #{slot}_items = #{slot}_items |> ORDER_BY _;\n" \
+        "  MUTABLE #{slot} = \"E\" $+ #{slot}_items.length().toString() $+ \"[\" $+ #{slot}_items.join(\"\") $+ \"]\";",
+        slot
+      ]
     end
 
     if (m = bare.match(/\A\{(.+?)\}(.+)\z/))
@@ -746,6 +765,9 @@ module ParserCompat
   ensure
     @case_builder = previous
   end
+
+  # Sets only have a wire format in stage 3 (see the [Set] branch below).
+  def stage3_sets? = !@encoder_skip_fields.nil?
 
   def with_encoder_skip(fields, &blk)
     previous = @encoder_skip_fields
