@@ -1,0 +1,29 @@
+# Test: deep-copying a struct that holds a Set.
+# `Set.insert` answers whether the value was newly added. One deep-copy helper
+# in the runtime header still called it as a statement, and Zig rejects an
+# ignored value -- so COPYing any struct with a Set field failed to compile,
+# while the sibling helper right below it already discarded the answer.
+
+STRUCT Holder {
+  names: [Set]String,
+  tag: Int64
+}
+
+FN duplicate(h: Holder) RETURNS Holder ->
+    RETURN COPY h;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE original = Holder{ names: Set["a", "b"], tag: 1 };
+    MUTABLE copy = duplicate(original);
+
+    ASSERT copy.names.length() == 2, "the set came across";
+    ASSERT copy.names.contains?("a"), "with its elements";
+    ASSERT copy.tag == 1, "and the rest of the struct";
+
+    &copy.names.insert("c");
+    ASSERT copy.names.length() == 3, "the copy is its own set";
+    ASSERT original.names.length() == 2, "the original is untouched";
+
+    print("set field deep copy ok");
+END

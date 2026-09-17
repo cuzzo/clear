@@ -4589,7 +4589,7 @@ pub const CheatLib = struct {
                     try dupeValue(ElemT, k.*, alloc)
                 else
                     k.*;
-                try result.insert(alloc, copied);
+                _ = try result.insert(alloc, copied);
             }
             return result;
         }
