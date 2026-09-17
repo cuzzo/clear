@@ -1386,13 +1386,29 @@ class MIREmitter
     declared = T.let(Set.new(excluded), T::Set[String])
     used = T.let([], T::Array[String])
     MIR.each_node(body) do |part|
-      declared << part.name.to_s if part.is_a?(MIR::Let)
+      declared.merge(names_bound_by(part))
       if part.is_a?(MIR::Ident)
         name = part.name.to_s
         used << name unless used.include?(name)
       end
     end
     used.reject { |name| declared.include?(name) }
+  end
+
+  # Every name a node BINDS inside the body. A capture list is the names the
+  # body reads from OUTSIDE it, so anything bound within is not one -- and
+  # rewriting such a name to `__captures[i]` leaves the binder unused, which
+  # Zig rejects outright.
+  sig { params(part: T.untyped).returns(T::Array[String]) }
+  def names_bound_by(part)
+    case part
+    when MIR::Let then [part.name.to_s]
+    when MIR::IfOptional, MIR::WhileStmt then [part.capture].compact.map(&:to_s)
+    when MIR::ForStmt then [part.capture, part.index_capture].compact.map(&:to_s)
+    when MIR::IfBindStmt
+      (part.bindings || []).filter_map { |b| b.is_a?(Hash) ? b[:capture] : b.capture }.map(&:to_s)
+    else []
+    end
   end
 
   sig { params(captures: T::Array[String]).returns(T::Hash[String, String]) }
@@ -1405,7 +1421,7 @@ class MIREmitter
     declared = T.let(Set.new(excluded), T::Set[String])
     moved = T.let([], T::Array[String])
     MIR.each_node(body) do |part|
-      declared << part.name.to_s if part.is_a?(MIR::Let)
+      declared.merge(names_bound_by(part))
       next unless part.is_a?(MIR::MoveMark)
 
       name = part.name.to_s
