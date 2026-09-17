@@ -225,7 +225,7 @@ PUB FN pipelineRangeLowerer__unwrap_range_chain(self: PipelineRangeLowerer, MUTA
     END
     RETURN PipelineRangeChain{ source: COPY cursor, stages: COPY stages };
 END
-PUB FN pipelineRangeLowerer__build_lazy_range_prefix(self: PipelineRangeLowerer, source_node: Locatable, stages: []Locatable, on_skip: ?[]FN(String) -> !Emittable = NIL, source_alloc: ?String@symbol = NIL, fiber_rt: ?String = NIL, track_owned_items: Bool = FALSE) RETURNS !?PipelineLazyRangePrefix ->
+PUB FN pipelineRangeLowerer__build_lazy_range_prefix(self: PipelineRangeLowerer, source_node: Locatable, stages: []Locatable, on_skip: ?(FN(String) -> !Emittable[]) = NIL, source_alloc: ?String@symbol = NIL, fiber_rt: ?String = NIL, track_owned_items: Bool = FALSE) RETURNS !PipelineLazyRangePrefix ->
     MUTABLE source_ti = TRY (aST__full_type_mut(source_node));
     MUTABLE elem_t = (TRY (type__runtime_stream_storage_element_type(source_ti)) OR TRY (pipelineRangeLowerer__range_literal_element_type(self, source_node)));
     MUTABLE elem_zig = TRY (type__zig_type( CAST(elem_t AS Type)));
