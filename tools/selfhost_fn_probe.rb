@@ -631,6 +631,13 @@ module SelfhostFnProbe
         # stdout against Ruby's recorded result.
         return [rstatus.success?, "#{rout}#{rerr}".strip, nil]
       end
+      # The Zig a failure names is in the temp dir the block is about to delete,
+      # and every position in the diagnostic is a position in THAT file.
+      if ENV['CLEAR_PROBE_KEEP']
+        Dir.glob(File.join(dir, '*.zig')).each do |emitted|
+          FileUtils.cp(emitted, File.join(ENV['CLEAR_PROBE_KEEP'], File.basename(emitted)))
+        end
+      end
       text = "#{out}\n#{err}"
       msg = text[/\[Compiler Error\][^\n]*|\[Parser Error\][^\n]*|[^\n]*\berror: [^\n]*/, 0]
       # A Zig diagnostic says almost nothing without the source line under it,

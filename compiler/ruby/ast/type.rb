@@ -1704,6 +1704,15 @@ class Type
     @capabilities.sync
   end
 
+  # A bare `Any` is the annotator's "infer this" placeholder -- what an
+  # undeclared return type resolves to. `Any@multiowned` NAMES a capability,
+  # so it is a declaration, and replacing it with the inferred bare type drops
+  # the Rc the caller was promised.
+  sig { returns(T::Boolean) }
+  def any_placeholder?
+    resolved == :Any && (ownership.nil? || ownership == :affine) && sync.nil?
+  end
+
   sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def layout=(value)
     apply_capabilities!(layout: Type.capability_symbol(value))

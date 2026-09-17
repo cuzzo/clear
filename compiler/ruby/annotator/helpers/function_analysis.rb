@@ -186,7 +186,7 @@ module FunctionAnalysis
     end
 
     # Update return type if we can narrow it
-    if (is_implicit || declared_return == :Any) && found_returns.any?
+    if (is_implicit || declared_return.any_placeholder?) && found_returns.any?
       inferred = T.must(found_returns.first).type
       if is_implicit || found_returns.size == 1
         return_type = inferred
@@ -464,7 +464,7 @@ module FunctionAnalysis
       end
 
       resolved_return_type = T.must(final_return_type)
-      if (is_implicit_return || declared_return == :Any)
+      if (is_implicit_return || declared_return.any_placeholder?)
         node.return_type = resolved_return_type
         signature.replace_return_type!(resolved_return_type)
       end

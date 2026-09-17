@@ -1,0 +1,22 @@
+# `Any@multiowned` is a declared capability, not the bare `Any` the annotator
+# infers through. Replacing it with the inferred type dropped the Rc, so the
+# retained return had no runtime to clean up with.
+UNION Value {
+  Text: String,
+  Num: Any@multiowned
+}
+
+FN castValueToAny(value: Value) RETURNS Any@multiowned ->
+  IF value IS_A Any @multiowned AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast");
+END
+
+FN main() RETURNS Void ->
+  n: Any@multiowned = 3.5;
+  v = Value{ Num: n };
+  got = castValueToAny(v);
+  ASSERT got == 3.5, "round trip";
+  print("ok");
+END
