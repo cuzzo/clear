@@ -1,0 +1,29 @@
+# A call that hands back a result the CALLER must clean up needs an allocator
+# in the caller, even when the callee allocates nothing. Propagation only
+# carries the callee's own runtime need, so the caller was emitted without a
+# runtime and its errdefer named an undeclared 'rt'.
+STRUCT Caps {
+  flag: Bool
+}
+
+STRUCT Info {
+  caps: Caps,
+  name: String
+}
+
+FN infoFor(tag: String) RETURNS !?Info ->
+  RETURN NIL;
+END
+
+PUB FN tagIsKnown(tag: String) RETURNS !Bool ->
+  IF (TRY (infoFor(tag))) EXISTS AS info THEN
+    RETURN info.caps.flag;
+  END
+  RETURN FALSE;
+END
+
+FN main() RETURNS !Void ->
+  known = TRY (tagIsKnown(COPY "one"));
+  ASSERT ! known, "stub returns nil";
+  print("ok");
+END

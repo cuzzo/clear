@@ -251,7 +251,7 @@ class ProgramMIRFinalizer
     def ast_node_lowers_through_runtime?(node, fn_nodes, schema_lookup)
       case node
       when AST::FuncCall, AST::MethodCall
-        ast_call_needs_runtime?(node, fn_nodes)
+        ast_call_needs_runtime?(node, fn_nodes, schema_lookup)
       when AST::BgBlock, AST::BgStreamBlock
         true
       when AST::Assignment
@@ -289,9 +289,21 @@ class ProgramMIRFinalizer
         type.recursive_cleanup_shape?(T.unsafe(schema_lookup))
     end
 
-    sig { params(node: T.any(AST::FuncCall, AST::MethodCall), fn_nodes: FnNodes).returns(T::Boolean) }
-    def ast_call_needs_runtime?(node, fn_nodes)
-      return false if fn_nodes.key?(node.name.to_s)
+    sig do
+      params(
+        node: T.any(AST::FuncCall, AST::MethodCall),
+        fn_nodes: FnNodes,
+        schema_lookup: Type::SchemaLookup,
+      ).returns(T::Boolean)
+    end
+    def ast_call_needs_runtime?(node, fn_nodes, schema_lookup)
+      # An in-program callee's OWN runtime need reaches its callers through
+      # propagate_runtime_requirements!. What propagation cannot carry is the
+      # CALLER's own obligation: a call that hands back a result the caller
+      # must clean up needs an allocator here even when the callee allocates
+      # nothing -- a pass-through, or a function that returns NIL. Lowering
+      # decides that cleanup from the result TYPE, so read the same fact.
+      return call_result_needs_cleanup?(node, schema_lookup) if fn_nodes.key?(node.name.to_s)
 
       signature = FunctionSignature.unwrap(node.matched_signature)
       # A call that hands the caller an OWNED result needs the runtime even
@@ -301,6 +313,13 @@ class ProgramMIRFinalizer
       # signature had left out.
       signature&.needs_rt == true || signature&.emits_allocating? == true ||
         !signature&.return_alloc.nil?
+    end
+
+    sig { params(node: AST::Node, schema_lookup: Type::SchemaLookup).returns(T::Boolean) }
+    def call_result_needs_cleanup?(node, schema_lookup)
+      type = Type.from_node!(node, context: "call result runtime requirement").success_type
+      type.needs_cleanup?(T.unsafe(schema_lookup)) ||
+        type.recursive_cleanup_shape?(T.unsafe(schema_lookup))
     end
 
     sig { params(node: T.any(AST::CopyNode, AST::KeepNode), schema_lookup: Type::SchemaLookup).returns(T::Boolean) }

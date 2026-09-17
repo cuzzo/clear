@@ -1062,9 +1062,10 @@ RSpec.describe "MIR gap-burn characterization" do
     runtime_call.matched_signature = runtime_sig
     missing_call = AST::FuncCall.new(tok, "missing", [])
 
-    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, missing_call, {})).to be(false)
-    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, plain_call, {})).to be(false)
-    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, runtime_call, {})).to be(true)
+    schema_lookup = ->(_name) { nil }
+    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, missing_call, {}, schema_lookup)).to be(false)
+    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, plain_call, {}, schema_lookup)).to be(false)
+    expect(ProgramMIRFinalizer.send(:ast_call_needs_runtime?, runtime_call, {}, schema_lookup)).to be(true)
     expect { MIREmitter.new.emit(MIR::InlineBc.new(:missing, [], nil)) }
       .to raise_error(/emit_inline_bc_as_zig: node has no stdlib_def/)
   end
