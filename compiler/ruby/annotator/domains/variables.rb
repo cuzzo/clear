@@ -1256,6 +1256,16 @@ module Annotator
           # Chained target (e.g. `y.items.field = ...` or `obj.f.g = ...`).
           # Attribute mutation to the chain root so post-annotation passes
           # see it without re-walking the AST.
+          #
+          # A CALL result is not an access path: `f(x).field = v` writes to a
+          # temporary nothing else can observe. Diagnose it here -- the cast
+          # below otherwise fails as a Sorbet TypeError with no source line.
+          unless field_node.target.is_a?(AST::GetField) || field_node.target.is_a?(AST::GetIndex) ||
+                 field_node.target.is_a?(AST::OptionalUnwrap) || field_node.target.is_a?(AST::Identifier)
+            return error!(assignment_node, :INVALID_ASSIGNMENT_TARGET,
+              got: "#{field_node.target.class.name.split('::').last} result (assignment through a value with no storage)")
+          end
+
           target = T.cast(field_node.target, AccessPathNode)
           root = chain_root_name(target)
           if root

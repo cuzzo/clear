@@ -3242,15 +3242,25 @@ FN mIRLowering__reject_module_scope_cleanup_mut(MUTABLE self: MIRLowering, stmt:
     IF !((stmt IS_A VarDecl OR stmt IS_A BindExpr)) THEN
       RETURN;
     END
-    MUTABLE nodes = ([lowered]).flatten() |> WHERE _ != NIL;
+    # Ruby's `[lowered].flatten.compact` over a node-or-array; here the union
+    # says which it is.
+    MUTABLE nodes: []Emittable = List[];
+    IF lowered EXISTS AS lowered_value THEN
+      IF lowered_value IS_A MIRLoweringLoweredMir.Emittable AS single THEN
+        &nodes.append(COPY single);
+      END
+      IF lowered_value IS_A MIRLoweringLoweredMir.ArrayValue AS many THEN
+        FOR item IN many DO
+          &nodes.append(COPY item);
+        END
+      END
+    END
     IF !(nodes |> ANY (_ IS_A Cleanup OR _ IS_A ErrCleanup)) THEN
       RETURN;
     END
-    MUTABLE name: String = "";
-    IF (aST__node_name(stmt) EXISTS) THEN
-      name = locatable__name(stmt);
-    ELSE
-      name = "value";
+    MUTABLE name: String = COPY "value";
+    IF locatable__name(stmt) EXISTS AS stmt_name THEN
+      name = COPY stmt_name;
     END
     RAISE Input, CompilerError, "{}but CLEAR has no module initialization/termination lifetime. Use a fixed-size comptime value, or construct it inside a function.";
 END
@@ -3321,16 +3331,17 @@ FN mIRLowering__lower_protocol_conformance_case(self: MIRLowering, protocol: Pro
     MUTABLE rtoc_indexed_output_105 = {};
     MUTABLE rtoc_indexed_i_104 = 0;
     WHILE rtoc_indexed_i_104 < rtoc_indexed_items_103.length() DO
-      MUTABLE rtoc_indexed_pair_106 = {
-    MUTABLE binding = COPY UNWRAP ((TRY (type__generic_args(declaration.protocol_type)))[rtoc_indexed_i_104]);
-    [UNWRAP (rtoc_indexed_items_103[rtoc_indexed_i_104]).name, TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY binding }))]
-    };
-      rtoc_indexed_output_105[rtoc_indexed_pair_106._0] = rtoc_indexed_pair_106._1;
+      MUTABLE binding = COPY UNWRAP ((TRY (type__generic_args(declaration.protocol_type)))[rtoc_indexed_i_104]);
+      rtoc_indexed_output_105[COPY UNWRAP (rtoc_indexed_items_103[rtoc_indexed_i_104]).name] = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY binding }));
       rtoc_indexed_i_104 = rtoc_indexed_i_104 + 1;
     END
     rtoc_indexed_output_105
     };
-    MUTABLE operations = declaration.members.to_h(%(member: FunctionDef) USE(self) -> [member.source_name, mIRLowering__zig_safe_name(self, member.name)]);
+    # Ruby's `members.to_h { |m| [k, v] }`; CLEAR builds the map by walking.
+    MUTABLE operations: {String}String = {};
+    FOR member IN declaration.members DO
+      operations[COPY CAST(member.source_name AS String)] = mIRLowering__zig_safe_name(self, member.name);
+    END
     MUTABLE owner_name = mIRLowering__protocol_base_name_for_lowering(self, declaration.owner_type);
     RETURN ProtocolConformanceCase{ owner_type: COPY IF generic THEN
       NIL
@@ -3414,16 +3425,12 @@ PRIVATE FN mIRLowering__lower_top_level(MUTABLE self: MIRLowering, stmt: Locatab
       &self.state.program.module_global_names.insert(COPY CAST(locatable__name(stmt) AS String));
     END
     MUTABLE lowered: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(stmt)));
-    MUTABLE items: []Any = List[];
-    IF lowered IS_A []@multiowned Any THEN
-      items = lowered;
-    ELSE
-      items = [CAST(lowered AS Any)];
-    END
-    FOR _ IN items DO
-    IF _ IS_A Let THEN
-      _.suppression = NIL;
-    END
+    # `lower` hands back at most one node; clearing a Let's suppression is a
+    # field write through the union.
+    IF lowered EXISTS AS MUTABLE lowered_value THEN
+      IF lowered_value IS_A Let AS MUTABLE lowered_let THEN
+        lowered_let.suppression = NIL;
+      END
     END
     RETURN lowered;
 END
@@ -3668,57 +3675,58 @@ PRIVATE FN mIRLowering__mir_cast(self: MIRLowering, mir_node: Emittable, from_ty
     IF (type__resolved(from_t) == :NoReturn) THEN
       RETURN COPY mir_node;
     END
-    MUTABLE to_t = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_120: ?TypeTypeInput = NIL;
-    IF to_type IS_A Type THEN
-      rtoc_ternary_value_120 = to_type;
-    ELSE
-      rtoc_ternary_value_120 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__mir_lowering(to_type)));
+    MUTABLE to_t: Type = TRY (type__new(castTypeTypeInputToTypeConstructionInput__mir_lowering(to_type)));
+    IF to_type IS_A Type AS to_type_struct THEN
+      to_t = COPY to_type_struct;
     END
-    rtoc_ternary_value_120? };
-    IF (type__semantic_type_key( castTypeTypeInputToType__mir_lowering( TypeTypeInput{ Type: TypeTypeInput{ Type: castTypeTypeInputToType__mir_lowering( TypeTypeInput{ Type: castTypeTypeInputToType__mir_lowering( TypeTypeInput{ Type: from_t }) }) } })) == type__semantic_type_key(to_t)) THEN
+    IF (type__semantic_type_key(from_t) == type__semantic_type_key(to_t)) THEN
       RETURN NIL;
     END
-    IF ((typeTypeInput__indirect?(to_t) AND !(type__indirect?(from_t))) AND (type__resolved(from_t) == to_t.resolved())) THEN
+    IF ((type__indirect?(to_t) AND !(type__indirect?(from_t))) AND (type__resolved(from_t) == type__resolved(to_t))) THEN
       RETURN NIL;
     END
-    IF (TRY (type__zig_type(castTypeTypeInputToType__mir_lowering( TypeTypeInput{ Type: from_t }))) == TRY (type__zig_type(to_t))) THEN
+    IF (TRY (type__zig_type(from_t)) == TRY (type__zig_type(to_t))) THEN
       RETURN NIL;
     END
-    MUTABLE zig_to = TRY (mIRLowering__transpile_type(self, castTypeTypeInputToZigTypeMapperType(to_t)));
-    IF (type__fn_type?(from_t) OR to_t.fn_type?()) THEN
+    MUTABLE zig_to = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY to_t }));
+    IF (type__fn_type?(from_t) OR type__fn_type?(to_t)) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__integer?(from_t) AND type__float?( castTypeTypeInputToType__mir_lowering(to_t))) THEN
+    IF (type__integer?(from_t) AND type__float?( to_t)) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: NIL, method: :floatFromInt, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__float?(from_t) AND type__integer?( castTypeTypeInputToType__mir_lowering(to_t))) THEN
+    IF (type__float?(from_t) AND type__integer?( to_t)) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: NIL, method: :intFromFloat, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__integer?( castTypeTypeInputToType__mir_lowering(from_t)) AND type__integer?(to_t)) THEN
+    IF (type__integer?( from_t) AND type__integer?(to_t)) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: NIL, method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__float?( castTypeTypeInputToType__mir_lowering(from_t)) AND type__float?(to_t)) THEN
+    IF (type__float?( from_t) AND type__float?(to_t)) THEN
       RETURN Emittable{ MIRCast: COPY MIRCast{ expr: Emittable{ MIRCast: COPY MIRCast{ expr: COPY mir_node, target_type: NIL, method: :floatCast, lowered_node_id: NIL, ownership_consumption: NIL } }, target_type: COPY zig_to, method: :as, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (type__dynamic?( castTypeTypeInputToType__mir_lowering(from_t)) AND type__dynamic?(to_t)) THEN
+    IF (type__dynamic?( from_t) AND type__dynamic?(to_t)) THEN
       RETURN NIL;
     END
-    IF (type__fixed?(from_t) AND type__empty_list?( castTypeTypeInputToType__mir_lowering(to_t))) THEN
+    IF (type__fixed?(from_t) AND type__empty_list?( to_t)) THEN
       RETURN NIL;
     END
-    IF (type__fixed?(from_t) AND type__dynamic?( castTypeTypeInputToType__mir_lowering(to_t))) THEN
+    IF (type__fixed?(from_t) AND type__dynamic?( to_t)) THEN
       MUTABLE from_elem: ?Type = TRY (type__element_type(from_t));
       MUTABLE to_elem: ?Type = TRY (type__element_type(to_t));
-      IF (((from_elem != NIL) AND to_elem) AND (TRY (type__surface_name(TypeTypeInput{ Type: COPY UNWRAP (from_elem) })) == TRY (type__surface_name(TypeTypeInput{ Type: COPY to_elem })))) THEN
-        RETURN NIL;
+      IF from_elem EXISTS AS from_elem_value THEN
+        IF to_elem EXISTS AS to_elem_value THEN
+          IF (TRY (type__surface_name(TypeTypeInput{ Type: COPY from_elem_value })) == TRY (type__surface_name(TypeTypeInput{ Type: COPY to_elem_value }))) THEN
+            RETURN NIL;
+          END
+        END
       END
     END
-    IF (type__map?( castTypeTypeInputToType__mir_lowering(from_t)) AND type__map?(to_t)) THEN
+    IF (type__map?( from_t) AND type__map?(to_t)) THEN
       RETURN NIL;
     END
-    IF to_t.error_union?() THEN
-      MUTABLE payload_type = to_t.payload_type();
-      MUTABLE from_matches = (TRY (type__surface_name(TypeTypeInput{ Type: COPY from_t })) == TRY (type__surface_name(payload_type)));
+    IF type__error_union?(to_t) THEN
+      MUTABLE payload_type: Type = UNWRAP (TRY (type__payload_type(to_t)));
+      MUTABLE from_matches = (TRY (type__surface_name(TypeTypeInput{ Type: COPY from_t })) == TRY (type__surface_name(TypeTypeInput{ Type: COPY payload_type })));
       from_matches = (from_matches OR (TRY (type__string?(from_t)) AND TRY (type__string?(payload_type))));
       IF from_matches THEN
         RETURN NIL;
@@ -3814,8 +3822,8 @@ PRIVATE FN mIRLowering__lower_struct_def(MUTABLE self: MIRLowering, MUTABLE node
     MUTABLE default_mir: ?Emittable = TRY (mIRLowering__lower_struct_field_default(&self, CAST(COPY UNWRAP (node.field_decls[_]) AS StructField)));
     FieldDef{ name: COPY _, zig_type: COPY zig_t, default: default_mir, lowered_node_id: NIL, ownership_consumption: NIL, boxed_capture: NIL }
       };
-      MUTABLE metadata = [Emittable{ PubConst: COPY PubConst{ name: "__clear_nominal_${mIRLowering__zig_safe_name(self, node.name)}", value: "true", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ PubConst: COPY PubConst{ name: "__clear_type_args", value: ".{ ${node.type_params.join(", ")} }", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
-      metadata = CAST(ruby_array_concat_PubConst( CAST(metadata AS []PubConst), CAST(TRY (mIRLowering__lower_struct_lifecycle_methods(&self, node)) AS []PubConst)) AS []Emittable);
+      MUTABLE metadata: []Emittable = [Emittable{ PubConst: COPY PubConst{ name: "__clear_nominal_${mIRLowering__zig_safe_name(self, node.name)}", value: "true", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ PubConst: COPY PubConst{ name: "__clear_type_args", value: ".{ ${node.type_params.join(", ")} }", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
+      metadata = ruby_array_concat_Emittable__mir_lowering(metadata, CAST(TRY (mIRLowering__lower_struct_lifecycle_methods(&self, node)) AS []Emittable));
       MUTABLE inner_struct = MIRStructDef{ name: NIL, fields: fields_mir, methods: metadata, visibility: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
       MUTABLE body = [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ MIRStructDef: COPY inner_struct }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
       RETURN Emittable{ FnDef: COPY FnDef{ name: COPY node.name, params: List[], ret_type: "type", body: CAST(body |> SELECT SegmentStmt{ Emittable: Emittable{ ReturnStmt: CAST(COPY _ AS ReturnStmt)} } AS []Emittable), visibility: NIL, can_fail: FALSE, comptime_params: COPY comptime_params, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
@@ -4016,12 +4024,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     WHILE rtoc_idx < facts.length() DO
       MUTABLE data: ?MIRLoweringUnionVariantPayload = COPY facts[rtoc_idx]?.data;
       IF (data == NIL) THEN
-          &cleanup_arms.append(UnionMatchArm{ variant: UNWRAP (COPY emittable__name( CAST(UNWRAP (facts[rtoc_idx]) AS Emittable))), payload: NIL, body: List[], pointer_payload: FALSE });
-          &clone_arms.append(UnionMatchArm{ variant: UNWRAP (COPY emittable__name( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(UNWRAP (facts[rtoc_idx]) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable))), payload: NIL, body: [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ StructInit: COPY StructInit{ zig_type: NIL, fields: [CAST({:name: emittable__name(UNWRAP (facts[rtoc_idx])), :value: Lit{ value: "void{}", lowered_node_id: NIL, ownership_consumption: NIL }} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], pointer_payload: FALSE });
+          &cleanup_arms.append(UnionMatchArm{ variant: COPY UNWRAP (facts[rtoc_idx]).name, payload: NIL, body: List[], pointer_payload: FALSE });
+          &clone_arms.append(UnionMatchArm{ variant: COPY UNWRAP (facts[rtoc_idx]).name, payload: NIL, body: [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ StructInit: COPY StructInit{ zig_type: NIL, fields: [CAST({:name: UNWRAP (facts[rtoc_idx]).name, :value: Lit{ value: "void{}", lowered_node_id: NIL, ownership_consumption: NIL }} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], pointer_payload: FALSE });
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE payload = "__payload_${mIRLowering__zig_safe_name(rtoc_self_view, UNWRAP (emittable__name( CAST(UNWRAP (facts[rtoc_idx]) AS Emittable))))}";
+      MUTABLE payload = "__payload_${mIRLowering__zig_safe_name(rtoc_self_view, COPY UNWRAP (facts[rtoc_idx]).name)}";
       MUTABLE body: []Emittable = List[];
       MUTABLE copy_strategy: String@symbol = :bit_copy;
       IF facts[rtoc_idx]?.inline_struct THEN
@@ -4048,7 +4056,7 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           IF (plan.drop_strategy == :resource_close) THEN
             &body.append(Emittable{ ResourceClose: COPY ResourceClose{ target: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY payload, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, close_plan: UNWRAP (plan.resource_close_plan), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
           ELSE_IF lifecyclePlan__needs_drop?(plan) THEN
-            &body.append(Emittable{ ExprStmt: COPY ExprStmt{ expr: castMIRLoweringReturnValueToEmittable__mir_lowering(COPY TRY (mIRLowering__emit_builtin(&rtoc_self_view, :cleanup, [Emittable{ Ident: COPY Ident{ name: COPY facts[rtoc_idx]?.zig_type, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: COPY payload, lowered_node_id: NIL, ownership_consumption: NIL } }]))), discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+            &body.append(Emittable{ ExprStmt: COPY ExprStmt{ expr: castMIRLoweringReturnValueToEmittable__mir_lowering(COPY TRY (mIRLowering__emit_builtin(&rtoc_self_view, :cleanup, [Emittable{ Ident: COPY Ident{ name: COPY UNWRAP (facts[rtoc_idx]).zig_type, lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: "alloc", lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: COPY payload, lowered_node_id: NIL, ownership_consumption: NIL } }]))), discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
           END
       END
       needs_cleanup = (needs_cleanup OR (body.length() > 0));
@@ -4058,8 +4066,8 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
         ELSE
           clone_payload = "try CheatLib.dupeValue(@TypeOf(${payload}.*), ${payload}.*, alloc)";
         END
-      &clone_arms.append(UnionMatchArm{ variant: COPY emittable__name(UNWRAP (facts[rtoc_idx])), payload: COPY payload, pointer_payload: TRUE, body: [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ StructInit: COPY StructInit{ zig_type: NIL, fields: [CAST({:name: emittable__name(UNWRAP (facts[rtoc_idx])), :value: Lit{ value: COPY clone_payload, lowered_node_id: NIL, ownership_consumption: NIL }} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] });
-      &cleanup_arms.append(UnionMatchArm{ variant: COPY emittable__name(UNWRAP (facts[rtoc_idx])), payload: COPY payload, pointer_payload: TRUE, body: COPY body });
+      &clone_arms.append(UnionMatchArm{ variant: COPY UNWRAP (facts[rtoc_idx]).name, payload: COPY payload, pointer_payload: TRUE, body: [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ StructInit: COPY StructInit{ zig_type: NIL, fields: [CAST({:name: UNWRAP (facts[rtoc_idx]).name, :value: Lit{ value: COPY clone_payload, lowered_node_id: NIL, ownership_consumption: NIL }} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] });
+      &cleanup_arms.append(UnionMatchArm{ variant: COPY UNWRAP (facts[rtoc_idx]).name, payload: COPY payload, pointer_payload: TRUE, body: COPY body });
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE methods: []FnDef = List[];
@@ -4145,10 +4153,22 @@ PRIVATE FN mIRLowering__lower_static_call(MUTABLE self: MIRLowering, node: Stati
     IF stdlib_def EXISTS AS stdlib_def_value THEN
       MUTABLE stdlib_def_value_mutable = COPY stdlib_def_value;
       IF TRY (functionSignature__intrinsic_bc?(stdlib_def_value_mutable)) THEN
-        mir_args = node.args |> SELECT TRY (mIRLowering__hoist_alloc(&self, TRY (mIRLowering__lower(&self, &_)), &_));
+        mir_args = List[];
+        FOR arg_node IN node.args DO
+          MUTABLE arg_stmt = castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY arg_node);
+          MUTABLE arg_mir: Emittable = UNWRAP (TRY (mIRLowering__lower(&self, &arg_stmt)));
+          MUTABLE arg_ast: Locatable = COPY arg_node;
+          &mir_args.append(TRY (mIRLowering__hoist_alloc(&self, &arg_mir, &arg_ast)));
+        END
         RETURN Emittable{ InlineBc: COPY InlineBc{ op: COPY TRY (functionSignature__intrinsic_bc_op_or(&stdlib_def_value_mutable, symbol((CAST(node.method_name AS String))))), args: COPY mir_args, stdlib_def: stdlib_def_value_mutable, suppress_try: FALSE, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
-      mir_args = node.args |> SELECT TRY (mIRLowering__hoist_alloc(&self, TRY (mIRLowering__lower(&self, &_)), &_));
+      mir_args = List[];
+      FOR arg_node IN node.args DO
+        MUTABLE arg_stmt = castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY arg_node);
+        MUTABLE arg_mir: Emittable = UNWRAP (TRY (mIRLowering__lower(&self, &arg_stmt)));
+        MUTABLE arg_ast: Locatable = COPY arg_node;
+        &mir_args.append(TRY (mIRLowering__hoist_alloc(&self, &arg_mir, &arg_ast)));
+      END
       RETURN Emittable{ RegistryCall: COPY RegistryCall{ entry: stdlib_def_value_mutable, args: COPY mir_args |> SELECT RegistryCallArg{ expr: COPY _, coerce_type: NIL }, reason: "static_call", ownership_contract: TRY (ownershipContract__empty()), allocs: NIL, owned_result_alloc: NIL, target_var: NIL, result_type: NIL, result_ownership_bearing: NIL, key_type: NIL, value_type: NIL, suppress_try: FALSE } };
     ELSE
       panic("lower_static_call: missing stdlib signature for {}");
@@ -4184,21 +4204,19 @@ PRIVATE FN mIRLowering__lower_require(MUTABLE self: MIRLowering, node: RequireNo
       END
       MUTABLE items: []Emittable = [Emittable{ Import: COPY Import{ alias_name: COPY zig_import_name, module_path: "${import_name}.zig", member: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
       MUTABLE pkg_mod: ?CompiledModule = NIL;
-      IF importer != NIL THEN
-        pkg_mod = COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_146 = importer;
-      TRY (moduleImporter__compile_package(&rtoc_mutable_receiver_146, node.path, mIRLowering__program_state(self).source_dir)) };
+      IF importer EXISTS AS MUTABLE importer_value THEN
+        pkg_mod = TRY (moduleImporter__compile_package(&importer_value, node.path, UNWRAP (mIRLowering__program_state(self).source_dir)));
       END
       IF pkg_mod EXISTS AS pkg_mod_value THEN
         mIRLowering__merge_module_schemas_mut(&self, pkg_mod_value);
       END
       mIRLowering__record_module_const_init_mut(&self, pkg_mod, zig_import_name);
-      MUTABLE pkg_scope: ?Any = COPY pkg_mod?.global_scope;
-      IF pkg_scope EXISTS AS pkg_scope_value THEN
+      IF pkg_mod EXISTS AS pkg_mod_scope_owner THEN
+        MUTABLE pkg_scope_value: Scope@multiowned = KEEP pkg_mod_scope_owner.global_scope;
         MUTABLE alias_target = zig_import_name;
         FOR rtoc_key IN pkg_scope_value.types.keys() DO
-    MUTABLE type_entry: Any = COPY UNWRAP (pkg_scope_value.types[rtoc_key]);
-    MUTABLE vis = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_147 = type_entry.schema;
-    functionSignature__visibility(rtoc_local_receiver_147) } OR :package);
+    MUTABLE type_entry: ScopeTypeEntry = COPY UNWRAP (pkg_scope_value.types[rtoc_key]);
+    MUTABLE vis: String@symbol = (schemaValue__visibility(type_entry.schema) OR_ELSE :package);
     IF !((vis == :pub)) THEN
             CONTINUE;
     END
@@ -4214,33 +4232,35 @@ PRIVATE FN mIRLowering__lower_require(MUTABLE self: MIRLowering, node: RequireNo
         MUTABLE importer_value_mutable = COPY importer_value;
         MUTABLE mod_branch_value: ?CompiledModule = NIL;
         IF pkg_inline THEN
-          mod_branch_value = TRY (moduleImporter__compile_package(&importer_value_mutable, node.path, mIRLowering__program_state(self).source_dir));
+          mod_branch_value = TRY (moduleImporter__compile_package(&importer_value_mutable, node.path, UNWRAP (mIRLowering__program_state(self).source_dir)));
         ELSE
-          mod_branch_value = TRY (moduleImporter__compile_file(&importer_value_mutable, node.path, mIRLowering__program_state(self).source_dir));
+          mod_branch_value = TRY (moduleImporter__compile_file(&importer_value_mutable, node.path, UNWRAP (mIRLowering__program_state(self).source_dir)));
         END
         MUTABLE mod: ?CompiledModule = mod_branch_value;
-        mIRLowering__merge_module_schemas_mut(&self, mod?);
-        IF (UNWRAP (mod)).ast THEN
-          MUTABLE rtoc_each_items_148 = ((UNWRAP (mod)).ast).statements();
+        mIRLowering__merge_module_schemas_mut(&self, UNWRAP (mod));
+        IF UNWRAP (mod).ast EXISTS AS mod_ast THEN
+          MUTABLE rtoc_each_items_148 = COPY mod_ast.statements;
           MUTABLE rtoc_idx = 0;
           WHILE rtoc_idx < rtoc_each_items_148.length() DO
       IF !(UNWRAP (rtoc_each_items_148[rtoc_idx]) IS_A FunctionDef) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF (UNWRAP (rtoc_each_items_148[rtoc_idx]).name() == name) THEN
+      IF (locatable__name(UNWRAP (rtoc_each_items_148[rtoc_idx])) == "main") THEN
                 rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE rtoc_index_receiver_149 = TRY (mIRLowering__fn_sigs(self));
-      rtoc_index_receiver_149[UNWRAP (rtoc_each_items_148[rtoc_idx]).name()] = TRY (functionSignature__from_function_def(UNWRAP (rtoc_each_items_148[rtoc_idx])));
+      IF UNWRAP (rtoc_each_items_148[rtoc_idx]) IS_A FunctionDef AS module_fn THEN
+        MUTABLE rtoc_index_receiver_149 = TRY (mIRLowering__fn_sigs(self));
+        rtoc_index_receiver_149[COPY module_fn.name] = TRY (functionSignature__from_function_def(module_fn));
+      END
     rtoc_idx = rtoc_idx + 1;
           END
-          MUTABLE module_scope = (UNWRAP (mod)).global_scope;
-          IF module_scope THEN
+          MUTABLE module_scope: Scope@multiowned = KEEP UNWRAP (mod).global_scope;
+          IF TRUE THEN
             MUTABLE rtoc_merged_sigs = TRY (mIRLowering__fn_sigs(self));
             TRY (functionSignature__merge_imported_signatures_mut(&rtoc_merged_sigs, module_scope));
-            mIRLowering__program_state(self).fn_sigs = rtoc_merged_sigs;
+            self.state.program.fn_sigs = rtoc_merged_sigs;
           END
         END
         MUTABLE same_dir = ((UNWRAP (mod)).source_dir == mIRLowering__program_state(self).source_dir);
@@ -4262,7 +4282,7 @@ PRIVATE FN mIRLowering__lower_require(MUTABLE self: MIRLowering, node: RequireNo
         IF !(&self.state.program.emitted_require_modules.insert(CAST(module_key AS String))) THEN
           RETURN List[];
         END
-        RETURN (dependency_items + TRY (mIRLowering__imported_module_extern_items(&self, mod?)) + TRY (mIRLowering__visible_type_items(self, mod?, same_dir)) + [Emittable{ ModuleNamespace: COPY ModuleNamespace{ name: mIRLowering__zig_module_alias(self, node.namespace), items: COPY namespace_items, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
+        RETURN (dependency_items + TRY (mIRLowering__imported_module_extern_items(&self, mod?)) + TRY (mIRLowering__visible_type_items(&self, mod?, same_dir)) + [Emittable{ ModuleNamespace: COPY ModuleNamespace{ name: mIRLowering__zig_module_alias(self, node.namespace), items: COPY namespace_items, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
       ELSE
         panic("MIRLowering: REQUIRE \\\"{}\\\" but no importer available");
       END
@@ -4270,10 +4290,19 @@ PRIVATE FN mIRLowering__lower_require(MUTABLE self: MIRLowering, node: RequireNo
 END
 PRIVATE FN mIRLowering__imported_module_extern_items(MUTABLE self: MIRLowering, mod_value: CompiledModule) RETURNS ![]Emittable
   EFFECTS REENTRANT ->
-    IF !(mod_value.ast) THEN
+    IF mod_value.ast == NIL THEN
       RETURN CAST(List[] AS []Emittable);
     END
-    RETURN ((UNWRAP (mod_value.ast).statements |> SELECT:? (IF !((_ IS_A ExternFnDecl OR _ IS_A ExternStructDecl)) THEN NIL ELSE TRY (mIRLowering__lower(&self, &_)) END) |> WHERE _ != NIL).flatten()) |> WHERE _ IS_A Emittable;
+    MUTABLE extern_items: []Emittable = List[];
+    FOR stmt IN UNWRAP (mod_value.ast).statements DO
+      IF (stmt IS_A ExternFnDecl OR stmt IS_A ExternStructDecl) THEN
+        MUTABLE extern_stmt = castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY stmt);
+        IF TRY (mIRLowering__lower(&self, &extern_stmt)) EXISTS AS extern_mir THEN
+          &extern_items.append(COPY extern_mir);
+        END
+      END
+    END
+    RETURN extern_items;
 END
 PRIVATE FN mIRLowering__record_module_const_init_mut(MUTABLE self: MIRLowering, mod_value: ?CompiledModule, alias_name: String) RETURNS Void ->
     MUTABLE items: ?[]Emittable = COPY mod_value?.mir_items;
@@ -4293,28 +4322,27 @@ PRIVATE FN mIRLowering__merge_module_schemas_mut(MUTABLE self: MIRLowering, mod_
     MUTABLE rtoc_mutable_receiver_152 = mIRLowering__lowering_schemas(&self);
     mIRLoweringSchemas__merge_mut(&rtoc_mutable_receiver_152, struct_schemas, enum_schemas, union_schemas);
 END
-PRIVATE FN mIRLowering__visible_type_items(self: MIRLowering, mod_value: CompiledModule, same_dir: Bool = FALSE) RETURNS ![]Emittable ->
+PRIVATE FN mIRLowering__visible_type_items(MUTABLE self: MIRLowering, mod_value: CompiledModule, same_dir: Bool = FALSE) RETURNS ![]Emittable ->
     MUTABLE items:? = mod_value.type_items;
     IF !(items) THEN
       RETURN CAST(List[] AS []Emittable);
     END
-    MUTABLE visible_names = TRY (mIRLowering__visible_imported_type_names(self, mod_value, same_dir));
+    MUTABLE visible_names = mIRLowering__visible_imported_type_names(&self, mod_value, same_dir);
     IF visible_names.empty?() THEN
       RETURN CAST(List[] AS []Emittable);
     END
     RETURN items |> WHERE (IF emittable__name(_) EXISTS AS item_name THEN visible_names.contains?(item_name) ELSE FALSE END);
 END
-PRIVATE FN mIRLowering__visible_imported_type_names(self: MIRLowering, mod_value: CompiledModule, same_dir: Bool = FALSE) RETURNS ![Set]String ->
-    MUTABLE visible_names = Set[];
-    IF !(mod_value.ast) THEN
-      RETURN visible_names;
+PRIVATE FN mIRLowering__visible_imported_type_names(MUTABLE self: MIRLowering, mod_value: CompiledModule, same_dir: Bool = FALSE) RETURNS [Set]String ->
+    MUTABLE visible_names: [Set]String = Set[];
+    IF mod_value.ast == NIL THEN
+      RETURN COPY visible_names;
     END
     MUTABLE rtoc_each_items_155 = UNWRAP (mod_value.ast).statements;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_155.length() DO
     IF (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A StructDef) OR (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A EnumDef) OR (UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A UnionDef) THEN
-        MUTABLE rtoc_vis_sig = UNWRAP (rtoc_each_items_155[rtoc_idx]);
-        MUTABLE vis = (functionSignature__visibility( CAST(rtoc_vis_sig AS FunctionSignature)) OR :package);
+        MUTABLE vis: String@symbol = (locatable__visibility(UNWRAP (rtoc_each_items_155[rtoc_idx])) OR_ELSE :package);
         IF (vis == :private) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
@@ -4330,22 +4358,22 @@ PRIVATE FN mIRLowering__visible_imported_type_names(self: MIRLowering, mod_value
         END
         &visible_names.insert(name);
         &self.state.program.emitted_types.insert(name);
-        IF UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A UnionDef THEN
-          FOR rtoc_key IN UNWRAP aST__node_variants( UNWRAP ((rtoc_each_items_155[rtoc_idx]))).keys() DO
-      MUTABLE var_data: Any = COPY UNWRAP (rtoc_each_items_155[rtoc_idx]).variants([rtoc_key]);
-      IF !(schemas__inline_struct?(var_data)) THEN
+        IF UNWRAP (rtoc_each_items_155[rtoc_idx]) IS_A UnionDef AS visible_union_def THEN
+          FOR rtoc_key IN visible_union_def.variants.keys() DO
+      MUTABLE var_data: SchemasUnionSchemaVariantInput = COPY UNWRAP (visible_union_def.variants[rtoc_key]);
+      IF !(schemas__inline_struct?(castSchemasUnionSchemaVariantInputToSchemasUnionSchemaVariantValue(var_data))) THEN
         rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE syn = "${UNWRAP (rtoc_each_items_155[rtoc_idx]).name()}_${rtoc_key}";
-      &visible_names.insert(syn);
-      &self.state.program.emitted_types.insert(syn);
+      MUTABLE syn = "${visible_union_def.name}_${rtoc_key}";
+      &visible_names.insert(COPY syn);
+      &self.state.program.emitted_types.insert(COPY syn);
           END
         END
     END
     rtoc_idx = rtoc_idx + 1;
     END
-    RETURN visible_names;
+    RETURN COPY visible_names;
 END
 PRIVATE FN mIRLowering__imported_module_items(MUTABLE self: MIRLowering, mod_value: CompiledModule) RETURNS ![]Emittable
   EFFECTS REENTRANT ->
@@ -5002,13 +5030,10 @@ PRIVATE FN mIRLowering__pipeline_host(MUTABLE self: MIRLowering) RETURNS !Pipeli
     RETURN KEEP UNWRAP (KEEP mIRLowering__program_state(self).pipeline_host);
 END
 PRIVATE FN mIRLowering__transpile_type(self: MIRLowering, type: MIRLoweringType, is_param: Bool = FALSE, is_field: Bool = FALSE) RETURNS !String ->
-    MUTABLE t = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_191: ?MIRLoweringType = NIL;
+    MUTABLE t: MIRLoweringType = TRY (type__new(castMIRLoweringTypeToTypeConstructionInput(type)));
     IF type IS_A Type THEN
-      rtoc_ternary_value_191 = type;
-    ELSE
-      rtoc_ternary_value_191 = TRY (type__new(castMIRLoweringTypeToTypeConstructionInput(type)));
+      t = COPY type;
     END
-    rtoc_ternary_value_191? };
     RETURN TRY (type__zig_type( CAST(t AS Type), is_param, is_field));
 END
 PRIVATE FN mIRLowering__fsm_fn_name_rename_map(MUTABLE self: MIRLowering) RETURNS !{String}String ->
@@ -5173,7 +5198,7 @@ PRIVATE FN mIRLowering__guard_fsm_result_cleanup_mut(MUTABLE self: MIRLowering, 
           END
           MUTABLE node_name = COPY CAST(emittable__name(UNWRAP (body[rtoc_idx_n1])) AS String);
           MUTABLE rendered_name = COPY (rename_map[node_name] OR_ELSE node_name);
-          IF !(((node_name == emittable__name( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(UNWRAP (facts[rtoc_idx]) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable))) OR (rendered_name == emittable__name(UNWRAP (facts[rtoc_idx]))))) THEN
+          IF !(((node_name == emittable__name( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(UNWRAP (facts[rtoc_idx]) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable))) OR (rendered_name == UNWRAP (facts[rtoc_idx]).name))) THEN
               rtoc_idx_n1 = rtoc_idx_n1 + 1;
         CONTINUE;
           END
@@ -5240,7 +5265,7 @@ PRIVATE FN mIRLowering__fsm_result_transfer_facts(MUTABLE self: MIRLowering, res
     MUTABLE rtoc_each_items_199 = (TRY (mIR__nodes(NodeRoot{ Emittable: COPY result_mir }))) |> WHERE (_ IS_A Ident);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_199.length() DO
-      MUTABLE name = COPY CAST(UNWRAP (rtoc_each_items_199[rtoc_idx]).name() AS String);
+      MUTABLE name = COPY CAST(locatable__name(UNWRAP (rtoc_each_items_199[rtoc_idx])) AS String);
       MUTABLE safe = COPY (rename_map[name] OR_ELSE name);
       MUTABLE entry = ((IF bindings[name] != NIL THEN bindings[name] ELSE bindings[safe] END) OR_ELSE cleanupEntry__none());
       MUTABLE guarded = ((guarded_cleanup_names[name] == TRUE) OR (guarded_cleanup_names[safe] == TRUE));
@@ -13911,13 +13936,10 @@ PRIVATE FN mIRLowering__lower_copy(MUTABLE self: MIRLowering, MUTABLE node: Copy
       RETURN source;
     END
     MUTABLE source_ti = TRY (mIRLowering__copy_source_type_info(self, node.value));
-    MUTABLE ti = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_608: ?Type = NIL;
+    MUTABLE ti: Type = source_ti;
     IF node.coerced_type_info() THEN
-      rtoc_ternary_value_608 = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (node.coerced_type_info()) }));
-    ELSE
-      rtoc_ternary_value_608 = source_ti;
+      ti = COPY TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (node.coerced_type_info()) }));
     END
-    rtoc_ternary_value_608? };
     IF (TRY (type__any_rc?(ti)) AND !(TRY (type__any_rc?(source_ti)))) THEN
       ti = KEEP source_ti;
     END
@@ -14397,13 +14419,10 @@ PRIVATE FN mIRLowering__lower_list_lit(MUTABLE self: MIRLowering, MUTABLE node: 
         lowered_item_branch_value = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_)));
       END
     MUTABLE lowered_item: U = lowered_item_branch_value?;
-    MUTABLE placed_item = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_631: ?Emittable = NIL;
-      IF elem_type != NIL THEN
-        rtoc_ternary_value_631 = TRY (mIRLowering__place_value_for_destination(&self, &lowered_item, &_, list_alloc, TypeTypeInput{ Type: COPY elem_type }));
-      ELSE
-        rtoc_ternary_value_631 = lowered_item;
-      END
-      rtoc_ternary_value_631? };
+    MUTABLE placed_item: Emittable = lowered_item;
+    IF elem_type != NIL THEN
+      placed_item = COPY TRY (mIRLowering__place_value_for_destination(&self, &lowered_item, &_, list_alloc, TypeTypeInput{ Type: COPY elem_type }));
+    END
     MUTABLE item_value = TRY (mIRLowering__materialize_owned_sink_value(&self, placed_item, _, list_alloc, ruby_wrap_optional_Type_TypeTypeInput__mir_lowering(elem_type)));
     MUTABLE item_alloc = (mIRLowering__mir_owned_alloc(&self, item_value) OR_ELSE (IF TRY (mIRLowering__ast_expr_produces_heap?(&self, _)) THEN
         :heap
@@ -14633,13 +14652,10 @@ PRIVATE FN mIRLowering__hash_literal_put_stmt(MUTABLE self: MIRLowering, MUTABLE
         lowered_branch_value = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(val_node)));
       END
     MUTABLE lowered: U = lowered_branch_value?;
-    MUTABLE placed = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_648: ?Emittable = NIL;
-      IF value_type THEN
-        rtoc_ternary_value_648 = TRY (mIRLowering__place_value_for_destination(&self, &lowered, &val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }));
-      ELSE
-        rtoc_ternary_value_648 = lowered;
-      END
-      rtoc_ternary_value_648? };
+    MUTABLE placed: Emittable = lowered;
+    IF value_type THEN
+      placed = COPY TRY (mIRLowering__place_value_for_destination(&self, &lowered, &val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }));
+    END
     TRY (mIRLowering__materialize_owned_sink_value(&self, placed, val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }))
     });
     MUTABLE value_mir = TRY (mIRLowering__hoist_alloc(&self, &raw_value, &val_node, TRUE));

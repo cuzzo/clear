@@ -22,7 +22,9 @@ PUB STRUCT CompiledModule {
   union_schemas: {String@symbol}UnionSchema@multiowned,
   enum_schemas: {String@symbol}[]TypeEnumVariantsItem,
   mir_items: ?[]Emittable,
-  type_items: ?[]Emittable
+  type_items: ?[]Emittable,
+  # Ruby's Struct carries the annotation lifecycle facts a re-lowering needs.
+  lifecycle_registry: LifecycleRegistry@multiowned
 }
 
 PUB STRUCT ModuleImporter {
