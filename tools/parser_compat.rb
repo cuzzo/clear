@@ -1233,6 +1233,9 @@ module ParserCompat
       when 'S' then parse_string
       when 'Y' then { '$symbol' => parse_string_body }
       when 'A' then parse_array
+      # A set: same shape as an array, already sorted by its element encodings
+      # so the two implementations agree without sharing a hash function.
+      when 'E' then { '$set' => parse_array }
       when 'H' then parse_hash
       when 'O' then parse_object
       else raise "unknown canonical tag #{tag.inspect} at #{@pos - 1}"
