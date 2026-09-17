@@ -118,6 +118,15 @@ module ParserCompat
 
   def corpus(name)
     return SMOKE_CASES if name == 'smoke'
+    # 700-odd self-contained programs, a far better denominator than eight
+    # smoke cases. `transpile-tests:N` takes the first N by name, which is what
+    # makes a fixing loop affordable.
+    if name.start_with?('transpile-tests')
+      limit = name.include?(':') ? Integer(name.split(':').last) : nil
+      files = Dir[File.join(LexerHarnessSupport::ROOT, 'transpile-tests', '**', '*.clear')].sort
+      files = files.first(limit) if limit
+      return files.map { |path| { 'name' => File.basename(path, '.clear'), 'source' => File.read(path) } }
+    end
 
     raise "unknown corpus: #{name}"
   end
@@ -484,12 +493,16 @@ module ParserCompat
   # A union encodes as its ACTIVE variant's payload, which is exactly what the
   # Ruby side wrote before the translation gave the slot a name.
   def clear_union_variants(generated_root)
-    @clear_union_variants ||= begin
+    glob = @struct_scan_glob || File.join('ast', '**', '*.clear')
+    @clear_union_variants ||= {}
+    @clear_union_variants[[generated_root, glob]] ||= begin
       table = {}
-      # ast/ and the parser are the translation under test; a same-named union
-      # elsewhere (mir/, semantic/) is a different type and would collide with
-      # the struct encoder of that name.
-      Dir[File.join(generated_root, 'ast', '**', '*.clear')].each do |path|
+      # For the PARSER comparison this stays ast/ and the parser -- the
+      # translation under test -- because a same-named union elsewhere (mir/,
+      # semantic/) is a different type and would collide with the struct
+      # encoder of that name. Stage 3 widens the scan with `with_struct_scan`,
+      # because its stamps reach unions declared outside ast/.
+      Dir[File.join(generated_root, glob)].each do |path|
         File.read(path).scan(/^(?:PUB )?UNION (\w+) \{(.+?)\}$/) do |name, body|
           table[name] = body.split(',').filter_map do |pair|
             variant, payload = pair.split(':', 2).map(&:strip)
