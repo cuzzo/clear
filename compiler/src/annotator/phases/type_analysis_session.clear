@@ -13305,8 +13305,9 @@ PRIVATE FN typeAnalysisSession__visit_assignment_field(MUTABLE self: TypeAnalysi
     # allocates nothing itself.
     IF TRY (type__needs_cleanup?(assignment_field_type)) THEN
       MUTABLE rtoc_field_store_ctx: ?FunctionContext@multiowned = typeAnalysisSession__current_fn_ctx(&self);
-      IF rtoc_field_store_ctx EXISTS AS rtoc_field_store_ctx_value THEN
-        functionContext__mark_runtime_used_mut(&rtoc_field_store_ctx_value);
+      IF rtoc_field_store_ctx EXISTS THEN
+        MUTABLE rtoc_field_store_ctx_mut: FunctionContext@multiowned = COPY rtoc_field_store_ctx;
+        functionContext__mark_runtime_used_mut(&rtoc_field_store_ctx_mut);
       END
     END
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&self, Locatable{ Assignment: COPY assignment_node }, :Void));
