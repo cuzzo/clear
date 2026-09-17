@@ -2594,8 +2594,12 @@ module MIRLoweringExpressions
       allocs[stmt.name.to_s] = stmt.alloc if stmt.is_a?(MIR::AllocMark)
     end
     result_names = mir_ident_names(result).map(&:to_s).to_set
+    # A boxed field temp is consumed by the STRUCT, not by the block result:
+    # the struct is what the break hands back, and normalization hoists that
+    # struct into a temp, after which a :block_result mark for a field temp no
+    # longer names anything the break expression mentions.
     local_alloc_names.intersection(result_names).each do |name|
-      hoisted.concat(ownership_transfer_marks(name, :block_result, target_alloc: alloc_by_name[name]))
+      hoisted.concat(ownership_transfer_marks(name, :owned_sink, target_alloc: alloc_by_name[name]))
     end
     hoisted << MIR::BreakStmt.new(label, result)
     inherited_alloc_names = function_state.lowered_alloc_names.dup
