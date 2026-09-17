@@ -802,7 +802,7 @@ module FunctionAnalysis
   def inject_default_arguments!(plan)
     T.bind(self, Annotator::Phases::TypeAnalysisSession)
     plan.injectable_defaults.each do |param|
-      injected = default_argument_for(param)
+      injected = bind_default_parameter_refs!(plan, default_argument_for(param))
       visit(injected)
       plan.site.append_arg!(injected)
     end
@@ -816,6 +816,38 @@ module FunctionAnalysis
     end
 
     T.cast(default.dup, AST::Locatable)
+  end
+
+  # A default is written in the CALLEE's scope: `capture_name: String =
+  # self.capture` names the callee's own `self` parameter. Injection copies the
+  # expression to the CALL SITE, where that name is the caller's -- a different
+  # variable, usually a different type. Bind each parameter reference to the
+  # argument that filled it, which is what evaluating the default in the callee
+  # would have read.
+  sig { params(plan: CallArityPlan, node: AST::Locatable).returns(AST::Locatable) }
+  def bind_default_parameter_refs!(plan, node)
+    bound = {}
+    plan.site.args.each_with_index do |arg, i|
+      name = plan.params[i]&.name
+      bound[name.to_s] = arg if name
+    end
+    return node if bound.empty?
+
+    return T.cast(T.must(bound[node.name.to_s]).dup, AST::Locatable) if
+      node.is_a?(AST::Identifier) && bound.key?(node.name.to_s)
+
+    AST.each_locatable(node) do |child|
+      next unless child.is_a?(Struct)
+
+      child.class.members.each do |member|
+        value = T.unsafe(child)[member]
+        next unless value.is_a?(AST::Identifier)
+
+        replacement = bound[value.name.to_s]
+        T.unsafe(child)[member] = replacement.dup if replacement
+      end
+    end
+    node
   end
 
   sig do

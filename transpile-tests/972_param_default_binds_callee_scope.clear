@@ -1,0 +1,26 @@
+# A parameter default is written in the CALLEE's scope: `capture_name: String =
+# self.capture` names the callee's own `self`. Injecting it at the call site
+# resolved that name against the CALLER's self -- a different struct.
+STRUCT Prefix {
+  capture: String
+}
+
+STRUCT Lowerer {
+  name: String
+}
+
+FN prefix__loop_label(self: Prefix, suffix: String, capture_name: String = self.capture) RETURNS String ->
+  RETURN COPY capture_name $+ COPY suffix;
+END
+
+FN lowerer__build(self: Lowerer, p: Prefix) RETURNS String ->
+  RETURN prefix__loop_label(p, COPY "-loop");
+END
+
+FN main() RETURNS Void ->
+  p = Prefix{ capture: "__item" };
+  l = Lowerer{ name: "l" };
+  out = lowerer__build(l, p);
+  ASSERT out == "__item-loop", "default came from the callee's self";
+  print("ok");
+END
