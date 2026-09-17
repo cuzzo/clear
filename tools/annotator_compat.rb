@@ -66,9 +66,12 @@ module AnnotatorCompat
     parse_line = '        program = clearParser__parse_source(CAST(source AS String)) OR_ELSE RAISE;'
     raise 'parser harness shape changed; update the splice' unless base.include?(parse_line)
 
+    # `program` is the parser harness's own binding and is passed by pointer to
+    # the annotator, so it has to be MUTABLE; `source` arrives as String@raw
+    # and the annotator's parameter is ?String.
     annotated = <<~CLEAR.chomp
-      #{parse_line}
-              MUTABLE rtoc_annotator = semanticAnnotator__new(NIL, NIL, NIL, FALSE, source) OR_ELSE RAISE;
+      #{parse_line.sub('        program =', '        MUTABLE program =')}
+              MUTABLE rtoc_annotator = semanticAnnotator__new(NIL, NIL, NIL, FALSE, CAST(source AS String)) OR_ELSE RAISE;
               semanticAnnotator__annotate_mut(&rtoc_annotator, &program) OR_ELSE RAISE;
     CLEAR
     annotator_require + base.sub(parse_line, annotated)
