@@ -2634,6 +2634,11 @@ module MIRLoweringExpressions
   sig { params(_field_type: T.nilable(Type::TypeInput), value: AST::Node, aggregate_alloc: Symbol).returns(Symbol) }
   def aggregate_field_sink_alloc(_field_type, value, aggregate_alloc)
     T.bind(self, MIRLowering) rescue nil
+    # A @boxed field IS a heap pointer, and the box owns what it holds: the
+    # payload is allocated where the box is, whatever the aggregate's own
+    # placement. Left on the frame it outlives its frame the moment the
+    # HeapCreate takes it (FRAME_ALLOC_ESCAPES at that transfer).
+    return :heap if value.respond_to?(:needs_heap_create) && value.needs_heap_create
     if value.is_a?(AST::Identifier)
       ti = Type.from_node!(value, context: "aggregate field sink")
       if ownership_tracked_transfer_type?(ti) &&
