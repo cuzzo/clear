@@ -1765,7 +1765,7 @@ PRIVATE FN capabilityAuditSession__effect_call_site_arg_families(self: Capabilit
 END
 PRIVATE FN capabilityAuditSession__effect_call_site_context_for(MUTABLE self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS {String@symbol}Bool ->
     capabilityAuditSession__set_call_site_context_mut(&self, caller_name, (capabilityAuditSession__effect_call_site_context(self)[caller_name] OR_ELSE {}));
-    MUTABLE caller_context = COPY capabilityAuditSession__effect_call_site_context(self)[caller_name];
+    MUTABLE caller_context: {String}{String@symbol}Bool = COPY (capabilityAuditSession__effect_call_site_context(self)[caller_name] OR_ELSE {});
     caller_context[callee_name] = (caller_context[callee_name] OR_ELSE {:loop: FALSE, :cond: FALSE});
     MUTABLE rtoc_result = COPY UNWRAP (caller_context[callee_name]);
     capabilityAuditSession__set_call_site_context_mut(&self, caller_name, COPY caller_context);
@@ -1773,7 +1773,7 @@ PRIVATE FN capabilityAuditSession__effect_call_site_context_for(MUTABLE self: Ca
 END
 PRIVATE FN capabilityAuditSession__effect_call_site_arg_families_for(MUTABLE self: CapabilityAuditSession, caller_name: String, callee_name: String) RETURNS ![][][Set]String@symbol ->
     capabilityAuditSession__set_call_site_arg_families_mut(&self, caller_name, (capabilityAuditSession__effect_call_site_arg_families(self)[caller_name] OR_ELSE {}));
-    MUTABLE caller_families = COPY capabilityAuditSession__effect_call_site_arg_families(self)[caller_name];
+    MUTABLE caller_families: {String}[][][Set]String@symbol = COPY (capabilityAuditSession__effect_call_site_arg_families(self)[caller_name] OR_ELSE {});
     IF !(caller_families.contains?(callee_name)) THEN
       caller_families[callee_name] = [];
     END

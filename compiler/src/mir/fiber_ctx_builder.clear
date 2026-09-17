@@ -190,7 +190,7 @@ PUB FN fiberCtxBuilder__build(analysis: ?CaptureAnalysis, body_access_prefix: St
       {
     MUTABLE rtoc_value_block_marker = 0;
     source_ref = (source_overrides[_] OR_ELSE _);
-    sym = COPY analysis?.capture_symbols[_];
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY analysis?.capture_symbols[_];
     MUTABLE rtoc_sym_is_param: Bool = FALSE;
     IF sym EXISTS AS rtoc_param_sym THEN
       rtoc_sym_is_param = symbolEntry__is_param(rtoc_param_sym);

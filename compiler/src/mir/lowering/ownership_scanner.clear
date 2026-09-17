@@ -13,6 +13,10 @@ PUB STRUCT MIRLoweringOwnershipScanner {
 }
 
 PUB UNION MIRLoweringOwnershipScannerScanRoot { MIRProgram: MIRProgram, RequireNode: RequireNode, ProtocolRequirement: ProtocolRequirement, ProtocolDef: ProtocolDef, FunctionDefMultiowned: FunctionDef@multiowned, ImplementationDef: ImplementationDef, ConformanceDef: ConformanceDef, MIRStructDef: MIRStructDef, VarDecl: VarDecl, Assignment: Assignment, MIRDestructureTarget: MIRDestructureTarget, DestructuringAssignment: DestructuringAssignment, BindExpr: BindExpr, BinaryOp: BinaryOp, IsA: IsA, MIRUnaryOp: MIRUnaryOp, CallSiteOverride: CallSiteOverride, Identifier: Identifier, Literal: Literal, ListLit: ListLit, TupleLit: TupleLit, DefaultArrayLit: DefaultArrayLit, HashLit: HashLit, DefaultLit: DefaultLit, StructLit: StructLit, LambdaLit: LambdaLit, IfStatement: IfStatement, IfBind: IfBind, WhileLoop: WhileLoop, WhileBindLoop: WhileBindLoop, BreakNode: BreakNode, ContinueNode: ContinueNode, FuncCall: FuncCall, MIRMethodCall: MIRMethodCall, GetField: GetField, GetIndex: GetIndex, MIRCast: MIRCast, ReturnNode: ReturnNode, Assert: Assert, TenseRecovery: TenseRecovery, ThrowNode: ThrowNode, DieNode: DieNode, Slice: Slice, Require: Require, MIRDeferStmt: MIRDeferStmt, WithBlockMultiowned: WithBlock@multiowned, SyncPolicyDecl: SyncPolicyDecl, SelectOpMultiowned: SelectOp@multiowned, WhereOpMultiowned: WhereOp@multiowned, IndexOpMultiowned: IndexOp@multiowned, ReduceOpMultiowned: ReduceOp@multiowned, OrderByOpMultiowned: OrderByOp@multiowned, LimitOp: LimitOp, UnnestOpMultiowned: UnnestOp@multiowned, DistinctOpMultiowned: DistinctOp@multiowned, EachOp: EachOp, TapOp: TapOp, SkipOp: SkipOp, CollectOp: CollectOp, TakeWhileOpMultiowned: TakeWhileOp@multiowned, WindowOpMultiowned: WindowOp@multiowned, BatchWindowOpMultiowned: BatchWindowOp@multiowned, JoinOp: JoinOp, FindOpMultiowned: FindOp@multiowned, AnyOpMultiowned: AnyOp@multiowned, AllOpMultiowned: AllOp@multiowned, CountOpMultiowned: CountOp@multiowned, SumOpMultiowned: SumOp@multiowned, AverageOpMultiowned: AverageOp@multiowned, MinOpMultiowned: MinOp@multiowned, MaxOpMultiowned: MaxOp@multiowned, ShardOp: ShardOp, ConcurrentOp: ConcurrentOp, Placeholder: Placeholder, Copy: Copy, MIROptionalUnwrap: MIROptionalUnwrap, TenseNavigation: TenseNavigation, MutableBorrow: MutableBorrow, TenseOperationKind: TenseOperationKind, CatchBlock: CatchBlock, RecoverOp: RecoverOp, MIRBlockExpr: MIRBlockExpr, StringConcat: StringConcat, CapabilityWrap: CapabilityWrap, MoveNode: MoveNode, CopyNode: CopyNode, KeepNode: KeepNode, ShareNode: ShareNode, LinkNode: LinkNode, ResolveNode: ResolveNode, FreezeNode: FreezeNode, PassStmt: PassStmt, StructPattern: StructPattern, MIRRangeLit: MIRRangeLit, ExternFnDecl: ExternFnDecl, ExternStructDecl: ExternStructDecl, MIREnumDef: MIREnumDef, UnionDef: UnionDef, UnionVariantLit: UnionVariantLit, StaticCall: StaticCall, MIRDoBlock: MIRDoBlock, MIRBgBlock: MIRBgBlock, ThenChain: ThenChain, BgStreamBlock: BgStreamBlock, YieldExpr: YieldExpr, CloseStream: CloseStream, NextExpr: NextExpr, MatchStatement: MatchStatement, ForRange: ForRange, ForEach: ForEach, TestBlock: TestBlock, WhenBlock: WhenBlock, LetBinding: LetBinding, TestThat: TestThat, AssertRaisesMultiowned: AssertRaises@multiowned, BenchmarkStmtMultiowned: BenchmarkStmt@multiowned, SmashStmtMultiowned: SmashStmt@multiowned, ProfileStmtMultiowned: ProfileStmt@multiowned, StubDecl: StubDecl, Drop: Drop, SuppressCleanup: SuppressCleanup, Return: Return, ReassignCleanup: ReassignCleanup, FieldCleanup: FieldCleanup, ArrayValue: []Locatable, FunctionDef: FunctionDef, WithBlock: WithBlock, SelectOp: SelectOp, WhereOp: WhereOp, IndexOp: IndexOp, ReduceOp: ReduceOp, OrderByOp: OrderByOp, UnnestOp: UnnestOp, DistinctOp: DistinctOp, TakeWhileOp: TakeWhileOp, WindowOp: WindowOp, BatchWindowOp: BatchWindowOp, FindOp: FindOp, AnyOp: AnyOp, AllOp: AllOp, CountOp: CountOp, SumOp: SumOp, AverageOp: AverageOp, MinOp: MinOp, MaxOp: MaxOp, AssertRaises: AssertRaises, BenchmarkStmt: BenchmarkStmt, SmashStmt: SmashStmt, ProfileStmt: ProfileStmt }
+PUB FN mIRLoweringOwnershipScanner__safe_name_call(self: MIRLoweringOwnershipScanner, arg0: String) RETURNS String ->
+  MUTABLE fn_value = self.safe_name;
+  RETURN fn_value(arg0);
+END
 PUB FN mIRLoweringOwnershipScanner__collect_bg_capture_transfer_roots(self: MIRLoweringOwnershipScanner, stmt: Locatable) RETURNS ![]String ->
   MUTABLE names: []String = List[];
   aST__each_bg_block_in_stmt(stmt, %(bg_value: BgNode) USE(MUTABLE names, self) -> {
@@ -89,12 +93,13 @@ PUB FN mIRLoweringOwnershipScanner__collect_moved_arg_roots(self: MIRLoweringOwn
   END
   MUTABLE ident: ?Identifier = (aST__root_identifier(arg));
   MUTABLE entry = (self.bindings[UNWRAP (root)] OR_ELSE cleanupEntry__none());
-  IF !(((IF ident != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_5 = ident.symbol();
-  symbolEntry__heap_storage?(rtoc_local_receiver_5) }
-    ELSE
-      NIL
-    END) OR_ELSE ((cleanupEntry__present?(entry) AND entry.heap?())))) THEN
+  MUTABLE ident_is_heap: Bool = FALSE;
+  IF ident EXISTS AS ident_value THEN
+    IF ident_value.symbol EXISTS AS ident_symbol THEN
+      ident_is_heap = symbolEntry__heap_storage?(ident_symbol);
+    END
+  END
+  IF !((ident_is_heap OR ((cleanupEntry__present?(entry) AND cleanupEntry__heap?(entry))))) THEN
       RETURN;
   END
   &names.append(UNWRAP (root));
@@ -117,7 +122,7 @@ END
 PUB FN mIRLoweringOwnershipScanner__moved_arg_root(self: MIRLoweringOwnershipScanner, arg: Locatable) RETURNS ?String ->
   MUTABLE node = COPY arg;
   IF node IS_A MoveNode AS move_node THEN
-    node = CAST(move_node.value AS Locatable);
+    node = COPY CAST(move_node.value AS Locatable);
   END
   IF node IS_A Identifier AS identifier THEN
     RETURN COPY identifier__name(identifier);
@@ -129,7 +134,7 @@ PUB FN mIRLoweringOwnershipScanner__transfer_binding_name(self: MIRLoweringOwner
   IF mapped EXISTS AS mapped_value THEN
     RETURN COPY mapped_value;
   END
-  MUTABLE safe = self.safe_name(name);
+  MUTABLE safe = mIRLoweringOwnershipScanner__safe_name_call(self, name);
   IF self.rename_map.contains?(safe) THEN
     RETURN COPY self.rename_map[safe]?;
   ELSE
@@ -137,10 +142,13 @@ PUB FN mIRLoweringOwnershipScanner__transfer_binding_name(self: MIRLoweringOwner
   END
 END
 PRIVATE FN mIRLoweringOwnershipScanner__arg_is_call_argument?(self: MIRLoweringOwnershipScanner, stmt: Locatable, arg: Locatable) RETURNS Bool ->
-  IF !((aST__call?(stmt) AND (locatable__args(stmt) != NIL))) THEN
+  IF !(aST__call?(stmt)) THEN
     RETURN FALSE;
   END
-  RETURN locatable__args(stmt).contains?(arg);
+  IF locatable__args(stmt) EXISTS AS call_args THEN
+    RETURN call_args.contains?(arg);
+  END
+  RETURN FALSE;
 END
 PRIVATE FN mIRLoweringOwnershipScanner__ownership_tracked_transfer_type?(self: MIRLoweringOwnershipScanner, ti: Type) RETURNS !Bool ->
   IF (((type__primitive?(ti) OR type__void?(ti)) OR type__any?(ti)) OR type__id_handle?(ti)) THEN
@@ -151,7 +159,7 @@ END
 PRIVATE FN mIRLoweringOwnershipScanner__nested_ownership_scope?(self: MIRLoweringOwnershipScanner, node: Locatable) RETURNS Bool ->
   RETURN PARTIAL MATCH node START
     Locatable.WithBlock AS with_block -> TRUE,
-    doblock -> TRUE,
+    Locatable.DoBlock -> TRUE,
     Locatable.BgBlock -> TRUE,
     Locatable.BgStreamBlock AS bg_stream_block -> TRUE,
     Locatable.FunctionDef AS function_def -> TRUE,

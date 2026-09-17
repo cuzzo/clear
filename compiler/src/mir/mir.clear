@@ -8074,7 +8074,7 @@ END
 PUB STRUCT MIRMethodCall {
   receiver: Emittable@boxed,
   method: String,
-  args: []@multiowned Any,
+  args: []Emittable,
   try_wrap: Bool,
   callable_contract: ?CallableContract@multiowned,
   owned_result_alloc: ?String@symbol,
