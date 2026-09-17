@@ -1,0 +1,33 @@
+# A statement inside a lambda body is a statement of that body. Hoisting it
+# out -- above the temp it reads -- emitted Zig that names an undeclared
+# identifier.
+STRUCT Node {
+  name: String
+}
+
+FN eachNode(items: []Node, visit: FN(Node) -> Void) RETURNS Void ->
+    FOR item IN items DO
+        visit(COPY item);
+    END
+END
+
+FN nothing() RETURNS Void ->
+END
+
+FN collect(items: []Node) RETURNS []Node ->
+    MUTABLE kept: []Node = List[];
+    eachNode(items, %(node: Node) USE(MUTABLE kept) -> {
+        &kept.append(COPY node);
+        nothing()
+    });
+    RETURN COPY kept;
+END
+
+FN main() RETURNS Void ->
+    a = Node{ name: "a" };
+    b = Node{ name: "b" };
+    items: []Node = [a, b];
+    out = collect(items);
+    ASSERT out.length() == 2, "both kept";
+    print("ok");
+END

@@ -745,7 +745,14 @@ module MIRHoistLowering
       return
     end
 
+    # A body slot holds STATEMENTS, not child expressions. Yielding them as
+    # children lets the caller hoist one out of the node it belongs to, above
+    # the declarations in that same body that it reads. Bodies normalize as
+    # bodies -- `normalize_nested_mir_bodies!` -- so their prefixes stay inside.
+    body_members = node.respond_to?(:body_slots) ? node.body_slots.map(&:name) : []
     node.class.members.each do |member|
+      next if body_members.include?(member)
+
       value = T.unsafe(node)[member]
       each_mir_expr_in_value(value, &blk)
     end
