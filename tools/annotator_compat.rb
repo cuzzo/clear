@@ -24,6 +24,7 @@ require 'optparse'
 saved = $PROGRAM_NAME
 $PROGRAM_NAME = 'parser_compat_support'
 require_relative 'parser_compat'
+require_relative 'annotated_encode'
 $PROGRAM_NAME = saved
 
 module AnnotatorCompat
@@ -31,14 +32,21 @@ module AnnotatorCompat
 
   ROOT = File.expand_path('..', __dir__)
 
-  # Ruby oracle: parse, annotate, then encode the stamped program through the
-  # same canonical encoder the parser comparison uses.
+  # Ruby oracle: parse, annotate, then encode the STAMPED program with stage 3's
+  # own encoder. ParserCompat.canonical_encode cannot be used here -- it rejects
+  # exactly the stamps the annotator writes, so it would compare parse trees and
+  # report agreement while testing nothing.
   def ruby_annotate(source)
     require_relative '../compiler/ruby/compiler/compiler_frontend'
-    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
-    annotator = SemanticAnnotator.new(source_code: source)
-    annotator.annotate!(ast)
-    ParserCompat::CanonicalDecoder.new(ParserCompat.canonical_encode(ast)).parse
+    ast = AnnotatedEncode.annotated_ast(source)
+    ParserCompat::CanonicalDecoder.new(AnnotatedEncode.encode(ast)).parse
+  end
+
+  def annotatable?(source)
+    AnnotatedEncode.annotated_ast(source)
+    true
+  rescue Exception
+    false
   end
 
   def annotator_require_spec(generated_root)
@@ -50,7 +58,9 @@ module AnnotatorCompat
   # The CLEAR harness is the parser one with annotation spliced in: the only
   # change is what `program` holds by the time it is encoded.
   def clear_harness_source(cases, generated_root)
-    base = ParserCompat.clear_harness_source(cases, generated_root)
+    # Generated under stage 3's contract, so the CLEAR encoders emit the same
+    # field list and the same bytes the Ruby side does.
+    base = AnnotatedEncode.with_contract { ParserCompat.clear_harness_source(cases, generated_root) }
     annotator_require = %(REQUIRE "#{annotator_require_spec(generated_root)}";\n)
 
     parse_line = '        program = clearParser__parse_source(CAST(source AS String)) OR_ELSE RAISE;'
@@ -80,6 +90,13 @@ module AnnotatorCompat
     end.parse!(argv)
 
     cases = ParserCompat.corpus(options[:corpus])
+    # The Ruby annotator REJECTS some corpus programs outright (an undeclared
+    # type, a non-recursive TAIL_CALL). There is no annotation to compare for
+    # those, so they are not cases -- but say how many, because a shrinking
+    # denominator is how a comparison flatters itself.
+    total = cases.length
+    cases = cases.select { |entry| annotatable?(entry['source']) }
+    warn "annotator rejects #{total - cases.length} of #{total} corpus programs; comparing #{cases.length}" if cases.length < total
     if options[:emit]
       File.write(options[:emit], clear_harness_source(cases, options[:generated_root]))
       puts "harness: #{options[:emit]} (#{File.read(options[:emit]).lines.length} lines)"
