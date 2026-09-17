@@ -92,6 +92,30 @@ module AnnotatedEncode
     "O#{name.bytesize}:#{name}#{fields.length}[#{encoded}]"
   end
 
+  # The CLEAR side of the same encoding. parser_compat already generates
+  # encoders from the corpus's own struct declarations; stage 3 needs the same
+  # generator with a different skip set -- keep the stamps, cut the container
+  # back-pointers -- so both implementations walk the identical field list.
+  def clear_encoders(cases, generated_root)
+    ParserCompat.with_struct_scan(STRUCT_SCAN) do
+      ParserCompat.with_encoder_skip(CUT) do
+        ParserCompat.with_case_builder(method(:annotated_ast)) do
+          ParserCompat.with_declared_members(method(:declared_members)) do
+            ParserCompat.send(:node_encoders, cases, generated_root)
+          end
+        end
+      end
+    end
+  end
+
+  # What the encoders will actually be handed: the ANNOTATED program.
+  def annotated_ast(source)
+    ast = ClearParser.new(Lexer.new(source).tokenize, source).parse
+    annotator = SemanticAnnotator.new(source_code: source)
+    annotator.annotate!(ast)
+    ast
+  end
+
   # Per-function encodings, which is what makes the compatibility report
   # function-by-function rather than one pass/fail per program. With the graph
   # cut to a tree each function's bytes are inherently self-contained, so two
@@ -125,16 +149,45 @@ module AnnotatedEncode
     end
   end
 
-  # Unlike the parser encoder this keeps STAMP_FIELDS: they are the payload.
+  # The corpus's own struct declaration is the field list, for BOTH sides.
+  # Ruby keeps most of the annotator's output in attr_accessors rather than in
+  # Struct members -- 293 of 348 declared fields on the common node types -- so
+  # reading `class.members` encoded the parse tree and 16% of the annotation,
+  # and would have reported agreement on everything it never looked at.
+  # Every corpus struct, not just ast/**: a stamp reaches Type, SymbolEntry,
+  # FunctionSignature and friends, which are declared elsewhere.
+  STRUCT_SCAN = File.join('**', '*.clear')
+
+  def clear_fields
+    @clear_fields ||= ParserCompat.with_struct_scan(STRUCT_SCAN) do
+      ParserCompat.send(:clear_struct_fields, GENERATED_ROOT)
+    end
+  end
+
+  GENERATED_ROOT = File.join(LexerHarnessSupport::ROOT, 'compiler', 'src')
+
+  # The declared field names of `name`, or nil when the corpus has no such
+  # struct (a Ruby-only helper type).
+  def declared_members(name)
+    decl = clear_fields[name]
+    decl&.keys&.map(&:to_s)
+  end
+
   def ruby_object(value)
-    fields = if value.is_a?(Struct)
+    name = value.class.name.split('::').last
+    declared = declared_members(name)
+    fields = if declared
+               # `public_send`, not `[]`: the field may be a Struct member or an
+               # attr_accessor, and the declaration does not say which.
+               declared.select { |m| value.respond_to?(m) }.to_h { |m| [m, value.public_send(m)] }
+             elsif value.is_a?(Struct)
                # value.class.members, not value.members: AST nodes are Structs,
                # and some of them (protocol/impl bodies) have their OWN `members`
                # field holding FunctionDefs, which shadows Struct#members. The
                # class-level reader is never shadowed.
                value.class.members.to_h { |member| [member.to_s, value[member]] }
              elsif value.class.respond_to?(:props)
-               value.class.props.keys.to_h { |name| [name.to_s, value.public_send(name)] }
+               value.class.props.keys.to_h { |field| [field.to_s, value.public_send(field)] }
              else
                value.instance_variables.to_h do |ivar|
                  [ivar.to_s.delete_prefix('@'), value.instance_variable_get(ivar)]
@@ -142,6 +195,6 @@ module AnnotatedEncode
              end
     raise "unsupported annotated value: #{value.class}" if fields.empty?
 
-    object(value.class.name.split('::').last, fields)
+    object(name, fields)
   end
 end

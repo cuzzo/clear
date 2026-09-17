@@ -453,10 +453,23 @@ module ParserCompat
     var_used was_moved zig_pattern symbol generic_params
   ].freeze
 
+  # Which corpus files are scanned for struct declarations. The parse tree only
+  # reaches ast/**; the ANNOTATED tree reaches types declared in annotator/,
+  # semantic/ and mir/ through its stamps, so stage 3 widens this.
+  def with_struct_scan(glob, &blk)
+    previous = @struct_scan_glob
+    @struct_scan_glob = glob
+    blk.call
+  ensure
+    @struct_scan_glob = previous
+  end
+
   def clear_struct_fields(generated_root)
-    @clear_struct_fields ||= begin
+    glob = @struct_scan_glob || File.join('ast', '**', '*.clear')
+    @clear_struct_fields ||= {}
+    @clear_struct_fields[[generated_root, glob]] ||= begin
       table = {}
-      Dir[File.join(generated_root, 'ast', '**', '*.clear')].each do |path|
+      Dir[File.join(generated_root, glob)].each do |path|
         File.read(path).scan(/^(?:PUB )?STRUCT (\w+) \{(.*?)\n\}/m) do |name, body|
           # A field type can hold commas (`[]Tuple<A, B>`), so match to end of
           # line and drop the trailing separator instead of stopping at `,`.
@@ -492,10 +505,29 @@ module ParserCompat
   # gets a loud panic rather than a silently wrong encoding.
   # AST nodes are a mix of Ruby Structs and T::Structs.
   def struct_member_names(klass)
+    declared = @declared_members&.call(klass.name.to_s.split('::').last)
+    return declared if declared
+
     klass.respond_to?(:members) ? klass.members.map(&:to_s) : klass.props.keys.map(&:to_s)
   end
 
-  def corpus_node_classes(cases)
+  # Where a node's field list comes from. The parser comparison reads Ruby's
+  # Struct members; stage 3 reads the CORPUS declaration, because Ruby keeps
+  # most of the annotator's output in attr_accessors that `members` never shows.
+  def with_declared_members(reader, &blk)
+    previous = @declared_members
+    @declared_members = reader
+    blk.call
+  ensure
+    @declared_members = previous
+  end
+
+  # `build` turns a case's source into the value the encoders will walk. The
+  # parser comparison parses; stage 3 parses AND annotates, and its walk has to
+  # step over the same CUT edges the encoders do or it would collect classes no
+  # encoder is generated for.
+  def corpus_node_classes(cases, &build)
+    build ||= ->(source) { ClearParser.new(Lexer.new(source).tokenize, source).parse }
     seen = {}
     @never_populated = Hash.new { |h, k| h[k] = {} }
     walk = lambda do |value, guard|
@@ -508,9 +540,13 @@ module ParserCompat
       when Struct
         name = value.class.name.split('::').last
         seen[name] = value.class
-        value.members.each do |m|
-          @never_populated[name][m.to_s] = @never_populated[name].fetch(m.to_s, true) && value[m].nil?
-          walk.call(value[m], guard)
+        struct_member_names(value.class).each do |m|
+          next if encoder_skip_fields.include?(m)
+          next unless value.respond_to?(m)
+
+          member = value.public_send(m)
+          @never_populated[name][m] = @never_populated[name].fetch(m, true) && member.nil?
+          walk.call(member, guard)
         end
       when Type, T::Enum
         # Encoded by identity, not by walking their fields.
@@ -529,8 +565,7 @@ module ParserCompat
       end
     end
     cases.each do |entry|
-      ast = ClearParser.new(Lexer.new(entry['source']).tokenize, entry['source']).parse
-      walk.call(ast, Set.new)
+      walk.call(build.call(entry['source']), Set.new)
     end
     seen
   end
@@ -655,6 +690,9 @@ module ParserCompat
       elsif bare == 'Float64' then "(\"F\" $+ floatValueText(#{expr}) $+ \";\")"
       elsif bare == 'Bool' then "(IF #{expr} THEN \"B1\" ELSE \"B0\" END)"
       elsif fields.key?(bare) then "encode#{bare}(#{expr})"
+      elsif @generated_root && clear_enum_members(@generated_root).key?(bare)
+        (@enum_encoders_needed ||= Set.new) << bare
+        "encode#{bare}(#{expr})"
       end
 
     simple ? ['', simple] : nil
@@ -691,10 +729,36 @@ module ParserCompat
     end
   end
 
+  # Which fields the generated CLEAR encoders leave out. The parser comparison
+  # drops the annotator's STAMPS, because a parse tree has none; stage 3 keeps
+  # them (they ARE its payload) and drops the container back-pointers instead.
+  # Both sides of a comparison must skip the same set or the bytes cannot agree.
+  def encoder_skip_fields
+    @encoder_skip_fields || STAMP_FIELDS
+  end
+
+  # How a case's source becomes the value the encoders walk. Stage 3 annotates;
+  # the parser comparison just parses.
+  def with_case_builder(builder, &blk)
+    previous = @case_builder
+    @case_builder = builder
+    blk.call
+  ensure
+    @case_builder = previous
+  end
+
+  def with_encoder_skip(fields, &blk)
+    previous = @encoder_skip_fields
+    @encoder_skip_fields = fields
+    blk.call
+  ensure
+    @encoder_skip_fields = previous
+  end
+
   def node_encoders(cases, generated_root)
     @generated_root = generated_root
     fields = clear_struct_fields(generated_root)
-    classes = corpus_node_classes(cases)
+    classes = corpus_node_classes(cases, &@case_builder)
     close_over_referenced_types!(classes, fields)
     emitted = []
     unsupported = []
@@ -713,7 +777,7 @@ module ParserCompat
         next
       end
 
-      members = struct_member_names(klass).reject { |m| STAMP_FIELDS.include?(m) }.sort
+      members = struct_member_names(klass).reject { |m| encoder_skip_fields.include?(m) }.sort
       parts = members.each_with_index.map do |member, slot_index|
         decl = decls[member]
         pair = decl && clear_value_encoder(decl, "node.#{member}", fields, "f#{slot_index}")
@@ -756,12 +820,51 @@ module ParserCompat
     raise "parser compat: cannot encode #{unsupported.join(', ')}" if unsupported.any?
 
     [emitted.join("\n\n"), [locatable_dispatch(classes.keys, fields, generated_root),
-                             union_encoders(generated_root, fields, classes.keys.to_set)].reject(&:empty?).join("\n\n")]
+                             union_encoders(generated_root, fields, classes.keys.to_set),
+                             enum_encoders(generated_root)].reject(&:empty?).join("\n\n")]
   end
 
   # One encoder per declared union: dispatch on the active variant and encode
   # its payload. Locatable keeps its hand-written dispatch (it names every AST
   # node and only the corpus-reachable ones get encoders).
+  # `PUB ENUM Name { A, B }` -> { "Name" => ["A", "B"] }.
+  def clear_enum_members(generated_root)
+    @clear_enum_members ||= {}
+    @clear_enum_members[generated_root] ||= begin
+      table = {}
+      Dir[File.join(generated_root, @struct_scan_glob || File.join('ast', '**', '*.clear'))].each do |path|
+        File.read(path).scan(/^(?:PUB )?ENUM (\w+) \{([^}]*)\}/) do |name, body|
+          table[name] = body.split(',').map(&:strip).reject(&:empty?)
+        end
+      end
+      table
+    end
+  end
+
+  # An enum encodes as the one-field object Ruby writes for a T::Enum, and the
+  # field holds Ruby's SERIALIZED value -- `Raise` on the CLEAR side is
+  # `"raise"` on the Ruby side, so the mapping comes from the Ruby class.
+  def enum_encoders(generated_root)
+    (@enum_encoders_needed || Set.new).sort.filter_map do |name|
+      members = clear_enum_members(generated_root)[name] or next
+      klass = struct_class_for(name) || (AST.const_defined?(name, false) ? AST.const_get(name, false) : nil)
+      next unless klass.respond_to?(:values)
+
+      serialized = klass.values.to_h { |v| [v.instance_variable_get(:@const_name).to_s, v.serialize.to_s] }
+      arms = members.filter_map do |member|
+        wire = serialized[member] or next
+        "  IF value == #{name}.#{member} THEN\n    text = #{wire.inspect};\n  END"
+      end
+      <<~FN.chomp
+        PRIVATE FN encode#{name}(value: #{name}) RETURNS String ->
+          MUTABLE text = "";
+        #{arms.join("\n")}
+          RETURN "O#{name.bytesize}:#{name}1[" $+ lengthEncoded("S", "value") $+ lengthEncoded("S", text) $+ "]";
+        END
+      FN
+    end.join("\n\n")
+  end
+
   def union_encoders(generated_root, fields, encodable)
     clear_union_variants(generated_root).filter_map do |name, variants|
       next if name == 'Locatable'
