@@ -501,13 +501,13 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE owned_result_guards = TRY (emit__fsm_owned_result_guards(segment_nodes, &lowering));
   MUTABLE seg_result_facts: {Int64}[]FsmResultTransferFact = {};
   MUTABLE seg_mir_codes: [][]Emittable = List[];
-  MUTABLE rtoc_indexed_result_15 = {
+  MUTABLE seg_codes: [][]FsmBodyItem = {
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_16: []Segment = segment_nodes;
   MUTABLE rtoc_indexed_output_20: [][]FsmBodyItem = List[];
   MUTABLE rtoc_indexed_i_17 = 0;
   WHILE rtoc_indexed_i_17 < rtoc_indexed_items_16.length() DO
-    &rtoc_indexed_output_20.append({
+    MUTABLE rtoc_indexed_output_20_item = {
   MUTABLE mir_stmts: []Emittable = List[];
   MUTABLE ast_stmts: []Locatable = List[];
   FOR _ IN UNWRAP (rtoc_indexed_items_16[rtoc_indexed_i_17]).stmts DO
@@ -534,7 +534,7 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     IF seg_overrides EXISTS AS seg_overrides_value THEN
       eff_capture_map = seg_overrides_value.keys() |> REDUCE(COPY capture_map) { acc[_] = COPY (seg_overrides_value[_] OR_ELSE CAST(panic("missing hash key") AS String)); acc };
     ELSE
-      eff_capture_map = capture_map;
+      eff_capture_map = COPY capture_map;
     END
     MUTABLE lowered_mir = mIRLowering__with_fsm_segment_lowering_context(&lowering_api, pointer_captures, inherited_capture_names, inherited_capture_names, owned_result_guards, %() USE(ast_stmts, bg_rt, ctx, eff_capture_map, id, MUTABLE lowering_api, want_result) -> mIRLowering__with_fiber_capture_map(&lowering_api, eff_capture_map, {}, bg_rt, %() USE(ast_stmts, ctx, id, MUTABLE lowering_api, want_result) -> {
     IF want_result THEN
@@ -557,12 +557,12 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
     seg_items = TRY (emit__fsm_body_mir_items(lowered_mir));
   END
   seg_items
-  });
+    };
+    &rtoc_indexed_output_20.append(rtoc_indexed_output_20_item);
     rtoc_indexed_i_17 = rtoc_indexed_i_17 + 1;
   END
   rtoc_indexed_output_20
   };
-  MUTABLE seg_codes = rtoc_indexed_result_15;
   TRY (emit__check_fsm_cleanup_invariant_mut(seg_mir_codes, segment_nodes, liveness, captured, conservative_promoted));
   MUTABLE void_assign_stmt_branch_value: ?Set = NIL;
   IF is_void THEN
@@ -572,13 +572,13 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   END
   MUTABLE void_assign_stmt: Set = void_assign_stmt_branch_value?;
   MUTABLE sp_indices = TRY (emit__compute_sp_indices(segment_nodes));
-  MUTABLE rtoc_indexed_result_21 = {
+  segment_specs = {
   MUTABLE rtoc_value_block_marker = 0;
   MUTABLE rtoc_indexed_items_22: []Segment = segment_nodes;
   MUTABLE rtoc_indexed_output_31: []FsmSegmentSpec = List[];
   MUTABLE rtoc_indexed_i_23 = 0;
   WHILE rtoc_indexed_i_23 < rtoc_indexed_items_22.length() DO
-    &rtoc_indexed_output_31.append({
+    MUTABLE rtoc_indexed_output_31_item = {
   MUTABLE tail = UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail;
   MUTABLE descriptor_branch_value: ?SuspendDescriptor = NIL;
     IF (tail IS_A IoSuspend OR tail IS_A NextSuspend) THEN
@@ -616,12 +616,12 @@ PUB FN emit__build_recursive(MUTABLE ctx: FsmEmitContext, segment_list: SegmentL
   MUTABLE rt_used = TRY (emit__mir_nodes_reference_ident?(rt_roots, bg_rt));
   MUTABLE suppress_runtime_ref = !(rt_used);
   FsmSegmentSpec{ index: UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index, prologue_stmts: COPY prologue_stmts, body_stmts: COPY body_stmts, tail: COPY castSegmentTailToEmitSegmentTail(UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).tail), descriptor: COPY descriptor, fsm_result_transfer_facts: COPY (seg_result_facts[UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index] OR_ELSE List[]), fn_name: "runSeg${UNWRAP (rtoc_indexed_items_22[rtoc_indexed_i_23]).index.toString()}", suppress_runtime_ref: suppress_runtime_ref, structure_stmts: List[], err_cleanups: List[], pre_body_skip: NIL, pre_body_stmts: List[], extra_prologue_stmts: List[], facts: fsmSegmentFacts__empty() }
-  });
+    };
+    &rtoc_indexed_output_31.append(rtoc_indexed_output_31_item);
     rtoc_indexed_i_23 = rtoc_indexed_i_23 + 1;
   END
   rtoc_indexed_output_31
   };
-  MUTABLE segment_specs = rtoc_indexed_result_21;
   TRY (emit__register_owned_suspend_result_cleanups_mut(segment_specs, &ctx, id));
   MUTABLE lock_extra_fields: []ContextFieldDecl = List[];
   MUTABLE next_lock_segment_index = segment_specs.length();
@@ -2010,7 +2010,7 @@ PRIVATE FN emit__expand_lock_segment(spec: FsmSegmentSpec, MUTABLE ctx: FsmEmitC
   END
   rtoc_ternary_value_42? };
   MUTABLE has_step_work = (!((spec.prologue_stmts.length() == 0)) OR !((spec.body_stmts.length() == 0)));
-  MUTABLE lock_try_spec = FsmSegmentSpec{ index: spec.index, prologue_stmts: COPY spec.prologue_stmts, body_stmts: COPY spec.body_stmts, structure_stmts: COPY spec.structure_stmts, tail: EmitSegmentTail{ FsmTailLockTry: COPY FsmTailLockTry{ try_method: CAST(meta[:try_method] AS String), lock_field_ref: CAST(meta[:lock_field_ref] AS String), ok_step: try_success_idx, wait_step: woken_idx, error_step: retry_idx } }, descriptor: NIL, fsm_result_transfer_facts: COPY spec.fsm_result_transfer_facts, fn_name: COPY IF has_step_work THEN
+  MUTABLE lock_try_spec = FsmSegmentSpec{ index: spec.index, prologue_stmts: COPY spec.prologue_stmts, body_stmts: COPY spec.body_stmts, structure_stmts: COPY spec.structure_stmts, tail: EmitSegmentTail{ FsmTailLockTry: COPY FsmTailLockTry{ try_method: CAST(COPY meta[:try_method] AS String), lock_field_ref: CAST(COPY meta[:lock_field_ref] AS String), ok_step: try_success_idx, wait_step: woken_idx, error_step: retry_idx } }, descriptor: NIL, fsm_result_transfer_facts: COPY spec.fsm_result_transfer_facts, fn_name: COPY IF has_step_work THEN
     spec.fn_name
   ELSE
     NIL
