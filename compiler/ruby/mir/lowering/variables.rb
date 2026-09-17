@@ -678,7 +678,14 @@ module MIRLoweringVariables
     # recipe inherited from the init expression may name a different one
     # (a heap String recipe for a frame-placed element view), and a binding
     # has exactly one allocator (INV-1).
-    cleanup_entry = T.must(hoist_cleanup_entry(init, node)).with_alloc(mir_alloc)
+    entry = hoist_cleanup_entry(init, node)
+    # An initializer that allocates nothing ITSELF -- a projection such as a
+    # union payload read, whose buffer the union owns -- has no cleanup recipe.
+    # The binding borrows that buffer: an AllocMark without a Cleanup is a LEAK
+    # by INV-2, and a Cleanup here would free what the union's cleanup frees.
+    return MIR::MaterializationPacket.value_only(let_node) unless entry
+
+    cleanup_entry = entry.with_alloc(mir_alloc)
     build_drop_entry!(cleanup_entry, node.full_type!, node)
     mark_guarded_cleanup_name!(safe_name) if cleanup_entry.has_moved_guard?
     MIR::MaterializationPacket.owned(alloc_mark, let_node, MIR::Cleanup.new(safe_name, cleanup_entry))

@@ -1689,6 +1689,12 @@ module MIRHoistLowering
       CleanupEntry.build(:frozen, alloc: :heap, has_moved_guard: false, fixed_alloc: true)
     when MIR::Cast, MIR::TryExpr, MIR::TryOptional, MIR::OptionalUnwrap
       hoist_cleanup_entry(mir.expr, ast_node)
+    when MIR::UnionPayloadGet
+      # Reading a variant's payload allocates nothing: the UNION owns it, and
+      # its cleanup frees it. `mir_allocates?` is true here only because the
+      # subject allocates, so a hoist of this projection is a borrow of that
+      # buffer -- giving it a cleanup of its own frees what the union frees.
+      nil
     when MIR::AsyncPayloadTake, MIR::DirectTenseMap, MIR::Call, MIR::MethodCall, MIR::TryCatch, MIR::Orelse, MIR::IfOptional, MIR::BlockExpr,
          MIR::Pipeline,
          MIR::InlineBc, MIR::RegistryCall, MIR::IndexedStore, MIR::ExternTrampoline, MIR::BgBlock,
