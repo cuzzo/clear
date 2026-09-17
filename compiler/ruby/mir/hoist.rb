@@ -783,11 +783,12 @@ module MIRHoistLowering
       err_cleanup: T.nilable(T::Boolean),
       mutable: T::Boolean,
       transfer_on_success: T::Boolean,
-      ownership_materialization_alloc: T.nilable(Symbol)
+      ownership_materialization_alloc: T.nilable(Symbol),
+      alloc: T.nilable(Symbol)
     ).returns(MIR::Node)
   end
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false, mutable: false, transfer_on_success: true,
-                  ownership_materialization_alloc: nil)
+                  ownership_materialization_alloc: nil, alloc: nil)
     T.bind(self, MIRLowering) rescue nil
     return expr if expr.is_a?(MIR::BlockExpr) && expr.lazy_boundary
     composite_materialization = owned_composite_transfer_materialization(
@@ -811,7 +812,10 @@ module MIRHoistLowering
       transfer_on_success: err_cleanup == true,
       type_info: composite_materialization&.type_info || alloc_mark_type_info(expr, T.must(ast_node), "MIR allocating hoist"),
       cleanup_entry: composite_materialization&.cleanup_entry || hoist_cleanup_entry(expr, ast_node),
-      alloc: composite_materialization&.alloc,
+      # A value with no allocator of its own lives where its DESTINATION is.
+      # Defaulting to :heap put a heap temp in a frame aggregate, which the
+      # checker reports as AGGREGATE_CHILD_ALLOC_MISMATCH.
+      alloc: composite_materialization&.alloc || alloc,
     )
     stamp_allocating_result_target!(expr, plan.name, alloc: plan.alloc)
     function_state.pending_stmts.concat(plan.statements)
@@ -1007,14 +1011,19 @@ module MIRHoistLowering
   def allocating_hoist_plan(expr, mutable:, transfer_on_success:, type_info:, cleanup_entry:, alloc: nil)
     T.bind(self, MIRLowering) rescue nil
     tmp_id = lowering_counters.next_tmp_id
+    chosen_alloc = alloc || mir_owned_alloc(expr) || :heap
     entry = cleanup_entry
     if entry
       transfer_on_success ? entry.mark_moved_guard! : entry.clear_moved_guard!
+      # The AllocMark above fixes this temp's allocator, and a binding has
+      # exactly one (INV-1). A recipe inherited from the expression may name a
+      # different one -- a heap String recipe for a frame-placed element view.
+      entry = entry.with_alloc(chosen_alloc)
     end
     MIR::BindingMaterialization.new(
       name: "__tmp_#{tmp_id}",
       expr: expr,
-      alloc: alloc || mir_owned_alloc(expr) || :heap,
+      alloc: chosen_alloc,
       type_info: type_info,
       mutable: mutable,
       cleanup_entry: entry,

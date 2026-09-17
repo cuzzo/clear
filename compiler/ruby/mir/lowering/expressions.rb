@@ -2288,7 +2288,7 @@ module MIRLoweringExpressions
                     field_value = aggregate_dynamic_slice_field_value(field_value, expected_ft, borrowed_field, field_sink_alloc, field_node)
                   end
                   field_alloc = mir_owned_alloc(field_value)
-                  lowered = hoist_alloc(field_value, field_node, err_cleanup: true)
+                  lowered = hoist_alloc(field_value, field_node, err_cleanup: true, alloc: field_sink_alloc)
                   # A freshly constructed value has no other owner to copy
                   # away from; for an Rc field it is CONSTRUCTED as a handle
                   # by the carrier wrap below, and copying it structurally is
