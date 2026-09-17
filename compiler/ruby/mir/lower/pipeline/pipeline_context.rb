@@ -170,6 +170,7 @@ class PipelinePlaceholderRewriter
     when AST::BindExpr then substitute_bind_expr(node)
     when AST::Assignment then substitute_assignment(node)
     when AST::DestructuringAssignment then substitute_destructuring_assignment(node)
+    when AST::IfBind then substitute_if_bind(node)
     when AST::UnaryOp then substitute_unary_op(node)
     when AST::OptionalUnwrap then substitute_optional_unwrap(node)
     when AST::IsA then substitute_is_a(node)
@@ -559,6 +560,32 @@ class PipelinePlaceholderRewriter
     new_if.else_result_type = node.else_result_type if node.respond_to?(:else_result_type)
     copy_type_info(node, new_if)
     new_if
+  end
+
+  # `IF _.field EXISTS AS x` keeps the tested expression on its BINDING rather
+  # than in a condition slot, so a rewriter that only knows IfStatement leaves
+  # the placeholder in it untouched and the emitted Zig names a capture that is
+  # not in scope.
+  sig { params(node: AST::IfBind).returns(AST::Node) }
+  def substitute_if_bind(node)
+    new_bindings = node.bindings.map do |binding|
+      new_expr = substitute(binding.expr)
+      next binding if new_expr == binding.expr
+
+      dup = binding.dup
+      dup.expr = new_expr
+      dup
+    end
+    new_then = node.then_branch.map { |stmt| substitute(stmt) }
+    new_else = node.else_branch&.map { |stmt| substitute(stmt) }
+    if new_bindings == node.bindings && new_then == node.then_branch && new_else == node.else_branch
+      return node
+    end
+
+    new_node = AST::IfBind.new(node.token, new_bindings, new_then, new_else)
+    new_node.expr_mode = node.expr_mode if node.respond_to?(:expr_mode)
+    copy_type_info(node, new_node)
+    new_node
   end
 
   # `k, v = _` inside a pipeline block. Without a case here the dispatch falls
