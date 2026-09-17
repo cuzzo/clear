@@ -492,7 +492,11 @@ module Semantic
           return payload.with_type_key(key) if payload
         end
 
-        unless type_info.primitive?
+        # An FN value is a CheatLib.Closure: a code pointer plus a pointer to an
+        # environment the enclosing frame owns. It owns nothing itself, so it
+        # drops like a primitive -- and function types are not declarations, so
+        # the inventory never carries one.
+        unless type_info.primitive? || type_info.fn_type?
           raise "missing annotation lifecycle plan for #{key} (non-primitive type absent from inventory; refusing to default to no-drop)"
         end
         LifecyclePlan.new(type_key: key, drop_strategy: :none, copy_strategy: :bit_copy)
