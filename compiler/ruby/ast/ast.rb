@@ -1413,7 +1413,13 @@ module AST
     sig { params(context: String).returns(Type) }
     def full_type!(context: "post-annotation AST")
       ft = full_type
-      raise "#{context}: unresolved type info for #{self.class}" if ft.untyped?
+      # Without a position this says only THAT some node is unstamped, which
+      # in a 54-file compilation unit is not something you can go and look at.
+      if ft.untyped?
+        tok = respond_to?(:token) ? token : nil
+        where = tok ? " at line #{tok.line}, column #{tok.column}" : ""
+        raise "#{context}: unresolved type info for #{self.class}#{where}"
+      end
       ft
     end
 

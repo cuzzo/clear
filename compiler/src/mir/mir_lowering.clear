@@ -7292,10 +7292,11 @@ PRIVATE FN mIRLowering__mir_ident_names(self: MIRLowering, node: ?Emittable) RET
       # the body. A backward index walk says the same thing without building a
       # reversed copy.
       MUTABLE last: ?Emittable = NIL;
-      MUTABLE break_idx = TRY (blockExpr__body(mir_block_expr)).length();
+      MUTABLE block_body = TRY (blockExpr__body(mir_block_expr));
+      MUTABLE break_idx = block_body.length();
       WHILE break_idx > 0 DO
         break_idx = break_idx - 1;
-        MUTABLE candidate = UNWRAP ((TRY (blockExpr__body(mir_block_expr)))[break_idx]);
+        MUTABLE candidate = UNWRAP (block_body[break_idx]);
         IF candidate IS_A BreakStmt THEN
           last = COPY candidate;
           BREAK;
@@ -7358,7 +7359,7 @@ PRIVATE FN mIRLowering__lower_extern_struct(MUTABLE self: MIRLowering, node: Ext
     MUTABLE fields: []FieldDef = List[];
     MUTABLE source: ?ExternSource = COPY node.extern_source;
     IF ((source != NIL) AND (source.abi == :c)) THEN
-      IF (node.field_decls.count == 0) THEN
+      IF (node.field_decls.length() == 0) THEN
         MUTABLE opaque_name = "${node.name}__opaque";
         RETURN MIRLoweringReturnValue{ ArrayValue: [TypeAlias{ name: COPY opaque_name, target: "opaque {}", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, TypeAlias{ name: COPY node.name, target: "*${opaque_name}", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] |> SELECT Emittable{ TypeAlias: COPY _ } };
       END
@@ -7545,12 +7546,17 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     END
     END
     MUTABLE found: Bool = FALSE;
-    aST__each_locatable_list(node.body, FALSE, %(candidate: Locatable) -> {
+    aST__each_locatable_list(node.body, FALSE, %(candidate: Locatable) USE(MUTABLE found) -> {
+    # Ruby breaks out of the walk; a CLEAR lambda cannot, so the first hit
+    # latches and every later candidate returns immediately.
+    IF found THEN
+        RETURN;
+    END
     MUTABLE type = TRY (aST__full_type_mut(candidate));
     MUTABLE coerced: ?Type = locatable__coerced_type_object(candidate);
-    IF (TRY (type__node_reference?(type)) OR type__node_reference?(UNWRAP (coerced))) THEN
+    IF (TRY (type__node_reference?(type)) OR (IF coerced EXISTS AS coerced_type THEN type__node_reference?(coerced_type) ELSE FALSE END)) THEN
         found = TRUE;
-        BREAK;
+        RETURN;
     END
     rubyToClearVoid__mir_lowering()
     });
@@ -7582,7 +7588,7 @@ PRIVATE FN mIRLowering__function_lowering_context(MUTABLE self: MIRLowering, MUT
     MUTABLE has_catch = ((TRY (mIRLowering__function_catch_clauses(self, node))).length() > 0);
     MUTABLE return_type_info: ?Type = TRY (type__from_node_mut( CAST(return_type_node AS ?Locatable), "function lowering return type"));
     MUTABLE return_payload: ?Type = TRY (type__plain_return_payload_type( UNWRAP (return_type_info)));
-    RETURN FunctionLoweringContext{ bindings: bindings, binding_types: {}, collection_params: COPY collection_params, protocol_map_allocators: COPY protocol_map_allocators, mutable_scalar_params: COPY mutable_scalar_params, param_names: COPY (node.params |> SELECT CAST(_.name AS String)) |> DISTINCT _, takes_param_names: COPY (node.params |> WHERE _.takes) |> SELECT CAST(_.name AS String) |> DISTINCT _, heap_carry_return_vars: COPY mIRLowering__typed_name_set(&self, node.heap_carry_return_vars), returned_names: COPY TRY (mIRLowering__collect_fn_returned_names(&self, node.body)), snapshot_types: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_291: ?[Set]String = NIL;
+    RETURN FunctionLoweringContext{ bindings: bindings, binding_types: {}, collection_params: COPY collection_params, protocol_map_allocators: COPY protocol_map_allocators, mutable_scalar_params: COPY mutable_scalar_params, param_names: COPY (node.params |> SELECT CAST(_.name AS String)) |> DISTINCT _, takes_param_names: COPY (node.params |> WHERE (_.takes OR_ELSE FALSE)) |> SELECT CAST(_.name AS String) |> DISTINCT _, heap_carry_return_vars: COPY mIRLowering__typed_name_set(&self, node.heap_carry_return_vars), returned_names: COPY TRY (mIRLowering__collect_fn_returned_names(&self, node.body)), snapshot_types: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_291: ?[Set]String = NIL;
     IF has_catch THEN
       rtoc_ternary_value_291 = mIRLowering__typed_name_set(&self, node.snapshot_types);
     ELSE
@@ -7667,20 +7673,12 @@ PRIVATE FN mIRLowering__function_param_zig_type(MUTABLE self: MIRLowering, param
     MUTABLE type_sym = type__resolved(param.type);
     MUTABLE is_user_struct = (TRY (mIRLowering__struct_schemas(&self))).contains?(type_sym);
     MUTABLE polymorphic_generic_struct = (((param.mutable != NIL) AND type__generic_instance?(type_info)) AND (TRY (mIRLowering__struct_schemas(&self))).contains?(type__generic_base(type_info)));
-    MUTABLE sym: ?String@symbol = COPY param.symbol;
-    MUTABLE atomic_sync =   IF sym THEN
-      {
-    MUTABLE rtoc_value_block_marker = 0;
-    families = sym.sync_families;
-    (symbolEntry__atomic?(sym) OR (IF families THEN
-      families.contains?(:ATOMIC)
-    ELSE
-      FALSE
-    END))
-    }
-    ELSE
-      FALSE
-    END;
+    MUTABLE sym: ?SymbolEntry@multiowned = COPY param.symbol;
+    MUTABLE atomic_sync = FALSE;
+    IF sym EXISTS AS sym_value THEN
+      MUTABLE families: ?[Set]String@symbol = COPY sym_value.sync_families;
+      atomic_sync = (symbolEntry__atomic?(sym_value) OR (IF families EXISTS AS families_value THEN families_value.contains?(:ATOMIC) ELSE FALSE END));
+    END
     IF (type__shared?(type_info) AND type__generic_type_parameter?(type_info)) THEN
       RETURN COPY "CheatLib.Arc(${type__resolved(type_info)})";
     END
@@ -7762,8 +7760,8 @@ PRIVATE FN mIRLowering__runtime_frame_prologue(MUTABLE self: MIRLowering, node: 
     IF !(fn_needs_rt) THEN
       RETURN CAST(List[] AS []Emittable);
     END
-    MUTABLE ret_type_obj: !Type = functionDef__lowering_return_type(node);
-    MUTABLE bare_ret = (TRY (type__success_type( TRY (ret_type_obj))) OR ret_type_obj);
+    MUTABLE ret_type_obj: Type = TRY (functionDef__lowering_return_type(node));
+    MUTABLE bare_ret = (TRY (type__success_type(ret_type_obj)) OR_ELSE ret_type_obj);
     MUTABLE returns_value_type = ((((type__void?(bare_ret) OR type__primitive?(bare_ret)) OR type__resource?(bare_ret)) OR (TRY (mIRLowering__enum_schemas(&self))).contains?(type__resolved(bare_ret))) OR (TRY (mIRLowering__union_schemas(&self))).contains?(type__resolved(bare_ret)));
     MUTABLE returns_string = TRY (type__string?(bare_ret));
     MUTABLE heap_carry_return = !(!(((TRUE AND (node.heap_carry_return OR_ELSE FALSE)))));
@@ -7834,21 +7832,21 @@ PRIVATE FN mIRLowering__mutable_scalar_param_shadows(self: MIRLowering, mutable_
       MUTABLE ptr_name = "_m_${UNWRAP (mutable_scalar_params[rtoc_idx])}";
       MUTABLE shadow_name = mIRLowering__zig_safe_name(self, UNWRAP (COPY mutable_scalar_params[rtoc_idx]));
       &out.append(Emittable{ Let: COPY Let{ name: COPY shadow_name, init: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY ptr_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: "_ = &${shadow_name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
-      &out.append(Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY ScopeBlock{ body: [Emittable{ Set: COPY Set{ target: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY ptr_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: COPY shadow_name, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: Emittable{ Set: COPY _ } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+      &out.append(Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY ScopeBlock{ body: [Emittable{ Set: COPY Set{ target: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY ptr_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: COPY shadow_name, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN out;
 END
 PRIVATE FN mIRLowering__kept_store_liveness(MUTABLE self: MIRLowering) RETURNS ?KeptEdgeLiveness@multiowned ->
-    MUTABLE fn:? = self.kept_liveness_fn;
-    IF !((IF fn != NIL THEN
-      locatable__body( Locatable{ FunctionDef: COPY fn })
-    ELSE
-      NIL
-    END)) THEN
+    MUTABLE fn: ?FunctionDef@multiowned = COPY self.kept_liveness_fn;
+    IF !(fn EXISTS) THEN
       RETURN NIL;
     END
-    self.kept_liveness = (self.kept_liveness OR_ELSE keptEdgeLiveness__new(UNWRAP (locatable__body( Locatable{ FunctionDef: COPY fn }))));
+    MUTABLE fn_body: ?[]Locatable = locatable__body( Locatable{ FunctionDef: COPY UNWRAP (fn) });
+    IF !(fn_body EXISTS) THEN
+      RETURN NIL;
+    END
+    self.kept_liveness = (self.kept_liveness OR_ELSE keptEdgeLiveness__new(UNWRAP (fn_body)));
     RETURN self.kept_liveness;
 END
 PRIVATE FN mIRLowering__takes_param_ownership_mir(MUTABLE self: MIRLowering, node: FunctionDef) RETURNS ![]Emittable ->
@@ -7935,7 +7933,7 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
     END
     NIL
     };
-    MUTABLE arg_idents = node.params |> SELECT Ident{ name: runtimeCallSpec__call(forward_name, _), lowered_node_id: NIL, ownership_consumption: NIL };
+    MUTABLE arg_idents = node.params |> SELECT Emittable{ Ident: COPY Ident{ name: forward_name(_), lowered_node_id: NIL, ownership_consumption: NIL } };
     IF fn_needs_rt THEN
       arg_idents = ([Emittable{ Ident: COPY Ident{ name: "rt", lowered_node_id: NIL, ownership_consumption: NIL } }] + arg_idents);
     END
