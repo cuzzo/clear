@@ -1393,13 +1393,9 @@ PRIVATE FN useAfterMoveChecker__check_reads_in_expr(MUTABLE self: UseAfterMoveCh
         hash_lit_mutable.pairs.keys() |> EACH {
     MUTABLE v: Locatable = (hash_lit_mutable.pairs[_] OR_ELSE CAST(panic("missing hash key") AS Locatable));
     TRY (useAfterMoveChecker__check_reads_in_expr(&self, _, state));
-    MUTABLE val = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_23: ?String = NIL;
-          IF v IS_A []Any THEN
-            rtoc_ternary_value_23 = v.substr(1, 1);
-          ELSE
-            rtoc_ternary_value_23 = v;
-          END
-          rtoc_ternary_value_23? };
+    # Ruby's `v.is_a?(Array) ? v[1] : v` reaches for the value half of a pair;
+    # a CLEAR hash literal's `pairs` is already keyed, so `v` IS the value.
+    MUTABLE val = COPY v;
     TRY (useAfterMoveChecker__check_reads_in_expr(&self, val, state));
         };
       ELSE_IF node_value_mutable IS_A Literal AS literal THEN
