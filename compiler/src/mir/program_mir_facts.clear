@@ -211,8 +211,8 @@ PRIVATE FN programMIRFinalizer__ast_node_needs_runtime?(node: Locatable, fn_node
 END
 PRIVATE FN programMIRFinalizer__ast_node_lowers_through_runtime?(node: Locatable, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   RETURN PARTIAL MATCH node START
-    Locatable.FuncCall AS func_call -> TRY (programMIRFinalizer__ast_call_needs_runtime?(Node{ FuncCall: COPY func_call }, fn_nodes)),
-    Locatable.MethodCall -> TRY (programMIRFinalizer__ast_call_needs_runtime?(castLocatableToNode__program_mir_facts(node), fn_nodes)),
+    Locatable.FuncCall AS func_call -> TRY (programMIRFinalizer__ast_call_needs_runtime?(Node{ FuncCall: COPY func_call }, fn_nodes, schema_lookup)),
+    Locatable.MethodCall -> TRY (programMIRFinalizer__ast_call_needs_runtime?(castLocatableToNode__program_mir_facts(node), fn_nodes, schema_lookup)),
     Locatable.BgBlock -> TRUE,
     Locatable.BgStreamBlock AS bg_stream_block -> TRUE,
     Locatable.Assignment AS assignment -> TRY (programMIRFinalizer__indexed_assignment_lowers_through_runtime?(assignment)),
@@ -239,12 +239,22 @@ PRIVATE FN programMIRFinalizer__owned_or_else_lowers_through_runtime?(node: Bina
   MUTABLE type = TRY (type__success_type( UNWRAP ((TRY (type__from_node_mut(Locatable{ BinaryOp: COPY node }, "owned OR runtime requirement"))))));
   RETURN (((((TRY (type__string?(type)) OR TRY (type__heap_ptr?(type))) OR TRY (type__collection_value?(type))) OR type__collection?(type)) OR TRY (type__needs_cleanup?(type, schema_lookup))) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup)));
 END
-PRIVATE FN programMIRFinalizer__ast_call_needs_runtime?(node: Node, fn_nodes: {String}FunctionDef) RETURNS !Bool ->
+PRIVATE FN programMIRFinalizer__ast_call_needs_runtime?(node: Node, fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  # An in-program callee's OWN runtime need reaches its callers through
+  # propagate_runtime_requirements!. What propagation cannot carry is the
+  # CALLER's own obligation: a call that hands back a result the caller
+  # must clean up needs an allocator here even when the callee allocates
+  # nothing -- a pass-through, or a function that returns NIL. Lowering
+  # decides that cleanup from the result TYPE, so read the same fact.
   IF fn_nodes.contains?(CAST(aST__node_name(UNWRAP (castNodeToLocatable(node))) AS String)) THEN
-    RETURN FALSE;
+    RETURN TRY (programMIRFinalizer__call_result_needs_cleanup?(node, schema_lookup));
   END
   MUTABLE signature: ?FunctionSignature@multiowned = functionSignature__unwrap( CAST(node__matched_signature(node) AS ?X));
   RETURN (((signature != NIL) AND (functionSignature__needs_rt(signature) == TRUE)) OR ((signature != NIL) AND (TRY (functionSignature__emits_allocating?(signature)) == TRUE)));
+END
+PRIVATE FN programMIRFinalizer__call_result_needs_cleanup?(node: Node, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
+  MUTABLE type = TRY (type__success_type( UNWRAP ((TRY (type__from_node_mut(castNodeToLocatable(node), "call result runtime requirement"))))));
+  RETURN (TRY (type__needs_cleanup?(type, schema_lookup)) OR TRY (type__recursive_cleanup_shape?(type, schema_lookup)));
 END
 PRIVATE FN programMIRFinalizer__copy_node_lowers_through_runtime?(node: Node, schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult) RETURNS !Bool ->
   MUTABLE type = TRY (type__success_type( UNWRAP ((TRY (type__from_node_mut(castNodeToLocatable(node), "COPY runtime requirement"))))));

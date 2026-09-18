@@ -2546,7 +2546,7 @@ PRIVATE FN typeAnalysisSession__analyze_routine(MUTABLE self: TypeAnalysisSessio
     ELSE
       locatable__resolved_type(UNWRAP (castRoutineBodyToOptionalLocatable(body)))
     END;
-    IF (((is_implicit OR ruby_union_scalar_equal_optional_TypeTypeInput_String_symbol(declared_return, :Any))) AND ((found_returns.length() > 0))) THEN
+    IF (((is_implicit OR typeTypeInput__any_placeholder?(declared_return))) AND ((found_returns.length() > 0))) THEN
       MUTABLE inferred = (UNWRAP (found_returns.first())).type;
       IF (is_implicit OR (found_returns.length() == 1)) THEN
         return_type = inferred;
@@ -2719,7 +2719,7 @@ PRIVATE FN typeAnalysisSession__visit_FunctionDef(MUTABLE self: TypeAnalysisSess
   
     END
     MUTABLE resolved_return_type = final_return_type?;
-    IF ((is_implicit_return OR (type__resolved(declared_return) == :Any))) THEN
+    IF ((is_implicit_return OR type__any_placeholder?(declared_return))) THEN
       node.return_type = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(resolved_return_type) }));
       TRY (functionSignature__replace_return_type_mut(&signature, TypeTypeInput{ SymbolValue: COPY symbol(resolved_return_type) }));
     END
@@ -13278,6 +13278,13 @@ PRIVATE FN typeAnalysisSession__visit_assignment_field(MUTABLE self: TypeAnalysi
         assignment_node.auto_lock = AutoLockPlan{ var: COPY UNWRAP (var_name), sync: COPY UNWRAP (syn)};
       END
     ELSE
+      # A CALL result is not an access path: `f(x).field = v` writes to a
+      # temporary nothing else can observe. Diagnose it here -- the cast
+      # below otherwise fails with no source line.
+      IF !((((field_node.target IS_A GetField OR field_node.target IS_A GetIndex) OR field_node.target IS_A OptionalUnwrap) OR field_node.target IS_A Identifier)) THEN
+        TRY (typeAnalysisSession__error_mut(&self, DiagnosticAnchor{ Locatable: Locatable{ Assignment: COPY assignment_node } }, TypeAnalysisCodeOrMessage{ SymbolValue: :INVALID_ASSIGNMENT_TARGET }, [], CAST({:got: DiagnosticKwValue{ StringValue: "${locatable__variant_name(field_node.target)} result (assignment through a value with no storage)" }} AS {String@symbol}Any)));
+        RETURN NIL;
+      END
       MUTABLE target: AccessPathNode = COPY castLocatableToAccessPathNode(field_node.target);
       MUTABLE root: ?String = typeAnalysisSession__chain_root_name(&self, castAccessPathNodeToLocatable(target));
       IF root EXISTS AS root_value THEN

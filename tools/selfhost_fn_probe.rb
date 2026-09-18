@@ -605,6 +605,14 @@ module SelfhostFnProbe
       # FileNotFound for alloc-profile.zig and compiler_regex.zig.
       native_dirs = [SRC, File.join(ROOT, 'zig'), File.join(ROOT, 'zig', 'runtime')].join(File::PATH_SEPARATOR)
       env = { 'CLEAR_EXTRA_LINK_LIBS' => 'pcre2-8', 'CLEAR_EXTRA_NATIVE_DIRS' => native_dirs }
+      # CLEAR_PROBE_MULTI=1 loads the same function-level accumulator the unit
+      # census uses, so one probe round reports EVERY failing statement instead
+      # of the first. A whole-file round costs minutes; one error per round is
+      # the loop's bottleneck, not the compile.
+      if ENV['CLEAR_PROBE_MULTI'] == '1'
+        env['RUBYOPT'] = [ENV['RUBYOPT'], "-r#{File.join(ROOT, 'tools', 'probe_multi_error')}"].compact.join(' ')
+        env['CLEAR_PROBE_ERROR_CAP'] = '200000'
+      end
       # Zig's local cache is not safe to share across concurrent builds: at high
       # job counts probes clobber each other's entries and the link stage
       # reports FileNotFound for runtime modules that are plainly present.

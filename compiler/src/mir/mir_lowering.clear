@@ -2849,6 +2849,14 @@ FN mIRLowering__ownership_operands_for_sink_value(MUTABLE self: MIRLowering, MUT
     IF mIRLowering__non_consuming_owned_value_expr?(&self, value_mir) THEN
       RETURN CAST([ownershipOperandFact__non_owning(ti, source)] AS []OwnershipOperandFact);
     END
+    # A COPY hands over a NEW buffer; the source keeps the one it had. The
+    # operand is that fresh value -- naming the copied BINDING transfers it,
+    # and the next read of it is then a use after transfer. `ownership_root_
+    # name` reaches through COPY on purpose (a reassignment's provenance is
+    # its source), so the check has to come before it.
+    IF ast_value IS_A CopyNode THEN
+      RETURN CAST([ownershipOperandFact__owned_result(ti, source, target_alloc)] AS []OwnershipOperandFact);
+    END
     IF TRY (mIRLowering__borrowed_ownership_ast?(&self, ast_value)) THEN
       RETURN CAST([ownershipOperandFact__borrowed_access(mIRLowering__ownership_root_name(&self, ast_value), ti, source, target_alloc)] AS []OwnershipOperandFact);
     END
@@ -6197,7 +6205,7 @@ PRIVATE FN mIRLowering__mir_expr_child?(self: MIRLowering, value: ?Emittable) RE
     END
     RETURN FALSE;
 END
-PRIVATE FN mIRLowering__hoist_alloc(MUTABLE self: MIRLowering, MUTABLE expr: Emittable, MUTABLE ast_node: ?Locatable = NIL, err_cleanup: ?Bool = FALSE, mutable_value: Bool = FALSE, transfer_on_success: Bool = TRUE, ownership_materialization_alloc: ?String@symbol = NIL) RETURNS !Emittable ->
+PRIVATE FN mIRLowering__hoist_alloc(MUTABLE self: MIRLowering, MUTABLE expr: Emittable, MUTABLE ast_node: ?Locatable = NIL, err_cleanup: ?Bool = FALSE, mutable_value: Bool = FALSE, transfer_on_success: Bool = TRUE, ownership_materialization_alloc: ?String@symbol = NIL, alloc: ?String@symbol = NIL) RETURNS !Emittable ->
     IF (IF expr IS_A MIRBlockExpr AS MUTABLE mir_block_expr THEN (TRUE) ELSE FALSE END) THEN
       RETURN COPY expr;
     END
@@ -6209,7 +6217,7 @@ PRIVATE FN mIRLowering__hoist_alloc(MUTABLE self: MIRLowering, MUTABLE expr: Emi
     IF !(((TRY (mIRLowering__mir_produces_owned_result?(&self, expr)) OR union_return_needs_hoist) OR composite_materialization)) THEN
       RETURN COPY expr;
     END
-    MUTABLE plan = mIRLowering__allocating_hoist_plan(&self, expr, mutable_value, (err_cleanup == TRUE), (composite_materialization?.type_info OR_ELSE TRY (mIRLowering__alloc_mark_type_info(&self, expr, UNWRAP (ast_node), "MIR allocating hoist"))), (IF (IF composite_materialization != NIL THEN
+    MUTABLE plan = TRY (mIRLowering__allocating_hoist_plan(&self, expr, mutable_value, (err_cleanup == TRUE), (composite_materialization?.type_info OR_ELSE TRY (mIRLowering__alloc_mark_type_info(&self, expr, UNWRAP (ast_node), "MIR allocating hoist"))), (IF (IF composite_materialization != NIL THEN
       TRY (ownedCompositeMaterialization__cleanup_entry(composite_materialization))
     ELSE
       NIL
@@ -6217,7 +6225,7 @@ PRIVATE FN mIRLowering__hoist_alloc(MUTABLE self: MIRLowering, MUTABLE expr: Emi
       TRY (ownedCompositeMaterialization__cleanup_entry(composite_materialization))
     ELSE
       NIL
-    END) ELSE TRY (mIRLowering__hoist_cleanup_entry(&self, expr, ast_node)) END), ruby_wrap_optional_string_to_symbol__mir_lowering(composite_materialization?.alloc));
+    END) ELSE TRY (mIRLowering__hoist_cleanup_entry(&self, expr, ast_node)) END), (ruby_wrap_optional_string_to_symbol__mir_lowering(composite_materialization?.alloc) OR_ELSE alloc)));
     TRY (mIRLowering__stamp_allocating_result_target_mut(&self, &expr, plan.name, plan.alloc));
     self.state.function_state.pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(&self).pending_stmts, TRY (bindingMaterialization__statements(plan)));
     mIRLowering__record_hoisted_allocation_mut(&self, plan);
@@ -6246,7 +6254,7 @@ END
 PRIVATE FN mIRLowering__composite_materialization_alloc(MUTABLE self: MIRLowering, type_info: Type, sink_alloc: String@symbol) RETURNS !String@symbol ->
     MUTABLE inherited: ?CleanupEntry@multiowned = TRY (cleanupClassifier__owned_value_entry(type_info, mIRLowering__mir_schema_lookup(&self)));
     IF inherited EXISTS AS inherited_value THEN
-      IF inherited_value[:fixed_alloc] THEN
+      IF cleanupEntry__fixed_alloc?(inherited_value) THEN
         RETURN cleanupEntry__alloc(inherited_value);
       ELSE
         RETURN sink_alloc;
@@ -6449,6 +6457,7 @@ END
 PRIVATE FN mIRLowering__allocating_hoist_plan(MUTABLE self: MIRLowering, expr: Emittable, mutable_value: Bool, transfer_on_success: Bool, type_info: Type, cleanup_entry: ?CleanupEntry, alloc: ?String@symbol = NIL) RETURNS !BindingMaterialization ->
     MUTABLE tmp_id = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_259 = mIRLowering__lowering_counters(&self);
     mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_259) };
+    MUTABLE chosen_alloc: String@symbol = ((alloc OR_ELSE TRY (mIRLowering__mir_owned_alloc(&self, expr))) OR_ELSE :heap);
     MUTABLE entry: ?CleanupEntry@multiowned = cleanup_entry;
     IF entry EXISTS AS entry_value THEN
       MUTABLE entry_value_mutable = COPY entry_value;
@@ -6457,8 +6466,12 @@ PRIVATE FN mIRLowering__allocating_hoist_plan(MUTABLE self: MIRLowering, expr: E
       ELSE
         cleanupEntry__clear_moved_guard_mut(&entry_value_mutable);
       END
+      # The AllocMark above fixes this temp's allocator, and a binding has
+      # exactly one (INV-1). A recipe inherited from the expression may name a
+      # different one -- a heap String recipe for a frame-placed element view.
+      entry = cleanupEntry__with_alloc(entry_value_mutable, chosen_alloc);
     END
-    RETURN BindingMaterialization{ name: "__tmp_${mIRLoweringGeneratedId__to_s(tmp_id)}", expr: COPY expr, alloc: UNWRAP (COPY ((IF alloc != NIL THEN alloc ELSE TRY (mIRLowering__mir_owned_alloc(&self, expr)) END))), type_info: COPY type_info, mutable: mutable_value, cleanup_entry: entry, cleanup_mode: IF transfer_on_success THEN
+    RETURN BindingMaterialization{ name: "__tmp_${mIRLoweringGeneratedId__to_s(tmp_id)}", expr: COPY expr, alloc: COPY chosen_alloc, type_info: COPY type_info, mutable: mutable_value, cleanup_entry: entry, cleanup_mode: IF transfer_on_success THEN
       :err
     ELSE
       :normal
@@ -7133,6 +7146,12 @@ PRIVATE FN mIRLowering__hoist_cleanup_entry(MUTABLE self: MIRLowering, mir: Emit
       RETURN mIRLowering__hoist_cleanup_entry(&self, tryOptional__expr(try_optional), ast_node);
     ELSE_IF mir IS_A MIROptionalUnwrap AS mir_optional_unwrap THEN
       RETURN mIRLowering__hoist_cleanup_entry(&self, optionalUnwrap__expr(mir_optional_unwrap), ast_node);
+    ELSE_IF mir IS_A UnionPayloadGet THEN
+      # Reading a variant's payload allocates nothing: the UNION owns it, and
+      # its cleanup frees it. `mir_allocates?` is true here only because the
+      # subject allocates, so a hoist of this projection is a borrow of that
+      # buffer -- giving it a cleanup of its own frees what the union frees.
+      RETURN NIL;
     ELSE_IF mir IS_A AsyncPayloadTake AS async_payload_take THEN
       IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ AsyncPayloadTake: COPY async_payload_take }, alloc)) END) != NIL THEN
     RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ AsyncPayloadTake: COPY async_payload_take }, alloc)) END))?;
@@ -13682,7 +13701,7 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
               field_value = TRY (mIRLowering__aggregate_dynamic_slice_field_value(&self, &field_value, expected_ft, borrowed_field, field_sink_alloc, &field_node));
           END
           MUTABLE field_alloc: ?String@symbol = TRY (mIRLowering__mir_owned_alloc(&self, field_value));
-          MUTABLE lowered = TRY (mIRLowering__hoist_alloc(&self, &field_value, &field_node, TRUE));
+          MUTABLE lowered = TRY (mIRLowering__hoist_alloc(&self, &field_value, &field_node, TRUE, FALSE, TRUE, NIL, field_sink_alloc));
           IF (TRUE AND TRY (mIRLowering__recursive_field_copy_required?(&self, expected_ft, field_node, field_alloc, field_sink_alloc))) THEN
             MUTABLE copy = (TRY (mIRLowering__retain_handle_for_destination(&self, lowered, expected_ft)) OR_ELSE Emittable{ DeepCopy: COPY DeepCopy{ source: COPY lowered, zig_type: COPY TRY (type__zig_type(expected_ft)), elem_type: NIL, strategy: :full_value, alloc: COPY field_sink_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(expected_ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } });
             RETURN TRY (mIRLowering__hoist_alloc(&self, &copy, &field_node, TRUE));
@@ -13891,8 +13910,12 @@ PRIVATE FN mIRLowering__wrap_indirect_field_hoists(MUTABLE self: MIRLowering, MU
     acc
     };
     MUTABLE result_names = (TRY (mIRLowering__mir_ident_names(self, result)) |> SELECT _.toString()) |> DISTINCT _;
+    # A boxed field temp is consumed by the STRUCT, not by the block result:
+    # the struct is what the break hands back, and normalization hoists that
+    # struct into a temp, after which a :block_result mark for a field temp no
+    # longer names anything the break expression mentions.
     FOR _ IN local_alloc_names.intersection(result_names) DO
-    hoisted = ruby_array_concat_Emittable__mir_lowering(hoisted, CAST(TRY (mIRLowering__ownership_transfer_marks(&self, _, :block_result, alloc_by_name[_])) AS []Emittable));
+    hoisted = ruby_array_concat_Emittable__mir_lowering(hoisted, CAST(TRY (mIRLowering__ownership_transfer_marks(&self, _, :owned_sink, alloc_by_name[_])) AS []Emittable));
     END
     &hoisted.append(Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY result, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     MUTABLE inherited_alloc_names = COPY mIRLowering__function_state(&self).lowered_alloc_names;
@@ -13930,6 +13953,13 @@ PRIVATE FN mIRLowering__union_variant_lit_field_types(MUTABLE self: MIRLowering,
     END
 END
 PRIVATE FN mIRLowering__aggregate_field_sink_alloc(MUTABLE self: MIRLowering, ignored_field_type: ?TypeTypeInput, value: Locatable, aggregate_alloc: String@symbol) RETURNS !String@symbol ->
+    # A @boxed field IS a heap pointer, and the box owns what it holds: the
+    # payload is allocated where the box is, whatever the aggregate's own
+    # placement. Left on the frame it outlives its frame the moment the
+    # HeapCreate takes it (FRAME_ALLOC_ESCAPES at that transfer).
+    IF (aST__node_needs_heap_create(value) OR_ELSE FALSE) THEN
+      RETURN :heap;
+    END
     IF value IS_A Identifier AS identifier THEN
       MUTABLE ti = TRY ( Locatable{ Identifier: COPY type__from_node_mut(Locatable{ Identifier: COPY identifier }, "aggregate field sink") });
       IF (TRY (mIRLowering__ownership_tracked_transfer_type?(&self, UNWRAP (ti))) AND ((aST__moved?(Locatable{ Identifier: COPY identifier }) OR (IF identifier.symbol != NIL THEN
@@ -15496,8 +15526,15 @@ PRIVATE FN mIRLowering__allocating_init_var_decl_plan(MUTABLE self: MIRLowering,
     IF !(TRY (mIRLowering__type_requires_alloc_cleanup?(&self, facts.ft, mir_alloc))) THEN
       RETURN materializationPacket__owned(alloc_mark, Emittable{ Let: COPY let_node });
     END
-    MUTABLE cleanup_entry = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_669 = UNWRAP (TRY (mIRLowering__hoist_cleanup_entry(&self, init, Locatable{ VarDecl: COPY node })));
-    cleanupEntry__with_alloc(rtoc_local_receiver_669, mir_alloc) };
+    MUTABLE entry: ?CleanupEntry@multiowned = TRY (mIRLowering__hoist_cleanup_entry(&self, init, Locatable{ VarDecl: COPY node }));
+    # An initializer that allocates nothing ITSELF -- a projection such as a
+    # union payload read, whose buffer the union owns -- has no cleanup recipe.
+    # The binding borrows that buffer: an AllocMark without a Cleanup is a LEAK
+    # by INV-2, and a Cleanup here would free what the union's cleanup frees.
+    IF !(entry EXISTS) THEN
+      RETURN materializationPacket__value_only(Emittable{ Let: COPY let_node });
+    END
+    MUTABLE cleanup_entry = cleanupEntry__with_alloc(UNWRAP (entry), mir_alloc);
     TRY (mIRLowering__build_drop_entry_mut(&self, &cleanup_entry, TRY (aST__full_type_mut(Locatable{ VarDecl: COPY node })), node));
     IF cleanupEntry__has_moved_guard?(cleanup_entry) THEN
       mIRLowering__mark_guarded_cleanup_name_mut(&self, safe_name);

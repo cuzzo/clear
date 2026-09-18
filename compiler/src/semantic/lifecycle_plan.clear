@@ -472,7 +472,11 @@ WITH POLYMORPHIC self AS rtoc_self_view {
     IF rtoc_self_view.plans[key] EXISTS AS known_plan THEN
       RETURN COPY known_plan;
     END
-    IF !(type__primitive?(type_info)) THEN
+    # An FN value is a CheatLib.Closure: a code pointer plus a pointer to an
+    # environment the enclosing frame owns. It owns nothing itself, so it
+    # drops like a primitive -- and function types are not declarations, so
+    # the inventory never carries one.
+    IF !((type__primitive?(type_info) OR type__fn_type?(type_info))) THEN
       panic("missing annotation lifecycle plan for {} (non-primitive type absent from inventory; refusing to default to no-drop)");
     END
     RETURN LifecyclePlan{ type_key: COPY key, drop_strategy: :none, copy_strategy: :bit_copy, resource_close_plan: NIL };

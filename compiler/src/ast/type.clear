@@ -1850,6 +1850,13 @@ END
 PUB FN type__to_sym(self: Type) RETURNS String@symbol EFFECTS REENTRANT ->
   RETURN type__resolved(self);
 END
+# A bare `Any` is the annotator's "infer this" placeholder -- what an
+# undeclared return type resolves to. `Any@multiowned` NAMES a capability,
+# so it is a declaration, and replacing it with the inferred bare type drops
+# the Rc the caller was promised.
+PUB FN type__any_placeholder?(self: Type) RETURNS Bool EFFECTS REENTRANT ->
+  RETURN (((type__resolved(self) == :Any) AND ((type__ownership(self) == NIL) OR (type__ownership(self) == :affine))) AND (type__sync(self) == NIL));
+END
 PUB FN type__resolved(self: Type) RETURNS String@symbol EFFECTS REENTRANT ->
   MUTABLE fn: ?FunctionType = type__function_type(self);
   IF !((fn == NIL)) THEN
@@ -5045,6 +5052,19 @@ PUB FN type__from_node(value: ?Type) RETURNS !?Type EFFECTS REENTRANT ->
   RETURN COPY value;
 END
 
+# Ruby's declared return is a TypeInput: an already-built Type for a declared
+# signature, a bare symbol where the annotator only has a name. Both spell the
+# `Any` placeholder, so both have to answer.
+PUB FN typeTypeInput__any_placeholder?(value: ?TypeTypeInput) RETURNS Bool EFFECTS REENTRANT ->
+  IF value EXISTS AS input_value THEN
+    PARTIAL MATCH input_value START
+      TypeTypeInput.Type AS item -> RETURN type__any_placeholder?(item);,
+      TypeTypeInput.SymbolValue AS item -> RETURN item == :Any;,
+      DEFAULT -> RETURN FALSE;
+    END
+  END
+  RETURN FALSE;
+END
 # Ruby asks `respond_to?(:shared?)` and then reads it. The variants that
 # can answer compute it; the rest do not respond.
 PUB FN typeTypeInput__shared?(value: TypeTypeInput) RETURNS ?Bool ->
