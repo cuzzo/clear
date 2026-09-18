@@ -6775,8 +6775,11 @@ PRIVATE FN mIRLowering__normalize_allocating_result_expr_mut(MUTABLE self: MIRLo
       RETURN prefix;
     END
     IF expr IS_A IfOptional AS MUTABLE if_optional THEN
-      MUTABLE optional_prefix, optional_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &if_optional.optional, FALSE));
-      TRY (mIRLowering__replace_mir_expr_child_mut(&self, Emittable{ IfOptional: COPY if_optional }, if_optional.optional, &optional_normalized));
+      MUTABLE optional_expr = COPY if_optional.optional;
+      MUTABLE optional_old = COPY if_optional.optional;
+      MUTABLE optional_parent = Emittable{ IfOptional: COPY if_optional };
+      MUTABLE optional_prefix, optional_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &optional_expr, FALSE));
+      TRY (mIRLowering__replace_mir_expr_child_mut(&self, &optional_parent, &optional_old, &optional_normalized));
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, optional_prefix);
       RETURN prefix;
     END
@@ -6833,8 +6836,11 @@ PRIVATE FN mIRLowering__normalize_allocating_used_expr(MUTABLE self: MIRLowering
       RETURN CAST(Tuple{prefix, COPY expr} AS Tuple<[]Emittable, Emittable>);
     END
     IF expr IS_A IfOptional AS MUTABLE if_optional THEN
-      MUTABLE optional_prefix, optional_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &if_optional.optional, FALSE));
-      TRY (mIRLowering__replace_mir_expr_child_mut(&self, Emittable{ IfOptional: COPY if_optional }, if_optional.optional, &optional_normalized));
+      MUTABLE optional_expr = COPY if_optional.optional;
+      MUTABLE optional_old = COPY if_optional.optional;
+      MUTABLE optional_parent = Emittable{ IfOptional: COPY if_optional };
+      MUTABLE optional_prefix, optional_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &optional_expr, FALSE));
+      TRY (mIRLowering__replace_mir_expr_child_mut(&self, &optional_parent, &optional_old, &optional_normalized));
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, optional_prefix);
       RETURN CAST(Tuple{prefix, COPY if_optional} AS Tuple<[]Emittable, Emittable>);
     END
@@ -6897,8 +6903,8 @@ PRIVATE FN mIRLowering__replaceable_t_struct?(MUTABLE self: MIRLowering, node: E
 END
 PRIVATE FN mIRLowering__refresh_ownership_consumption_for_replaced_child_mut(MUTABLE self: MIRLowering, MUTABLE parent: Emittable, MUTABLE old_child: Emittable, MUTABLE new_child: Emittable) RETURNS !Void ->
     MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(parent);
-    MUTABLE old_names = (TRY (mIRLowering__mir_ident_names(self, old_child)) |> SELECT _.toString()) |> DISTINCT _;
-    MUTABLE new_names = TRY (mIRLowering__mir_ident_names(self, new_child)) |> SELECT _.toString();
+    MUTABLE old_names = TRY (mIRLowering__mir_ident_names(self, old_child)) |> DISTINCT _;
+    MUTABLE new_names = TRY (mIRLowering__mir_ident_names(self, new_child));
     MUTABLE visible_names = new_names |> WHERE TRY (mIRLowering__owned_binding_visible?(&self, CAST(_ AS String)));
     IF (visible_names.length() == 0) THEN
       RETURN;
@@ -6944,7 +6950,7 @@ PRIVATE FN mIRLowering__stamp_allocating_result_target_mut(MUTABLE self: MIRLowe
       registry_call_mutable.target_var = COPY name;
       IF alloc EXISTS AS alloc_value THEN
         IF KEEP registry_call_mutable.allocs != NIL THEN
-          registry_call_mutable.allocs = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_284 = ((KEEP registry_call_mutable.allocs)?);
+          registry_call_mutable.allocs = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_284 = UNWRAP (KEEP registry_call_mutable.allocs);
         inlineAllocMetadata__with_all(rtoc_local_receiver_284, alloc_value) };
         ELSE
           registry_call_mutable.allocs = NIL;
@@ -7023,7 +7029,7 @@ PRIVATE FN mIRLowering__hoist_cleanup_entry(MUTABLE self: MIRLowering, mir: Emit
       RETURN mIRLowering__heap_string_entry(self, alloc);
     ELSE_IF mir IS_A AllocSlice AS alloc_slice THEN
       MUTABLE e = mIRLowering__uniform_cleanup_entry(self, "[]${alloc_slice.elem_type}", alloc);
-      e[:elem_zig_type] = alloc_slice.elem_type;
+      cleanupEntry__set_elem_zig_type_mut(&e, COPY alloc_slice.elem_type);
       RETURN e;
     ELSE_IF mir IS_A MakeList AS make_list THEN
       RETURN mIRLowering__uniform_cleanup_entry(self, "std.ArrayListUnmanaged(${make_list.elem_type})", alloc);
@@ -7238,9 +7244,9 @@ PRIVATE FN mIRLowering__cleanup_entry_for_ownership_effect(MUTABLE self: MIRLowe
     IF mir IS_A MIRBlockExpr AS mir_block_expr THEN
       MUTABLE transferred: ?String = COPY effect.target_var;
       IF transferred EXISTS AS transferred_value THEN
-        MUTABLE let = (TRY (blockExpr__body(mir_block_expr))) |> WHERE (_ IS_A Let) |> FIND (CAST(emittable__name(_) AS String) == transferred_value);
-        IF let THEN
-          RETURN TRY (mIRLowering__hoist_cleanup_entry(&self, let.init, NIL));
+        MUTABLE let: ?Emittable = (TRY (blockExpr__body(mir_block_expr))) |> WHERE (_ IS_A Let) |> FIND (CAST(emittable__name(_) AS String) == transferred_value);
+        IF let EXISTS AS transferred_let THEN
+          RETURN TRY (mIRLowering__hoist_cleanup_entry(&self, UNWRAP (emittable__init(transferred_let)), NIL));
         END
       END
     END
@@ -7293,9 +7299,21 @@ PRIVATE FN mIRLowering__mir_ident_names(self: MIRLowering, node: ?Emittable) RET
           END
         END
       END
-      MUTABLE last = ((TRY (blockExpr__body(mir_block_expr))).reverse() |> WHERE (_ IS_A BreakStmt)).first();
-      IF last THEN
-        RETURN (mIRLowering__mir_ident_names(self, aST__node_value( CAST(last AS Locatable)))) |> WHERE !((local_names.contains?(_) OR transferred_names.contains?(_)));
+      # Ruby's `body.reverse.grep(MIR::BreakStmt).first` -- the LAST break in
+      # the body. A backward index walk says the same thing without building a
+      # reversed copy.
+      MUTABLE last: ?Emittable = NIL;
+      MUTABLE break_idx = TRY (blockExpr__body(mir_block_expr)).length();
+      WHILE break_idx > 0 DO
+        break_idx = break_idx - 1;
+        MUTABLE candidate = UNWRAP ((TRY (blockExpr__body(mir_block_expr)))[break_idx]);
+        IF candidate IS_A BreakStmt THEN
+          last = COPY candidate;
+          BREAK;
+        END
+      END
+      IF last EXISTS AS last_break THEN
+        RETURN (mIRLowering__mir_ident_names(self, emittable__value(last_break))) |> WHERE !((local_names.contains?(_) OR transferred_names.contains?(_)));
       ELSE
         RETURN CAST(List[] AS []String);
       END
@@ -7328,7 +7346,7 @@ PRIVATE FN mIRLowering__lower_extern_fn(MUTABLE self: MIRLowering, node: ExternF
     MUTABLE mod: String = COPY (node.from_module OR_ELSE "");
     IF &self.state.program.emitted_extern_modules.insert(mod) THEN
       MUTABLE mod_parts = mod.split(".");
-      MUTABLE root_module:? = mod_parts.first();
+      MUTABLE root_module: String = UNWRAP (mod_parts.first());
       MUTABLE tail_modules = mod_parts |> SKIP 1;
       MUTABLE import_expr = ("@import(\"${root_module}\")" $+ ((tail_modules |> SELECT ".${_}").join("")));
       MUTABLE mod_alias = mIRLowering__zig_module_alias(self, mod);
