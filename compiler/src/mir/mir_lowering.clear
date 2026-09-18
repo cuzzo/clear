@@ -1649,6 +1649,14 @@ FN mIRLowering__ensure_lowered_node_id(MUTABLE self: MIRLowering, MUTABLE node: 
     emittable__set_lowered_node_id_mut(&node, assigned);
     RETURN assigned;
 END
+# Ruby recognises a child it already yielded with `equal?`. A value language
+# has no object identity, so the walk stamps every child with a lowered node id
+# first -- the same ids Ruby's ensure_lowered_node_id hands out lazily.
+FN mIRLowering__ensure_expr_child_ids_mut(MUTABLE self: MIRLowering, MUTABLE node: Emittable) RETURNS Void ->
+    MUTABLE next_id = self.state.ownership.next_lowered_node_id;
+    next_id = emittable__ensure_expr_child_ids_mut(&node, next_id);
+    self.state.ownership.next_lowered_node_id = next_id;
+END
 FN mIRLowering__lowered_body_id(MUTABLE self: MIRLowering, body: []Emittable) RETURNS LoweredBodyId ->
     MUTABLE node_ids: []LoweredNodeId = List[];
     FOR MUTABLE rtoc_mutable_block_param_35 IN body DO
@@ -6620,6 +6628,7 @@ PRIVATE FN mIRLowering__normalize_stmt_child_exprs_mut(MUTABLE self: MIRLowering
       TRY (mIRLowering__replace_mir_expr_child_mut(&self, &stmt, &optional_old, &optional_normalized));
       RETURN COPY optional_prefix;
     END
+    mIRLowering__ensure_expr_child_ids_mut(&self, &stmt);
     MUTABLE children = TRY (emittable__child_exprs(stmt));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < children.length() DO
@@ -6783,6 +6792,7 @@ PRIVATE FN mIRLowering__normalize_allocating_result_expr_mut(MUTABLE self: MIRLo
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, optional_prefix);
       RETURN prefix;
     END
+    mIRLowering__ensure_expr_child_ids_mut(&self, &expr);
     MUTABLE result_children: []Emittable = (TRY (emittable__ownership_source_exprs(expr)) OR_ELSE List[]);
     MUTABLE owned_sources: [Set]Emittable = (TRY (emittable__owned_position_source_exprs(expr)) OR_ELSE List[]) |> DISTINCT _;
     MUTABLE rtoc_idx = 0;
@@ -6869,6 +6879,7 @@ PRIVATE FN mIRLowering__normalize_allocating_used_expr(MUTABLE self: MIRLowering
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, CAST(hoisted AS []Emittable));
       RETURN CAST(Tuple{prefix, COPY ident} AS Tuple<[]Emittable, Emittable>);
     END
+    mIRLowering__ensure_expr_child_ids_mut(&self, &expr);
     TRY (mIRLowering__each_mir_expr_child(self, expr, %(child: Emittable) USE(expr, MUTABLE prefix, MUTABLE self) -> {
     MUTABLE nested_expr = COPY child;
     MUTABLE nested_old = COPY child;
