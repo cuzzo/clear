@@ -6367,34 +6367,24 @@ PRIVATE FN mIRLowering__mir_alloc_mark_type_info(MUTABLE self: MIRLowering, mir:
     END
 END
 PRIVATE FN mIRLowering__mir_explicit_result_type(self: MIRLowering, mir: Emittable) RETURNS !?Type ->
-    MUTABLE raw_type =   IF ((emittable__result_type(mir) != NIL) AND emittable__result_type(mir)) THEN
-      emittable__result_type(mir)
-    ELSE_IF (emittable__responds_to_return_type?(mir) AND mir.return_type) THEN
-      mir.return_type()
-    ELSE_IF (emittable__callable_contract(mir) != NIL) THEN
-      (IF emittable__callable_contract(mir) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_256 = (emittable__callable_contract(mir)).signature;
-    functionSignature__return_type(rtoc_local_receiver_256) }
-    ELSE
-      NIL
-    END)
+    MUTABLE raw_type: ?TypeConstructionInput = NIL;
+    IF emittable__result_type(mir) EXISTS AS result_type_value THEN
+      raw_type = TypeConstructionInput{ Type: COPY result_type_value };
+    ELSE_IF (emittable__responds_to_return_type?(mir) AND (emittable__return_type(mir) EXISTS)) THEN
+      raw_type = emittable__return_type(mir);
+    ELSE_IF emittable__callable_contract(mir) EXISTS AS contract THEN
+      raw_type = TypeConstructionInput{ Type: COPY functionSignature__return_type(contract.signature) };
     ELSE_IF (mir IS_A RegistryCall OR mir IS_A InlineBc) THEN
-      (IF functionSignature__unwrap(emittable__stdlib_def(mir)) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_257 = (functionSignature__unwrap(emittable__stdlib_def(mir)));
-    functionSignature__return_type(rtoc_local_receiver_257) }
-    ELSE
-      NIL
-    END)
-    ELSE_IF (IF mir IS_A Pipeline AS pipeline THEN pipeline.ast_node ELSE FALSE END) THEN
-      TRY (type__from_node_mut(mir.ast_node, "pipeline cleanup result"))
-    ELSE
-      NIL
-    END;
-    IF raw_type THEN
-      RETURN TRY (type__new(raw_type));
-    ELSE
-      RETURN NIL;
+      IF functionSignature__unwrap(emittable__stdlib_def(mir)) EXISTS AS stdlib_signature THEN
+        raw_type = TypeConstructionInput{ Type: COPY functionSignature__return_type(stdlib_signature) };
+      END
+    ELSE_IF mir IS_A Pipeline AS pipeline THEN
+      raw_type = TypeConstructionInput{ Type: COPY TRY (type__from_node_mut(pipeline.ast_node, "pipeline cleanup result")) };
     END
+    IF raw_type EXISTS AS raw_type_value THEN
+      RETURN TRY (type__new(raw_type_value));
+    END
+    RETURN NIL;
 END
 PRIVATE FN mIRLowering__block_expr_result_type(self: MIRLowering, mir: MIRBlockExpr) RETURNS !?Type ->
     MUTABLE marks: []AllocMark = List[];

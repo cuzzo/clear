@@ -19471,6 +19471,25 @@ END
 
 # Ruby asks `respond_to?(:return_type)`: a question about the variant, not
 # about whether the value is set.
+# Ruby asks `respond_to?(:return_type)` and then reads it. The variants that
+# can answer spell it differently -- a Zig type string, a Type, an optional
+# string -- so the reader takes the construction input rather than one of them.
+PUB FN emittable__return_type(value: Emittable) RETURNS ?TypeConstructionInput ->
+  PARTIAL MATCH value START
+    Emittable.CExternFnDecl AS item -> RETURN TypeConstructionInput{ StringValue: COPY item.return_type };,
+    Emittable.ThunkTrampoline AS item -> RETURN TypeConstructionInput{ Type: COPY item.return_type };,
+    Emittable.MutualThunkTrampoline AS item -> RETURN TypeConstructionInput{ Type: COPY item.return_type };,
+    Emittable.PolymorphicMutateFlow AS item -> RETURN (IF item.return_type EXISTS AS return_type_value THEN
+      TypeConstructionInput{ StringValue: COPY return_type_value }
+    ELSE
+      NIL
+    END);,
+    Emittable.ExternTrampoline AS item -> RETURN TypeConstructionInput{ Type: COPY item.return_type };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
+
 PUB FN emittable__responds_to_return_type?(value: Emittable) RETURNS Bool ->
   PARTIAL MATCH value START
     Emittable.CExternFnDecl AS item -> RETURN TRUE;,
