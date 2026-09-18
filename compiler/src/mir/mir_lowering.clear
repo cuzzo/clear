@@ -7586,8 +7586,8 @@ PRIVATE FN mIRLowering__function_lowering_context(MUTABLE self: MIRLowering, MUT
     bindings[_] = (bindings[_] OR_ELSE cleanupEntry__no_cleanup(:heap, :heap));
     END
     MUTABLE has_catch = ((TRY (mIRLowering__function_catch_clauses(self, node))).length() > 0);
-    MUTABLE return_type_info: ?Type = TRY (type__from_node_mut( CAST(return_type_node AS ?Locatable), "function lowering return type"));
-    MUTABLE return_payload: ?Type = TRY (type__plain_return_payload_type( UNWRAP (return_type_info)));
+    MUTABLE return_type_info: Type = TRY (type__from_node_mut( CAST(return_type_node AS ?Locatable), "function lowering return type"));
+    MUTABLE return_payload: ?Type = TRY (type__plain_return_payload_type(return_type_info));
     RETURN FunctionLoweringContext{ bindings: bindings, binding_types: {}, collection_params: COPY collection_params, protocol_map_allocators: COPY protocol_map_allocators, mutable_scalar_params: COPY mutable_scalar_params, param_names: COPY (node.params |> SELECT CAST(_.name AS String)) |> DISTINCT _, takes_param_names: COPY (node.params |> WHERE (_.takes OR_ELSE FALSE)) |> SELECT CAST(_.name AS String) |> DISTINCT _, heap_carry_return_vars: COPY mIRLowering__typed_name_set(&self, node.heap_carry_return_vars), returned_names: COPY TRY (mIRLowering__collect_fn_returned_names(&self, node.body)), snapshot_types: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_291: ?[Set]String = NIL;
     IF has_catch THEN
       rtoc_ternary_value_291 = mIRLowering__typed_name_set(&self, node.snapshot_types);
@@ -7758,7 +7758,7 @@ PRIVATE FN mIRLowering__runtime_frame_prologue(MUTABLE self: MIRLowering, node: 
       RETURN CAST(List[] AS []Emittable);
     END
     MUTABLE ret_type_obj: Type = TRY (functionDef__lowering_return_type(node));
-    MUTABLE bare_ret = (TRY (type__success_type(ret_type_obj)) OR_ELSE ret_type_obj);
+    MUTABLE bare_ret = TRY (type__success_type(ret_type_obj));
     MUTABLE returns_value_type = ((((type__void?(bare_ret) OR type__primitive?(bare_ret)) OR type__resource?(bare_ret)) OR (TRY (mIRLowering__enum_schemas(&self))).contains?(type__resolved(bare_ret))) OR (TRY (mIRLowering__union_schemas(&self))).contains?(type__resolved(bare_ret)));
     MUTABLE returns_string = TRY (type__string?(bare_ret));
     MUTABLE heap_carry_return = !(!(((TRUE AND (node.heap_carry_return OR_ELSE FALSE)))));
@@ -7829,7 +7829,7 @@ PRIVATE FN mIRLowering__mutable_scalar_param_shadows(self: MIRLowering, mutable_
       MUTABLE ptr_name = "_m_${UNWRAP (mutable_scalar_params[rtoc_idx])}";
       MUTABLE shadow_name = mIRLowering__zig_safe_name(self, UNWRAP (COPY mutable_scalar_params[rtoc_idx]));
       &out.append(Emittable{ Let: COPY Let{ name: COPY shadow_name, init: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY ptr_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: NIL, suppression: "_ = &${shadow_name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
-      &out.append(Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY ScopeBlock{ body: [Emittable{ Set: COPY Set{ target: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY ptr_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: COPY shadow_name, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] |> SELECT SegmentStmt{ Emittable: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
+      &out.append(Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY ScopeBlock{ body: [Emittable{ Set: COPY Set{ target: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY Ident{ name: COPY ptr_name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, value: Emittable{ Ident: COPY Ident{ name: COPY shadow_name, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     rtoc_idx = rtoc_idx + 1;
     END
     RETURN out;
@@ -7839,7 +7839,7 @@ PRIVATE FN mIRLowering__kept_store_liveness(MUTABLE self: MIRLowering) RETURNS ?
     IF !(fn EXISTS) THEN
       RETURN NIL;
     END
-    MUTABLE fn_body: ?[]Locatable = locatable__body( Locatable{ FunctionDef: COPY UNWRAP (fn) });
+    MUTABLE fn_body: ?[]Locatable = locatable__body( Locatable{ FunctionDef: COPY fn });
     IF !(fn_body EXISTS) THEN
       RETURN NIL;
     END
@@ -7935,15 +7935,17 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
       arg_idents = ([Emittable{ Ident: COPY Ident{ name: "rt", lowered_node_id: NIL, ownership_consumption: NIL } }] + arg_idents);
     END
     MUTABLE rt_obj: ?Type = COPY node.return_type;
-    MUTABLE is_error_union = !(!((((rt_obj != NIL) AND type__error_union?(rt_obj)))));
-    MUTABLE payload_type_branch_value: ?Type = NIL;
-    IF is_error_union THEN
-      payload_type_branch_value = TRY (type__payload_type(rt_obj));
-    ELSE
-      payload_type_branch_value = rt_obj;
+    MUTABLE is_error_union = FALSE;
+    MUTABLE payload_type: ?Type = NIL;
+    IF rt_obj EXISTS AS return_type_value THEN
+      is_error_union = type__error_union?(return_type_value);
+      IF is_error_union THEN
+        payload_type = TRY (type__payload_type(return_type_value));
+      ELSE
+        payload_type = COPY return_type_value;
+      END
     END
-    MUTABLE payload_type: ?Type = payload_type_branch_value;
-    MUTABLE is_void = !(!(((((payload_type != NIL) AND TRUE) AND type__void?(payload_type)))));
+    MUTABLE is_void = (IF payload_type EXISTS AS payload_value THEN type__void?(payload_value) ELSE FALSE END);
     MUTABLE inner_sig = TRY (functionSignature__from_function_def(node));
     MUTABLE inner_contract = callableContract__new(inner_sig, TRY (ownershipContract__new(List[], List[], List[], TRUE)), node.params.length());
     MUTABLE inner_call_mir = Call{ callee: COPY inner_name, args: COPY arg_idents, try_wrap: is_error_union, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FunctionDef: COPY node })), callable_contract: COPY inner_contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
