@@ -4647,7 +4647,7 @@ FN mIRLowering__emit_expr(MUTABLE self: MIRLowering, node: Emittable) RETURNS !?
     RETURN TRY (mIREmitter__emit(&emitter, node));
 END
 PRIVATE FN mIRLowering__try_catch_with_provenance(self: MIRLowering, left: Emittable, catch_body: Emittable, capture: ?String, fallback: ?MIRLoweringFallback = NIL) RETURNS !TryCatch ->
-    MUTABLE stripped:! = mIRLowering__strip_try(self, left);
+    MUTABLE stripped = TRY (mIRLowering__strip_try(self, left));
     MUTABLE out = TryCatch{ expr: COPY TRY (stripped), catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     IF emittable__result_type(TRY (stripped)) != NIL THEN
       out.result_type = TRY (type__new( TypeConstructionInput{ Type: COPY UNWRAP (emittable__result_type(TRY (stripped))) }));
@@ -5651,10 +5651,10 @@ PRIVATE FN mIRLowering__lower_test_that(MUTABLE self: MIRLowering, test_that: Te
     IF test_that.pending THEN
       RETURN TestDef{ name: COPY full_name, body: [Emittable{ TestPreamble: COPY testBlockCtx__fresh_preamble(env.ctx) }, Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "error", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "SkipZigTest", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] , lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL };
     END
-    MUTABLE body_mir:! = mIRLowering__with_test_that_bindings(&self, test_that, %() USE(test_that, MUTABLE self) -> {
+    MUTABLE body_mir = TRY (mIRLowering__with_test_that_bindings(&self, test_that, %() USE(test_that, MUTABLE self) -> {
     rtoc_lambda_result_226 = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(test_that.body)));
     rtoc_lambda_result_226
-    });
+    }));
     MUTABLE before_mir: []Emittable = List[];
     FOR before_group IN env.ctx.test_before_each_mir DO
       before_mir = ruby_array_concat_Emittable__mir_lowering(before_mir, COPY before_group);
@@ -8691,7 +8691,7 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
     callee_sig = (callee_sig OR_ELSE TRY (mIRLowering__matched_call_signature(self, CallNode{ FuncCall: COPY node })));
     MUTABLE call_plans = (node.kept_edge_plans OR_ELSE {});
     MUTABLE call_args = COPY node.args;
-    MUTABLE args_mir:! = mIRLowering__with_kept_edge_call_frame(&self, %() USE(call_args, call_plans, callee_sig, MUTABLE self) -> {
+    MUTABLE args_mir = TRY (mIRLowering__with_kept_edge_call_frame(&self, %() USE(call_args, call_plans, callee_sig, MUTABLE self) -> {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE rtoc_indexed_items_359: []Locatable = call_args;
     MUTABLE rtoc_indexed_output_361 = [];
@@ -8701,7 +8701,7 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
       rtoc_indexed_i_360 = rtoc_indexed_i_360 + 1;
     END
     rtoc_indexed_output_361
-    });
+    }));
     mod_alias = node.module_alias;
     MUTABLE mod_prefix: String = "";
     IF mod_alias EXISTS AS mod_alias_value THEN
@@ -10472,10 +10472,10 @@ PRIVATE FN mIRLowering__lower_polymorphic_universal(MUTABLE self: MIRLowering, M
       rtoc_ternary_value_468 = COPY CAST(TRY (type__bare_data_type( UNWRAP (rt_obj))) AS String);
     END
     rtoc_ternary_value_468 });
-    MUTABLE body_mir:! = mIRLowering__with_capability_alias_maps(&self, &node, %() USE(node, MUTABLE self) -> {
+    MUTABLE body_mir = TRY (mIRLowering__with_capability_alias_maps(&self, &node, %() USE(node, MUTABLE self) -> {
     rtoc_lambda_result_469 = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(node.body)));
     rtoc_lambda_result_469
-    });
+    }));
     MUTABLE guard_cond: ?MIRBinOp = TRY (mIRLowering__combined_guard_cond(&self, node));
     IF TRY (mIRLowering__polymorphic_flow_required?(self, &node)) THEN
       MUTABLE guard_fail = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_471: ?[]Emittable = NIL;
