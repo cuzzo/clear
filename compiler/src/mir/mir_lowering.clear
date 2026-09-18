@@ -7405,7 +7405,7 @@ PRIVATE FN mIRLowering__lower_extern_struct(MUTABLE self: MIRLowering, node: Ext
         RETURN MIRLoweringReturnValue{ ArrayValue: COPY items };
       END
     ELSE
-    IF (node.field_decls.count == 0) THEN
+    IF (node.field_decls.length() == 0) THEN
         RETURN MIRLoweringReturnValue{ Emittable: COPY CAST(Noop{ reason: "empty_local_extern_struct", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
     ELSE
         fields = node.field_decls.keys() |> SELECT {
@@ -7607,11 +7607,11 @@ PRIVATE FN mIRLowering__activate_function_context(MUTABLE self: MIRLowering, con
     MUTABLE rtoc_mutable_receiver_292 = mIRLowering__function_state(&self);
     functionState__activate_mut(&rtoc_mutable_receiver_292, context);
 END
-PRIVATE FN mIRLowering__typed_name_set(MUTABLE self: MIRLowering, values: ?[]ValuesItem) RETURNS [Set]String ->
+PRIVATE FN mIRLowering__typed_name_set(MUTABLE self: MIRLowering, values: ?[Set]String) RETURNS [Set]String ->
     MUTABLE names: [Set]String = Set[];
-    IF values != NIL THEN
-        FOR _ IN values DO
-        &names.insert(COPY CAST(_ AS String));
+    IF values EXISTS AS present_values THEN
+        FOR _ IN present_values DO
+        &names.insert(COPY _);
         END
     END
     RETURN names;
@@ -11487,7 +11487,7 @@ PRIVATE FN mIRLowering__enforce_bg_capture_strategies_mut(MUTABLE self: MIRLower
       strategies = {};
     END
     MUTABLE refused = strategies.values() |> WHERE _ IS_A Refuse;
-    IF (refused.count == 0) THEN
+    IF (refused.length() == 0) THEN
       RETURN;
     END
     MUTABLE lines = refused.keys() |> SELECT {
