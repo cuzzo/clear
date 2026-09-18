@@ -13,7 +13,6 @@ PUB STRUCT StdLibTypeBinding {
   name: String@symbol,
   schema_factory: FN() -> Any
 }
-builtin_global_bindings: [1]StdLibGlobalBinding = [StdLibGlobalBinding{ name: "argv", type: TypeTypeInput{ SymbolValue: :String }, storage: :heap }];
 builtin_type_bindings: [4]StdLibTypeBinding = [StdLibTypeBinding{ name: :Range, schema_factory: %() -> {
   rtoc_lambda_result_6 = TRY (structSchema__new(CAST({symbol("start"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), default: NIL, borrowed: FALSE } }, symbol("end"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), default: NIL, borrowed: FALSE } }} AS {String@symbol}SchemasStructSchemaFieldInput), List[], List[], {}, {}));
   rtoc_lambda_result_6
@@ -34,7 +33,7 @@ END
 
 # `BUILTIN_GLOBAL_BINDINGS`. A module constant does not cross a CLEAR file.
 PUB FN builtinGlobalBindings() RETURNS [1]StdLibGlobalBinding EFFECTS REENTRANT ->
-  RETURN builtin_global_bindings;
+  RETURN [StdLibGlobalBinding{ name: "argv", type: TypeTypeInput{ SymbolValue: :String }, storage: :heap }];
 END
 
 PUB FN builtinTypeBindings() RETURNS [4]StdLibTypeBinding EFFECTS REENTRANT ->
