@@ -618,7 +618,7 @@ PRIVATE FN resolutionSession__setup_builtins(MUTABLE self: ResolutionSession) RE
     MUTABLE rtoc_mutable_receiver_12 = TRY (resolutionSession__current_scope(self));
     TRY (scope__declare(&rtoc_mutable_receiver_12, _.name, NIL, castTypeToOptionalSymbolEntryTypeInput__resolution_phase(UNWRAP (castTypeTypeInputToType(_.type))), ScopeMutabilityInput{ BoolValue: FALSE }, FALSE, NIL, _.storage));
     END
-    FOR _ IN builtinTypeBindings() DO
+    FOR _ IN TRY (builtinTypeBindings()) DO
     MUTABLE rtoc_local_receiver_13 = TRY (resolutionSession__current_scope(self));
     MUTABLE rtoc_factory = _.schema_factory;
     scope__install_type( &rtoc_local_receiver_13, symbol(_.name), rtoc_factory());

@@ -23,7 +23,7 @@ PUB FN builtinGlobalBindings() RETURNS [1]StdLibGlobalBinding EFFECTS REENTRANT 
   RETURN [StdLibGlobalBinding{ name: "argv", type: TypeTypeInput{ SymbolValue: :String }, storage: :heap }];
 END
 
-PUB FN builtinTypeBindings() RETURNS [4]StdLibTypeBinding EFFECTS REENTRANT ->
+PUB FN builtinTypeBindings() RETURNS ![4]StdLibTypeBinding EFFECTS REENTRANT ->
   RETURN [StdLibTypeBinding{ name: :Range, schema_factory: %() -> {
   rtoc_lambda_result_6 = TRY (structSchema__new(CAST({symbol("start"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), default: NIL, borrowed: FALSE } }, symbol("end"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), default: NIL, borrowed: FALSE } }} AS {String@symbol}SchemasStructSchemaFieldInput), List[], List[], {}, {}));
   rtoc_lambda_result_6
