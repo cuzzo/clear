@@ -6783,8 +6783,8 @@ PRIVATE FN mIRLowering__normalize_allocating_result_expr_mut(MUTABLE self: MIRLo
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, optional_prefix);
       RETURN prefix;
     END
-    MUTABLE result_children: ?[]Emittable = TRY (emittable__ownership_source_exprs(expr));
-    MUTABLE owned_sources: [Set]Emittable = emittable__owned_position_source_exprs(expr) |> DISTINCT _;
+    MUTABLE result_children: []Emittable = (TRY (emittable__ownership_source_exprs(expr)) OR_ELSE List[]);
+    MUTABLE owned_sources: [Set]Emittable = (TRY (emittable__owned_position_source_exprs(expr)) OR_ELSE List[]) |> DISTINCT _;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < result_children.length() DO
       IF (((owned_position OR expr IS_A TryExpr)) AND owned_sources.contains?(result_children[rtoc_idx])) THEN
@@ -6813,8 +6813,10 @@ PRIVATE FN mIRLowering__normalize_allocating_result_expr_mut(MUTABLE self: MIRLo
     IF result_children |> ANY mir__same_node?(_, child) THEN
         RETURN;
     END
-    MUTABLE other_prefix, other_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &child, mIRLowering__consumes_owned_children?(self, expr)));
-    TRY (mIRLowering__replace_mir_expr_child_mut(&self, &expr, &child, &other_normalized));
+    MUTABLE other_expr = COPY child;
+    MUTABLE other_old = COPY child;
+    MUTABLE other_prefix, other_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &other_expr, mIRLowering__consumes_owned_children?(self, expr)));
+    TRY (mIRLowering__replace_mir_expr_child_mut(&self, &expr, &other_old, &other_normalized));
     prefix = ruby_array_concat_Emittable__mir_lowering(prefix, other_prefix);
     rubyToClearVoid__mir_lowering()
     }));
