@@ -7962,19 +7962,15 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
       END
     IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY UNWRAP (cond_mir), lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Panic: COPY Panic{ message: COPY msg_text, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }
     };
+    MUTABLE debug_stmts: []Emittable = List[];
+    IF !((check_stmts.length() == 0)) THEN
+      debug_stmts = [Emittable{ DebugOnly: COPY DebugOnly{ body: check_stmts |> SELECT Emittable{ IfStmt: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
+    END
     MUTABLE body: []Emittable = List[];
     IF is_void THEN
-      body = ([Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY inner_call_mir }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + (IF !((check_stmts.length() == 0)) THEN
-      CAST([Emittable{ DebugOnly: COPY DebugOnly{ body: check_stmts |> SELECT Emittable{ IfStmt: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)
+      body = ([Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY inner_call_mir }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + debug_stmts  + [Emittable{ ReturnStmt: COPY ReturnStmt{ value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
     ELSE
-      CAST(List[] AS []Emittable)
-    END) + [Emittable{ ReturnStmt: COPY ReturnStmt{ value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
-    ELSE
-      body = ([Emittable{ Let: COPY Let{ name: COPY "result", init: Emittable{ Call: COPY inner_call_mir }, mutable: FALSE, annotation: NIL, suppression: "_ = &result;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] + (IF !((check_stmts.length() == 0)) THEN
-      CAST([Emittable{ DebugOnly: COPY DebugOnly{ body: check_stmts |> SELECT Emittable{ IfStmt: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)
-    ELSE
-      CAST(List[] AS []Emittable)
-    END) + [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: "result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
+      body = ([Emittable{ Let: COPY Let{ name: COPY "result", init: Emittable{ Call: COPY inner_call_mir }, mutable: FALSE, annotation: NIL, suppression: "_ = &result;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] + debug_stmts  + [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: "result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
     END
     RETURN FnDef{ name: mIRLowering__zig_safe_name(self, node.name), params: COPY params_mir, ret_type: COPY return_type_str, body: COPY body, visibility: COPY vis, can_fail: FALSE, comptime_params: comptime_params, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
