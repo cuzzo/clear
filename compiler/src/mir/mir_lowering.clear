@@ -5080,11 +5080,11 @@ PRIVATE FN mIRLowering__pipeline_host(MUTABLE self: MIRLowering) RETURNS !Pipeli
     RETURN KEEP UNWRAP (KEEP mIRLowering__program_state(self).pipeline_host);
 END
 PRIVATE FN mIRLowering__transpile_type(self: MIRLowering, type: MIRLoweringType, is_param: Bool = FALSE, is_field: Bool = FALSE) RETURNS !String ->
-    MUTABLE t: MIRLoweringType = TRY (type__new(castMIRLoweringTypeToTypeConstructionInput(type)));
-    IF type IS_A Type THEN
-      t = COPY type;
+    MUTABLE t: Type = TRY (type__new(castMIRLoweringTypeToTypeConstructionInput(type)));
+    IF type IS_A Type AS type_struct THEN
+      t = COPY type_struct;
     END
-    RETURN TRY (type__zig_type( CAST(t AS Type), is_param, is_field));
+    RETURN TRY (type__zig_type(t, is_param, is_field));
 END
 PRIVATE FN mIRLowering__fsm_fn_name_rename_map(MUTABLE self: MIRLowering) RETURNS !{String}String ->
     RETURN COPY mIRLowering__function_state(&self).fn_name_rename_map;
@@ -5143,7 +5143,7 @@ PRIVATE FN mIRLowering__lower_step_stmts(MUTABLE self: MIRLowering, stmts: []Loc
           expr_t_branch_value = COPY expr_type;
         END
         MUTABLE expr_t: Type = expr_t_branch_value?;
-        MUTABLE declared_result_type: Type = expr_t;
+        MUTABLE declared_result_type: Type = COPY expr_t;
         IF async_result_shape != NIL THEN
           declared_result_type = COPY async_result_shape.payload_type;
         END
@@ -5181,13 +5181,14 @@ PRIVATE FN mIRLowering__lower_step_stmts(MUTABLE self: MIRLowering, stmts: []Loc
           result_value = mIRLowering__async_payload_storage_value(&self, result_value, (async_result_shape OR_ELSE TRY (asyncResultShape__promise(result_destination_type))));
           MUTABLE result_set = Set{ target: Emittable{ FieldGet: COPY target }, value: COPY result_value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
           MUTABLE transfer_facts = TRY (mIRLowering__fsm_result_transfer_facts(&self, last_mir, last_step_value_mutable.expr, result_destination_type));
-          mIRLowering__capture_state(&self).last_fsm_result_transfer_facts = ruby_array_concat_FsmResultTransferFact(mIRLowering__capture_state(&self).last_fsm_result_transfer_facts, transfer_facts);
+          self.state.capture.last_fsm_result_transfer_facts = ruby_array_concat_FsmResultTransferFact(mIRLowering__capture_state(&self).last_fsm_result_transfer_facts, transfer_facts);
           TRY (mIRLowering__guard_fsm_result_cleanup_mut(&self, result_mir, transfer_facts));
           MUTABLE transfer_names = (transfer_facts |> SELECT _.name) |> DISTINCT _ |> SELECT COPY _;
+          MUTABLE result_set_emittable: Emittable = Emittable{ Set: COPY result_set };
           IF (transfer_names).any?() THEN
-            result_set = TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ Set: COPY result_set }, transfer_names, "fsm_result", :owned_sink, mIRLowering__uniform_fsm_result_target_alloc(self, transfer_facts)));
+            result_set_emittable = TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ Set: COPY result_set }, transfer_names, "fsm_result", :owned_sink, mIRLowering__uniform_fsm_result_target_alloc(self, transfer_facts)));
           END
-          &result_mir.append(Emittable{ Set: COPY result_set });
+          &result_mir.append(COPY result_set_emittable);
           result_mir = ruby_array_concat_Emittable__mir_lowering(result_mir, CAST(transfer_facts |> UNNEST TRY (fsmResultTransferFact__marks(_)) AS []Emittable));
           MUTABLE last_expr = COPY last_step_value_mutable.expr;
           IF last_expr IS_A Identifier AS identifier THEN
@@ -5286,38 +5287,54 @@ PRIVATE FN mIRLowering__fsm_result_transfer_facts(MUTABLE self: MIRLowering, res
     IF (IF result_owner IS_A Ident AS ident THEN TRY (mIRLowering__ownership_tracked_transfer_type?(&self, UNWRAP (result_type))) ELSE FALSE END) THEN
       MUTABLE owner_name = COPY CAST(emittable__name(result_owner) AS String);
       owner_name = COPY (rename_map[owner_name] OR_ELSE owner_name);
-      MUTABLE mir_entry = ((IF bindings[CAST(emittable__name(result_owner) AS String)] != NIL THEN bindings[CAST(emittable__name(result_owner) AS String)] ELSE bindings[owner_name] END) OR_ELSE cleanupEntry__none());
+      MUTABLE mir_entry: CleanupEntry@multiowned = cleanupEntry__none();
+      IF bindings[CAST(emittable__name(result_owner) AS String)] EXISTS AS direct_entry THEN
+        mir_entry = KEEP direct_entry;
+      ELSE_IF bindings[owner_name] EXISTS AS renamed_entry THEN
+        mir_entry = KEEP renamed_entry;
+      END
       IF cleanupEntry__present?(mir_entry) THEN
         cleanupEntry__mark_moved_guard_mut(&mir_entry);
         guarded_cleanup_names[owner_name] = TRUE;
       END
-      &facts.append(FsmResultTransferFact{ name: COPY owner_name, target_alloc: COPY IF cleanupEntry__present?(mir_entry) THEN
-        mir_entry.alloc()
-      ELSE
-        :heap
-      END, move_guarded: TRUE });
+      MUTABLE fact_alloc: String@symbol = :heap;
+      IF cleanupEntry__present?(mir_entry) THEN
+        fact_alloc = cleanupEntry__alloc(mir_entry);
+      END
+      &facts.append(FsmResultTransferFact{ name: COPY owner_name, target_alloc: COPY fact_alloc, move_guarded: TRUE });
       RETURN facts;
     END
     MUTABLE consumed = TRY (mIRLowering__fsm_ast_result_consumed_roots(&self, castLocatableToOptionalFsmAstResultNode(ast_node)));
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < consumed.length() DO
-      MUTABLE safe = mIRLowering__fsm_zig_safe_name(self, consumed[rtoc_idx]?);
+      MUTABLE consumed_name: String = COPY UNWRAP (consumed[rtoc_idx]);
+      MUTABLE safe = mIRLowering__fsm_zig_safe_name(self, consumed_name);
       safe = COPY (rename_map[safe] OR_ELSE safe);
-      MUTABLE binding_entry = ((IF bindings[consumed[rtoc_idx]?] != NIL THEN bindings[consumed[rtoc_idx]?] ELSE bindings[safe] END) OR_ELSE cleanupEntry__none());
+      MUTABLE binding_entry: CleanupEntry@multiowned = cleanupEntry__none();
+      IF bindings[consumed_name] EXISTS AS direct_binding THEN
+        binding_entry = KEEP direct_binding;
+      ELSE_IF bindings[safe] EXISTS AS renamed_binding THEN
+        binding_entry = KEEP renamed_binding;
+      END
       IF !(cleanupEntry__present?(binding_entry)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE guarded = (cleanupEntry__has_moved_guard?(binding_entry) OR (guarded_cleanup_names[safe] == TRUE));
-      &facts.append(FsmResultTransferFact{ name: COPY safe, target_alloc: COPY binding_entry.alloc(), move_guarded: guarded });
+      &facts.append(FsmResultTransferFact{ name: COPY safe, target_alloc: COPY cleanupEntry__alloc(binding_entry), move_guarded: guarded });
     rtoc_idx = rtoc_idx + 1;
     END
     MUTABLE rtoc_each_items_199 = (TRY (mIR__nodes(NodeRoot{ Emittable: COPY result_mir }))) |> WHERE (_ IS_A Ident);
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_199.length() DO
-      MUTABLE name = COPY CAST(locatable__name(UNWRAP (rtoc_each_items_199[rtoc_idx])) AS String);
+      MUTABLE name = COPY CAST(emittable__name(rtoc_each_items_199[rtoc_idx]) AS String);
       MUTABLE safe = COPY (rename_map[name] OR_ELSE name);
-      MUTABLE entry = ((IF bindings[name] != NIL THEN bindings[name] ELSE bindings[safe] END) OR_ELSE cleanupEntry__none());
+      MUTABLE entry: CleanupEntry@multiowned = cleanupEntry__none();
+      IF bindings[name] EXISTS AS direct_entry THEN
+        entry = KEEP direct_entry;
+      ELSE_IF bindings[safe] EXISTS AS renamed_entry THEN
+        entry = KEEP renamed_entry;
+      END
       MUTABLE guarded = ((guarded_cleanup_names[name] == TRUE) OR (guarded_cleanup_names[safe] == TRUE));
       IF !((guarded OR cleanupEntry__present?(entry))) THEN
           rtoc_idx = rtoc_idx + 1;
@@ -5419,12 +5436,8 @@ PRIVATE FN mIRLowering__lower_one_step_to_mir(MUTABLE self: MIRLowering, step: T
       RETURN CAST(List[] AS []Emittable);
     END
     MUTABLE pending = TRY (mIRLowering__flush_pending( &self));
-    IF mir IS_A []@multiowned Any THEN
-      RETURN TRY (mIRLowering__guard_shared_node_statement(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(step.expr), (pending + (mir |> WHERE _ != NIL))));
-    END
-    IF !(mir IS_A Emittable) THEN
-      RETURN CAST(List[] AS []Emittable);
-    END
+    # `lower` hands back at most one node: the multi-node lowerings put their
+    # extra statements in the pending list this already flushes.
     MUTABLE main: ?Emittable = TRY (mIRLowering__wrap_step_as_stmt(self, step, mir));
     IF main EXISTS AS main_value THEN
       RETURN TRY (mIRLowering__guard_shared_node_statement(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(step.expr), (pending + [main_value])));
@@ -5512,16 +5525,19 @@ PUB FN mIRLowering__fsm_cap_metadata(self: MIRLowering, cap: CapabilityTransitio
         END
       END
       MUTABLE alias_data_ref = "(${lock_field_ref}.data)";
-      MUTABLE try_method, unlock_method = PARTIAL MATCH lock_kind START
-        :rwlock_write -> ["tryWriteLockForFsm", "unlock"],
-        :rwlock_read -> ["tryReadLockForFsm", "unlockShared"],
-        DEFAULT -> ["tryLockForFsm", "unlock"]
-      END;
-      MUTABLE retries: Int64 = 0;
-      IF with_node.lock_error_clause != NIL THEN
-        retries = ((with_node.lock_error_clause)?).retries;
+      MUTABLE try_method: String = COPY "tryLockForFsm";
+      MUTABLE unlock_method: String = COPY "unlock";
+      IF (lock_kind == :rwlock_write) THEN
+        try_method = COPY "tryWriteLockForFsm";
+      ELSE_IF (lock_kind == :rwlock_read) THEN
+        try_method = COPY "tryReadLockForFsm";
+        unlock_method = COPY "unlockShared";
       END
-      RETURN CAST({:cap: FsmCapMetadataValue{ CapabilityTransition: COPY cap }, :lock_kind: FsmCapMetadataValue{ SymbolValue: COPY lock_kind }, :try_method: try_method, :unlock_method: unlock_method, :lock_field_ref: FsmCapMetadataValue{ StringValue: COPY lock_field_ref }, :alias_name: FsmCapMetadataValue{ StringValue: COPY alias_name }, :alias_data_ref: FsmCapMetadataValue{ StringValue: COPY alias_data_ref }, :retries: FsmCapMetadataValue{ Int64Value: retries }} AS ?{String@symbol}FsmCapMetadataValue);
+      MUTABLE retries: Int64 = 0;
+      IF with_node.lock_error_clause EXISTS AS lock_error_clause THEN
+        retries = (lock_error_clause.retries OR_ELSE 0);
+      END
+      RETURN CAST({:cap: FsmCapMetadataValue{ CapabilityTransition: COPY cap }, :lock_kind: FsmCapMetadataValue{ SymbolValue: COPY lock_kind }, :try_method: FsmCapMetadataValue{ StringValue: COPY try_method }, :unlock_method: FsmCapMetadataValue{ StringValue: COPY unlock_method }, :lock_field_ref: FsmCapMetadataValue{ StringValue: COPY lock_field_ref }, :alias_name: FsmCapMetadataValue{ StringValue: COPY alias_name }, :alias_data_ref: FsmCapMetadataValue{ StringValue: COPY alias_data_ref }, :retries: FsmCapMetadataValue{ Int64Value: retries }} AS ?{String@symbol}FsmCapMetadataValue);
     ELSE
       RETURN NIL;
     END
@@ -5584,30 +5600,36 @@ PRIVATE FN mIRLowering__lower_when_block(MUTABLE self: MIRLowering, when_block: 
     MUTABLE prev_stubs = OWN COPY (COPY mIRLowering__test_state(&self).active_stubs);
     self.state.test.active_stubs = OWN COPY prev_stubs;
     DEFER self.state.test.active_stubs = prev_stubs;
-    MUTABLE stubs, non_stub_setup = when_block.setup.partition(%(s) -> s IS_A StubDecl);
-    MUTABLE when_setup_mir = TRY (mIRLowering__lower_body(&self, non_stub_setup));
-    MUTABLE stub_mir = (stubs |> UNNEST {
-    MUTABLE m: ?Emittable = TRY (mIRLowering__lower(&self, &_));
-    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_224: ?[]Any = NIL;
-      IF m IS_A []@multiowned Any THEN
-        rtoc_ternary_value_224 = m;
+    MUTABLE stubs: []Locatable = List[];
+    MUTABLE non_stub_setup: []Locatable = List[];
+    FOR setup_stmt IN (when_block.setup OR_ELSE List[]) DO
+      IF setup_stmt IS_A StubDecl THEN
+        &stubs.append(COPY setup_stmt);
       ELSE
-        rtoc_ternary_value_224 = [m];
+        &non_stub_setup.append(COPY setup_stmt);
       END
-      rtoc_ternary_value_224? })
-    }) |> WHERE _ != NIL;
+    END
+    MUTABLE when_setup_mir = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(non_stub_setup)));
+    MUTABLE stub_mir: []Emittable = List[];
+    FOR stub_stmt IN stubs DO
+      MUTABLE stub_lowerable = castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY stub_stmt);
+      IF TRY (mIRLowering__lower(&self, &stub_lowerable)) EXISTS AS stub_node THEN
+        &stub_mir.append(COPY stub_node);
+      END
+    END
     MUTABLE when_before_each_mir = (((when_block.before_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(_)));
     MUTABLE when_after_each_mir = (((when_block.after_each OR_ELSE List[]))) |> SELECT TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(_)));
     MUTABLE let_ast_map = TRY (mIRLowering__build_let_ast_map(self, (when_block.lets OR_ELSE List[]), TRY (mIRLowering__build_let_ast_map(self, (ctx.test_block.lets OR_ELSE List[])))));
     TRY (testBlockCtx__emit_all_hooks( &ctx, (when_block.before_all OR_ELSE List[]), "__before_all", "${when_desc}: ", &tests));
     MUTABLE tag_suffix = mIRLowering__format_tag_suffix(self, (when_block.tags OR_ELSE List[]));
-    MUTABLE env = TestThatEnv{ ctx: COPY ctx, when_block: COPY when_block, when_desc: COPY when_desc, tag_suffix: tag_suffix, stub_mir: stub_mir, when_setup_mir: when_setup_mir, when_before_each_mir: when_before_each_mir, when_after_each_mir: when_after_each_mir, let_ast_map: let_ast_map };
-    FOR _ IN ((when_block.tests OR_ELSE List[])) DO
+    MUTABLE env = TestThatEnv{ ctx: COPY ctx, when_block: COPY when_block, when_desc: COPY when_desc, tag_suffix: COPY tag_suffix, stub_mir: COPY stub_mir, when_setup_mir: COPY when_setup_mir, when_before_each_mir: COPY when_before_each_mir, when_after_each_mir: COPY when_after_each_mir, let_ast_map: let_ast_map };
+    FOR _ IN when_block.tests DO
     &tests.append(TRY (mIRLowering__lower_test_that(&self, _, env)));
     END
-    FOR MUTABLE rtoc_for_elem_6566 IN ((when_block.benchmarks OR_ELSE List[])) DO
+    FOR MUTABLE rtoc_for_elem_6566 IN when_block.benchmarks DO
+    MUTABLE benchmark_lowerable = castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (castBenchmarkEntryToLocatable(rtoc_for_elem_6566)));
     MUTABLE name = "${ctx.test_name}: ${when_desc}: benchmark${tag_suffix}";
-    MUTABLE body = (((([testBlockCtx__fresh_preamble(ctx)] + stub_mir) + ctx.setup_mir) + when_setup_mir) + [TRY (mIRLowering__lower(&self, &rtoc_for_elem_6566))]);
+    MUTABLE body = (((([Emittable{ TestPreamble: COPY testBlockCtx__fresh_preamble(ctx) }] + stub_mir) + ctx.setup_mir) + when_setup_mir) + [UNWRAP (TRY (mIRLowering__lower(&self, &benchmark_lowerable)))]);
     &tests.append(TestDef{ name: COPY name, body: COPY body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL });
     END
     RETURN TRY (testBlockCtx__emit_all_hooks( &ctx, (when_block.after_all OR_ELSE List[]), "__after_all", "${when_desc}: ", &tests));
@@ -5621,18 +5643,39 @@ PRIVATE FN mIRLowering__lower_test_that(MUTABLE self: MIRLowering, test_that: Te
     rtoc_lambda_result_226 = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(test_that.body)));
     rtoc_lambda_result_226
     });
-    MUTABLE before_mir = (env.ctx.test_before_each_mir.flatten() + env.when_before_each_mir.flatten());
+    MUTABLE before_mir: []Emittable = List[];
+    FOR before_group IN env.ctx.test_before_each_mir DO
+      before_mir = ruby_array_concat_Emittable__mir_lowering(before_mir, COPY before_group);
+    END
+    FOR before_group IN env.when_before_each_mir DO
+      before_mir = ruby_array_concat_Emittable__mir_lowering(before_mir, COPY before_group);
+    END
     MUTABLE after_defers = ((env.ctx.test_after_each_mir + env.when_after_each_mir)) |> SELECT MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY ScopeBlock{ body: COPY _, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    MUTABLE used_let_names = TRY (mIRLowering__compute_used_let_names(self, env.let_ast_map, ([test_that.body, env.when_block.before_each, env.when_block.after_each, env.ctx.test_block.before_each, env.ctx.test_block.after_each]).flatten()));
-    MUTABLE let_decls_mir = used_let_names |> SELECT Let{ name: COPY _, init: COPY TRY (mIRLowering__lower(&self, (UNWRAP (env.let_ast_map[_])).expr)), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
-    MUTABLE body = ((((((([testBlockCtx__fresh_preamble(env.ctx)] + env.stub_mir) + env.ctx.setup_mir) + env.when_setup_mir) + let_decls_mir) + before_mir) + after_defers) + body_mir);
+    # Ruby flattens the test body with the four hook bodies; the hooks are
+    # optional lists of lists here, so the walk builds the flat list.
+    MUTABLE let_search_nodes: []?AstIdentifierSearchNode = List[];
+    FOR body_stmt IN test_that.body DO
+      &let_search_nodes.append(castLocatableToOptionalAstIdentifierSearchNode(COPY body_stmt));
+    END
+    FOR hook_group IN ((env.when_block.before_each OR_ELSE List[]) + (env.when_block.after_each OR_ELSE List[]) + (env.ctx.test_block.before_each OR_ELSE List[]) + (env.ctx.test_block.after_each OR_ELSE List[])) DO
+      FOR hook_stmt IN hook_group DO
+        &let_search_nodes.append(castLocatableToOptionalAstIdentifierSearchNode(COPY hook_stmt));
+      END
+    END
+    MUTABLE used_let_names = TRY (mIRLowering__compute_used_let_names(self, env.let_ast_map, let_search_nodes));
+    MUTABLE let_decls_mir: []Emittable = List[];
+    FOR let_name IN used_let_names DO
+      MUTABLE let_expr = castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY UNWRAP (env.let_ast_map[let_name]).expr);
+      &let_decls_mir.append(Emittable{ Let: COPY Let{ name: COPY let_name, init: COPY UNWRAP (TRY (mIRLowering__lower(&self, &let_expr))), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
+    END
+    MUTABLE body = ((((((([Emittable{ TestPreamble: COPY testBlockCtx__fresh_preamble(env.ctx) }] + env.stub_mir) + env.ctx.setup_mir) + env.when_setup_mir) + let_decls_mir) + before_mir) + after_defers) + body_mir);
     MUTABLE test_def = TestDef{ name: COPY full_name, body: COPY body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, needs_scheduler: NIL };
     test_def.needs_scheduler = TRY (mIRLowering__test_body_spawns_fibers?(self, body));
     RETURN test_def;
 END
 PRIVATE FN mIRLowering__test_body_spawns_fibers?(self: MIRLowering, body: []Emittable) RETURNS !Bool ->
     MUTABLE found: Bool = FALSE;
-    TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY body }, %(n: Emittable) -> {
+    TRY (mIR__each_node(NodeRoot{ ArrayValue: COPY body }, %(n: Emittable) USE(MUTABLE found) -> {
     found = (found OR ((((n IS_A MIRBgBlock OR n IS_A StreamSpawn) OR n IS_A ShardConcurrentEach) OR ((IF n IS_A MIRMethodCall AS mir_method_call THEN (mir_method_call.method == "getSched") ELSE FALSE END))) OR ((IF n IS_A RuntimeCall AS runtime_call THEN runtime_call.spec.callee.downcase().contains?("concurrent") ELSE FALSE END))));
     rubyToClearVoid__mir_lowering()
     }));
@@ -5666,7 +5709,7 @@ PRIVATE FN mIRLowering__compute_used_let_names(self: MIRLowering, let_ast_map: {
     IF (let_ast_map.count() == 0) THEN
       RETURN CAST(List[] AS []String);
     END
-    MUTABLE referenced = Set[];
+    MUTABLE referenced: [Set]String = Set[];
     FOR MUTABLE rtoc_for_item_6659 IN ast_subtrees DO
     mIRLowering__collect_identifier_refs(self, rtoc_for_item_6659, let_ast_map, &referenced);
     END
@@ -5677,14 +5720,14 @@ PRIVATE FN mIRLowering__compute_used_let_names(self: MIRLowering, let_ast_map: {
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < rtoc_each_items_231.length() DO
       MUTABLE let_binding: ?LetBinding = COPY let_ast_map[UNWRAP (rtoc_each_items_231[rtoc_idx])];
-      IF !(let_binding) THEN
+      IF let_binding == NIL THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE rhs = COPY let_binding.expr;
-      MUTABLE before = referenced.size;
+      MUTABLE before: Int64 = referenced.length();
       mIRLowering__collect_identifier_refs(self, castLocatableToOptionalAstIdentifierSearchNode(rhs), let_ast_map, &referenced);
-      IF (referenced.size > before) THEN
+      IF (referenced.length() > before) THEN
             changed = TRUE;
       END
     rtoc_idx = rtoc_idx + 1;
@@ -5692,8 +5735,127 @@ PRIVATE FN mIRLowering__compute_used_let_names(self: MIRLowering, let_ast_map: {
     END
     RETURN let_ast_map.keys() |> WHERE referenced.contains?(_);
 END
+FN castAstIdentifierSearchNodeToLocatable(value: AstIdentifierSearchNode) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    AstIdentifierSearchNode.Program AS cast_payload -> RETURN Locatable{ Program: COPY cast_payload };,
+    AstIdentifierSearchNode.RequireNode AS cast_payload -> RETURN Locatable{ RequireNode: COPY cast_payload };,
+    AstIdentifierSearchNode.ProtocolRequirement AS cast_payload -> RETURN Locatable{ ProtocolRequirement: COPY cast_payload };,
+    AstIdentifierSearchNode.ProtocolDef AS cast_payload -> RETURN Locatable{ ProtocolDef: COPY cast_payload };,
+    AstIdentifierSearchNode.ImplementationDef AS cast_payload -> RETURN Locatable{ ImplementationDef: COPY cast_payload };,
+    AstIdentifierSearchNode.ConformanceDef AS cast_payload -> RETURN Locatable{ ConformanceDef: COPY cast_payload };,
+    AstIdentifierSearchNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
+    AstIdentifierSearchNode.Assignment AS cast_payload -> RETURN Locatable{ Assignment: COPY cast_payload };,
+    AstIdentifierSearchNode.DestructuringAssignment AS cast_payload -> RETURN Locatable{ DestructuringAssignment: COPY cast_payload };,
+    AstIdentifierSearchNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
+    AstIdentifierSearchNode.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
+    AstIdentifierSearchNode.IsA AS cast_payload -> RETURN Locatable{ IsA: COPY cast_payload };,
+    AstIdentifierSearchNode.CallSiteOverride AS cast_payload -> RETURN Locatable{ CallSiteOverride: COPY cast_payload };,
+    AstIdentifierSearchNode.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    AstIdentifierSearchNode.Literal AS cast_payload -> RETURN Locatable{ Literal: COPY cast_payload };,
+    AstIdentifierSearchNode.ListLit AS cast_payload -> RETURN Locatable{ ListLit: COPY cast_payload };,
+    AstIdentifierSearchNode.TupleLit AS cast_payload -> RETURN Locatable{ TupleLit: COPY cast_payload };,
+    AstIdentifierSearchNode.DefaultArrayLit AS cast_payload -> RETURN Locatable{ DefaultArrayLit: COPY cast_payload };,
+    AstIdentifierSearchNode.HashLit AS cast_payload -> RETURN Locatable{ HashLit: COPY cast_payload };,
+    AstIdentifierSearchNode.DefaultLit AS cast_payload -> RETURN Locatable{ DefaultLit: COPY cast_payload };,
+    AstIdentifierSearchNode.StructLit AS cast_payload -> RETURN Locatable{ StructLit: COPY cast_payload };,
+    AstIdentifierSearchNode.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
+    AstIdentifierSearchNode.IfStatement AS cast_payload -> RETURN Locatable{ IfStatement: COPY cast_payload };,
+    AstIdentifierSearchNode.IfBind AS cast_payload -> RETURN Locatable{ IfBind: COPY cast_payload };,
+    AstIdentifierSearchNode.WhileLoop AS cast_payload -> RETURN Locatable{ WhileLoop: COPY cast_payload };,
+    AstIdentifierSearchNode.WhileBindLoop AS cast_payload -> RETURN Locatable{ WhileBindLoop: COPY cast_payload };,
+    AstIdentifierSearchNode.BreakNode AS cast_payload -> RETURN Locatable{ BreakNode: COPY cast_payload };,
+    AstIdentifierSearchNode.ContinueNode AS cast_payload -> RETURN Locatable{ ContinueNode: COPY cast_payload };,
+    AstIdentifierSearchNode.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
+    AstIdentifierSearchNode.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
+    AstIdentifierSearchNode.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    AstIdentifierSearchNode.ReturnNode AS cast_payload -> RETURN Locatable{ ReturnNode: COPY cast_payload };,
+    AstIdentifierSearchNode.Assert AS cast_payload -> RETURN Locatable{ Assert: COPY cast_payload };,
+    AstIdentifierSearchNode.ThrowNode AS cast_payload -> RETURN Locatable{ ThrowNode: COPY cast_payload };,
+    AstIdentifierSearchNode.DieNode AS cast_payload -> RETURN Locatable{ DieNode: COPY cast_payload };,
+    AstIdentifierSearchNode.Slice AS cast_payload -> RETURN Locatable{ Slice: COPY cast_payload };,
+    AstIdentifierSearchNode.Require AS cast_payload -> RETURN Locatable{ Require: COPY cast_payload };,
+    AstIdentifierSearchNode.SyncPolicyDecl AS cast_payload -> RETURN Locatable{ SyncPolicyDecl: COPY cast_payload };,
+    AstIdentifierSearchNode.LimitOp AS cast_payload -> RETURN Locatable{ LimitOp: COPY cast_payload };,
+    AstIdentifierSearchNode.EachOp AS cast_payload -> RETURN Locatable{ EachOp: COPY cast_payload };,
+    AstIdentifierSearchNode.TapOp AS cast_payload -> RETURN Locatable{ TapOp: COPY cast_payload };,
+    AstIdentifierSearchNode.SkipOp AS cast_payload -> RETURN Locatable{ SkipOp: COPY cast_payload };,
+    AstIdentifierSearchNode.CollectOp AS cast_payload -> RETURN Locatable{ CollectOp: COPY cast_payload };,
+    AstIdentifierSearchNode.JoinOp AS cast_payload -> RETURN Locatable{ JoinOp: COPY cast_payload };,
+    AstIdentifierSearchNode.ShardOp AS cast_payload -> RETURN Locatable{ ShardOp: COPY cast_payload };,
+    AstIdentifierSearchNode.ConcurrentOp AS cast_payload -> RETURN Locatable{ ConcurrentOp: COPY cast_payload };,
+    AstIdentifierSearchNode.Placeholder AS cast_payload -> RETURN Locatable{ Placeholder: COPY cast_payload };,
+    AstIdentifierSearchNode.Copy AS cast_payload -> RETURN Locatable{ Copy: COPY cast_payload };,
+    AstIdentifierSearchNode.TenseNavigation AS cast_payload -> RETURN Locatable{ TenseNavigation: COPY cast_payload };,
+    AstIdentifierSearchNode.MutableBorrow AS cast_payload -> RETURN Locatable{ MutableBorrow: COPY cast_payload };,
+    AstIdentifierSearchNode.CatchBlock AS cast_payload -> RETURN Locatable{ CatchBlock: COPY cast_payload };,
+    AstIdentifierSearchNode.RecoverOp AS cast_payload -> RETURN Locatable{ RecoverOp: COPY cast_payload };,
+    AstIdentifierSearchNode.StringConcat AS cast_payload -> RETURN Locatable{ StringConcat: COPY cast_payload };,
+    AstIdentifierSearchNode.CapabilityWrap AS cast_payload -> RETURN Locatable{ CapabilityWrap: COPY cast_payload };,
+    AstIdentifierSearchNode.MoveNode AS cast_payload -> RETURN Locatable{ MoveNode: COPY cast_payload };,
+    AstIdentifierSearchNode.CopyNode AS cast_payload -> RETURN Locatable{ CopyNode: COPY cast_payload };,
+    AstIdentifierSearchNode.KeepNode AS cast_payload -> RETURN Locatable{ KeepNode: COPY cast_payload };,
+    AstIdentifierSearchNode.ShareNode AS cast_payload -> RETURN Locatable{ ShareNode: COPY cast_payload };,
+    AstIdentifierSearchNode.LinkNode AS cast_payload -> RETURN Locatable{ LinkNode: COPY cast_payload };,
+    AstIdentifierSearchNode.ResolveNode AS cast_payload -> RETURN Locatable{ ResolveNode: COPY cast_payload };,
+    AstIdentifierSearchNode.FreezeNode AS cast_payload -> RETURN Locatable{ FreezeNode: COPY cast_payload };,
+    AstIdentifierSearchNode.PassStmt AS cast_payload -> RETURN Locatable{ PassStmt: COPY cast_payload };,
+    AstIdentifierSearchNode.StructPattern AS cast_payload -> RETURN Locatable{ StructPattern: COPY cast_payload };,
+    AstIdentifierSearchNode.ExternFnDecl AS cast_payload -> RETURN Locatable{ ExternFnDecl: COPY cast_payload };,
+    AstIdentifierSearchNode.ExternStructDecl AS cast_payload -> RETURN Locatable{ ExternStructDecl: COPY cast_payload };,
+    AstIdentifierSearchNode.UnionDef AS cast_payload -> RETURN Locatable{ UnionDef: COPY cast_payload };,
+    AstIdentifierSearchNode.UnionVariantLit AS cast_payload -> RETURN Locatable{ UnionVariantLit: COPY cast_payload };,
+    AstIdentifierSearchNode.StaticCall AS cast_payload -> RETURN Locatable{ StaticCall: COPY cast_payload };,
+    AstIdentifierSearchNode.ThenChain AS cast_payload -> RETURN Locatable{ ThenChain: COPY cast_payload };,
+    AstIdentifierSearchNode.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
+    AstIdentifierSearchNode.YieldExpr AS cast_payload -> RETURN Locatable{ YieldExpr: COPY cast_payload };,
+    AstIdentifierSearchNode.CloseStream AS cast_payload -> RETURN Locatable{ CloseStream: COPY cast_payload };,
+    AstIdentifierSearchNode.NextExpr AS cast_payload -> RETURN Locatable{ NextExpr: COPY cast_payload };,
+    AstIdentifierSearchNode.MatchStatement AS cast_payload -> RETURN Locatable{ MatchStatement: COPY cast_payload };,
+    AstIdentifierSearchNode.ForRange AS cast_payload -> RETURN Locatable{ ForRange: COPY cast_payload };,
+    AstIdentifierSearchNode.ForEach AS cast_payload -> RETURN Locatable{ ForEach: COPY cast_payload };,
+    AstIdentifierSearchNode.TestBlock AS cast_payload -> RETURN Locatable{ TestBlock: COPY cast_payload };,
+    AstIdentifierSearchNode.WhenBlock AS cast_payload -> RETURN Locatable{ WhenBlock: COPY cast_payload };,
+    AstIdentifierSearchNode.LetBinding AS cast_payload -> RETURN Locatable{ LetBinding: COPY cast_payload };,
+    AstIdentifierSearchNode.TestThat AS cast_payload -> RETURN Locatable{ TestThat: COPY cast_payload };,
+    AstIdentifierSearchNode.StubDecl AS cast_payload -> RETURN Locatable{ StubDecl: COPY cast_payload };,
+    AstIdentifierSearchNode.Drop AS cast_payload -> RETURN Locatable{ Drop: COPY cast_payload };,
+    AstIdentifierSearchNode.SuppressCleanup AS cast_payload -> RETURN Locatable{ SuppressCleanup: COPY cast_payload };,
+    AstIdentifierSearchNode.Return AS cast_payload -> RETURN Locatable{ Return: COPY cast_payload };,
+    AstIdentifierSearchNode.ReassignCleanup AS cast_payload -> RETURN Locatable{ ReassignCleanup: COPY cast_payload };,
+    AstIdentifierSearchNode.FieldCleanup AS cast_payload -> RETURN Locatable{ FieldCleanup: COPY cast_payload };,
+    AstIdentifierSearchNode.FunctionDef AS cast_payload -> RETURN Locatable{ FunctionDef: COPY cast_payload };,
+    AstIdentifierSearchNode.WithBlock AS cast_payload -> RETURN Locatable{ WithBlock: COPY cast_payload };,
+    AstIdentifierSearchNode.SelectOp AS cast_payload -> RETURN Locatable{ SelectOp: COPY cast_payload };,
+    AstIdentifierSearchNode.WhereOp AS cast_payload -> RETURN Locatable{ WhereOp: COPY cast_payload };,
+    AstIdentifierSearchNode.IndexOp AS cast_payload -> RETURN Locatable{ IndexOp: COPY cast_payload };,
+    AstIdentifierSearchNode.ReduceOp AS cast_payload -> RETURN Locatable{ ReduceOp: COPY cast_payload };,
+    AstIdentifierSearchNode.OrderByOp AS cast_payload -> RETURN Locatable{ OrderByOp: COPY cast_payload };,
+    AstIdentifierSearchNode.UnnestOp AS cast_payload -> RETURN Locatable{ UnnestOp: COPY cast_payload };,
+    AstIdentifierSearchNode.DistinctOp AS cast_payload -> RETURN Locatable{ DistinctOp: COPY cast_payload };,
+    AstIdentifierSearchNode.TakeWhileOp AS cast_payload -> RETURN Locatable{ TakeWhileOp: COPY cast_payload };,
+    AstIdentifierSearchNode.WindowOp AS cast_payload -> RETURN Locatable{ WindowOp: COPY cast_payload };,
+    AstIdentifierSearchNode.BatchWindowOp AS cast_payload -> RETURN Locatable{ BatchWindowOp: COPY cast_payload };,
+    AstIdentifierSearchNode.FindOp AS cast_payload -> RETURN Locatable{ FindOp: COPY cast_payload };,
+    AstIdentifierSearchNode.AnyOp AS cast_payload -> RETURN Locatable{ AnyOp: COPY cast_payload };,
+    AstIdentifierSearchNode.AllOp AS cast_payload -> RETURN Locatable{ AllOp: COPY cast_payload };,
+    AstIdentifierSearchNode.CountOp AS cast_payload -> RETURN Locatable{ CountOp: COPY cast_payload };,
+    AstIdentifierSearchNode.SumOp AS cast_payload -> RETURN Locatable{ SumOp: COPY cast_payload };,
+    AstIdentifierSearchNode.AverageOp AS cast_payload -> RETURN Locatable{ AverageOp: COPY cast_payload };,
+    AstIdentifierSearchNode.MinOp AS cast_payload -> RETURN Locatable{ MinOp: COPY cast_payload };,
+    AstIdentifierSearchNode.MaxOp AS cast_payload -> RETURN Locatable{ MaxOp: COPY cast_payload };,
+    AstIdentifierSearchNode.AssertRaises AS cast_payload -> RETURN Locatable{ AssertRaises: COPY cast_payload };,
+    AstIdentifierSearchNode.BenchmarkStmt AS cast_payload -> RETURN Locatable{ BenchmarkStmt: COPY cast_payload };,
+    AstIdentifierSearchNode.SmashStmt AS cast_payload -> RETURN Locatable{ SmashStmt: COPY cast_payload };,
+    AstIdentifierSearchNode.ProfileStmt AS cast_payload -> RETURN Locatable{ ProfileStmt: COPY cast_payload };,
+    DEFAULT -> RETURN panic("unreachable identifier search node");
+  END
+  RETURN panic("unreachable identifier search node");
+END
 PRIVATE FN mIRLowering__collect_identifier_refs(self: MIRLowering, node: ?AstIdentifierSearchNode, name_set: {String}LetBinding, MUTABLE out: [Set]String) RETURNS Void ->
-    aST__each_locatable(node, TRUE, %(candidate: Locatable) USE(name_set, MUTABLE out) -> {
+    IF node == NIL THEN
+      RETURN;
+    END
+    aST__each_locatable(castAstIdentifierSearchNodeToLocatable(node), TRUE, %(candidate: Locatable) USE(name_set, MUTABLE out) -> {
     IF (IF candidate IS_A Identifier AS identifier THEN name_set.contains?(identifier__name(identifier)) ELSE FALSE END) THEN
         IF locatable__name(candidate) EXISTS AS candidate_name THEN
         &out.insert(COPY CAST(candidate_name AS String));
@@ -5733,7 +5895,13 @@ PRIVATE FN mIRLowering__stub_intercept_for(MUTABLE self: MIRLowering, fn_name: S
       MUTABLE si = "__stub_si_${counter.toString()}";
       RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY label, body: CAST(COPY (suppress_stmts + [Emittable{ Let: COPY Let{ name: COPY si, init: Emittable{ Ident: COPY idx }, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "usize" })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY idx }, value: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: Emittable{ Ident: COPY idx }, right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ IndexGet: COPY IndexGet{ object: Emittable{ Ident: COPY seq }, index: Emittable{ Ident: COPY Ident{ name: COPY si, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]) AS []Emittable), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
     ELSE_IF ((stub_info).kind == :with) THEN
-      MUTABLE args_mir = call_inputs |> SELECT TRY (mIRLowering__lower(&self, &_));
+      MUTABLE args_mir: []Emittable = List[];
+      FOR call_input IN call_inputs DO
+        MUTABLE call_input_stmt = castOptionalLocatableToMIRLoweringLowerableStmt(COPY call_input);
+        IF TRY (mIRLowering__lower(&self, &call_input_stmt)) EXISTS AS call_input_mir THEN
+          &args_mir.append(COPY call_input_mir);
+        END
+      END
       RETURN Emittable{ Call: COPY Call{ callee: COPY (stub_info).var, args: COPY ([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL } }] + args_mir), try_wrap: TRUE, owned_return: FALSE, callable_contract: NIL, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     ELSE
       RETURN NIL;
@@ -5746,7 +5914,15 @@ PRIVATE FN mIRLowering__stub_local_idents(MUTABLE self: MIRLowering, node: Locat
       IF identifier.symbol != NIL THEN
         decl = COPY ((identifier.symbol)?).reg;
       END
-      MUTABLE renamed = (((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(&self))))[aST__node_identity(castSymbolEntryRegInputToLocatable(decl))] != NIL))) OR (TRY (functionState__rename_map(mIRLowering__function_state(&self))))[name]) OR name);
+      MUTABLE renamed: String = COPY name;
+      IF (TRY (functionState__rename_map(mIRLowering__function_state(&self))))[name] EXISTS AS mapped_name THEN
+        renamed = COPY mapped_name;
+      END
+      IF decl EXISTS AS decl_value THEN
+        IF (TRY (functionState__decl_zig_names(mIRLowering__function_state(&self))))[aST__node_identity(castSymbolEntryRegInputToLocatable(decl_value))] EXISTS AS decl_zig_name THEN
+          renamed = COPY decl_zig_name;
+        END
+      END
       RETURN CAST([renamed] AS []String);
     ELSE
       RETURN CAST(List[] AS []String);
@@ -5756,31 +5932,37 @@ PRIVATE FN mIRLowering__lower_stub_decl(MUTABLE self: MIRLowering, MUTABLE node:
     MUTABLE fn_name = node.function_name;
     MUTABLE stub_var = "__stub_${fn_name}";
     IF (node.kind == :returns) THEN
-      MUTABLE val: ?Emittable = TRY (mIRLowering__lower(&self, CAST(&node.value AS MIRLoweringLowerableStmt)));
-      MUTABLE rtoc_index_receiver_235 = COPY mIRLowering__test_state(&self).active_stubs;
-      rtoc_index_receiver_235[fn_name] = StubInfo{ kind: :returns, var: COPY stub_var };
-      RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY stub_var, init: COPY val, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
+      MUTABLE stub_value_stmt = castOptionalLocatableToMIRLoweringLowerableStmt(castStubValueToLocatable(UNWRAP (node.value)));
+      MUTABLE val: ?Emittable = TRY (mIRLowering__lower(&self, &stub_value_stmt));
+      self.state.test.active_stubs[COPY fn_name] = StubInfo{ kind: :returns, var: COPY stub_var };
+      RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY stub_var, init: COPY UNWRAP (val), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
     ELSE_IF (node.kind == :captures) THEN
       MUTABLE cap_name: ?StubValue@boxed = COPY node.value;
       MUTABLE rtoc_index_receiver_236 = COPY mIRLowering__test_state(&self).active_stubs;
       rtoc_index_receiver_236[fn_name] = StubInfo{ kind: :captures, var: CAST(cap_name AS String) };
       RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: CAST(COPY cap_name AS String), init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "i64" })), suppression: "_ = &${CAST(cap_name AS String)};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
     ELSE_IF (node.kind == :sequence) THEN
-      MUTABLE values: ?StubValue@boxed = COPY node.value;
-      MUTABLE items_mir: []Any = List[];
-      IF (aST__node_items( UNWRAP (castStubValueToLocatable( UNWRAP (values)))) EXISTS) THEN
-        items_mir = values.items |> SELECT TRY (mIRLowering__lower(&self, &_));
+      MUTABLE values_locatable: Locatable = UNWRAP (castStubValueToLocatable(UNWRAP (node.value)));
+      MUTABLE items_mir: []Emittable = List[];
+      IF aST__node_items(values_locatable) EXISTS AS stub_items THEN
+        FOR stub_item IN stub_items DO
+          MUTABLE stub_item_stmt = castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY stub_item);
+          IF TRY (mIRLowering__lower(&self, &stub_item_stmt)) EXISTS AS stub_item_mir THEN
+            &items_mir.append(COPY stub_item_mir);
+          END
+        END
       ELSE
-        items_mir = [CAST(TRY (mIRLowering__lower(&self, CAST(&values AS MIRLoweringLowerableStmt))) AS Any)];
+        MUTABLE values_stmt = castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY values_locatable);
+        &items_mir.append(UNWRAP (TRY (mIRLowering__lower(&self, &values_stmt))));
       END
-      MUTABLE rtoc_index_receiver_237 = COPY mIRLowering__test_state(&self).active_stubs;
-      rtoc_index_receiver_237[fn_name] = StubInfo{ kind: :sequence, var: COPY stub_var };
-      RETURN NodeRoot{ ArrayValue: [Let{ name: MIRLoweringName{ StringValue: COPY "${stub_var}_seq" }, init: Emittable{ ArrayInit: COPY ArrayInit{ elem_type: "[]const u8", count: "_", items: COPY items_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: MIRLoweringName{ StringValue: COPY "${stub_var}_idx" }, init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "usize" })), suppression: "_ = &${stub_var}_idx;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] |> SELECT Emittable{ Let: COPY _ } };
+      self.state.test.active_stubs[COPY fn_name] = StubInfo{ kind: :sequence, var: COPY stub_var };
+      RETURN NodeRoot{ ArrayValue: [Let{ name: COPY "${stub_var}_seq", init: Emittable{ ArrayInit: COPY ArrayInit{ elem_type: "[]const u8", count: "_", items: COPY items_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }, Let{ name: COPY "${stub_var}_idx", init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "usize" })), suppression: "_ = &${stub_var}_idx;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL }] |> SELECT Emittable{ Let: COPY _ } };
     ELSE_IF (node.kind == :with) THEN
-      MUTABLE val: ?Emittable = TRY (mIRLowering__lower(&self, &node.value));
+      MUTABLE with_value_stmt = castOptionalLocatableToMIRLoweringLowerableStmt(castStubValueToLocatable(UNWRAP (node.value)));
+      MUTABLE val: ?Emittable = TRY (mIRLowering__lower(&self, &with_value_stmt));
       MUTABLE rtoc_index_receiver_238 = COPY mIRLowering__test_state(&self).active_stubs;
       rtoc_index_receiver_238[fn_name] = StubInfo{ kind: :with, var: COPY stub_var };
-      RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY stub_var, init: COPY val, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
+      RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY stub_var, init: COPY UNWRAP (val), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
     ELSE
       panic("MIRLowering: unhandled StubDecl kind: {} for {}");
     END
@@ -15671,7 +15853,7 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
         mIRLowering__alloc_from_sym(self, &rp.alloc_mut())
       ELSE
         (IF cleanupEntry__present?(binding_entry) THEN
-        binding_entry.alloc()
+        cleanupEntry__alloc(binding_entry)
       ELSE
         NIL
       END)
