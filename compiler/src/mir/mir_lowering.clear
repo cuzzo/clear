@@ -6801,7 +6801,7 @@ PRIVATE FN mIRLowering__normalize_allocating_result_expr_mut(MUTABLE self: MIRLo
     rtoc_idx = rtoc_idx + 1;
     END
     TRY (mIRLowering__each_mir_expr_child(self, expr, %(child: Emittable) USE(expr, MUTABLE prefix, result_children, MUTABLE self) -> {
-    IF result_children |> ANY _.equal?(child) THEN
+    IF result_children |> ANY mir__same_node?(_, child) THEN
         RETURN;
     END
     MUTABLE other_prefix, other_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &child, mIRLowering__consumes_owned_children?(self, expr)));
@@ -6873,84 +6873,21 @@ PRIVATE FN mIRLowering__mir_consumes_owned_operands?(self: MIRLowering, MUTABLE 
     END
     RETURN contract.operands |> ANY (!(_.borrowed) AND (_.name != NIL));
 END
-PRIVATE FN mIRLowering__replace_mir_expr_child_mut(MUTABLE self: MIRLowering, MUTABLE parent: Emittable, MUTABLE old_child: Emittable, MUTABLE new_child: Emittable) RETURNS !Void ->
-    IF old_child.equal?(new_child) THEN
+PRIVATE FN mIRLowering__replace_mir_expr_child_mut(MUTABLE self: MIRLowering, MUTABLE parent: Emittable, MUTABLE old_child: Emittable, MUTABLE new_child: Emittable) RETURNS !Void
+  EFFECTS REENTRANT ->
+    IF mir__same_node?(old_child, new_child) THEN
       RETURN;
     END
-    IF !(((emittable__mir?(parent) != NIL) AND emittable__mir?(parent))) THEN
+    IF !((emittable__mir?(parent) OR_ELSE FALSE)) THEN
       RETURN;
     END
-    IF FALSE THEN
-      mIRLowering__replace_t_struct_expr_child_mut(&self, parent, old_child, new_child);
-      RETURN;
-    END
-    MUTABLE rtoc_each_items_281 = parent.class().members;
-    MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_281.length() DO
-      MUTABLE value = parent[UNWRAP (rtoc_each_items_281[rtoc_idx])];
-      IF value.equal?(old_child) THEN
-          parent[UNWRAP (rtoc_each_items_281[rtoc_idx])] = COPY new_child;
-          TRY (mIRLowering__refresh_ownership_consumption_for_replaced_child_mut(&self, &parent, &old_child, &new_child));
-          RETURN;
-      ELSE_IF (value IS_A []@multiowned Any OR value IS_A {}Any) THEN
-          IF mIRLowering__replace_mir_expr_in_value_mut(&self, &value, old_child, new_child) THEN
-            TRY (mIRLowering__refresh_ownership_consumption_for_replaced_child_mut(&self, &parent, &old_child, &new_child));
-            RETURN;
-          END
-      END
-    rtoc_idx = rtoc_idx + 1;
+    IF emittable__replace_expr_child(&parent, old_child, new_child) THEN
+      TRY (mIRLowering__refresh_ownership_consumption_for_replaced_child_mut(&self, &parent, &old_child, &new_child));
     END
     NIL;
 END
 PRIVATE FN mIRLowering__replaceable_t_struct?(MUTABLE self: MIRLowering, node: Emittable) RETURNS Bool ->
     RETURN node IS_A RegistryCall;
-END
-PRIVATE FN mIRLowering__replace_t_struct_expr_child_mut(MUTABLE self: MIRLowering, parent: Emittable, old_child: Emittable, new_child: Emittable) RETURNS Void ->
-    IF FALSE THEN
-      RETURN;
-    END
-    unsupportedRuby("CallNode at 1488:4: each_key block contains unsupported ReturnNode");
-    NIL;
-END
-PRIVATE FN mIRLowering__replace_mir_expr_in_value_mut(MUTABLE self: MIRLowering, MUTABLE value: MirAggregate, old_child: Emittable, new_child: Emittable) RETURNS Bool
-  EFFECTS REENTRANT ->
-    IF (value == Array) THEN
-      MUTABLE replaced: Bool = FALSE;
-      MUTABLE rtoc_idx = 0;
-      WHILE rtoc_idx < value.length() DO
-      IF value[rtoc_idx].equal?(old_child) THEN
-            value[rtoc_idx] = COPY new_child;
-            replaced = TRUE;
-            BREAK;
-      END
-      IF (value[rtoc_idx] IS_A []@multiowned Any OR value[rtoc_idx] IS_A {}Any) THEN
-            IF mIRLowering__replace_mir_expr_in_value_mut(&self, &value[rtoc_idx], old_child, new_child) THEN
-              replaced = TRUE;
-              BREAK;
-            END
-      END
-    rtoc_idx = rtoc_idx + 1;
-      END
-      RETURN replaced;
-    ELSE_IF (value == Hash) THEN
-      MUTABLE replaced: Bool = FALSE;
-      FOR _ IN value.keys() DO
-    MUTABLE item = value[_];
-    IF item.equal?(old_child) THEN
-          value[_] = COPY new_child;
-          replaced = TRUE;
-          BREAK;
-    END
-    IF (item IS_A []@multiowned Any OR item IS_A {}Any) THEN
-          IF mIRLowering__replace_mir_expr_in_value_mut(&self, &item, old_child, new_child) THEN
-            replaced = TRUE;
-            BREAK;
-          END
-    END
-      END
-      RETURN replaced;
-    END
-    RETURN FALSE;
 END
 PRIVATE FN mIRLowering__refresh_ownership_consumption_for_replaced_child_mut(MUTABLE self: MIRLowering, MUTABLE parent: Emittable, MUTABLE old_child: Emittable, MUTABLE new_child: Emittable) RETURNS !Void ->
     MUTABLE fact: ?OwnershipConsumptionFact = emittable__ownership_consumption(parent);
@@ -8210,7 +8147,7 @@ PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input:
 END
 PRIVATE FN mIRLowering__materialize_mutable_call_temporary(MUTABLE self: MIRLowering, MUTABLE arg: Emittable, MUTABLE ast_arg: Locatable) RETURNS !Emittable ->
     MUTABLE hoisted = TRY (mIRLowering__hoist_alloc(&self, &arg, &ast_arg, FALSE, TRUE));
-    IF !(hoisted.equal?(arg)) THEN
+    IF !(mir__same_node?(hoisted, arg)) THEN
       RETURN hoisted;
     END
     MUTABLE owned_temp: ?Let = mIRLowering__pending_owned_let(&self, arg);
@@ -15955,7 +15892,7 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
         Set{ target: Emittable{ Ident: COPY Ident{ name: COPY target_name, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
       END;
       MUTABLE ownership_value = (mIRLowering__fallible_self_fallback_success_expr(self, target_name, value) OR_ELSE value);
-      MUTABLE ownership_ast =     IF ownership_value.equal?(value) THEN
+      MUTABLE ownership_ast =     IF mir__same_node?(ownership_value, value) THEN
         node.value
       ELSE_IF node.value IS_A BinaryOp THEN
         node.value.left()
