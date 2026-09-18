@@ -6375,7 +6375,7 @@ PRIVATE FN mIRLowering__mir_explicit_result_type(self: MIRLowering, mir: Emittab
     ELSE_IF emittable__callable_contract(mir) EXISTS AS contract THEN
       raw_type = TypeConstructionInput{ Type: COPY functionSignature__return_type(contract.signature) };
     ELSE_IF (mir IS_A RegistryCall OR mir IS_A InlineBc) THEN
-      IF functionSignature__unwrap(emittable__stdlib_def(mir)) EXISTS AS stdlib_signature THEN
+      IF emittable__stdlib_def(mir) EXISTS AS stdlib_signature THEN
         raw_type = TypeConstructionInput{ Type: COPY functionSignature__return_type(stdlib_signature) };
       END
     ELSE_IF mir IS_A Pipeline AS pipeline THEN
@@ -6912,14 +6912,14 @@ PRIVATE FN mIRLowering__refresh_ownership_consumption_for_replaced_child_mut(MUT
       ELSE
         (IF (IF TRY (ownershipEffect__alloc_of(old_child)) != NIL THEN TRY (ownershipEffect__alloc_of(old_child)) ELSE TRY (mIRLowering__mir_owned_alloc(&self, new_child)) END) != NIL THEN (IF TRY (ownershipEffect__alloc_of(old_child)) != NIL THEN TRY (ownershipEffect__alloc_of(old_child)) ELSE TRY (mIRLowering__mir_owned_alloc(&self, new_child)) END) ELSE mIRLowering__function_state(&self).current_decl_alloc END)
       END;
-      parent.ownership_consumption = OwnershipConsumptionFact{ operands: COPY visible_names |> SELECT ownershipOperandFact__owned_binding(CAST(_ AS String), TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "hoist replacement", target_alloc), target: :owned_sink, target_alloc: COPY target_alloc, source: COPY emittable__variant_name(parent), covers_consuming_params: TRUE };
+      emittable__set_ownership_consumption_mut(&parent, OwnershipConsumptionFact{ operands: COPY visible_names |> SELECT ownershipOperandFact__owned_binding(CAST(_ AS String), TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "hoist replacement", target_alloc), target: :owned_sink, target_alloc: COPY target_alloc, source: COPY emittable__variant_name(parent), covers_consuming_params: TRUE });
       RETURN;
     END
     MUTABLE operands = (TRY (callOwnershipFacts__operands( CAST(fact AS CallOwnershipFacts)))) |> WHERE !(((_.name EXISTS) AND old_names.contains?(CAST(((_.name)?) AS String))));
     FOR _ IN visible_names DO
     &operands.append(ownershipOperandFact__owned_binding(CAST(_ AS String), TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "hoist replacement", fact.target_alloc));
     END
-    parent.ownership_consumption = OwnershipConsumptionFact{ operands: COPY operands, target: CAST(COPY locatable__target( CAST(fact AS Locatable)) AS String), target_alloc: COPY fact.target_alloc, source: COPY fact.source, covers_consuming_params: fact.covers_consuming_params };
+    emittable__set_ownership_consumption_mut(&parent, OwnershipConsumptionFact{ operands: COPY operands, target: CAST(COPY locatable__target( CAST(fact AS Locatable)) AS String), target_alloc: COPY fact.target_alloc, source: COPY fact.source, covers_consuming_params: fact.covers_consuming_params });
     NIL;
 END
 PRIVATE FN mIRLowering__stamp_allocating_result_target_mut(MUTABLE self: MIRLowering, MUTABLE expr: Emittable, name: String, alloc: ?String@symbol = NIL) RETURNS !Void
@@ -6946,10 +6946,10 @@ PRIVATE FN mIRLowering__stamp_allocating_result_target_mut(MUTABLE self: MIRLowe
       END
     ELSE
       IF (((alloc != NIL) AND (TRY (ownershipEffect__of(expr))).produces_owned) AND (aST__node_alloc(castEmittableToLocatable__mir_lowering(expr)) EXISTS)) THEN
-        expr.alloc = COPY alloc;
+        emittable__set_alloc_mut(&expr, UNWRAP (alloc));
       END
       FOR MUTABLE rtoc_mutable_block_param_285 IN (TRY (emittable__ownership_source_exprs(expr)) OR_ELSE List[]) DO
-    MUTABLE has_alloc_metadata = (TRUE AND rtoc_mutable_block_param_285.has_alloc_metadata?());
+    MUTABLE has_alloc_metadata = emittable__has_alloc_metadata?(rtoc_mutable_block_param_285);
     IF (has_alloc_metadata OR TRY (mIRLowering__mir_allocates?(&self, rtoc_mutable_block_param_285))) THEN
           mIRLowering__stamp_allocating_result_target_mut(&self, &rtoc_mutable_block_param_285, name, alloc);
     END
@@ -8959,8 +8959,8 @@ PRIVATE FN mIRLowering__call_owned_return?(MUTABLE self: MIRLowering, node: Node
     IF (aST__node_name( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
       sig = TRY (mIRLowering__fn_sig_for(self, (IF aST__node_name(UNWRAP (castNodeToLocatable(node))) EXISTS AS rtoc_wrap_10278 THEN MIRLoweringName{ SymbolValue: symbol(COPY rtoc_wrap_10278)} ELSE NIL END)));
     END
-    IF (aST__node__matched_signature(node) EXISTS) THEN
-      sig = (sig OR_ELSE functionSignature__unwrap(node.matched_signature));
+    IF aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS THEN
+      sig = (sig OR_ELSE aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))));
     END
     IF (((sig != NIL) AND TRUE) AND !(((TRY (functionSignature__return_lifetime(sig))).length() == 0))) THEN
       IF !(((functionSignature__heap_carry_return(sig) == TRUE) OR TRY (functionSignature__heap_return_alloc?(sig)))) THEN
@@ -9279,7 +9279,7 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
         END
         mir_args = COPY plain_args;
       END
-      IF (node.zig_pattern == "CheatLib.len({0})") THEN
+      IF (node__zig_pattern(node) == symbol("CheatLib.len({0})")) THEN
         MUTABLE len_expr: ?MIRCast = TRY (mIRLowering__lower_direct_length(&self, node));
         IF len_expr EXISTS AS len_expr_value THEN
           RETURN Emittable{ MIRCast: COPY len_expr_value };
@@ -14243,7 +14243,7 @@ PRIVATE FN mIRLowering__copy_source_type_info(self: MIRLowering, source: Locatab
       END
     END
     MUTABLE sym_type =   IF (IF source IS_A Identifier AS identifier THEN TRUE ELSE FALSE END) THEN
-      source.symbol.type()
+      symbolEntry__type(UNWRAP (locatable__symbol(source)))
     ELSE
       NIL
     END;
@@ -14339,7 +14339,7 @@ PRIVATE FN mIRLowering__kept_identity_orelse_field_value(MUTABLE self: MIRLoweri
           MUTABLE default_ti:? = (TRY (type__from_node_mut(binary_op_mutable.right, "kept orelse default")));
           MUTABLE default_rc = ((default_ti != NIL) AND (TRY (type__any_rc?(default_ti)) == TRUE));
           IF (!(default_rc) AND TRUE) THEN
-            MUTABLE sig: ?FunctionSignature@multiowned = functionSignature__unwrap(locatable__right( Locatable{ BinaryOp: binary_op_mutable }).matched_signature);
+            MUTABLE sig: ?FunctionSignature@multiowned = locatable__matched_signature(UNWRAP (locatable__right( Locatable{ BinaryOp: binary_op_mutable })));
             MUTABLE rt: ?Type@multiowned = NIL;
             IF sig != NIL THEN
               rt = COPY functionSignature__return_type(sig);

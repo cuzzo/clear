@@ -21645,6 +21645,54 @@ END
 # The mirror of emittable__ownership_consumption: a variant that carries the field takes
 # the write, and one that does not ignores it -- which is what Ruby does
 # when the node has no such attribute.
+# Ruby asks `respond_to?(:has_alloc_metadata?)` and then reads it. Three
+# variants answer; the rest do not respond.
+PUB FN emittable__has_alloc_metadata?(value: Emittable) RETURNS Bool ->
+  PARTIAL MATCH value START
+    Emittable.RegistryCall AS item -> RETURN registryCall__has_alloc_metadata?(item);,
+    Emittable.IndexedStore AS item -> RETURN indexedStore__has_alloc_metadata?(item);,
+    Emittable.ShardedMapPut AS item -> RETURN shardedMapPut__has_alloc_metadata?(item);,
+    DEFAULT -> RETURN FALSE;
+  END
+  RETURN FALSE;
+END
+# Ruby asks `respond_to?(:alloc=)` and then writes it. The variants that
+# carry an allocator take the write; the rest ignore it, as Ruby does.
+PUB FN emittable__set_alloc_mut(MUTABLE value: Emittable, new_value: String@symbol) RETURNS Void ->
+  PARTIAL MATCH value START
+    Emittable.ReassignWithCleanup AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.IndexInsert AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.BatchWindowPush AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.BatchWindowFlush AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.HeapCreate AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.DupeSlice AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.AllocSlice AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.FreeSlice AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.DestroyPtr AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.DeepCopy AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.ContainerInit AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.CapWrap AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.SharePromote AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.MonomorphicKeep AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.RcRelease AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.MakeList AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.MakeSet AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.SnapshotTransaction AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.SnapshotMultiTxn AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.AllocMark AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.OwnedCreate AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.OwnedDestroy AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.OwnedStore AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.ReassignMark AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.FieldCleanupMark AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.ArrayDefaultInit AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.ConcatStr AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.ConcatList AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.NextPromiseList AS MUTABLE item -> item.alloc = COPY new_value;,
+    Emittable.OwnedSlice AS MUTABLE item -> item.alloc = COPY new_value;
+  END
+  NIL;
+END
 PUB FN emittable__set_ownership_consumption_mut(MUTABLE value: Emittable, new_value: ?OwnershipConsumptionFact) RETURNS Void ->
   PARTIAL MATCH value START
     Emittable.FnDef AS MUTABLE item -> item.ownership_consumption = COPY new_value;,
