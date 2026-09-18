@@ -6615,8 +6615,9 @@ PRIVATE FN mIRLowering__normalize_stmt_child_exprs_mut(MUTABLE self: MIRLowering
     # retain out left it reading a capture that does not exist yet.
     IF stmt IS_A IfOptional AS if_optional THEN
       MUTABLE optional_expr = COPY if_optional.optional;
+      MUTABLE optional_old = COPY if_optional.optional;
       MUTABLE optional_prefix, optional_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &optional_expr));
-      TRY (mIRLowering__replace_mir_expr_child_mut(&self, &stmt, COPY if_optional.optional, &optional_normalized));
+      TRY (mIRLowering__replace_mir_expr_child_mut(&self, &stmt, &optional_old, &optional_normalized));
       RETURN COPY optional_prefix;
     END
     MUTABLE children = TRY (emittable__child_exprs(stmt));
