@@ -53,19 +53,24 @@ def arm_lines(variant, members):
                     '      END',
                     '    END']
         elif kind == 'opt_scalar':
+            # The EXISTS binding borrows the member, so the payload is copied
+            # out before the write -- assigning through a live borrow is the
+            # one thing the checker rejects here.
             out += ['    IF !(arm_hit) THEN',
-                    f'      IF item_mutable.{name} EXISTS AS rtoc_c THEN',
-                    '        IF mir__same_node?(rtoc_c, old_child) THEN',
+                    f'      IF item_mutable.{name} EXISTS THEN',
+                    f'        MUTABLE rtoc_{name}_cur = COPY UNWRAP (item_mutable.{name});',
+                    f'        IF mir__same_node?(rtoc_{name}_cur, old_child) THEN',
                     f'          item_mutable.{name} = COPY new_child;',
                     '          arm_hit = TRUE;',
                     '        END',
                     '      END',
                     '    END']
         elif kind in ('list', 'opt_list'):
-            src = f'item_mutable.{name}' if kind == 'list' else 'rtoc_l'
+            src = f'item_mutable.{name}' if kind == 'list' else f'rtoc_{name}_cur'
             out.append('    IF !(arm_hit) THEN')
             if kind == 'opt_list':
-                out.append(f'      IF item_mutable.{name} EXISTS AS rtoc_l THEN')
+                out.append(f'      IF item_mutable.{name} EXISTS THEN')
+                out.append(f'        MUTABLE rtoc_{name}_cur = COPY UNWRAP (item_mutable.{name});')
             ind = '      ' if kind == 'list' else '        '
             out += [f'{ind}MUTABLE rtoc_{name}: []Emittable = List[];',
                     f'{ind}FOR rtoc_c IN {src} DO',

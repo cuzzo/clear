@@ -16009,9 +16009,10 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.methods EXISTS AS rtoc_l THEN
+      IF item_mutable.methods EXISTS THEN
+        MUTABLE rtoc_methods_cur = COPY UNWRAP (item_mutable.methods);
         MUTABLE rtoc_methods: []Emittable = List[];
-        FOR rtoc_c IN rtoc_l DO
+        FOR rtoc_c IN rtoc_methods_cur DO
           IF (!(arm_hit) AND mir__same_node?(rtoc_c, old_child)) THEN
             &rtoc_methods.append(COPY new_child);
             arm_hit = TRUE;
@@ -16032,8 +16033,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.default EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.default EXISTS THEN
+        MUTABLE rtoc_default_cur = COPY UNWRAP (item_mutable.default);
+        IF mir__same_node?(rtoc_default_cur, old_child) THEN
           item_mutable.default = COPY new_child;
           arm_hit = TRUE;
         END
@@ -16047,9 +16049,10 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.methods EXISTS AS rtoc_l THEN
+      IF item_mutable.methods EXISTS THEN
+        MUTABLE rtoc_methods_cur = COPY UNWRAP (item_mutable.methods);
         MUTABLE rtoc_methods: []Emittable = List[];
-        FOR rtoc_c IN rtoc_l DO
+        FOR rtoc_c IN rtoc_methods_cur DO
           IF (!(arm_hit) AND mir__same_node?(rtoc_c, old_child)) THEN
             &rtoc_methods.append(COPY new_child);
             arm_hit = TRUE;
@@ -16217,9 +16220,10 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.else_body EXISTS AS rtoc_l THEN
+      IF item_mutable.else_body EXISTS THEN
+        MUTABLE rtoc_else_body_cur = COPY UNWRAP (item_mutable.else_body);
         MUTABLE rtoc_else_body: []Emittable = List[];
-        FOR rtoc_c IN rtoc_l DO
+        FOR rtoc_c IN rtoc_else_body_cur DO
           IF (!(arm_hit) AND mir__same_node?(rtoc_c, old_child)) THEN
             &rtoc_else_body.append(COPY new_child);
             arm_hit = TRUE;
@@ -16254,9 +16258,10 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.else_body EXISTS AS rtoc_l THEN
+      IF item_mutable.else_body EXISTS THEN
+        MUTABLE rtoc_else_body_cur = COPY UNWRAP (item_mutable.else_body);
         MUTABLE rtoc_else_body: []Emittable = List[];
-        FOR rtoc_c IN rtoc_l DO
+        FOR rtoc_c IN rtoc_else_body_cur DO
           IF (!(arm_hit) AND mir__same_node?(rtoc_c, old_child)) THEN
             &rtoc_else_body.append(COPY new_child);
             arm_hit = TRUE;
@@ -16297,8 +16302,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.update EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.update EXISTS THEN
+        MUTABLE rtoc_update_cur = COPY UNWRAP (item_mutable.update);
+        IF mir__same_node?(rtoc_update_cur, old_child) THEN
           item_mutable.update = COPY new_child;
           arm_hit = TRUE;
         END
@@ -16366,9 +16372,10 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.default_body EXISTS AS rtoc_l THEN
+      IF item_mutable.default_body EXISTS THEN
+        MUTABLE rtoc_default_body_cur = COPY UNWRAP (item_mutable.default_body);
         MUTABLE rtoc_default_body: []Emittable = List[];
-        FOR rtoc_c IN rtoc_l DO
+        FOR rtoc_c IN rtoc_default_body_cur DO
           IF (!(arm_hit) AND mir__same_node?(rtoc_c, old_child)) THEN
             &rtoc_default_body.append(COPY new_child);
             arm_hit = TRUE;
@@ -16395,9 +16402,10 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.default_body EXISTS AS rtoc_l THEN
+      IF item_mutable.default_body EXISTS THEN
+        MUTABLE rtoc_default_body_cur = COPY UNWRAP (item_mutable.default_body);
         MUTABLE rtoc_default_body: []Emittable = List[];
-        FOR rtoc_c IN rtoc_l DO
+        FOR rtoc_c IN rtoc_default_body_cur DO
           IF (!(arm_hit) AND mir__same_node?(rtoc_c, old_child)) THEN
             &rtoc_default_body.append(COPY new_child);
             arm_hit = TRUE;
@@ -16418,9 +16426,10 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.default_body EXISTS AS rtoc_l THEN
+      IF item_mutable.default_body EXISTS THEN
+        MUTABLE rtoc_default_body_cur = COPY UNWRAP (item_mutable.default_body);
         MUTABLE rtoc_default_body: []Emittable = List[];
-        FOR rtoc_c IN rtoc_l DO
+        FOR rtoc_c IN rtoc_default_body_cur DO
           IF (!(arm_hit) AND mir__same_node?(rtoc_c, old_child)) THEN
             &rtoc_default_body.append(COPY new_child);
             arm_hit = TRUE;
@@ -16441,8 +16450,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.value EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.value EXISTS THEN
+        MUTABLE rtoc_value_cur = COPY UNWRAP (item_mutable.value);
+        IF mir__same_node?(rtoc_value_cur, old_child) THEN
           item_mutable.value = COPY new_child;
           arm_hit = TRUE;
         END
@@ -16456,8 +16466,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.value EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.value EXISTS THEN
+        MUTABLE rtoc_value_cur = COPY UNWRAP (item_mutable.value);
+        IF mir__same_node?(rtoc_value_cur, old_child) THEN
           item_mutable.value = COPY new_child;
           arm_hit = TRUE;
         END
@@ -16471,8 +16482,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.value EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.value EXISTS THEN
+        MUTABLE rtoc_value_cur = COPY UNWRAP (item_mutable.value);
+        IF mir__same_node?(rtoc_value_cur, old_child) THEN
           item_mutable.value = COPY new_child;
           arm_hit = TRUE;
         END
@@ -16681,8 +16693,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.fsm_structure EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.fsm_structure EXISTS THEN
+        MUTABLE rtoc_fsm_structure_cur = COPY UNWRAP (item_mutable.fsm_structure);
+        IF mir__same_node?(rtoc_fsm_structure_cur, old_child) THEN
           item_mutable.fsm_structure = COPY new_child;
           arm_hit = TRUE;
         END
@@ -16794,9 +16807,10 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.default_body EXISTS AS rtoc_l THEN
+      IF item_mutable.default_body EXISTS THEN
+        MUTABLE rtoc_default_body_cur = COPY UNWRAP (item_mutable.default_body);
         MUTABLE rtoc_default_body: []Emittable = List[];
-        FOR rtoc_c IN rtoc_l DO
+        FOR rtoc_c IN rtoc_default_body_cur DO
           IF (!(arm_hit) AND mir__same_node?(rtoc_c, old_child)) THEN
             &rtoc_default_body.append(COPY new_child);
             arm_hit = TRUE;
@@ -16895,8 +16909,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.capacity EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.capacity EXISTS THEN
+        MUTABLE rtoc_capacity_cur = COPY UNWRAP (item_mutable.capacity);
+        IF mir__same_node?(rtoc_capacity_cur, old_child) THEN
           item_mutable.capacity = COPY new_child;
           arm_hit = TRUE;
         END
@@ -17242,9 +17257,10 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.guard_fail_body EXISTS AS rtoc_l THEN
+      IF item_mutable.guard_fail_body EXISTS THEN
+        MUTABLE rtoc_guard_fail_body_cur = COPY UNWRAP (item_mutable.guard_fail_body);
         MUTABLE rtoc_guard_fail_body: []Emittable = List[];
-        FOR rtoc_c IN rtoc_l DO
+        FOR rtoc_c IN rtoc_guard_fail_body_cur DO
           IF (!(arm_hit) AND mir__same_node?(rtoc_c, old_child)) THEN
             &rtoc_guard_fail_body.append(COPY new_child);
             arm_hit = TRUE;
@@ -17265,8 +17281,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.ret EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.ret EXISTS THEN
+        MUTABLE rtoc_ret_cur = COPY UNWRAP (item_mutable.ret);
+        IF mir__same_node?(rtoc_ret_cur, old_child) THEN
           item_mutable.ret = COPY new_child;
           arm_hit = TRUE;
         END
@@ -17603,8 +17620,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.end_expr EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.end_expr EXISTS THEN
+        MUTABLE rtoc_end_expr_cur = COPY UNWRAP (item_mutable.end_expr);
+        IF mir__same_node?(rtoc_end_expr_cur, old_child) THEN
           item_mutable.end_expr = COPY new_child;
           arm_hit = TRUE;
         END
@@ -18065,8 +18083,9 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
     MUTABLE item_mutable = COPY item;
     MUTABLE arm_hit = FALSE;
     IF !(arm_hit) THEN
-      IF item_mutable.message EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.message EXISTS THEN
+        MUTABLE rtoc_message_cur = COPY UNWRAP (item_mutable.message);
+        IF mir__same_node?(rtoc_message_cur, old_child) THEN
           item_mutable.message = COPY new_child;
           arm_hit = TRUE;
         END
@@ -18098,16 +18117,18 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.shard_idx EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.shard_idx EXISTS THEN
+        MUTABLE rtoc_shard_idx_cur = COPY UNWRAP (item_mutable.shard_idx);
+        IF mir__same_node?(rtoc_shard_idx_cur, old_child) THEN
           item_mutable.shard_idx = COPY new_child;
           arm_hit = TRUE;
         END
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.shard_key EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.shard_key EXISTS THEN
+        MUTABLE rtoc_shard_key_cur = COPY UNWRAP (item_mutable.shard_key);
+        IF mir__same_node?(rtoc_shard_key_cur, old_child) THEN
           item_mutable.shard_key = COPY new_child;
           arm_hit = TRUE;
         END
@@ -18133,16 +18154,18 @@ PUB FN emittable__replace_expr_child(MUTABLE value: Emittable, old_child: Emitta
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.shard_idx EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.shard_idx EXISTS THEN
+        MUTABLE rtoc_shard_idx_cur = COPY UNWRAP (item_mutable.shard_idx);
+        IF mir__same_node?(rtoc_shard_idx_cur, old_child) THEN
           item_mutable.shard_idx = COPY new_child;
           arm_hit = TRUE;
         END
       END
     END
     IF !(arm_hit) THEN
-      IF item_mutable.shard_key EXISTS AS rtoc_c THEN
-        IF mir__same_node?(rtoc_c, old_child) THEN
+      IF item_mutable.shard_key EXISTS THEN
+        MUTABLE rtoc_shard_key_cur = COPY UNWRAP (item_mutable.shard_key);
+        IF mir__same_node?(rtoc_shard_key_cur, old_child) THEN
           item_mutable.shard_key = COPY new_child;
           arm_hit = TRUE;
         END
