@@ -7762,11 +7762,15 @@ PRIVATE FN mIRLowering__runtime_frame_prologue(MUTABLE self: MIRLowering, node: 
     MUTABLE returns_value_type = ((((type__void?(bare_ret) OR type__primitive?(bare_ret)) OR type__resource?(bare_ret)) OR (TRY (mIRLowering__enum_schemas(&self))).contains?(type__resolved(bare_ret))) OR (TRY (mIRLowering__union_schemas(&self))).contains?(type__resolved(bare_ret)));
     MUTABLE returns_string = TRY (type__string?(bare_ret));
     MUTABLE heap_carry_return = !(!(((TRUE AND (node.heap_carry_return OR_ELSE FALSE)))));
-    MUTABLE has_frame_bindings =   IF node.cleanup_bindings THEN
-      (node.cleanup_bindings OR_ELSE {}) |> ANY type__frame?(_._1)
-    ELSE
-      node.uses_frame
-    END;
+    MUTABLE has_frame_bindings = (node.uses_frame OR_ELSE FALSE);
+    IF node.cleanup_bindings EXISTS AS declared_cleanup_bindings THEN
+      has_frame_bindings = FALSE;
+      FOR binding_name IN declared_cleanup_bindings.keys() DO
+        IF cleanupEntry__frame?(UNWRAP (declared_cleanup_bindings[binding_name])) THEN
+          has_frame_bindings = TRUE;
+        END
+      END
+    END
     MUTABLE out: []Emittable = [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY Call{ callee: "@setEvalBranchQuota", args: [Emittable{ Lit: COPY Lit{ value: "100000", lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
     IF mIRLowering__runtime_frame_save_required?(self, has_frame_bindings, returns_value_type, returns_string, heap_carry_return) THEN
       &out.append(Emittable{ FrameSave: COPY FrameSave{ rt_expr: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
@@ -7842,7 +7846,7 @@ PRIVATE FN mIRLowering__kept_store_liveness(MUTABLE self: MIRLowering) RETURNS ?
     IF locatable__body( Locatable{ FunctionDef: COPY fn }) EXISTS AS fn_body THEN
       self.kept_liveness = (self.kept_liveness OR_ELSE keptEdgeLiveness__new(fn_body));
     END
-    RETURN self.kept_liveness;
+    RETURN COPY self.kept_liveness;
 END
 PRIVATE FN mIRLowering__takes_param_ownership_mir(MUTABLE self: MIRLowering, node: FunctionDef) RETURNS ![]Emittable ->
     MUTABLE out: []Emittable = List[];
@@ -7949,14 +7953,12 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
     MUTABLE inner_call_mir = Call{ callee: COPY inner_name, args: COPY arg_idents, try_wrap: is_error_union, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FunctionDef: COPY node })), callable_contract: COPY inner_contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
     inner_call_mir.result_type = TRY (type__new((IF payload_type EXISTS AS inner_payload THEN TypeConstructionInput{ Type: COPY inner_payload } ELSE TypeConstructionInput{ SymbolValue: :Void } END)));
     MUTABLE check_stmts = (((node.post_clauses OR_ELSE List[]))) |> SELECT {
-    MUTABLE expr = _[:expr];
-    MUTABLE source = _[:source];
-    MUTABLE cond_mir: ?Emittable = TRY (mIRLowering__lower(&self, &expr));
-    MUTABLE msg_text: String = "";
-      IF (source AND !(source.empty?())) THEN
+    MUTABLE expr: Locatable = CAST(UNWRAP (_[:expr]) AS Locatable);
+    MUTABLE source: String = CAST((_[:source] OR_ELSE ContractClauseValue{ StringValue: "" }) AS String);
+    MUTABLE cond_mir: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(expr)));
+    MUTABLE msg_text: String = "DEBUG_POST failed";
+      IF !(source.empty?()) THEN
         msg_text = "DEBUG_POST failed: ${source}";
-      ELSE
-        msg_text = "DEBUG_POST failed";
       END
     IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY cond_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Panic: COPY Panic{ message: COPY msg_text, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }
     };
@@ -7980,7 +7982,9 @@ PRIVATE FN mIRLowering__build_catch_clauses(MUTABLE self: MIRLowering, MUTABLE n
     MUTABLE snap_types: [Set]String = (node.snapshot_types OR_ELSE Set[]);
     MUTABLE snapshot_type_branch_value: ?Type = NIL;
     IF (snap_types.length() == 1) THEN
-      snapshot_type_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(UNWRAP (snap_types.first())) }));
+      FOR snap_type_name IN snap_types DO
+        snapshot_type_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(snap_type_name) }));
+      END
     ELSE
       snapshot_type_branch_value = NIL;
     END
