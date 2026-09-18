@@ -7106,7 +7106,12 @@ PRIVATE FN mIRLowering__hoist_cleanup_entry(MUTABLE self: MIRLowering, mir: Emit
     RETURN cleanupEntry__build(:rc, alloc, FALSE);
       END
     ELSE_IF mir IS_A FreezeExpr AS freeze_expr THEN
-      RETURN cleanupEntry__build(:frozen, :heap, FALSE, {:fixed_alloc: TRUE});
+      # Ruby's `CleanupEntry.build(..., fixed_alloc: true)` passes the extra
+      # through **extra; CLEAR's build takes named parameters, so the flag is
+      # set through its own accessor.
+      MUTABLE frozen_entry = cleanupEntry__build(:frozen, :heap, FALSE);
+      cleanupEntry__set_fixed_alloc_mut(&frozen_entry, TRUE);
+      RETURN frozen_entry;
     ELSE_IF mir IS_A MIRCast AS mir_cast THEN
       RETURN mIRLowering__hoist_cleanup_entry(&self, cast__expr(mir_cast), ast_node);
     ELSE_IF mir IS_A TryExpr AS try_expr THEN
@@ -7122,95 +7127,50 @@ PRIVATE FN mIRLowering__hoist_cleanup_entry(MUTABLE self: MIRLowering, mir: Emit
       # buffer -- giving it a cleanup of its own frees what the union frees.
       RETURN NIL;
     ELSE_IF mir IS_A AsyncPayloadTake AS async_payload_take THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ AsyncPayloadTake: COPY async_payload_take }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ AsyncPayloadTake: COPY async_payload_take }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ AsyncPayloadTake: COPY async_payload_take }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ AsyncPayloadTake: COPY async_payload_take }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ AsyncPayloadTake: COPY async_payload_take }, alloc)));
     ELSE_IF mir IS_A DirectTenseMap AS direct_tense_map THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ DirectTenseMap: COPY direct_tense_map }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ DirectTenseMap: COPY direct_tense_map }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ DirectTenseMap: COPY direct_tense_map }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ DirectTenseMap: COPY direct_tense_map }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ DirectTenseMap: COPY direct_tense_map }, alloc)));
     ELSE_IF mir IS_A Call AS call THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ Call: COPY call }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ Call: COPY call }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ Call: COPY call }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ Call: COPY call }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ Call: COPY call }, alloc)));
     ELSE_IF mir IS_A MIRMethodCall AS mir_method_call THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ MIRMethodCall: COPY mir_method_call }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ MIRMethodCall: COPY mir_method_call }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ MIRMethodCall: COPY mir_method_call }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ MIRMethodCall: COPY mir_method_call }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ MIRMethodCall: COPY mir_method_call }, alloc)));
     ELSE_IF mir IS_A TryCatch AS try_catch THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ TryCatch: COPY try_catch }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ TryCatch: COPY try_catch }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ TryCatch: COPY try_catch }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ TryCatch: COPY try_catch }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ TryCatch: COPY try_catch }, alloc)));
     ELSE_IF mir IS_A Orelse AS orelse THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ Orelse: COPY orelse }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ Orelse: COPY orelse }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ Orelse: COPY orelse }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ Orelse: COPY orelse }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ Orelse: COPY orelse }, alloc)));
     ELSE_IF mir IS_A IfOptional AS if_optional THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ IfOptional: COPY if_optional }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ IfOptional: COPY if_optional }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ IfOptional: COPY if_optional }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ IfOptional: COPY if_optional }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ IfOptional: COPY if_optional }, alloc)));
     ELSE_IF mir IS_A MIRBlockExpr AS mir_block_expr THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ MIRBlockExpr: COPY mir_block_expr }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ MIRBlockExpr: COPY mir_block_expr }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ MIRBlockExpr: COPY mir_block_expr }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ MIRBlockExpr: COPY mir_block_expr }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ MIRBlockExpr: COPY mir_block_expr }, alloc)));
     ELSE_IF mir IS_A Pipeline AS pipeline THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ Pipeline: COPY pipeline }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ Pipeline: COPY pipeline }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ Pipeline: COPY pipeline }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ Pipeline: COPY pipeline }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ Pipeline: COPY pipeline }, alloc)));
     ELSE_IF mir IS_A InlineBc AS inline_bc THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ InlineBc: COPY inline_bc }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ InlineBc: COPY inline_bc }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ InlineBc: COPY inline_bc }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ InlineBc: COPY inline_bc }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ InlineBc: COPY inline_bc }, alloc)));
     ELSE_IF mir IS_A RegistryCall AS registry_call THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ RegistryCall: COPY registry_call }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ RegistryCall: COPY registry_call }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ RegistryCall: COPY registry_call }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ RegistryCall: COPY registry_call }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ RegistryCall: COPY registry_call }, alloc)));
     ELSE_IF mir IS_A IndexedStore AS indexed_store THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ IndexedStore: COPY indexed_store }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ IndexedStore: COPY indexed_store }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ IndexedStore: COPY indexed_store }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ IndexedStore: COPY indexed_store }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ IndexedStore: COPY indexed_store }, alloc)));
     ELSE_IF mir IS_A ExternTrampoline AS extern_trampoline THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ ExternTrampoline: COPY extern_trampoline }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ ExternTrampoline: COPY extern_trampoline }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ ExternTrampoline: COPY extern_trampoline }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ ExternTrampoline: COPY extern_trampoline }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ ExternTrampoline: COPY extern_trampoline }, alloc)));
     ELSE_IF mir IS_A MIRBgBlock AS mir_bg_block THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ MIRBgBlock: COPY mir_bg_block }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ MIRBgBlock: COPY mir_bg_block }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ MIRBgBlock: COPY mir_bg_block }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ MIRBgBlock: COPY mir_bg_block }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ MIRBgBlock: COPY mir_bg_block }, alloc)));
     ELSE_IF mir IS_A ShardedMapGet AS sharded_map_get THEN
-      IF (IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ ShardedMapGet: COPY sharded_map_get }, alloc)) END) != NIL THEN
-    RETURN ((IF TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) != NIL THEN TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ ShardedMapGet: COPY sharded_map_get }, alloc)) END))?;
-      ELSE
-    RETURN TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ ShardedMapGet: COPY sharded_map_get }, alloc));
-      END
+      # Ruby chains these with `||`, which evaluates each at most once.
+      RETURN ((TRY (mIRLowering__cleanup_entry_for_owned_result(&self, ast_node, alloc)) OR_ELSE TRY (mIRLowering__typed_cleanup_entry_for_mir_result(&self, Emittable{ ShardedMapGet: COPY sharded_map_get }, alloc))) OR_ELSE TRY (mIRLowering__cleanup_entry_for_ownership_effect(&self, Emittable{ ShardedMapGet: COPY sharded_map_get }, alloc)));
     ELSE
       panic("{}mir_allocates? returned true but no cleanup entry is defined. Add a case.");
     END
@@ -7299,7 +7259,9 @@ PRIVATE FN mIRLowering__cleanup_entry_for_ownership_effect(MUTABLE self: MIRLowe
     ELSE_IF (effect.cleanup_kind == :rc) THEN
       RETURN cleanupEntry__build(:rc, alloc, FALSE);
     ELSE_IF (effect.cleanup_kind == :frozen) THEN
-      RETURN cleanupEntry__build(:frozen, :heap, FALSE, CAST({:fixed_alloc: TRUE} AS ?ResourceClosePlan));
+      MUTABLE frozen_result_entry = cleanupEntry__build(:frozen, :heap, FALSE);
+      cleanupEntry__set_fixed_alloc_mut(&frozen_result_entry, TRUE);
+      RETURN frozen_result_entry;
     ELSE
       RETURN NIL;
     END
