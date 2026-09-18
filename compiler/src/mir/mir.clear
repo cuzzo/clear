@@ -15965,13 +15965,9 @@ END
 PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS REENTRANT ->
   MUTABLE out: []Emittable = List[];
   IF value IS_A FnDef AS item THEN
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A MIRStructDef AS item THEN
-    IF item.methods EXISTS AS rtoc_l THEN
-      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
-    END
     RETURN out;
   END
   IF value IS_A FieldDef AS item THEN
@@ -15989,7 +15985,6 @@ PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS R
     RETURN out;
   END
   IF value IS_A TestDef AS item THEN
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A Let AS item THEN
@@ -16016,10 +16011,6 @@ PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS R
   END
   IF value IS_A IfStmt AS item THEN
     &out.append(COPY item.cond);
-    FOR rtoc_c IN item.then_body DO &out.append(COPY rtoc_c); END
-    IF item.else_body EXISTS AS rtoc_l THEN
-      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
-    END
     RETURN out;
   END
   IF value IS_A IfBindStmt AS item THEN
@@ -16037,31 +16028,20 @@ PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS R
   END
   IF value IS_A ForStmt AS item THEN
     &out.append(COPY item.iter);
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A ScopeBlock AS item THEN
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A SwitchStmt AS item THEN
     &out.append(COPY item.subject);
-    IF item.default_body EXISTS AS rtoc_l THEN
-      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
-    END
     RETURN out;
   END
   IF value IS_A UnionMatchStmt AS item THEN
     &out.append(COPY item.subject);
-    IF item.default_body EXISTS AS rtoc_l THEN
-      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
-    END
     RETURN out;
   END
   IF value IS_A IfChain AS item THEN
-    IF item.default_body EXISTS AS rtoc_l THEN
-      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
-    END
     RETURN out;
   END
   IF value IS_A ReturnStmt AS item THEN
@@ -16085,7 +16065,6 @@ PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS R
     RETURN out;
   END
   IF value IS_A DebugOnly AS item THEN
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A Sort AS item THEN
@@ -16126,12 +16105,10 @@ PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS R
     RETURN out;
   END
   IF value IS_A MIRBgBlock AS item THEN
-    FOR rtoc_c IN item.run_body DO &out.append(COPY rtoc_c); END
     IF item.fsm_structure EXISTS AS rtoc_c THEN &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A StreamSpawn AS item THEN
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A StreamYield AS item THEN
@@ -16157,9 +16134,6 @@ PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS R
   END
   IF value IS_A CatchWrapper AS item THEN
     &out.append(COPY item.inner_call);
-    IF item.default_body EXISTS AS rtoc_l THEN
-      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
-    END
     RETURN out;
   END
   IF value IS_A HeapCreate AS item THEN
@@ -16241,33 +16215,25 @@ PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS R
   END
   IF value IS_A SnapshotRead AS item THEN
     &out.append(COPY item.cell_unwrap);
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A SnapshotTransaction AS item THEN
     &out.append(COPY item.cell_unwrap);
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     &out.append(COPY item.conflict_action);
     RETURN out;
   END
   IF value IS_A SnapshotMultiTxn AS item THEN
     FOR rtoc_c IN item.cells DO &out.append(COPY rtoc_c); END
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     &out.append(COPY item.conflict_action);
     RETURN out;
   END
   IF value IS_A PolymorphicMutate AS item THEN
     &out.append(COPY item.cell);
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A PolymorphicMutateFlow AS item THEN
     &out.append(COPY item.cell);
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     &out.append(COPY item.guard_cond);
-    IF item.guard_fail_body EXISTS AS rtoc_l THEN
-      FOR rtoc_c IN rtoc_l DO &out.append(COPY rtoc_c); END
-    END
     RETURN out;
   END
   IF value IS_A PolymorphicFlowSignal AS item THEN
@@ -16361,7 +16327,6 @@ PUB FN emittable__expr_children(value: Emittable) RETURNS ![]Emittable EFFECTS R
     RETURN out;
   END
   IF value IS_A MIRBlockExpr AS item THEN
-    FOR rtoc_c IN item.body DO &out.append(COPY rtoc_c); END
     RETURN out;
   END
   IF value IS_A ConcatList AS item THEN

@@ -6341,11 +6341,8 @@ PRIVATE FN mIRLowering__mir_alloc_mark_type_info(MUTABLE self: MIRLowering, mir:
     ELSE_IF mir IS_A Pipeline AS pipeline THEN
       IF pipeline.ast_node THEN
         RETURN TRY (type__from_node_mut(pipeline.ast_node, context));
-      ELSE_IF (pipeline.inner EXISTS AS pipeline_inner) THEN
-        IF TRY (mIRLowering__mir_allocates?(&self, pipeline_inner)) THEN
-          RETURN CAST(mIRLowering__mir_alloc_mark_type_info(&self, pipeline_inner, NIL, context) AS Type);
-        END
-        panic("{}: allocating MIR::Pipeline has no typed result");
+      ELSE_IF TRY (mIRLowering__mir_allocates?(&self, pipeline.inner)) THEN
+        RETURN CAST(mIRLowering__mir_alloc_mark_type_info(&self, pipeline.inner, NIL, context) AS Type);
       ELSE
         panic("{}: allocating MIR::Pipeline has no typed result");
       END
