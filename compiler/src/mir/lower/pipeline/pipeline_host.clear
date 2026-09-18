@@ -935,7 +935,7 @@ PRIVATE FN pipelineHost__bc_target?(MUTABLE self: PipelineHost) RETURNS Bool
     RETURN pipelineLoweringBridge__bc_target?(&self.lowering_bridge);
 END
 PRIVATE FN pipelineHost__pipeline_source_shape(MUTABLE self: PipelineHost, source_node: Locatable) RETURNS !PipelineSourceShape ->
-    RETURN PipelineSourceShape{ type: UNWRAP (COPY TRY (type__from_node_mut(source_node, "pipeline source shape"))), bc_target: pipelineHost__bc_target?(&self), named_source: source_node IS_A Identifier };
+    RETURN PipelineSourceShape{ type: COPY TRY (type__from_node_mut(source_node, "pipeline source shape")), bc_target: pipelineHost__bc_target?(&self), named_source: source_node IS_A Identifier };
 END
 PRIVATE FN pipelineHost__lower_range_fold_observable(self: PipelineHost, p: PipelineLazyRangePrefix, smooth_node: BinaryOp, label: String, source_node: Locatable, acc_alloc_expr: Emittable, publish_stmts: []Emittable) RETURNS !MIRBlockExpr
   EFFECTS REENTRANT ->

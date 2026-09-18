@@ -699,7 +699,7 @@ FN mIRLowering__destination_placement_plan(MUTABLE self: MIRLowering, MUTABLE mi
     IF dest_alloc EXISTS AS dest_alloc_value THEN
       MUTABLE dest_alloc_value_mutable = COPY dest_alloc_value;
       MUTABLE ti = TRY (mIRLowering__destination_type( &self, ast_node, dest_type));
-      IF ((type__symbol?(ti) OR (((TRUE AND TRY (locatable__typed?(ast_node))) AND ((type__symbol?(UNWRAP (TRY (type__from_node_mut( ast_node, "placement symbol probe")))))))))) THEN
+      IF ((type__symbol?(ti) OR (((TRUE AND TRY (locatable__typed?(ast_node))) AND ((type__symbol?(TRY (type__from_node_mut( ast_node, "placement symbol probe"))))))))) THEN
         RETURN mIRLowering__destination_keep_plan(&self, dest_alloc_value_mutable);
       END
       IF (placement__heap?(dest_alloc_value_mutable) AND TRY (mIRLowering__heap_indirect_destination?(&self, mir, ast_node, CAST(ti AS Type)))) THEN
@@ -752,9 +752,7 @@ END
 FN mIRLowering__destination_type(MUTABLE self: MIRLowering, ast_node: Locatable, dest_type: ?TypeTypeInput) RETURNS !Type ->
     MUTABLE ti: ?TypeTypeInput = COPY dest_type;
     IF ti == NIL THEN
-      IF TRY (type__from_node_mut(ast_node, "destination placement type")) EXISTS AS from_node_type THEN
-        ti = TypeTypeInput{ Type: COPY from_node_type };
-      END
+      ti = TypeTypeInput{ Type: COPY TRY (type__from_node_mut(ast_node, "destination placement type")) };
     END
     IF ti IS_A Type AS type THEN
       RETURN type;
@@ -1176,7 +1174,7 @@ FN mIRLowering__place_string_value_for_heap_destination(MUTABLE self: MIRLowerin
     IF TRY (mIRLowering__heap_owned_result?(&self, Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, ast_node)) THEN
       RETURN COPY Emittable{ TryExpr: CAST(COPY mir AS TryExpr)};
     END
-    IF type__error_union?( UNWRAP ((TRY (type__from_node_mut(ast_node, "heap destination placement"))))) THEN
+    IF type__error_union?( TRY (type__from_node_mut(ast_node, "heap destination placement"))) THEN
       mir = TryExpr{ expr: Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, lowered_node_id: NIL, ownership_consumption: NIL };
     END
     RETURN Emittable{ DupeSlice: COPY DupeSlice{ source: Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -1190,13 +1188,13 @@ FN mIRLowering__place_string_value_for_destination(MUTABLE self: MIRLowering, mi
         RETURN COPY Emittable{ TryExpr: CAST(COPY mir AS TryExpr)};
       END
       IF source_alloc EXISTS AS source_alloc_value THEN
-        RETURN TRY (mIRLowering__place_owned_alloc_mismatch_for_destination(&self, Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, UNWRAP (TRY (type__from_node_mut(ast_node, "string destination placement"))), dest_alloc, source_alloc_value));
+        RETURN TRY (mIRLowering__place_owned_alloc_mismatch_for_destination(&self, Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, TRY (type__from_node_mut(ast_node, "string destination placement")), dest_alloc, source_alloc_value));
       END
     END
     IF placement__heap?(dest_alloc) THEN
       RETURN TRY (mIRLowering__place_string_value_for_heap_destination(&self, Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, ast_node));
     END
-    IF type__error_union?( UNWRAP ((TRY (type__from_node_mut(ast_node, "string destination placement"))))) THEN
+    IF type__error_union?( TRY (type__from_node_mut(ast_node, "string destination placement"))) THEN
       mir = TryExpr{ expr: Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, lowered_node_id: NIL, ownership_consumption: NIL };
     END
     RETURN Emittable{ DupeSlice: COPY DupeSlice{ source: Emittable{ TryExpr: CAST(COPY mir AS TryExpr)}, alloc: COPY dest_alloc, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -5048,7 +5046,7 @@ PRIVATE FN mIRLowering__borrowed_union_sink_source?(MUTABLE self: MIRLowering, a
 END
 PRIVATE FN mIRLowering__rc_retain_needed?(MUTABLE self: MIRLowering, value_node: Locatable) RETURNS !Bool ->
     IF value_node IS_A Identifier AS identifier THEN
-      MUTABLE ti = UNWRAP (TRY (type__from_node_mut(Locatable{ Identifier: COPY identifier }, "rc retain")));
+      MUTABLE ti = TRY (type__from_node_mut(Locatable{ Identifier: COPY identifier }, "rc retain"));
       MUTABLE declared: ?Type@multiowned = NIL;
       IF identifier.symbol != NIL THEN
         declared = COPY symbolEntry__type(((identifier.symbol)?));
@@ -11548,7 +11546,7 @@ PRIVATE FN mIRLowering__enforce_bg_capture_strategies_mut(MUTABLE self: MIRLower
 END
 PRIVATE FN mIRLowering__fsm_bg_block_from_transform_mut(MUTABLE self: MIRLowering, node: BgBlock, transform_result: FsmLoweringResult, captured: {String}Type, analysis: ?CaptureAnalysis) RETURNS !MIRBgBlock ->
     MUTABLE fsm_structure = COPY transform_result.structure;
-    MUTABLE result_type = TRY (type__tense_type( UNWRAP ((TRY (type__from_node_mut( Locatable{ BgBlock: COPY node }, "FSM BG result"))))));
+    MUTABLE result_type = TRY (type__tense_type( TRY (type__from_node_mut( Locatable{ BgBlock: COPY node }, "FSM BG result"))));
     fsm_structure.owned_result_required = !(!(((TRUE AND TRY (mIRLowering__ownership_tracked_transfer_type?(&self, result_type))))));
     TRY (mIRChecker__check_fsm_structure_mut(fsm_structure, Locatable{ BgBlock: COPY node }));
     MUTABLE bg = MIRBgBlock{ code: castFsmBodyToBgBlockPlan( castMIRFsmLoweringResultFsmBodyToFsmBody(COPY transform_result.body)), captures: COPY captured, run_body: List[], fsm_structure: Emittable{ FsmStructure: COPY fsm_structure }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
@@ -11685,7 +11683,7 @@ PRIVATE FN mIRLowering__lower_yield(MUTABLE self: MIRLowering, MUTABLE node: Yie
     IF ((transfer_marks.length() == 0) OR !(lowered IS_A Ident)) THEN
       push_contract_branch_value = base_contract;
     ELSE
-      MUTABLE operand = ownershipOperandFact__owned_binding(CAST(emittable__name(lowered) AS String), UNWRAP (TRY (type__from_node_mut(node.expr, "YIELD ownership transfer"))), "stream YIELD push", :heap);
+      MUTABLE operand = ownershipOperandFact__owned_binding(CAST(emittable__name(lowered) AS String), TRY (type__from_node_mut(node.expr, "YIELD ownership transfer")), "stream YIELD push", :heap);
       push_contract_branch_value = callableContract__new(base_contract.signature, TRY (ownershipContract__consume_operands([operand])), 1);
     END
     MUTABLE push_contract: CallableContract = push_contract_branch_value?;
@@ -11969,7 +11967,7 @@ PRIVATE FN mIRLowering__lower_unary_op(MUTABLE self: MIRLowering, node: UnaryOp)
     IF (node.op == :NOT) OR (node.op == "!") THEN
       RETURN Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: UNWRAP (COPY right), lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE_IF (node.op == :EXISTS) THEN
-      IF TRY (type__stream_step?( UNWRAP ((TRY (type__from_node_mut(node.right)))))) THEN
+      IF TRY (type__stream_step?( TRY (type__from_node_mut(node.right)))) THEN
         RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: UNWRAP (COPY right), method: "isItem", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
       ELSE
         TRY (mIRLowering__require_tense_operation_plan_mut(&self, Locatable{ UnaryOp: COPY node }, TenseOperationKind.Exists, TenseBackendForm.OptionalTest));
@@ -12433,7 +12431,7 @@ PRIVATE FN mIRLowering__lower_lazy_boolean_op(MUTABLE self: MIRLowering, MUTABLE
 END
 PRIVATE FN mIRLowering__lower_boolean_operand(MUTABLE self: MIRLowering, node: Locatable) RETURNS !Emittable ->
     MUTABLE lowered: Emittable = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering( node))) AS Emittable);
-    IF !(type__optional?( UNWRAP ((TRY (type__from_node_mut( node, "logical operand")))))) THEN
+    IF !(type__optional?( TRY (type__from_node_mut( node, "logical operand")))) THEN
       RETURN lowered;
     END
     RETURN Emittable{ MIRBinOp: COPY MIRBinOp{ op: "!=", left: COPY lowered, right: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -17009,7 +17007,7 @@ PRIVATE FN mIRLowering__lower_while_bind(MUTABLE self: MIRLowering, node: WhileB
     IF ((!(tight) AND mIRLowering__current_function_has_rt?(&self)) AND !(mIRLowering__loop_body_exits?(self, body))) THEN
       &body.append(Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "checkYield", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     END
-    IF TRY (type__stream_step?( UNWRAP ((TRY (type__from_node_mut(node.condition)))))) THEN
+    IF TRY (type__stream_step?( TRY (type__from_node_mut(node.condition)))) THEN
       MUTABLE step_name = "__stream_step_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_738 = mIRLowering__lowering_counters(&self);
       mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_738)) }}";
       MUTABLE step = Ident{ name: COPY step_name, lowered_node_id: NIL, ownership_consumption: NIL };

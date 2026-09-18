@@ -5042,11 +5042,22 @@ PUB FN typeAutoOptional?(value: ?Type) RETURNS Bool ->
   END
   RETURN FALSE;
 END
-PUB FN type__from_node_mut(node: ?Locatable, context: String = "post-annotation MIR") RETURNS !?Type EFFECTS REENTRANT ->
-  IF node EXISTS AS node_value THEN
-    RETURN TRY (aST__full_type_mut(node_value));
+# Ruby's `Type.from_node!`: the caller has already decided the node is typed,
+# so a missing or unresolved type is a compiler bug, not a value to hand back.
+# Returning an optional here pushed a nil check onto every reader and let an
+# untyped node travel a further pass before anything noticed.
+PUB FN type__from_node_mut(node: ?Locatable, context: String = "post-annotation MIR") RETURNS !Type EFFECTS REENTRANT ->
+  IF !(node EXISTS) THEN
+    RAISE Input, CompilerError, "${context}: missing type info for a node that is not there";
   END
-  RETURN NIL;
+  MUTABLE found: ?Type = TRY (aST__full_type_mut(UNWRAP (node)));
+  IF !(found EXISTS) THEN
+    RAISE Input, CompilerError, "${context}: missing type info for ${locatable__variant_name(UNWRAP (node))}";
+  END
+  IF type__untyped?(UNWRAP (found)) THEN
+    RAISE Input, CompilerError, "${context}: unresolved type info for ${locatable__variant_name(UNWRAP (node))}";
+  END
+  RETURN UNWRAP (found);
 END
 PUB FN type__from_node(value: ?Type) RETURNS !?Type EFFECTS REENTRANT ->
   RETURN COPY value;

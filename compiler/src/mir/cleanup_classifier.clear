@@ -296,10 +296,7 @@ PUB FN cleanupClassifier__stamp_loop_extensions_mut(body: []Locatable, bindings:
   }));
 END
 PUB FN cleanupClassifier__value_extends_loop?(value: Locatable) RETURNS !Bool ->
-  IF (TRY (type__from_node_mut(value, "cleanup lifetime extension"))) EXISTS AS ti THEN
-    RETURN TRY (type__heap_ptr?(ti));
-  END
-  RETURN FALSE;
+  RETURN TRY (type__heap_ptr?(TRY (type__from_node_mut(value, "cleanup lifetime extension"))));
 END
 PUB FN cleanupClassifier__promote_entry_to_heap_cleanup_mut(MUTABLE entry_obj: CleanupEntry, value: Locatable) RETURNS !Void ->
   MUTABLE lifecycle: ?LifecyclePlan = cleanupEntry__lifecycle_plan(entry_obj);
@@ -1609,10 +1606,7 @@ PRIVATE FN cleanupClassifier__struct_lit_field_borrowed?(struct_lit: StructLit, 
     IF aST__node_borrow_provenance?(fval) THEN
       RETURN TRUE;
     END
-    IF (TRY (type__from_node_mut(fval, "struct literal borrowed field"))) EXISTS AS fval_ti THEN
-      RETURN type__borrowed_reference?(fval_ti);
-    END
-    RETURN FALSE;
+    RETURN type__borrowed_reference?(TRY (type__from_node_mut(fval, "struct literal borrowed field")));
   END
   RETURN TRUE;
 END
@@ -1687,9 +1681,8 @@ PRIVATE FN cleanupClassifier__struct_lit_field_static?(struct_lit: StructLit, fi
     IF aST__node_borrow_provenance?(fval) THEN
       RETURN TRUE;
     END
-    IF (TRY (type__from_node_mut(fval, "struct cleanup field"))) EXISTS AS fval_ti THEN
-      RETURN (type__rodata?(fval_ti) OR type__borrowed_reference?(fval_ti));
-    END
+    MUTABLE fval_ti = TRY (type__from_node_mut(fval, "struct cleanup field"));
+    RETURN (type__rodata?(fval_ti) OR type__borrowed_reference?(fval_ti));
   END
   RETURN FALSE;
 END
