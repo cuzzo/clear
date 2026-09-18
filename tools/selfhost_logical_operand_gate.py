@@ -33,7 +33,39 @@ NILCMP_RE = re.compile(r'\b([a-z_][\w]*)\.([a-z_]\w*)\s*[!=]= NIL\b')
 # The same defect at a CALL: a function whose declared return is not optional,
 # compared against NIL because Ruby compared an always-truthy value.
 FN_RET_RE = re.compile(r'^(?:PUB |PRIVATE )?FN ([\w?!]+)(?:<[^>]*>)?\([^\n]*?\)\s*RETURNS\s+(!?)(\??)', re.M)
-CALLNIL_RE = re.compile(r'(?:TRY \()?([a-z]\w*(?:__)?\w*)\([^()]*\)\)?\s*[!=]= NIL\b')
+NILOP_RE = re.compile(r'\s*[!=]= NIL\b')
+
+
+def call_before_nil(line):
+    """Name of the call whose closing paren immediately precedes a NIL test.
+
+    Scanning back from `!= NIL` over BALANCED parens is what distinguishes
+    `outer(inner(x)) != NIL` from `inner(x) != NIL`; a regex picks the inner
+    call and reports the wrong function.
+    """
+    for m in NILOP_RE.finditer(line):
+        i = m.start() - 1
+        while i >= 0 and line[i] == ' ':
+            i -= 1
+        if i < 0 or line[i] != ')':
+            continue
+        depth, j = 0, i
+        while j >= 0:
+            if line[j] == ')':
+                depth += 1
+            elif line[j] == '(':
+                depth -= 1
+                if depth == 0:
+                    break
+            j -= 1
+        if j < 0:
+            continue
+        k = j - 1
+        while k >= 0 and (line[k].isalnum() or line[k] == '_'):
+            k -= 1
+        name = line[k + 1:j]
+        if name:
+            yield name
 
 
 def fn_returns():
@@ -78,7 +110,7 @@ def main():
                     decl = types.get(field)
                     if decl and not decl[0]:
                         findings.append((rel, n, f'{recv}.{field}', decl[1], label))
-            for fname in CALLNIL_RE.findall(line):
+            for fname in call_before_nil(line):
                 opt = returns.get(fname)
                 if opt is False:
                     findings.append((rel, n, f'{fname}()', 'non-optional', 'NIL?'))
