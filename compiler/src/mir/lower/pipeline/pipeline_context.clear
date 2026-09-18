@@ -126,6 +126,10 @@ PUB FN pipelinePlaceholderRewriter__substitute(MUTABLE self: PipelinePlaceholder
     ELSE_IF node IS_A Assignment AS assignment THEN
       MUTABLE assignment_mutable = COPY assignment;
       RETURN TRY (pipelinePlaceholderRewriter__substitute_assignment(&self, assignment_mutable));
+    ELSE_IF node IS_A DestructuringAssignment AS destructuring_assignment THEN
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_destructuring_assignment(&self, destructuring_assignment));
+    ELSE_IF node IS_A IfBind AS if_bind THEN
+      RETURN TRY (pipelinePlaceholderRewriter__substitute_if_bind(&self, if_bind));
     ELSE_IF (node IS_A UnaryOp) THEN
       IF node IS_A UnaryOp AS unary_op THEN
         MUTABLE unary_op_mutable = COPY unary_op;
@@ -578,6 +582,35 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_if_statement(MUTABLE self: Pi
     pipelinePlaceholderRewriter__copy_type_info(self, PipelineRewriteNode{ IfStatement: COPY node }, PipelineRewriteNode{ IfStatement: COPY new_if });
     RETURN Locatable{ IfStatement: COPY new_if };
 END
+# `IF _.field EXISTS AS x` keeps the tested expression on its BINDING rather
+# than in a condition slot, so a rewriter that only knows IfStatement leaves
+# the placeholder in it untouched and the emitted Zig names a capture that is
+# not in scope.
+PRIVATE FN pipelinePlaceholderRewriter__substitute_if_bind(MUTABLE self: PipelinePlaceholderRewriter, node: IfBind) RETURNS !Locatable
+  EFFECTS REENTRANT ->
+    MUTABLE new_bindings: []Binding = List[];
+    FOR binding IN node.bindings DO
+      MUTABLE new_expr = TRY (pipelinePlaceholderRewriter__substitute(&self, binding.expr));
+      MUTABLE new_binding = COPY binding;
+      new_binding.expr = COPY new_expr;
+      &new_bindings.append(COPY new_binding);
+    END
+    MUTABLE new_then = node.then_branch |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&self, _));
+    MUTABLE new_else = node.else_branch |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&self, _));
+    MUTABLE new_if_bind = IfBind{ token: COPY node.token, bindings: COPY new_bindings, then_branch: COPY new_then, else_branch: COPY new_else, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(self, PipelineRewriteNode{ IfBind: COPY node }, PipelineRewriteNode{ IfBind: COPY new_if_bind });
+    RETURN Locatable{ IfBind: COPY new_if_bind };
+END
+# `k, v = _` inside a pipeline block. Without a case here the dispatch falls
+# through to `else node`, the placeholder survives into the emitted Zig, and
+# the loop capture it should have named is not in scope.
+PRIVATE FN pipelinePlaceholderRewriter__substitute_destructuring_assignment(MUTABLE self: PipelinePlaceholderRewriter, node: DestructuringAssignment) RETURNS !Locatable
+  EFFECTS REENTRANT ->
+    MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&self, node.value));
+    MUTABLE new_node = DestructuringAssignment{ token: COPY node.token, targets: COPY node.targets, value: COPY new_value, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
+    pipelinePlaceholderRewriter__copy_type_info(self, PipelineRewriteNode{ DestructuringAssignment: COPY node }, PipelineRewriteNode{ DestructuringAssignment: COPY new_node });
+    RETURN Locatable{ DestructuringAssignment: COPY new_node };
+END
 PRIVATE FN pipelinePlaceholderRewriter__copy_type_info(self: PipelinePlaceholderRewriter, src: PipelineRewriteNode, MUTABLE dst: PipelineRewriteNode) RETURNS Void ->
     aST__copy_pipeline_rewrite_metadata_mut(&dst, src);
 END
@@ -748,6 +781,8 @@ END
 FN castNodeToPipelineRewriteNode(value: Node) RETURNS PipelineRewriteNode ->
   PARTIAL MATCH value START
     Node.Assignment AS cast_payload -> RETURN PipelineRewriteNode{ Assignment: COPY cast_payload };,
+    Node.IfBind AS cast_payload -> RETURN PipelineRewriteNode{ IfBind: COPY cast_payload };,
+    Node.DestructuringAssignment AS cast_payload -> RETURN PipelineRewriteNode{ DestructuringAssignment: COPY cast_payload };,
     Node.BindExpr AS cast_payload -> RETURN PipelineRewriteNode{ BindExpr: COPY cast_payload };,
     Node.BinaryOp AS cast_payload -> RETURN PipelineRewriteNode{ BinaryOp: COPY cast_payload };,
     Node.Identifier AS cast_payload -> RETURN PipelineRewriteNode{ Identifier: COPY cast_payload };,
@@ -775,6 +810,8 @@ FN castOptionalPipelineRewriteNodeToLocatable(value: ?PipelineRewriteNode) RETUR
   END
   PARTIAL MATCH value START
     PipelineRewriteNode.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    PipelineRewriteNode.IfBind AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
+    PipelineRewriteNode.DestructuringAssignment AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     PipelineRewriteNode.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
     PipelineRewriteNode.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
     PipelineRewriteNode.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
