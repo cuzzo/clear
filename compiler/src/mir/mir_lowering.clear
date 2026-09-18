@@ -7964,15 +7964,15 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
     };
     MUTABLE body =   IF is_void THEN
       ([Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY inner_call_mir }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + (IF !((check_stmts.length() == 0)) THEN
-      [Emittable{ DebugOnly: COPY DebugOnly{ body: check_stmts |> SELECT Emittable{ IfStmt: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]
+      CAST([Emittable{ DebugOnly: COPY DebugOnly{ body: check_stmts |> SELECT Emittable{ IfStmt: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)
     ELSE
-      NIL
+      CAST(List[] AS []Emittable)
     END) + [Emittable{ ReturnStmt: COPY ReturnStmt{ value: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }])
     ELSE
       ([Emittable{ Let: COPY Let{ name: COPY "result", init: Emittable{ Call: COPY inner_call_mir }, mutable: FALSE, annotation: NIL, suppression: "_ = &result;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] + (IF !((check_stmts.length() == 0)) THEN
-      [Emittable{ DebugOnly: COPY DebugOnly{ body: check_stmts |> SELECT Emittable{ IfStmt: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]
+      CAST([Emittable{ DebugOnly: COPY DebugOnly{ body: check_stmts |> SELECT Emittable{ IfStmt: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] AS []Emittable)
     ELSE
-      NIL
+      CAST(List[] AS []Emittable)
     END) + [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: "result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }])
     END;
     RETURN FnDef{ name: mIRLowering__zig_safe_name(self, node.name), params: COPY params_mir, ret_type: COPY return_type_str, body: COPY body, visibility: COPY vis, can_fail: FALSE, comptime_params: comptime_params, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
@@ -7997,7 +7997,7 @@ PRIVATE FN mIRLowering__build_catch_clauses(MUTABLE self: MIRLowering, MUTABLE n
     MUTABLE default_body: []Emittable = List[];
     MUTABLE default_action: CatchDefaultAction = CatchDefaultAction.Unreachable;
     IF TRY (mIRLowering__has_default_catch?(self, &node)) THEN
-      MUTABLE default_mir = TRY (mIRLowering__lower_body(&self, TRY (mIRLowering__default_catch_body(self, node))));
+      MUTABLE default_mir = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(TRY (mIRLowering__default_catch_body(self, node)))));
       default_body = default_mir;
       default_action = CatchDefaultAction.Body;
     ELSE_IF fn_can_fail THEN
@@ -8079,6 +8079,42 @@ PRIVATE FN mIRLowering__infer_catch_value_allocator(self: MIRLowering, expr: ?Lo
     ELSE
       RETURN NIL;
     END
+END
+PRIVATE FN mIRLowering__with_alias_pointer_shaped?(MUTABLE self: MIRLowering, a: Locatable) RETURNS Bool ->
+    IF !(a IS_A Identifier) THEN
+      RETURN FALSE;
+    END
+    MUTABLE name = CAST(aST__node_name(a) AS String);
+    MUTABLE owner_map: ?{String}String = COPY mIRLowering__capability_state(&self).with_alias_owner_map;
+    IF !((IF owner_map EXISTS AS alias_owners THEN alias_owners.contains?(name) ELSE FALSE END)) THEN
+      RETURN FALSE;
+    END
+    IF mIRLowering__capability_state(&self).if_bind_aliases.contains?(name) THEN
+      RETURN mIRLowering__capability_state(&self).if_bind_pointer_aliases.contains?(name);
+    END
+    IF locatable__symbol(a) EXISTS AS alias_symbol THEN
+      RETURN symbolEntry__borrowed_alias(alias_symbol);
+    END
+    RETURN FALSE;
+END
+PRIVATE FN mIRLowering__arg_already_pointer_shaped?(MUTABLE self: MIRLowering, a: Locatable) RETURNS Bool ->
+    IF !(a IS_A Identifier) THEN
+      RETURN FALSE;
+    END
+    MUTABLE name = CAST(aST__node_name(a) AS String);
+    IF mIRLowering__current_function_collection_param?(&self, name) THEN
+      RETURN TRUE;
+    END
+    IF mIRLowering__with_alias_pointer_shaped?(&self, a) THEN
+      RETURN TRUE;
+    END
+    IF mIRLowering__capture_state(&self).current_lambda_pointer_params.contains?(name) THEN
+      RETURN TRUE;
+    END
+    IF mIRLowering__capture_state(&self).current_bg_pointer_captures EXISTS AS bg_pointer_captures THEN
+      RETURN bg_pointer_captures.contains?(name);
+    END
+    RETURN FALSE;
 END
 PRIVATE FN mIRLowering__wants_ptr?(MUTABLE self: MIRLowering, a: Locatable, ti: ?Type, callee_param: ?Param, callee_param_type: Type, callee_sig: ?FunctionSignature, idx: Int64) RETURNS !Bool ->
     MUTABLE mutable_callee = (IF callee_param EXISTS AS mutable_check_param THEN (mutable_check_param.mutable OR_ELSE FALSE) ELSE FALSE END);
@@ -8166,13 +8202,13 @@ PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input:
     IF (((callee_param != NIL) AND (callee_param.mutable OR_ELSE FALSE)) AND symbolEntry__always_mutable_sync?(type__sync( UNWRAP (ti)))) THEN
       RETURN Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ FieldGet: COPY FieldGet{ object: COPY arg, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (((with_alias_pointer_shaped?(a) AND (callee_param != NIL)) AND !(callee_param.mutable)) AND !(type__needs_pointer_passing?(callee_param_type))) THEN
+    IF (((mIRLowering__with_alias_pointer_shaped?(&self, a) AND (callee_param != NIL)) AND !(callee_param.mutable)) AND !(type__needs_pointer_passing?(callee_param_type))) THEN
       RETURN Emittable{ Deref: COPY Deref{ expr: COPY arg, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     IF !(TRY (mIRLowering__wants_ptr?(&self, a, ti, callee_param, callee_param_type, callee_sig, idx))) THEN
       RETURN COPY arg;
     END
-    IF arg_already_pointer_shaped?(a) THEN
+    IF mIRLowering__arg_already_pointer_shaped?(&self, a) THEN
       RETURN COPY arg;
     END
     IF (((callee_param != NIL) AND (callee_param.mutable OR_ELSE FALSE)) AND (aST__root_identifier(a) == NIL)) THEN
@@ -8376,9 +8412,9 @@ PRIVATE FN mIRLowering__stdlib_call_facts(MUTABLE self: MIRLowering, MUTABLE nod
     sig = (sig OR_ELSE aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))));
     IF sig EXISTS AS sig_value THEN
       MUTABLE ast_args = IF node IS_A MethodCall THEN
-        ([UNWRAP (node__object(node))] + node__args(node))
+        ([UNWRAP (node__object(node))] + (node__args(node) OR_ELSE List[]))
       ELSE
-        node__args(node)
+        (node__args(node) OR_ELSE List[])
       END;
       IF (functionSignature__intrinsic_fixed_arg_list?(sig_value) AND ((TRY (functionSignature__params(sig_value))).length() != (ast_args).length())) THEN
         panic("stdlib call {}: signature has {} params for {} args");
@@ -9240,7 +9276,7 @@ PRIVATE FN mIRLowering__lower_safe_nav_method_call(MUTABLE self: MIRLowering, no
 END
 PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node: Node) RETURNS !Emittable ->
     IF ((IF node IS_A FuncCall AS func_call THEN (CAST(funcCall__name(func_call) AS String) == "symbol") ELSE FALSE END) AND ((node__args(node)).length() == 1)) THEN
-      MUTABLE literal = node__args(node).first();
+      MUTABLE literal = (node__args(node) OR_ELSE List[]).first();
       IF (IF literal IS_A Literal AS string_literal THEN (string_literal.type == :STRING) ELSE FALSE END) THEN
         RETURN Emittable{ SymbolLit: COPY SymbolLit{ value: CAST(UNWRAP (literal.value) AS String), lowered_node_id: NIL, ownership_consumption: NIL } };
       END
@@ -9369,7 +9405,7 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
       END
       MUTABLE receiver_mutates = ((node__mutates_receiver(node) OR_ELSE FALSE) OR TRY (functionSignature__mutates_receiver?(entry_value_mutable)));
       MUTABLE target_var: ?String = NIL;
-      MUTABLE first_arg = node__args(node).first();
+      MUTABLE first_arg = (node__args(node) OR_ELSE List[]).first();
       IF ((IF node IS_A MethodCall AS method_call THEN receiver_mutates ELSE FALSE END) AND TRUE) THEN
         target_var = TRY (mIRLowering__extract_root_var_name(&self, UNWRAP (node__object(node))));
       ELSE_IF (receiver_mutates AND ((first_arg != NIL) AND TRUE)) THEN
