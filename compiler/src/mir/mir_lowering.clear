@@ -4656,10 +4656,10 @@ FN mIRLowering__emit_expr(MUTABLE self: MIRLowering, node: Emittable) RETURNS !?
 END
 PRIVATE FN mIRLowering__try_catch_with_provenance(self: MIRLowering, left: Emittable, catch_body: Emittable, capture: ?String, fallback: ?MIRLoweringFallback = NIL) RETURNS !TryCatch ->
     MUTABLE stripped = TRY (mIRLowering__strip_try(self, left));
-    MUTABLE out = TryCatch{ expr: COPY TRY (stripped), catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-    IF emittable__result_type(TRY (stripped)) != NIL THEN
-      out.result_type = TRY (type__new( TypeConstructionInput{ Type: COPY UNWRAP (emittable__result_type(TRY (stripped))) }));
-    ELSE_IF ((fallback != NIL) AND mIRLoweringFallback__responds_to_full_type?(fallback)) THEN
+    MUTABLE out = TryCatch{ expr: COPY stripped, catch_body: COPY catch_body, capture: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+    IF emittable__result_type(stripped) EXISTS AS stripped_result_type THEN
+      out.result_type = TRY (type__new( TypeConstructionInput{ Type: COPY stripped_result_type }));
+    ELSE_IF ((fallback EXISTS) AND mIRLoweringFallback__responds_to_full_type?(fallback)) THEN
       out.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut( CAST(fallback AS Locatable))) }));
     END
     RETURN out;
@@ -6823,7 +6823,7 @@ PRIVATE FN mIRLowering__normalize_allocating_result_expr_mut(MUTABLE self: MIRLo
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, child_prefix);
     rtoc_idx = rtoc_idx + 1;
     END
-    TRY (mIRLowering__each_mir_expr_child(self, expr, %(child: Emittable) USE(expr, MUTABLE prefix, result_children, MUTABLE self) -> {
+    TRY (mIRLowering__each_mir_expr_child(self, expr, %(child: Emittable) USE(MUTABLE expr, MUTABLE prefix, result_children, MUTABLE self) -> {
     IF result_children |> ANY mir__same_node?(_, child) THEN
         RETURN;
     END
@@ -6880,7 +6880,7 @@ PRIVATE FN mIRLowering__normalize_allocating_used_expr(MUTABLE self: MIRLowering
       RETURN CAST(Tuple{prefix, COPY ident} AS Tuple<[]Emittable, Emittable>);
     END
     mIRLowering__ensure_expr_child_ids_mut(&self, &expr);
-    TRY (mIRLowering__each_mir_expr_child(self, expr, %(child: Emittable) USE(expr, MUTABLE prefix, MUTABLE self) -> {
+    TRY (mIRLowering__each_mir_expr_child(self, expr, %(child: Emittable) USE(MUTABLE expr, MUTABLE prefix, MUTABLE self) -> {
     MUTABLE nested_expr = COPY child;
     MUTABLE nested_old = COPY child;
     MUTABLE child_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &nested_expr, mIRLowering__consumes_owned_children?(self, expr)));
@@ -7075,7 +7075,7 @@ PRIVATE FN mIRLowering__hoist_cleanup_entry(MUTABLE self: MIRLowering, mir: Emit
       IF cap_wrap.sync_fn THEN
         RETURN mIRLowering__uniform_cleanup_entry(self, UNWRAP (cap_wrap.sync_type), alloc);
       ELSE_IF cap_wrap.own_fn THEN
-        RETURN TRY (mIRLowering__rc_cleanup_entry(&self, ast_node, "MIR::CapWrap (own_fn=${cap_wrap.own_fn})", Emittable{ CapWrap: COPY cap_wrap }));
+        RETURN TRY (mIRLowering__rc_cleanup_entry(&self, ast_node, "MIR::CapWrap (own_fn=${(cap_wrap.own_fn OR_ELSE "")})", Emittable{ CapWrap: COPY cap_wrap }));
       ELSE_IF (cap_wrap.strategy == :local) THEN
         RETURN mIRLowering__uniform_cleanup_entry(self, "*${cap_wrap.zig_base}", alloc);
       END
