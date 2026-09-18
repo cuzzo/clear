@@ -7688,15 +7688,12 @@ PRIVATE FN mIRLowering__function_param_zig_type(MUTABLE self: MIRLowering, param
     ELSE
       NIL
     END) THEN
-      MUTABLE payload = IF type__optional?(type_info) THEN
-        (((IF TRY (type__wrapped_type(type_info)) != NIL THEN
-        type__resolved((TRY (type__wrapped_type(type_info))))
-      ELSE
-        NIL
-      END) OR_ELSE type_sym))
-      ELSE
-        type_sym
-      END;
+      MUTABLE payload = type_sym;
+      IF type__optional?(type_info) THEN
+        IF TRY (type__wrapped_type(type_info)) EXISTS AS wrapped_payload THEN
+          payload = type__resolved(wrapped_payload);
+        END
+      END
       MUTABLE handle = "CheatLib.Rc(${payload})";
       IF type__optional?(type_info) THEN
         RETURN COPY "?${handle}";
@@ -17896,9 +17893,9 @@ PRIVATE FN mIRLowering__returned_no_cleanup_binding?(MUTABLE self: MIRLowering, 
     MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(&self))))[name];
     RETURN !(!(((((entry != NIL) AND cleanupEntry__present?(entry)) AND !(cleanupEntry__needs_cleanup?(entry))))));
 END
-PRIVATE FN mIRLowering__collect_fn_returned_names(MUTABLE self: MIRLowering, body: []Node) RETURNS ![Set]String ->
+PRIVATE FN mIRLowering__collect_fn_returned_names(MUTABLE self: MIRLowering, body: []Locatable) RETURNS ![Set]String ->
     MUTABLE names: [Set]String = Set[];
-    aST__walk_body(body |> SELECT castNodeToLocatable__mir_lowering(_), %(node: Locatable) USE(MUTABLE names, MUTABLE self) -> {
+    aST__walk_body(body, %(node: Locatable) USE(MUTABLE names, MUTABLE self) -> {
     IF node IS_A ReturnNode AS return_node THEN
         TRY (mIRLowering__collect_returned_binding_names(&self, return_node.value, &names));
     END
