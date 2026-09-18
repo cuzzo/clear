@@ -7601,7 +7601,7 @@ PRIVATE FN mIRLowering__function_lowering_context(MUTABLE self: MIRLowering, MUT
       TRY (type__zig_type(return_payload))
     ELSE
       final_type
-    END, return_type: COPY return_type_info, heap_carry_return: (TRUE AND (node.heap_carry_return == TRUE)), has_catch: has_catch, source_start_line: node.source_range.start_line };
+    END, return_type: COPY return_type_info, heap_carry_return: (TRUE AND (node.heap_carry_return == TRUE)), has_catch: has_catch, source_start_line: (node.source_range?.start_line OR_ELSE 0) };
 END
 PRIVATE FN mIRLowering__activate_function_context(MUTABLE self: MIRLowering, context: FunctionLoweringContext) RETURNS Void ->
     MUTABLE rtoc_mutable_receiver_292 = mIRLowering__function_state(&self);
@@ -7763,7 +7763,7 @@ PRIVATE FN mIRLowering__runtime_frame_prologue(MUTABLE self: MIRLowering, node: 
     MUTABLE returns_string = TRY (type__string?(bare_ret));
     MUTABLE heap_carry_return = !(!(((TRUE AND (node.heap_carry_return OR_ELSE FALSE)))));
     MUTABLE has_frame_bindings =   IF node.cleanup_bindings THEN
-      node.cleanup_bindings |> ANY type__frame?(_._1)
+      (node.cleanup_bindings OR_ELSE {}) |> ANY type__frame?(_._1)
     ELSE
       node.uses_frame
     END;
@@ -7839,11 +7839,9 @@ PRIVATE FN mIRLowering__kept_store_liveness(MUTABLE self: MIRLowering) RETURNS ?
     IF !(fn EXISTS) THEN
       RETURN NIL;
     END
-    MUTABLE fn_body: ?[]Locatable = locatable__body( Locatable{ FunctionDef: COPY fn });
-    IF !(fn_body EXISTS) THEN
-      RETURN NIL;
+    IF locatable__body( Locatable{ FunctionDef: COPY fn }) EXISTS AS fn_body THEN
+      self.kept_liveness = (self.kept_liveness OR_ELSE keptEdgeLiveness__new(fn_body));
     END
-    self.kept_liveness = (self.kept_liveness OR_ELSE keptEdgeLiveness__new(UNWRAP (fn_body)));
     RETURN self.kept_liveness;
 END
 PRIVATE FN mIRLowering__takes_param_ownership_mir(MUTABLE self: MIRLowering, node: FunctionDef) RETURNS ![]Emittable ->
@@ -7949,7 +7947,7 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
     MUTABLE inner_sig = TRY (functionSignature__from_function_def(node));
     MUTABLE inner_contract = callableContract__new(inner_sig, TRY (ownershipContract__new(List[], List[], List[], TRUE)), node.params.length());
     MUTABLE inner_call_mir = Call{ callee: COPY inner_name, args: COPY arg_idents, try_wrap: is_error_union, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FunctionDef: COPY node })), callable_contract: COPY inner_contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
-    inner_call_mir.result_type = TRY (type__new((payload_type OR_ELSE :Void)));
+    inner_call_mir.result_type = TRY (type__new((IF payload_type EXISTS AS inner_payload THEN TypeConstructionInput{ Type: COPY inner_payload } ELSE TypeConstructionInput{ SymbolValue: :Void } END)));
     MUTABLE check_stmts = (((node.post_clauses OR_ELSE List[]))) |> SELECT {
     MUTABLE expr = _[:expr];
     MUTABLE source = _[:source];
@@ -7979,15 +7977,10 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
 END
 PRIVATE FN mIRLowering__build_catch_clauses(MUTABLE self: MIRLowering, MUTABLE node: FunctionDef, fn_can_fail: Bool) RETURNS !CatchLoweringPlan ->
     MUTABLE clauses: []MIRCatchClause = List[];
-    MUTABLE snap_types: [Set]Any = Set[];
-    IF TRUE THEN
-      snap_types = ((node.snapshot_types OR_ELSE Set[]));
-    ELSE
-      snap_types = Set[];
-    END
+    MUTABLE snap_types: [Set]String = (node.snapshot_types OR_ELSE Set[]);
     MUTABLE snapshot_type_branch_value: ?Type = NIL;
     IF (snap_types.length() == 1) THEN
-      snapshot_type_branch_value = TRY (type__new(snap_types.first()));
+      snapshot_type_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(UNWRAP (snap_types.first())) }));
     ELSE
       snapshot_type_branch_value = NIL;
     END
