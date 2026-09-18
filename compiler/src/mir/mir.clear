@@ -14541,6 +14541,13 @@ END
 # carriers declare the field as FunctionSignature, so there is nothing to
 # coerce.
 # End Ruby module MIR
+PUB FN mirCapture__to_s(value: MirCapture) RETURNS String ->
+  PARTIAL MATCH value START
+    MirCapture.StringValue AS item -> RETURN COPY item;,
+    MirCapture.SymbolValue AS item -> RETURN CAST(item AS String);
+  END
+  RETURN "";
+END
 FN castCaptureToNamedMirFieldValue(value: MirCapture) RETURNS NamedMirFieldValue ->
   PARTIAL MATCH value START
     MirCapture.StringValue AS cast_payload -> RETURN NamedMirFieldValue{ StringValue: COPY cast_payload };,

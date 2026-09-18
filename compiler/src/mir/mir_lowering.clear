@@ -6524,12 +6524,13 @@ PRIVATE FN mIRLowering__normalize_allocating_mir_stmt_mut(MUTABLE self: MIRLower
       MUTABLE if_bind_stmt_mutable = COPY if_bind_stmt;
       MUTABLE rtoc_idx = 0;
       WHILE rtoc_idx < if_bind_stmt_mutable.bindings.length() DO
-      MUTABLE expr = if_bind_stmt_mutable.bindings[rtoc_idx][:expr];
-      MUTABLE capture = COPY CAST(if_bind_stmt_mutable.bindings[rtoc_idx][:capture] AS String);
-      MUTABLE capture_cleanup: ?ResourceClose = if_bind_stmt_mutable.then_body |> FIND (_ IS_A Cleanup AND (CAST(emittable__name(_) AS String) == capture));
+      MUTABLE binding = UNWRAP (if_bind_stmt_mutable.bindings[rtoc_idx]);
+      MUTABLE expr = COPY binding.expr;
+      MUTABLE capture = mirCapture__to_s(binding.capture);
+      MUTABLE capture_cleanup: ?Emittable = if_bind_stmt_mutable.then_body |> FIND ((_ IS_A Cleanup) AND (CAST(emittable__name(_) AS String) == capture));
       MUTABLE expr_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &expr, ((capture_cleanup != NIL) AND (capture_cleanup IS_A Cleanup))));
-      MUTABLE rtoc_index_receiver_265:? = if_bind_stmt_mutable.bindings[rtoc_idx];
-      rtoc_index_receiver_265[:expr] = COPY normalized;
+      binding.expr = COPY normalized;
+      if_bind_stmt_mutable.bindings[rtoc_idx] = COPY binding;
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, expr_prefix);
       IF !(normalized IS_A Ident) THEN
             rtoc_idx = rtoc_idx + 1;
@@ -6539,17 +6540,16 @@ PRIVATE FN mIRLowering__normalize_allocating_mir_stmt_mut(MUTABLE self: MIRLower
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF mIRLowering__if_bind_transfer_present?(&self, if_bind_stmt_mutable, CAST(normalized.name() AS String)) THEN
+      IF mIRLowering__if_bind_transfer_present?(&self, if_bind_stmt_mutable, CAST(emittable__name(normalized) AS String)) THEN
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE target_alloc = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_266 = TRY (ownedCompositeMaterialization__cleanup_entry(capture_cleanup));
-      cleanupEntry__alloc(rtoc_local_receiver_266) };
-      MUTABLE then_marks = TRY (mIR__ownership_transfer_marks(CAST(normalized.name() AS String), :owned_sink, target_alloc, TRUE));
+      MUTABLE target_alloc = cleanupEntry__alloc(UNWRAP (emittable__cleanup_entry(UNWRAP (capture_cleanup))));
+      MUTABLE then_marks = TRY (mIR__ownership_transfer_marks(CAST(emittable__name(normalized) AS String), :owned_sink, target_alloc, TRUE));
       if_bind_stmt_mutable.then_body = (then_marks + if_bind_stmt_mutable.then_body);
       if_bind_stmt_mutable.else_body = (if_bind_stmt_mutable.else_body OR_ELSE List[]);
-      MUTABLE else_marks = TRY (mIR__ownership_transfer_marks(CAST(normalized.name() AS String), :owned_sink, target_alloc, TRUE));
-      if_bind_stmt_mutable.else_body = (else_marks + if_bind_stmt_mutable.else_body);
+      MUTABLE else_marks = TRY (mIR__ownership_transfer_marks(CAST(emittable__name(normalized) AS String), :owned_sink, target_alloc, TRUE));
+      if_bind_stmt_mutable.else_body = (else_marks + UNWRAP (if_bind_stmt_mutable.else_body));
     rtoc_idx = rtoc_idx + 1;
       END
     ELSE_IF stmt IS_A WhileStmt AS while_stmt THEN
@@ -6567,29 +6567,34 @@ PRIVATE FN mIRLowering__normalize_allocating_mir_stmt_mut(MUTABLE self: MIRLower
     ELSE_IF stmt IS_A UnionMatchStmt AS union_match_stmt THEN
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, TRY (mIRLowering__normalize_used_expr_attr_mut(&self, Emittable{ UnionMatchStmt: COPY union_match_stmt }, :subject)));
     ELSE_IF stmt IS_A IfChain AS if_chain THEN
-      IF if_chain.branches != NIL THEN
-            FOR _ IN if_chain.branches DO
-          MUTABLE cond = _.cond;
-          MUTABLE cond_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &cond));
-          _.cond = COPY normalized;
-          prefix = ruby_array_concat_Emittable__mir_lowering(prefix, cond_prefix);
-            END
+      MUTABLE if_chain_mutable = COPY if_chain;
+      MUTABLE rtoc_branch_idx = 0;
+      WHILE rtoc_branch_idx < if_chain_mutable.branches.length() DO
+        MUTABLE branch = UNWRAP (if_chain_mutable.branches[rtoc_branch_idx]);
+        MUTABLE cond = COPY branch.cond;
+        MUTABLE cond_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &cond));
+        branch.cond = COPY normalized;
+        if_chain_mutable.branches[rtoc_branch_idx] = COPY branch;
+        prefix = ruby_array_concat_Emittable__mir_lowering(prefix, cond_prefix);
+        rtoc_branch_idx = rtoc_branch_idx + 1;
       END
     ELSE_IF stmt IS_A MIRDeferStmt AS mir_defer_stmt THEN
       MUTABLE mir_defer_stmt_mutable = COPY mir_defer_stmt;
       MUTABLE defer_body = deferStmt__body(mir_defer_stmt_mutable);
       IF defer_body IS_A []Emittable AS array THEN
         mir_defer_stmt_mutable.body = DeferBody{ ArrayValue: COPY TRY (mIRLowering__normalize_allocating_mir_body(&self, array)) };
-      ELSE
-        prefix = ruby_array_concat_Emittable__mir_lowering(prefix, mIRLowering__normalize_allocating_mir_stmt_mut(&self, &defer_body));
+      ELSE_IF defer_body IS_A Emittable AS defer_stmt_value THEN
+        MUTABLE defer_stmt_mutable = COPY defer_stmt_value;
+        prefix = ruby_array_concat_Emittable__mir_lowering(prefix, mIRLowering__normalize_allocating_mir_stmt_mut(&self, &defer_stmt_mutable));
       END
     ELSE_IF stmt IS_A ErrDeferStmt AS err_defer_stmt THEN
       MUTABLE err_defer_stmt_mutable = COPY err_defer_stmt;
       MUTABLE defer_body = errDeferStmt__body(err_defer_stmt_mutable);
       IF defer_body IS_A []Emittable AS array THEN
         err_defer_stmt_mutable.body = DeferBody{ ArrayValue: COPY TRY (mIRLowering__normalize_allocating_mir_body(&self, array)) };
-      ELSE
-        prefix = ruby_array_concat_Emittable__mir_lowering(prefix, mIRLowering__normalize_allocating_mir_stmt_mut(&self, &defer_body));
+      ELSE_IF defer_body IS_A Emittable AS defer_stmt_value THEN
+        MUTABLE defer_stmt_mutable = COPY defer_stmt_value;
+        prefix = ruby_array_concat_Emittable__mir_lowering(prefix, mIRLowering__normalize_allocating_mir_stmt_mut(&self, &defer_stmt_mutable));
       END
     ELSE_IF stmt IS_A BatchWindowPush AS batch_window_push THEN
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, TRY (mIRLowering__normalize_used_expr_attr_mut(&self, Emittable{ BatchWindowPush: COPY batch_window_push }, :item_expr)));
