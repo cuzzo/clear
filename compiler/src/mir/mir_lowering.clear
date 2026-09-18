@@ -10605,7 +10605,11 @@ PRIVATE FN mIRLowering__zig_string_lit(self: MIRLowering, text: String) RETURNS 
     ELSE_IF (b == 9) THEN
         &out.append("\\t");
     ELSE_IF ((((b >= 0) AND (b <= 31)) OR (b == 127))) THEN
-        &out.append(format(symbol("\\x%02x"), b));
+        # Ruby's `format('\\x%02x', b)`. CLEAR has no printf, and the escape
+        # is always exactly two lowercase hex digits for a byte.
+        &out.append("\\x");
+        &out.append("0123456789abcdef".substr((b / 16), 1));
+        &out.append("0123456789abcdef".substr((b - ((b / 16) * 16)), 1));
     ELSE
         &out.append(codepointToString(b));
     END
