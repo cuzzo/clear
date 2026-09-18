@@ -6787,25 +6787,29 @@ PRIVATE FN mIRLowering__normalize_allocating_result_expr_mut(MUTABLE self: MIRLo
     MUTABLE owned_sources: [Set]Emittable = (TRY (emittable__owned_position_source_exprs(expr)) OR_ELSE List[]) |> DISTINCT _;
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < result_children.length() DO
-      IF (((owned_position OR expr IS_A TryExpr)) AND owned_sources.contains?(result_children[rtoc_idx])) THEN
-          prefix = ruby_array_concat_Emittable__mir_lowering(prefix, mIRLowering__normalize_allocating_result_expr_mut(&self, result_children[rtoc_idx], transfer_on_success, TRUE));
+      # Every callee below takes its expression MUTABLE, so the element has to
+      # be a named local; an index read is a borrow of the list.
+      MUTABLE result_child = UNWRAP (result_children[rtoc_idx]);
+      MUTABLE result_child_old = UNWRAP (result_children[rtoc_idx]);
+      IF (((owned_position OR expr IS_A TryExpr)) AND owned_sources.contains?(result_child)) THEN
+          prefix = ruby_array_concat_Emittable__mir_lowering(prefix, TRY (mIRLowering__normalize_allocating_result_expr_mut(&self, &result_child, transfer_on_success, TRUE)));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF TRY (mIRLowering__mir_produces_owned_result?(&self, result_children[rtoc_idx])) THEN
-          MUTABLE owned_prefix, owned_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, result_children[rtoc_idx], mIRLowering__consumes_owned_children?(self, expr)));
-          TRY (mIRLowering__replace_mir_expr_child_mut(&self, &expr, result_children[rtoc_idx], &owned_normalized));
+      IF TRY (mIRLowering__mir_produces_owned_result?(&self, result_child)) THEN
+          MUTABLE owned_prefix, owned_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &result_child, mIRLowering__consumes_owned_children?(self, expr)));
+          TRY (mIRLowering__replace_mir_expr_child_mut(&self, &expr, &result_child_old, &owned_normalized));
           prefix = ruby_array_concat_Emittable__mir_lowering(prefix, owned_prefix);
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF TRY (mIRLowering__mir_allocates?(&self, result_children[rtoc_idx])) THEN
-          prefix = ruby_array_concat_Emittable__mir_lowering(prefix, mIRLowering__normalize_allocating_result_expr_mut(&self, result_children[rtoc_idx], transfer_on_success));
+      IF TRY (mIRLowering__mir_allocates?(&self, result_child)) THEN
+          prefix = ruby_array_concat_Emittable__mir_lowering(prefix, TRY (mIRLowering__normalize_allocating_result_expr_mut(&self, &result_child, transfer_on_success)));
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE child_prefix, child_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, result_children[rtoc_idx], mIRLowering__consumes_owned_children?(self, expr)));
-      TRY (mIRLowering__replace_mir_expr_child_mut(&self, &expr, result_children[rtoc_idx], &child_normalized));
+      MUTABLE child_prefix, child_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &result_child, mIRLowering__consumes_owned_children?(self, expr)));
+      TRY (mIRLowering__replace_mir_expr_child_mut(&self, &expr, &result_child_old, &child_normalized));
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, child_prefix);
     rtoc_idx = rtoc_idx + 1;
     END
@@ -6866,8 +6870,10 @@ PRIVATE FN mIRLowering__normalize_allocating_used_expr(MUTABLE self: MIRLowering
       RETURN CAST(Tuple{prefix, COPY ident} AS Tuple<[]Emittable, Emittable>);
     END
     TRY (mIRLowering__each_mir_expr_child(self, expr, %(child: Emittable) USE(expr, MUTABLE prefix, MUTABLE self) -> {
-    MUTABLE child_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &child, mIRLowering__consumes_owned_children?(self, expr)));
-    TRY (mIRLowering__replace_mir_expr_child_mut(&self, &expr, &child, &normalized));
+    MUTABLE nested_expr = COPY child;
+    MUTABLE nested_old = COPY child;
+    MUTABLE child_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &nested_expr, mIRLowering__consumes_owned_children?(self, expr)));
+    TRY (mIRLowering__replace_mir_expr_child_mut(&self, &expr, &nested_old, &normalized));
     prefix = ruby_array_concat_Emittable__mir_lowering(prefix, child_prefix);
     rubyToClearVoid__mir_lowering()
     }));
