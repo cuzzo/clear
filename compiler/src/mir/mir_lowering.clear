@@ -8343,7 +8343,7 @@ PRIVATE FN mIRLowering__stdlib_call_facts(MUTABLE self: MIRLowering, MUTABLE nod
     END
     IF sig EXISTS AS sig_value THEN
       MUTABLE ast_args = IF node IS_A MethodCall THEN
-        ([node.object] + node__args(node))
+        ([UNWRAP (node__object(node))] + node__args(node))
       ELSE
         node__args(node)
       END;
@@ -8485,8 +8485,8 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
           payload_ft_branch_value = COPY facts.callee_param_type;
         END
         MUTABLE payload_ft: Type = payload_ft_branch_value?;
-        MUTABLE source = IF inner IS_A CopyNode THEN
-          inner.value()
+        MUTABLE source = IF inner IS_A CopyNode AS inner_copy THEN
+          COPY inner_copy.value
         ELSE
           inner
         END;
@@ -8545,7 +8545,7 @@ PRIVATE FN mIRLowering__lower_call_arg_from_facts(MUTABLE self: MIRLowering, fac
         inner = UNWRAP (castLocatableToMoveNode(facts.ast_arg).value);
       END
       IF inner IS_A Identifier THEN
-        (&self.kept_edge_temp_stack.last()?.moved_sources).push(mIRLowering__zig_safe_name(self, inner.name()));
+        (&self.kept_edge_temp_stack.last()?.moved_sources).push(mIRLowering__zig_safe_name(self, CAST(aST__node_name(inner) AS String)));
       END
     END
     IF kept_edge EXISTS AS kept_edge_value THEN
@@ -9212,15 +9212,15 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
         RETURN Emittable{ SymbolLit: COPY SymbolLit{ value: CAST(literal.value() AS String), lowered_node_id: NIL, ownership_consumption: NIL } };
       END
     END
-    IF node.zig_pattern IS_A String@symbol THEN
-      IF (node.zig_pattern == :macro_print) THEN
+    IF node__zig_pattern(node) EXISTS THEN
+      IF (node__zig_pattern(node) == :macro_print) THEN
         IF node IS_A FuncCall AS func_call THEN
           MUTABLE func_call_mutable = COPY func_call;
           RETURN Emittable{ Call: COPY TRY (mIRLowering__lower_macro_print(&self, func_call_mutable)) };
         ELSE
           panic("macro_print intrinsic must be a function call");
         END
-      ELSE_IF (node.zig_pattern == :macro_map) THEN
+      ELSE_IF (node__zig_pattern(node) == :macro_map) THEN
         panic("BUG: macro_map should have been rewritten by PipelineRewriter");
       ELSE
         panic("MIRLowering: unhandled symbol intrinsic: {}");
@@ -9334,11 +9334,11 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
         END
         ownership_contract = TRY (ownershipContract__consume_operands(operands));
       END
-      MUTABLE receiver_mutates = (node.mutates_receiver OR TRY (functionSignature__mutates_receiver?(entry_value_mutable)));
+      MUTABLE receiver_mutates = ((node__mutates_receiver(node) OR_ELSE FALSE) OR TRY (functionSignature__mutates_receiver?(entry_value_mutable)));
       MUTABLE target_var: ?String = NIL;
       MUTABLE first_arg = node__args(node).first();
       IF ((IF node IS_A MethodCall AS method_call THEN receiver_mutates ELSE FALSE END) AND TRUE) THEN
-        target_var = TRY (mIRLowering__extract_root_var_name(&self, node.object));
+        target_var = TRY (mIRLowering__extract_root_var_name(&self, UNWRAP (node__object(node))));
       ELSE_IF (receiver_mutates AND ((first_arg != NIL) AND TRUE)) THEN
         target_var = TRY (mIRLowering__extract_root_var_name(&self, &first_arg));
       END
@@ -15175,7 +15175,7 @@ PRIVATE FN mIRLowering__var_decl_facts(MUTABLE self: MIRLowering, MUTABLE node: 
     MUTABLE decl_name = COPY CAST(node.name AS String);
     MUTABLE binding_entry:? = node_entry;
     MUTABLE transport_plan: ?PassStateValue = COPY node.ownership_transport_plan;
-    MUTABLE inferred_borrow = (transport_plan IS_A OwnershipTransportPlan AND (transport_plan.action == :borrow));
+    MUTABLE inferred_borrow = (IF transport_plan IS_A OwnershipTransportPlan AS inferred_transport THEN (inferred_transport.action == :borrow) ELSE FALSE END);
     IF inferred_borrow THEN
       binding_entry = mIRLowering__new();
     END
@@ -15273,7 +15273,7 @@ PRIVATE FN mIRLowering__owned_binding_source_alloc(MUTABLE self: MIRLowering, va
     IF !(TRY (mIRLowering__ownership_tracked_transfer_type?(&self, UNWRAP (ti)))) THEN
       RETURN NIL;
     END
-    MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(node.name() AS String)];
+    MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(aST__node_name(node) AS String)];
     IF !((IF entry != NIL THEN
       cleanupEntry__needs_cleanup?(entry)
     ELSE
@@ -15285,7 +15285,7 @@ PRIVATE FN mIRLowering__owned_binding_source_alloc(MUTABLE self: MIRLowering, va
 END
 PRIVATE FN mIRLowering__var_decl_source_transfer_required?(MUTABLE self: MIRLowering, MUTABLE node: VarDecl, facts: VarDeclFacts, init_effect: OwnershipEffect) RETURNS !Bool ->
     MUTABLE plan: ?PassStateValue = node.ownership_transport_plan;
-    IF (UNWRAP (plan) IS_A OwnershipTransportPlan AND (plan.action != :move)) THEN
+    IF (IF UNWRAP (plan) IS_A OwnershipTransportPlan AS transport THEN (transport.action != :move) ELSE FALSE END) THEN
       RETURN FALSE;
     END
     IF mIRLowering__var_decl_source_borrowed?(self, node) THEN
@@ -15827,7 +15827,7 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
         RETURN NodeRoot{ Emittable: COPY CAST(TRY (mIRLowering__lower_atomic_assignment(&self, node)) AS Emittable) };
       END
       MUTABLE target_name = TRY (mIRLowering__assignment_storage_name(&self, CAST(node.name AS String), TRUE));
-      MUTABLE rp: ?PassStateValue = COPY node.reassign_cleanup;
+      MUTABLE rp: ?ReassignPlan = COPY node.reassign_cleanup;
       MUTABLE binding_entry = ((IF mIRLowering__cleanup_entry_for_ast_binding(self, Locatable{ BindExpr: COPY node }) != NIL THEN mIRLowering__cleanup_entry_for_ast_binding(self, Locatable{ BindExpr: COPY node }) ELSE (TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(node.name AS String)] END) OR_ELSE cleanupEntry__none());
       MUTABLE heap_return_var = mIRLowering__current_function_heap_carry_return_var?(&self, CAST(node.name AS String));
       MUTABLE module_global = mIRLowering__program_state(self).module_global_names.contains?(CAST(node.name AS String));
@@ -15835,7 +15835,7 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
         :heap
       ELSE
         (IF rp THEN
-        mIRLowering__alloc_from_sym(self, &rp.alloc_mut())
+        mIRLowering__alloc_from_sym(self, UNWRAP (UNWRAP (rp).alloc))
       ELSE
         (IF cleanupEntry__present?(binding_entry) THEN
         cleanupEntry__alloc(binding_entry)
@@ -15880,7 +15880,7 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
       END)) THEN
         panic("reassignment cleanup lacks annotation lifecycle plan for {}");
       END
-    ReassignWithCleanup{ name: COPY target_name, value: COPY value, zig_type: &rp.zig_type_mut(), alloc: mIRLowering__alloc_from_sym(self, &rp.alloc_mut()), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
+    ReassignWithCleanup{ name: COPY target_name, value: COPY value, zig_type: UNWRAP (UNWRAP (rp).zig_type), alloc: mIRLowering__alloc_from_sym(self, UNWRAP (UNWRAP (rp).alloc)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
       }
       ELSE_IF (heap_return_var AND lifecyclePlan__needs_drop?((TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), TRY (aST__full_type_mut(Locatable{ BindExpr: COPY node }))))))) THEN
         {
@@ -17526,8 +17526,10 @@ PRIVATE FN mIRLowering__lower_return(MUTABLE self: MIRLowering, MUTABLE node: Re
     IF ((value != NIL) AND hoist__noreturn_value?(node.value)) THEN
       RETURN NodeRoot{ Emittable: COPY value };
     END
-    IF (IF value? IS_A Call AS call THEN mIRLowering__tail_call_return?(&self, Emittable{ Call: COPY call }) ELSE FALSE END) THEN
-      RETURN NodeRoot{ Emittable: COPY CAST(ReturnStmt{ value: Emittable{ TailCall: COPY TailCall{ callee: COPY value?.callee, args: COPY value.args(), callable_contract: COPY value.callable_contract(), lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
+    IF (UNWRAP (value)) IS_A Call AS tail_call_value THEN
+    IF mIRLowering__tail_call_return?(&self, Emittable{ Call: COPY tail_call_value }) THEN
+      RETURN NodeRoot{ Emittable: COPY CAST(ReturnStmt{ value: Emittable{ TailCall: COPY TailCall{ callee: COPY tail_call_value.callee, args: COPY tail_call_value.args, callable_contract: COPY tail_call_value.callable_contract, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
+    END
     END
     IF (((node.value EXISTS) AND TRY (mIRLowering__rc_retain_needed?(&self, node.value))) AND !(TRY (mIRLowering__return_transfers_heap_binding?(&self, node.value)))) THEN
       MUTABLE retained = TRY (mIRLowering__hoist_alloc(&self, Emittable{ RcRetain: COPY TRY (mIRLowering__make_rc_retain(&self, node.value)) }, node.value, TRUE));
