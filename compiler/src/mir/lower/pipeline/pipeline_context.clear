@@ -598,7 +598,27 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_if_bind(MUTABLE self: Pipelin
     MUTABLE new_then = node.then_branch |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&self, _));
     MUTABLE new_else = node.else_branch |> SELECT TRY (pipelinePlaceholderRewriter__substitute(&self, _));
     MUTABLE new_if_bind = IfBind{ token: COPY node.token, bindings: COPY new_bindings, then_branch: COPY new_then, else_branch: COPY new_else, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-    pipelinePlaceholderRewriter__copy_type_info(self, PipelineRewriteNode{ IfBind: COPY node }, PipelineRewriteNode{ IfBind: COPY new_if_bind });
+    # `AST.copy_pipeline_rewrite_metadata!`, inlined. PipelineRewriteNode is the
+    # union of the node types Ruby's helper accepts, and IfBind and
+    # DestructuringAssignment are not among them -- extending it would mean an
+    # arm in every exhaustive MATCH over it. The fields are the ones the helper
+    # copies, in its order.
+    new_if_bind.type_object = COPY node.type_object;
+    new_if_bind.coerced_type_object = COPY node.coerced_type_object;
+    new_if_bind.storage_override = COPY node.storage_override;
+    IF node.var_used EXISTS THEN
+      new_if_bind.var_used = node.var_used;
+    END
+    IF node.was_moved EXISTS THEN
+      new_if_bind.was_moved = node.was_moved;
+    END
+    IF node.slot_size EXISTS THEN
+      new_if_bind.slot_size = node.slot_size;
+    END
+    IF node.container_borrow EXISTS THEN
+      new_if_bind.container_borrow = node.container_borrow;
+    END
+    new_if_bind.tense_plan = COPY node.tense_plan;
     RETURN Locatable{ IfBind: COPY new_if_bind };
 END
 # `k, v = _` inside a pipeline block. Without a case here the dispatch falls
@@ -608,7 +628,27 @@ PRIVATE FN pipelinePlaceholderRewriter__substitute_destructuring_assignment(MUTA
   EFFECTS REENTRANT ->
     MUTABLE new_value = TRY (pipelinePlaceholderRewriter__substitute(&self, node.value));
     MUTABLE new_node = DestructuringAssignment{ token: COPY node.token, targets: COPY node.targets, value: COPY new_value, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
-    pipelinePlaceholderRewriter__copy_type_info(self, PipelineRewriteNode{ DestructuringAssignment: COPY node }, PipelineRewriteNode{ DestructuringAssignment: COPY new_node });
+    # `AST.copy_pipeline_rewrite_metadata!`, inlined. PipelineRewriteNode is the
+    # union of the node types Ruby's helper accepts, and IfBind and
+    # DestructuringAssignment are not among them -- extending it would mean an
+    # arm in every exhaustive MATCH over it. The fields are the ones the helper
+    # copies, in its order.
+    new_node.type_object = COPY node.type_object;
+    new_node.coerced_type_object = COPY node.coerced_type_object;
+    new_node.storage_override = COPY node.storage_override;
+    IF node.var_used EXISTS THEN
+      new_node.var_used = node.var_used;
+    END
+    IF node.was_moved EXISTS THEN
+      new_node.was_moved = node.was_moved;
+    END
+    IF node.slot_size EXISTS THEN
+      new_node.slot_size = node.slot_size;
+    END
+    IF node.container_borrow EXISTS THEN
+      new_node.container_borrow = node.container_borrow;
+    END
+    new_node.tense_plan = COPY node.tense_plan;
     RETURN Locatable{ DestructuringAssignment: COPY new_node };
 END
 PRIVATE FN pipelinePlaceholderRewriter__copy_type_info(self: PipelinePlaceholderRewriter, src: PipelineRewriteNode, MUTABLE dst: PipelineRewriteNode) RETURNS Void ->
@@ -781,8 +821,6 @@ END
 FN castNodeToPipelineRewriteNode(value: Node) RETURNS PipelineRewriteNode ->
   PARTIAL MATCH value START
     Node.Assignment AS cast_payload -> RETURN PipelineRewriteNode{ Assignment: COPY cast_payload };,
-    Node.IfBind AS cast_payload -> RETURN PipelineRewriteNode{ IfBind: COPY cast_payload };,
-    Node.DestructuringAssignment AS cast_payload -> RETURN PipelineRewriteNode{ DestructuringAssignment: COPY cast_payload };,
     Node.BindExpr AS cast_payload -> RETURN PipelineRewriteNode{ BindExpr: COPY cast_payload };,
     Node.BinaryOp AS cast_payload -> RETURN PipelineRewriteNode{ BinaryOp: COPY cast_payload };,
     Node.Identifier AS cast_payload -> RETURN PipelineRewriteNode{ Identifier: COPY cast_payload };,
@@ -810,8 +848,6 @@ FN castOptionalPipelineRewriteNodeToLocatable(value: ?PipelineRewriteNode) RETUR
   END
   PARTIAL MATCH value START
     PipelineRewriteNode.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
-    PipelineRewriteNode.IfBind AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
-    PipelineRewriteNode.DestructuringAssignment AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     PipelineRewriteNode.FuncCall AS cast_payload -> RETURN Locatable{ FuncCall: COPY cast_payload };,
     PipelineRewriteNode.BinaryOp AS cast_payload -> RETURN Locatable{ BinaryOp: COPY cast_payload };,
     PipelineRewriteNode.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
