@@ -6341,8 +6341,11 @@ PRIVATE FN mIRLowering__mir_alloc_mark_type_info(MUTABLE self: MIRLowering, mir:
     ELSE_IF mir IS_A Pipeline AS pipeline THEN
       IF pipeline.ast_node THEN
         RETURN TRY (type__from_node_mut(pipeline.ast_node, context));
-      ELSE_IF (pipeline.inner AND TRY (mIRLowering__mir_allocates?(&self, pipeline.inner))) THEN
-        RETURN CAST(mIRLowering__mir_alloc_mark_type_info(&self, pipeline.inner, NIL, context) AS Type);
+      ELSE_IF (pipeline.inner EXISTS AS pipeline_inner) THEN
+        IF TRY (mIRLowering__mir_allocates?(&self, pipeline_inner)) THEN
+          RETURN CAST(mIRLowering__mir_alloc_mark_type_info(&self, pipeline_inner, NIL, context) AS Type);
+        END
+        panic("{}: allocating MIR::Pipeline has no typed result");
       ELSE
         panic("{}: allocating MIR::Pipeline has no typed result");
       END
@@ -6983,7 +6986,7 @@ PRIVATE FN mIRLowering__refresh_ownership_consumption_for_replaced_child_mut(MUT
       parent.ownership_consumption = OwnershipConsumptionFact{ operands: COPY visible_names |> SELECT ownershipOperandFact__owned_binding(CAST(_ AS String), TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "hoist replacement", target_alloc), target: :owned_sink, target_alloc: COPY target_alloc, source: COPY emittable__variant_name(parent), covers_consuming_params: TRUE };
       RETURN;
     END
-    MUTABLE operands = (TRY (callOwnershipFacts__operands( CAST(fact AS CallOwnershipFacts)))) |> WHERE !((_.name AND old_names.contains?(CAST(((_.name)?) AS String))));
+    MUTABLE operands = (TRY (callOwnershipFacts__operands( CAST(fact AS CallOwnershipFacts)))) |> WHERE !(((_.name EXISTS) AND old_names.contains?(CAST(((_.name)?) AS String))));
     FOR _ IN visible_names DO
     &operands.append(ownershipOperandFact__owned_binding(CAST(_ AS String), TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "hoist replacement", fact.target_alloc));
     END
@@ -16803,7 +16806,7 @@ PRIVATE FN mIRLowering__lower_if_bind(MUTABLE self: MIRLowering, node: IfBind) R
     capture_markers = capture_markers |> WHERE !(((aST__node_name(castEmittableToLocatable__mir_lowering(_)) EXISTS) AND existing_capture_names.contains?(CAST(_.name AS String))));
     MUTABLE then_body = (capture_markers + lowered_then);
     MUTABLE else_body_branch_value: ?[]Emittable = NIL;
-    IF ((node.else_branch AND !(node.else_branch.empty?()))) THEN
+    IF (((node.else_branch EXISTS) AND !(node.else_branch.empty?()))) THEN
       else_body_branch_value = TRY (mIRLowering__lower_body(&self, node.else_branch));
     ELSE
       else_body_branch_value = NIL;
@@ -17597,7 +17600,7 @@ PRIVATE FN mIRLowering__lower_return(MUTABLE self: MIRLowering, MUTABLE node: Re
     IF (IF value? IS_A Call AS call THEN mIRLowering__tail_call_return?(&self, Emittable{ Call: COPY call }) ELSE FALSE END) THEN
       RETURN NodeRoot{ Emittable: COPY CAST(ReturnStmt{ value: Emittable{ TailCall: COPY TailCall{ callee: COPY value?.callee, args: COPY value.args(), callable_contract: COPY value.callable_contract(), lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
     END
-    IF ((node.value AND TRY (mIRLowering__rc_retain_needed?(&self, node.value))) AND !(TRY (mIRLowering__return_transfers_heap_binding?(&self, node.value)))) THEN
+    IF (((node.value EXISTS) AND TRY (mIRLowering__rc_retain_needed?(&self, node.value))) AND !(TRY (mIRLowering__return_transfers_heap_binding?(&self, node.value)))) THEN
       MUTABLE retained = TRY (mIRLowering__hoist_alloc(&self, Emittable{ RcRetain: COPY TRY (mIRLowering__make_rc_retain(&self, node.value)) }, node.value, TRUE));
       RETURN TRY (mIRLowering__return_with_transfer_marks(&self, plan, &retained, ReturnStmt{ value: COPY retained, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }));
     ELSE
@@ -17631,7 +17634,7 @@ PRIVATE FN mIRLowering__finalize_return_value(MUTABLE self: MIRLowering, node: R
     RETURN TRY (mIRLowering__heap_carry_recursive_param_value(&self, node, value));
 END
 PRIVATE FN mIRLowering__generic_parameter_return_copy(MUTABLE self: MIRLowering, node: ReturnNode, value: ?Emittable) RETURNS !?Emittable ->
-    IF !((node.value AND ((value != NIL) AND (value IS_A Ident)))) THEN
+    IF !(((node.value EXISTS) AND ((value != NIL) AND (value IS_A Ident)))) THEN
       RETURN COPY value;
     END
     IF !(mIRLowering__current_function_param_name?(&self, UNWRAP (emittable__name( value)))) THEN
@@ -17759,7 +17762,7 @@ PRIVATE FN mIRLowering__return_lowering_plan(MUTABLE self: MIRLowering, MUTABLE 
     END
     MUTABLE value: ?U = value_branch_value;
     MUTABLE explicit_return_names: [Set]String = Set[];
-    IF (node.value AND !(mIRLowering__aggregate_return_literal?(&self, node.value))) THEN
+    IF ((node.value EXISTS) AND !(mIRLowering__aggregate_return_literal?(&self, node.value))) THEN
       explicit_return_names = TRY (mIRLowering__returned_binding_names(&self, UNWRAP (node.value)));
     ELSE
       explicit_return_names = Set[];
