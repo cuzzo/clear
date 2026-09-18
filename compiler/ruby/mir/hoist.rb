@@ -1011,7 +1011,12 @@ module MIRHoistLowering
   def allocating_hoist_plan(expr, mutable:, transfer_on_success:, type_info:, cleanup_entry:, alloc: nil)
     T.bind(self, MIRLowering) rescue nil
     tmp_id = lowering_counters.next_tmp_id
-    chosen_alloc = alloc || mir_owned_alloc(expr) || :heap
+    # A value with an allocator OF ITS OWN keeps it: a heap-returning call
+    # hands back heap storage whatever aggregate the result is destined for,
+    # and marking the temp with the destination's allocator makes the mark
+    # disagree with the initializer (OWNED_RESULT_ALLOC_MISMATCH). The
+    # destination only decides for a value that does not allocate itself.
+    chosen_alloc = mir_owned_alloc(expr) || alloc || :heap
     entry = cleanup_entry
     if entry
       transfer_on_success ? entry.mark_moved_guard! : entry.clear_moved_guard!
