@@ -26,6 +26,10 @@ STRUCT_RE = re.compile(r'^(?:PUB )?STRUCT (\w+) \{(.*?)^\}', re.S | re.M)
 FIELD_RE = re.compile(r'^  (\w+): (\??)([\w\[\]{}@<>, ]+?),?\s*$', re.M)
 OPERAND_RE = re.compile(r'\(\s*([a-z_][\w]*)\.([a-z_]\w*)\s+(AND|OR)\s')
 TAIL_RE = re.compile(r'\s(AND|OR)\s+([a-z_][\w]*)\.([a-z_]\w*)\s*\)')
+# The same nilable-Ruby-field-rendered-required defect, in its other shapes.
+UNWRAP_RE = re.compile(r'UNWRAP \(\s*([a-z_][\w]*)\.([a-z_]\w*)\s*\)')
+EXISTS_RE = re.compile(r'\b([a-z_][\w]*)\.([a-z_]\w*)\s+EXISTS\b')
+NILCMP_RE = re.compile(r'\b([a-z_][\w]*)\.([a-z_]\w*)\s*[!=]= NIL\b')
 
 
 def field_types():
@@ -54,6 +58,12 @@ def main():
                 decl = types.get(field)
                 if decl and not decl[0] and decl[1] != 'Bool':
                     findings.append((rel, n, f'{recv}.{field}', decl[1], op))
+            for pattern, label in ((UNWRAP_RE, 'UNWRAP'), (EXISTS_RE, 'EXISTS'),
+                                   (NILCMP_RE, 'NIL?')):
+                for recv, field in pattern.findall(line):
+                    decl = types.get(field)
+                    if decl and not decl[0]:
+                        findings.append((rel, n, f'{recv}.{field}', decl[1], label))
     by_file = defaultdict(list)
     for rel, n, expr, ty, op in findings:
         by_file[rel].append((n, expr, ty, op))
