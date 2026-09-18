@@ -6204,7 +6204,7 @@ PRIVATE FN mIRLowering__mir_expr_child?(self: MIRLowering, value: ?Emittable) RE
     RETURN FALSE;
 END
 PRIVATE FN mIRLowering__hoist_alloc(MUTABLE self: MIRLowering, MUTABLE expr: Emittable, MUTABLE ast_node: ?Locatable = NIL, err_cleanup: ?Bool = FALSE, mutable_value: Bool = FALSE, transfer_on_success: Bool = TRUE, ownership_materialization_alloc: ?String@symbol = NIL, alloc: ?String@symbol = NIL) RETURNS !Emittable ->
-    IF (IF expr IS_A MIRBlockExpr AS MUTABLE mir_block_expr THEN (TRUE) ELSE FALSE END) THEN
+    IF (IF expr IS_A MIRBlockExpr AS MUTABLE mir_block_expr THEN blockExpr__lazy_boundary(mir_block_expr) ELSE FALSE END) THEN
       RETURN COPY expr;
     END
     MUTABLE composite_materialization: ?OwnedCompositeMaterialization = TRY (mIRLowering__owned_composite_transfer_materialization(&self, expr, ast_node, ownership_materialization_alloc));
@@ -6608,18 +6608,23 @@ PRIVATE FN mIRLowering__normalize_allocating_mir_stmt_mut(MUTABLE self: MIRLower
 END
 PRIVATE FN mIRLowering__normalize_stmt_child_exprs_mut(MUTABLE self: MIRLowering, MUTABLE stmt: Emittable) RETURNS ![]Emittable ->
     MUTABLE prefix: []Emittable = List[];
-    IF !((TRY (emittable__child_exprs(stmt)) != NIL)) THEN
-      RETURN prefix;
+    # The capture binds only inside the branches, so nothing may be hoisted
+    # across that boundary -- the rule normalize_allocating_used_expr already
+    # applies when the same node is reached as an EXPRESSION. In statement
+    # position the branches are ordinary child_exprs, and hoisting a branch's
+    # retain out left it reading a capture that does not exist yet.
+    IF stmt IS_A IfOptional AS if_optional THEN
+      MUTABLE optional_expr = COPY if_optional.optional;
+      MUTABLE optional_prefix, optional_normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &optional_expr));
+      TRY (mIRLowering__replace_mir_expr_child_mut(&self, &stmt, COPY if_optional.optional, &optional_normalized));
+      RETURN COPY optional_prefix;
     END
-    MUTABLE rtoc_each_items_268:! = emittable__child_exprs(stmt);
+    MUTABLE children = TRY (emittable__child_exprs(stmt));
     MUTABLE rtoc_idx = 0;
-    WHILE rtoc_idx < rtoc_each_items_268.length() DO
-      IF !(UNWRAP (rtoc_each_items_268[rtoc_idx])) THEN
-        rtoc_idx = rtoc_idx + 1;
-    CONTINUE;
-      END
-      MUTABLE child_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, UNWRAP (rtoc_each_items_268[rtoc_idx])));
-      TRY (mIRLowering__replace_mir_expr_child_mut(&self, &stmt, UNWRAP (rtoc_each_items_268[rtoc_idx]), &normalized));
+    WHILE rtoc_idx < children.length() DO
+      MUTABLE child = UNWRAP (children[rtoc_idx]);
+      MUTABLE child_prefix, normalized = TRY (mIRLowering__normalize_allocating_used_expr(&self, &child));
+      TRY (mIRLowering__replace_mir_expr_child_mut(&self, &stmt, UNWRAP (children[rtoc_idx]), &normalized));
       prefix = ruby_array_concat_Emittable__mir_lowering(prefix, child_prefix);
     rtoc_idx = rtoc_idx + 1;
     END
@@ -6762,7 +6767,7 @@ PRIVATE FN mIRLowering__normalize_allocating_result_expr_mut(MUTABLE self: MIRLo
     IF !(emittable__expr?(expr)) THEN
       RETURN prefix;
     END
-    IF (IF expr IS_A MIRBlockExpr AS mir_block_expr THEN (blockExpr__lazy_boundary(mir_block_expr) != NIL) ELSE FALSE END) THEN
+    IF (IF expr IS_A MIRBlockExpr AS mir_block_expr THEN blockExpr__lazy_boundary(mir_block_expr) ELSE FALSE END) THEN
       RETURN prefix;
     END
     IF expr IS_A TryCatch AS try_catch THEN
@@ -6823,7 +6828,7 @@ PRIVATE FN mIRLowering__normalize_allocating_used_expr(MUTABLE self: MIRLowering
     IF expr IS_A Ident AS ident THEN
       RETURN CAST(Tuple{prefix, COPY ident} AS Tuple<[]Emittable, Emittable>);
     END
-    IF (IF expr IS_A MIRBlockExpr AS mir_block_expr THEN (blockExpr__lazy_boundary(mir_block_expr) != NIL) ELSE FALSE END) THEN
+    IF (IF expr IS_A MIRBlockExpr AS mir_block_expr THEN blockExpr__lazy_boundary(mir_block_expr) ELSE FALSE END) THEN
       RETURN CAST(Tuple{prefix, COPY expr} AS Tuple<[]Emittable, Emittable>);
     END
     IF expr IS_A IfOptional AS MUTABLE if_optional THEN

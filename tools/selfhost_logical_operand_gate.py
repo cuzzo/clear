@@ -30,6 +30,19 @@ TAIL_RE = re.compile(r'\s(AND|OR)\s+([a-z_][\w]*)\.([a-z_]\w*)\s*\)')
 UNWRAP_RE = re.compile(r'UNWRAP \(\s*([a-z_][\w]*)\.([a-z_]\w*)\s*\)')
 EXISTS_RE = re.compile(r'\b([a-z_][\w]*)\.([a-z_]\w*)\s+EXISTS\b')
 NILCMP_RE = re.compile(r'\b([a-z_][\w]*)\.([a-z_]\w*)\s*[!=]= NIL\b')
+# The same defect at a CALL: a function whose declared return is not optional,
+# compared against NIL because Ruby compared an always-truthy value.
+FN_RET_RE = re.compile(r'^(?:PUB |PRIVATE )?FN ([\w?!]+)(?:<[^>]*>)?\([^\n]*?\)\s*RETURNS\s+(!?)(\??)', re.M)
+CALLNIL_RE = re.compile(r'(?:TRY \()?([a-z]\w*(?:__)?\w*)\([^()]*\)\)?\s*[!=]= NIL\b')
+
+
+def fn_returns():
+    """Declared return optionality per function name, when unambiguous."""
+    votes = defaultdict(set)
+    for f in sorted(SRC.rglob('*.clear')):
+        for m in FN_RET_RE.finditer(f.read_text()):
+            votes[m.group(1)].add(m.group(3) == '?')
+    return {n: next(iter(v)) for n, v in votes.items() if len(v) == 1}
 
 
 def field_types():
@@ -43,6 +56,7 @@ def field_types():
 
 def main():
     types = field_types()
+    returns = fn_returns()
     only = sys.argv[1] if len(sys.argv) > 1 else None
     findings = []
     for f in sorted(SRC.rglob('*.clear')):
@@ -64,6 +78,10 @@ def main():
                     decl = types.get(field)
                     if decl and not decl[0]:
                         findings.append((rel, n, f'{recv}.{field}', decl[1], label))
+            for fname in CALLNIL_RE.findall(line):
+                opt = returns.get(fname)
+                if opt is False:
+                    findings.append((rel, n, f'{fname}()', 'non-optional', 'NIL?'))
     by_file = defaultdict(list)
     for rel, n, expr, ty, op in findings:
         by_file[rel].append((n, expr, ty, op))
