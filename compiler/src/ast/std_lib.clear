@@ -13,7 +13,18 @@ PUB STRUCT StdLibTypeBinding {
   name: String@symbol,
   schema_factory: FN() -> Any
 }
-builtin_type_bindings: [4]StdLibTypeBinding = [StdLibTypeBinding{ name: :Range, schema_factory: %() -> {
+PUB FN stdLibTypeBinding__schema_factory_call(self: StdLibTypeBinding) RETURNS Any ->
+  MUTABLE fn_value = self.schema_factory;
+  RETURN fn_value();
+END
+
+# `BUILTIN_GLOBAL_BINDINGS`. A module constant does not cross a CLEAR file.
+PUB FN builtinGlobalBindings() RETURNS [1]StdLibGlobalBinding EFFECTS REENTRANT ->
+  RETURN [StdLibGlobalBinding{ name: "argv", type: TypeTypeInput{ SymbolValue: :String }, storage: :heap }];
+END
+
+PUB FN builtinTypeBindings() RETURNS [4]StdLibTypeBinding EFFECTS REENTRANT ->
+  RETURN [StdLibTypeBinding{ name: :Range, schema_factory: %() -> {
   rtoc_lambda_result_6 = TRY (structSchema__new(CAST({symbol("start"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), default: NIL, borrowed: FALSE } }, symbol("end"): SchemasStructSchemaFieldInput{ StructField: COPY StructField{ type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Float64 })), default: NIL, borrowed: FALSE } }} AS {String@symbol}SchemasStructSchemaFieldInput), List[], List[], {}, {}));
   rtoc_lambda_result_6
 } }, StdLibTypeBinding{ name: :File, schema_factory: %() -> {
@@ -26,16 +37,4 @@ builtin_type_bindings: [4]StdLibTypeBinding = [StdLibTypeBinding{ name: :Range, 
   rtoc_lambda_result_12 = TRY (resourceSchema__new(resourceClosePlan__function("CheatLib.socketClose"), CAST({"connect": CAST({:args: SchemasResourceSchemaStaticMethodValue{ ArrayValue: COPY [:String, :Int64] }, :return: SchemasResourceSchemaStaticMethodValue{ SymbolValue: :TCPClient }, :zig: SchemasResourceSchemaStaticMethodValue{ StringValue: "try CheatLib.socketConnect({0}, @intCast({1}))" }, :can_fail: SchemasResourceSchemaStaticMethodValue{ BoolValue: TRUE }} AS {String@symbol}SchemasResourceSchemaStaticMethodValue)} AS {String}{String@symbol}SchemasResourceSchemaStaticMethodValue), {}, List[], NIL, NIL, :package, {}));
   rtoc_lambda_result_12
 } }];
-PUB FN stdLibTypeBinding__schema_factory_call(self: StdLibTypeBinding) RETURNS Any ->
-  MUTABLE fn_value = self.schema_factory;
-  RETURN fn_value();
-END
-
-# `BUILTIN_GLOBAL_BINDINGS`. A module constant does not cross a CLEAR file.
-PUB FN builtinGlobalBindings() RETURNS [1]StdLibGlobalBinding EFFECTS REENTRANT ->
-  RETURN [StdLibGlobalBinding{ name: "argv", type: TypeTypeInput{ SymbolValue: :String }, storage: :heap }];
-END
-
-PUB FN builtinTypeBindings() RETURNS [4]StdLibTypeBinding EFFECTS REENTRANT ->
-  RETURN builtin_type_bindings;
 END
