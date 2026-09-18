@@ -6913,12 +6913,18 @@ PRIVATE FN mIRLowering__refresh_ownership_consumption_for_replaced_child_mut(MUT
       IF !(((parent IS_A StructInit OR parent IS_A ArrayInit) OR parent IS_A TupleLiteral)) THEN
         RETURN;
       END
-      MUTABLE allocs = (visible_names |> SELECT:? (IF (TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(_ AS String)] != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_282:? = ((TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(_ AS String)]);
-      cleanupEntry__alloc( UNWRAP (rtoc_local_receiver_282)) }
-      ELSE
-        NIL
-      END) |> WHERE _ != NIL) |> DISTINCT _ |> SELECT COPY _;
+      # Ruby's `visible_names.filter_map { ... }.uniq`. A CLEAR `SELECT:?` keeps
+      # the optional in the element type, so the stream cannot be DISTINCTed;
+      # the loop drops the absent ones and dedupes in one pass.
+      MUTABLE allocs: []String@symbol = List[];
+      FOR visible_name IN visible_names DO
+        IF (TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(visible_name AS String)] EXISTS AS visible_entry THEN
+          MUTABLE visible_alloc = cleanupEntry__alloc(visible_entry);
+          IF !(allocs.contains?(visible_alloc)) THEN
+            &allocs.append(COPY visible_alloc);
+          END
+        END
+      END
       MUTABLE target_alloc: ?String@symbol =     IF (allocs.length() == 1) THEN
         allocs.first()
       ELSE
@@ -6957,8 +6963,10 @@ PRIVATE FN mIRLowering__stamp_allocating_result_target_mut(MUTABLE self: MIRLowe
         END
       END
     ELSE
-      IF (((alloc != NIL) AND (TRY (ownershipEffect__of(expr))).produces_owned) AND (aST__node_alloc(castEmittableToLocatable__mir_lowering(expr)) EXISTS)) THEN
-        emittable__set_alloc_mut(&expr, UNWRAP (alloc));
+      IF alloc EXISTS AS alloc_value THEN
+        IF ((TRY (ownershipEffect__of(expr))).produces_owned AND (aST__node_alloc(castEmittableToLocatable__mir_lowering(expr)) EXISTS)) THEN
+          emittable__set_alloc_mut(&expr, alloc_value);
+        END
       END
       FOR MUTABLE rtoc_mutable_block_param_285 IN (TRY (emittable__ownership_source_exprs(expr)) OR_ELSE List[]) DO
     MUTABLE has_alloc_metadata = emittable__has_alloc_metadata?(rtoc_mutable_block_param_285);
