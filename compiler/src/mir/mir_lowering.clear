@@ -7960,7 +7960,7 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
       IF !(source.empty?()) THEN
         msg_text = "DEBUG_POST failed: ${source}";
       END
-    IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY cond_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Panic: COPY Panic{ message: COPY msg_text, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }
+    IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY UNWRAP (cond_mir), lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Panic: COPY Panic{ message: COPY msg_text, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }
     };
     MUTABLE body =   IF is_void THEN
       ([Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY inner_call_mir }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + (IF !((check_stmts.length() == 0)) THEN
@@ -7990,7 +7990,7 @@ PRIVATE FN mIRLowering__build_catch_clauses(MUTABLE self: MIRLowering, MUTABLE n
     END
     MUTABLE snapshot_type: ?Type = snapshot_type_branch_value;
     FOR _ IN TRY (mIRLowering__function_catch_clauses(self, node)) DO
-    MUTABLE clause_mir = TRY (mIRLowering__lower_body(&self, _.body));
+    MUTABLE clause_mir = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(_.body)));
     MUTABLE clause_body: []Emittable = clause_mir;
     &clauses.append(MIRCatchClause{ meta: COPY CatchClauseMeta{ kinds: COPY _.kinds |> SELECT _.toString(), types: COPY _.types |> SELECT _.toString(), filter_types: COPY _.filter_types |> SELECT _.toString(), filter_messages: COPY _.filter_messages |> SELECT CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_))) AS Emittable) }, body: COPY clause_body });
     END
@@ -8080,6 +8080,32 @@ PRIVATE FN mIRLowering__infer_catch_value_allocator(self: MIRLowering, expr: ?Lo
       RETURN NIL;
     END
 END
+PRIVATE FN mIRLowering__wants_ptr?(MUTABLE self: MIRLowering, a: Locatable, ti: ?Type, callee_param: ?Param, callee_param_type: Type, callee_sig: ?FunctionSignature, idx: Int64) RETURNS !Bool ->
+    MUTABLE mutable_callee = (IF callee_param EXISTS AS mutable_check_param THEN (mutable_check_param.mutable OR_ELSE FALSE) ELSE FALSE END);
+    MUTABLE wants_ptr_mut_list = FALSE;
+    IF mutable_callee THEN
+      IF callee_param EXISTS AS list_check_param THEN
+        wants_ptr_mut_list = type__list_collection?(list_check_param.type);
+      END
+    END
+    MUTABLE wants_ptr_mut_value = ((mutable_callee AND !(wants_ptr_mut_list)) AND !(type__needs_pointer_passing?(callee_param_type)));
+    # `T` generic parameters are emitted as an anytype value. Passing a
+    # map/list by address here changes the instantiated T to *Map/*List and
+    # breaks value-returning generic functions; their own body decides whether
+    # to borrow or materialize the concrete payload.
+    MUTABLE wants_ptr_intrinsic = FALSE;
+    IF ti EXISTS AS arg_type THEN
+      wants_ptr_intrinsic = (type__needs_pointer_passing?(arg_type) AND !(type__generic_type_parameter?(callee_param_type)));
+    END
+    MUTABLE wants_ptr_protocol_map = FALSE;
+    IF callee_sig EXISTS AS protocol_sig THEN
+      IF callee_param EXISTS AS protocol_param THEN
+        wants_ptr_protocol_map = mIRLowering__protocol_map_signature_param?(self, protocol_sig, protocol_param);
+      END
+    END
+    MUTABLE wants_ptr_poly = TRY (mIRLowering__universal_poly_arg_needs_addr?(self, a, callee_sig, idx));
+    RETURN ((((wants_ptr_mut_list OR wants_ptr_mut_value) OR wants_ptr_intrinsic) OR wants_ptr_protocol_map) OR wants_ptr_poly);
+END
 PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input: Emittable, MUTABLE a: Locatable, callee_param: ?Param, callee_param_type: Type, callee_sig: ?FunctionSignature, idx: Int64) RETURNS !Emittable ->
     MUTABLE arg = COPY arg_input;
     MUTABLE ti: ?Type = TRY (type__from_node_mut(a, "call boundary argument"));
@@ -8093,7 +8119,7 @@ PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input:
       END
     END
     IF (((callee_param != NIL) AND (callee_param.takes OR_ELSE FALSE)) AND (callee_param.carrier_contract == :monomorphic)) THEN
-      IF wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx) THEN
+      IF TRY (mIRLowering__wants_ptr?(&self, a, ti, callee_param, callee_param_type, callee_sig, idx)) THEN
         RETURN Emittable{ AddressOf: COPY AddressOf{ expr: COPY arg, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
       RETURN COPY arg;
@@ -8107,7 +8133,7 @@ PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input:
         MUTABLE owned_slice = OwnedSlice{ expr: Emittable{ DeepCopy: COPY materialized }, alloc: COPY sink_alloc, lowered_node_id: NIL, ownership_consumption: NIL };
         RETURN Emittable{ OwnedSlice: COPY castEmittableToOwnedSlice(TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ OwnedSlice: COPY owned_slice }, TRY (mIRLowering__mir_ident_names(self, Emittable{ DeepCopy: COPY materialized })), "MIR::OwnedSlice(managed payload)", :owned_sink, sink_alloc))) };
       END
-      IF wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx) THEN
+      IF TRY (mIRLowering__wants_ptr?(&self, a, ti, callee_param, callee_param_type, callee_sig, idx)) THEN
         RETURN Emittable{ AddressOf: COPY AddressOf{ expr: Emittable{ DeepCopy: COPY materialized }, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
       RETURN Emittable{ DeepCopy: COPY materialized };
@@ -8143,7 +8169,7 @@ PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input:
     IF (((with_alias_pointer_shaped?(a) AND (callee_param != NIL)) AND !(callee_param.mutable)) AND !(type__needs_pointer_passing?(callee_param_type))) THEN
       RETURN Emittable{ Deref: COPY Deref{ expr: COPY arg, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF !(wants_ptr?(a, ti, callee_param, callee_param_type, callee_sig, idx)) THEN
+    IF !(TRY (mIRLowering__wants_ptr?(&self, a, ti, callee_param, callee_param_type, callee_sig, idx))) THEN
       RETURN COPY arg;
     END
     IF arg_already_pointer_shaped?(a) THEN
@@ -8252,17 +8278,17 @@ PRIVATE FN mIRLowering__ownership_consumed_arg_names(self: MIRLowering, MUTABLE 
     IF UNWRAP (arg) IS_A Ident AS ident THEN
       RETURN CAST([CAST(ident.name AS String)] AS []String);
     ELSE_IF UNWRAP (arg) IS_A OwnedSlice AS owned_slice THEN
-      RETURN mIRLowering__ownership_consumed_arg_names(self, ownedSlice__expr(owned_slice));
+      RETURN TRY (mIRLowering__ownership_consumed_arg_names(self, ownedSlice__expr(owned_slice)));
     ELSE_IF UNWRAP (arg) IS_A MIRCast AS mir_cast THEN
-      RETURN mIRLowering__ownership_consumed_arg_names(self, cast__expr(mir_cast));
+      RETURN TRY (mIRLowering__ownership_consumed_arg_names(self, cast__expr(mir_cast)));
     ELSE_IF UNWRAP (arg) IS_A TryExpr AS try_expr THEN
-      RETURN mIRLowering__ownership_consumed_arg_names(self, tryExpr__expr(try_expr));
+      RETURN TRY (mIRLowering__ownership_consumed_arg_names(self, tryExpr__expr(try_expr)));
     ELSE_IF UNWRAP (arg) IS_A TryOptional AS try_optional THEN
-      RETURN mIRLowering__ownership_consumed_arg_names(self, tryOptional__expr(try_optional));
+      RETURN TRY (mIRLowering__ownership_consumed_arg_names(self, tryOptional__expr(try_optional)));
     ELSE_IF UNWRAP (arg) IS_A AddressOf AS address_of THEN
-      RETURN mIRLowering__ownership_consumed_arg_names(self, addressOf__expr(address_of));
+      RETURN TRY (mIRLowering__ownership_consumed_arg_names(self, addressOf__expr(address_of)));
     ELSE_IF UNWRAP (arg) IS_A Deref AS deref THEN
-      RETURN mIRLowering__ownership_consumed_arg_names(self, deref__expr(deref));
+      RETURN TRY (mIRLowering__ownership_consumed_arg_names(self, deref__expr(deref)));
     ELSE
       RETURN TRY (mIRLowering__mir_ident_names(self, arg));
     END
@@ -8347,9 +8373,7 @@ PRIVATE FN mIRLowering__borrowed_ownership_operand?(self: MIRLowering, arg: Loca
 END
 PRIVATE FN mIRLowering__stdlib_call_facts(MUTABLE self: MIRLowering, MUTABLE node: Node) RETURNS !StdlibCallFacts ->
     MUTABLE sig: ?FunctionSignature@multiowned = TRY (mIRLowering__intrinsic_signature_for(self, node));
-    IF (aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
-      sig = ( X{ FunctionSignature: UNWRAP (COPY sig OR_ELSE functionSignature__unwrap((IF aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS AS rtoc_wrap_9582 THEN X{ FunctionSignature: COPY rtoc_wrap_9582 } ELSE NIL END))) });
-    END
+    sig = (sig OR_ELSE aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))));
     IF sig EXISTS AS sig_value THEN
       MUTABLE ast_args = IF node IS_A MethodCall THEN
         ([UNWRAP (node__object(node))] + node__args(node))
