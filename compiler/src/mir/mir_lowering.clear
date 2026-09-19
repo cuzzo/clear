@@ -14111,7 +14111,12 @@ PRIVATE FN mIRLowering__aggregate_field_sink_alloc(MUTABLE self: MIRLowering, ig
     RETURN aggregate_alloc;
 END
 PRIVATE FN mIRLowering__lower_string_concat(MUTABLE self: MIRLowering, node: StringConcat) RETURNS !ConcatStr ->
-    MUTABLE parts = node.parts |> SELECT TRY (mIRLowering__hoist_alloc(&self, TRY (mIRLowering__widen_symbol_to_bytes(&self, UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_)))), _)), &_));
+    # Each part is lowered and hoisted, which stamps it; a pipeline
+    # placeholder is an immutable borrow of the source element.
+    MUTABLE parts: []Emittable = List[];
+    FOR MUTABLE rtoc_part IN node.parts DO
+      &parts.append(TRY (mIRLowering__hoist_alloc(&self, TRY (mIRLowering__widen_symbol_to_bytes(&self, UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(rtoc_part)))), rtoc_part)), &rtoc_part)));
+    END
     MUTABLE alloc = TRY (mIRLowering__alloc_for_node(&self, Locatable{ StringConcat: COPY node }));
     RETURN ConcatStr{ parts: COPY parts, alloc: COPY alloc, rt_expr: COPY mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL };
 END
