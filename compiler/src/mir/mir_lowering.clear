@@ -13235,13 +13235,19 @@ END
 PRIVATE FN mIRLowering__unit_variant_constructor(MUTABLE self: MIRLowering, node: GetField) RETURNS !?StructInit ->
     MUTABLE target_node = COPY node.target;
     IF target_node IS_A Identifier AS identifier THEN
-      MUTABLE schema:? = (TRY (mIRLowering__union_schemas(&self)))[symbol(identifier__name(identifier))];
-      IF !(schema IS_A UnionSchema@multiowned) THEN
+      MUTABLE schema: ?UnionSchema@multiowned = COPY (TRY (mIRLowering__union_schemas(&self)))[symbol(identifier__name(identifier))];
+      IF !(schema) THEN
         RETURN NIL;
       END
-      MUTABLE field_key: ?MIRLoweringReturnValue = mIRLowering__union_variant_key(self, UNWRAP (schema), MIRLoweringField{ StringValue: COPY node.field });
+      MUTABLE field_key: ?MIRLoweringReturnValue = mIRLowering__union_variant_key(self, schema, MIRLoweringField{ StringValue: COPY node.field });
       IF field_key EXISTS AS field_key_value THEN
-        MUTABLE var_data = schema.variants[field_key_value];
+        MUTABLE rtoc_variant_key: String@symbol = :unknown;
+        PARTIAL MATCH field_key_value START
+          MIRLoweringReturnValue.StringValue AS rtoc_key_str -> rtoc_variant_key = symbol(rtoc_key_str);,
+          MIRLoweringReturnValue.SymbolValue AS rtoc_key_sym -> rtoc_variant_key = rtoc_key_sym;,
+          DEFAULT -> PASS;
+        END
+        MUTABLE var_data: ?SchemasUnionSchemaVariantValue = COPY schema.variants[rtoc_variant_key];
         IF schemas__inline_struct?(var_data) THEN
           RETURN NIL;
         END
