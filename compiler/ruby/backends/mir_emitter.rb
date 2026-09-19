@@ -3680,7 +3680,10 @@ class MIREmitter
         # -- but nothing binds it here.
         used = prologue.each_with_index.select { |_line, i| rendered.include?(capture_ptr_name(names[i], suffix)) }
                        .map(&:first)
-        splice_prologue(rendered, [env_head, *used])
+        # With no capture bound, the slot array itself is unused -- also a
+        # Zig error. The environment pointer still has to be consumed.
+        head = used.any? ? [env_head, *used] : ["_ = #{env_param};"]
+        splice_prologue(rendered, head)
       end
     else
       splice_prologue(emit_fn_def(fn), ["_ = #{env_param};"])

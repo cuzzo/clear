@@ -1,0 +1,34 @@
+# A capture the lambda body never reads. The slot array it would be read out
+# of is then unused too, and Zig rejects an unused constant.
+
+FN noop() RETURNS Void ->
+END
+
+FN each(items: []Int64, f: FN(Int64) -> Void) RETURNS Void ->
+  FOR it IN items DO
+    f(it);
+  END
+END
+
+FN count(xs: []Int64) RETURNS !Int64 ->
+  MUTABLE unread: Int64 = 99;
+  MUTABLE seen: Int64 = 0;
+  each(xs, %(v: Int64) USE(MUTABLE unread) -> {
+    noop()
+  });
+  FOR x IN xs DO
+    seen = seen + x;
+  END
+  RETURN seen;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE xs: []Int64 = List[];
+  &xs.append(4);
+  &xs.append(5);
+  IF TRY (count(xs)) == 9 THEN
+    print("PASS");
+  ELSE
+    print("FAIL");
+  END
+END
