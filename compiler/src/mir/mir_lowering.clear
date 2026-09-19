@@ -9011,16 +9011,23 @@ PRIVATE FN mIRLowering__user_protocol_receiver_type_arg(MUTABLE self: MIRLowerin
 END
 PRIVATE FN mIRLowering__inject_protocol_map_allocator_args(MUTABLE self: MIRLowering, signature: ?FunctionSignature, ast_args: []Locatable, mir_args: []Emittable) RETURNS ![]Emittable ->
     IF signature EXISTS AS signature_value THEN
-      RETURN {
-    MUTABLE rtoc_value_block_marker = 0;
-    MUTABLE rtoc_indexed_items_374: []Emittable = mir_args;
-    MUTABLE rtoc_indexed_output_376 = [];
-    MUTABLE rtoc_indexed_i_375 = 0;
-    WHILE rtoc_indexed_i_375 < rtoc_indexed_items_374.length() DO
-      MUTABLE rtoc_indexed_value_377 = { MUTABLE rtoc_value_block_marker = 0; MUTABLE param: ?Param = COPY (TRY (functionSignature__params(signature_value)))[rtoc_indexed_i_375]; (IF !(((param != NIL) AND mIRLowering__protocol_map_signature_param?(self, signature_value, param))) THEN [UNWRAP (rtoc_indexed_items_374[rtoc_indexed_i_375])] ELSE [UNWRAP (rtoc_indexed_items_374[rtoc_indexed_i_375]), TRY (mIRLowering__protocol_map_allocator_for(&self, UNWRAP (ast_args[rtoc_indexed_i_375])))] END) };
-      FOR rtoc_indexed_flattened_378 IN rtoc_indexed_value_377 DO
-        &rtoc_indexed_output_376.append(COPY rtoc_indexed_flattened_378);
+      MUTABLE rtoc_out: []Emittable = List[];
+      MUTABLE rtoc_i: Int64 = 0;
+      WHILE (rtoc_i < mir_args.length()) DO
+        MUTABLE rtoc_param: ?Param = COPY (TRY (functionSignature__params(signature_value)))[rtoc_i];
+        &rtoc_out.append(COPY UNWRAP (mir_args[rtoc_i]));
+        IF rtoc_param EXISTS AS rtoc_param_value THEN
+          IF mIRLowering__protocol_map_signature_param?(self, signature_value, rtoc_param_value) THEN
+            &rtoc_out.append(TRY (mIRLowering__protocol_map_allocator_for(&self, UNWRAP (ast_args[rtoc_i]))));
+          END
+        END
+        rtoc_i = rtoc_i + 1;
       END
+      RETURN rtoc_out;
+    ELSE
+      RETURN COPY mir_args;
+    END
+END
       rtoc_indexed_i_375 = rtoc_indexed_i_375 + 1;
     END
     rtoc_indexed_output_376
@@ -10453,13 +10460,15 @@ PRIVATE FN mIRLowering__with_block_inline_bindings(self: MIRLowering, materializ
     panic("WITH binding materialization still produced pre-emission Zig text; structural MIR binding nodes are required");
 END
 PRIVATE FN mIRLowering__structured_with_bindings(self: MIRLowering, materialization: WithBindingMaterialization) RETURNS ![]Emittable ->
-    RETURN materialization.bindings |> UNNEST (  IF _ IS_A []Emittable THEN
-      _
-    ELSE_IF _ IS_A Emittable THEN
-      [_]
-    ELSE
-      List[]
-    END);
+    MUTABLE rtoc_out: []Emittable = List[];
+    FOR rtoc_binding IN materialization.bindings DO
+      PARTIAL MATCH rtoc_binding START
+        WithBindingNode.ArrayValue AS rtoc_binding_list -> rtoc_out = (rtoc_out + rtoc_binding_list);,
+        WithBindingNode.Emittable AS rtoc_binding_node -> &rtoc_out.append(COPY rtoc_binding_node);,
+        DEFAULT -> PASS;
+      END
+    END
+    RETURN rtoc_out;
 END
 PRIVATE FN mIRLowering__assemble_with_block(self: MIRLowering, MUTABLE node: WithBlock, materialization: WithBindingMaterialization, body_stmts: []Emittable, with_label: ?String) RETURNS !MIRLoweringReturnValue ->
     MUTABLE stmts: []Emittable = List[];
