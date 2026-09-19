@@ -8431,7 +8431,7 @@ PRIVATE FN mIRLowering__stdlib_call_facts(MUTABLE self: MIRLowering, MUTABLE nod
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &facts.append(StdlibCallArgFact{ index: rtoc_idx, ast_arg: COPY UNWRAP (ast_args[rtoc_idx]), takes: callOwnershipFacts__takes?(ownership, rtoc_idx), coerce_type: COPY TRY (mIRLowering__stdlib_coerce_type(self, TypeTypeInput{ Type: COPY param__type(UNWRAP (param_opt)) })), sink_type: CAST(COPY TRY (mIRLowering__stdlib_sink_type_for_arg(self, CAST(receiver_type AS ?Type), callOwnershipFacts__takes?(ownership, rtoc_idx))) AS ?Type), declared_byte_string: (TRY (mIRLowering__stdlib_coerce_type(self, TypeTypeInput{ Type: COPY param__type(UNWRAP (param_opt)) })) == :String) });
+      &facts.append(StdlibCallArgFact{ index: rtoc_idx, ast_arg: COPY UNWRAP (ast_args[rtoc_idx]), takes: callOwnershipFacts__takes?(ownership, rtoc_idx), coerce_type: COPY TRY (mIRLowering__stdlib_coerce_type(self, TypeTypeInput{ Type: COPY param__type(param_opt) })), sink_type: CAST(COPY TRY (mIRLowering__stdlib_sink_type_for_arg(self, CAST(receiver_type AS ?Type), callOwnershipFacts__takes?(ownership, rtoc_idx))) AS ?Type), declared_byte_string: (TRY (mIRLowering__stdlib_coerce_type(self, TypeTypeInput{ Type: COPY param__type(param_opt) })) == :String) });
     rtoc_idx = rtoc_idx + 1;
       END
       RETURN StdlibCallFacts{ args: COPY facts, ownership: COPY ownership };
@@ -8537,7 +8537,7 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
         ELSE
           payload = TRY (type__zig_type(ti));
         END
-        RETURN Emittable{ RcRetain: COPY RcRetain{ source: COPY TRY (mIRLowering__lower(&self, &inner)), zig_base: COPY payload, func: IF (plan_value_mutable.family == :shared) THEN
+        RETURN Emittable{ RcRetain: COPY RcRetain{ source: COPY TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(inner))), zig_base: COPY payload, func: IF (plan_value_mutable.family == :shared) THEN
           "arcRetain"
         ELSE
           "rcRetain"
@@ -8557,7 +8557,7 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
         END;
         MUTABLE lowered = mIRLowering__with_decl_alloc(&self, :heap, %() USE(payload_ft, source, MUTABLE self) -> {
     rtoc_lambda_result_347 = mIRLowering__with_expected_type(&self, payload_ft, %() USE(source, MUTABLE self) -> {
-    rtoc_lambda_result_346 = TRY (mIRLowering__lower(&self, &source));
+    rtoc_lambda_result_346 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(source)));
     rtoc_lambda_result_346
         });
     rtoc_lambda_result_347
