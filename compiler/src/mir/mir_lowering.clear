@@ -8694,7 +8694,12 @@ PRIVATE FN mIRLowering__finalize_call_result(MUTABLE self: MIRLowering, MUTABLE 
       END
     END
     TRY (mIRLowering__attach_explicit_move_consumption_mut(&self, &call, ast_args, mir_args, "call explicit move", contract));
-    IF !(((MATCH node START CallNode.FuncCall AS item -> item.heap_dupe_result, CallNode.MethodCall AS item -> item.heap_dupe_result END) OR_ELSE FALSE)) THEN
+    MUTABLE heap_dupe_result = FALSE;
+    MATCH node START
+      CallNode.FuncCall AS item -> heap_dupe_result = (item.heap_dupe_result OR_ELSE FALSE);,
+      CallNode.MethodCall AS item -> heap_dupe_result = (item.heap_dupe_result OR_ELSE FALSE);
+    END
+    IF !(heap_dupe_result) THEN
       RETURN Emittable{ Call: COPY call };
     END
     IF owned_return THEN
@@ -8704,30 +8709,37 @@ PRIVATE FN mIRLowering__finalize_call_result(MUTABLE self: MIRLowering, MUTABLE 
 END
 PRIVATE FN mIRLowering__attach_explicit_move_consumption_mut(MUTABLE self: MIRLowering, MUTABLE call: Call, ast_args: []Locatable, mir_args: []Emittable, source: String, contract: ?CallableContract) RETURNS !Void ->
     MUTABLE operands: []OwnershipOperandFact = List[];
+    # A kept-identity edge (retained identity v4) consumes its retained
+    # handle temp exactly like an explicit move consumes its source.
+    MUTABLE contract_params: []Param = List[];
+    IF contract EXISTS AS move_contract THEN
+      contract_params = TRY (functionSignature__params(move_contract.signature));
+    END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < ast_args.length() DO
-      MUTABLE kept_edge = !(!((IF ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_355 = contract?.signature;
-      TRY (functionSignature__params( UNWRAP (rtoc_local_receiver_355))) })[rtoc_idx] != NIL THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_356 = (({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_355 = contract?.signature;
-      TRY (functionSignature__params( UNWRAP (rtoc_local_receiver_355))) })[rtoc_idx]).symbol;
-      symbolEntry__kept_identity(rtoc_local_receiver_356) }
-        ELSE
-          NIL
-        END)));
-      IF !(((ast_args[rtoc_idx]? IS_A MoveNode OR aST__moved?(ast_args[rtoc_idx]?)) OR kept_edge)) THEN
+      MUTABLE ast_arg = UNWRAP (ast_args[rtoc_idx]);
+      MUTABLE kept_edge = FALSE;
+      IF contract_params[rtoc_idx] EXISTS AS move_param THEN
+        IF move_param.symbol EXISTS AS move_param_symbol THEN
+          kept_edge = symbolEntry__kept_identity(move_param_symbol);
+        END
+      END
+      IF !(((ast_arg IS_A MoveNode OR aST__moved?(ast_arg)) OR kept_edge)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      IF TRY (mIRLowering__managed_handle_materialized_for_plain_takes?(&self, ast_args[rtoc_idx]?, contract, rtoc_idx)) THEN
+      IF TRY (mIRLowering__managed_handle_materialized_for_plain_takes?(&self, ast_arg, contract, rtoc_idx)) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
       MUTABLE mir_arg: ?Emittable = COPY mir_args[rtoc_idx];
-      IF !(mir_arg) THEN
+      IF !(mir_arg EXISTS) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      operands = ruby_array_concat_OwnershipOperandFact(operands, TRY (mIRLowering__ownership_operands_for_lowered_takes_arg(&self, UNWRAP (mir_arg), ast_args[rtoc_idx]?, source, :heap)));
+      MUTABLE takes_mir_arg = UNWRAP (mir_arg);
+      MUTABLE takes_ast_arg = COPY ast_arg;
+      operands = ruby_array_concat_OwnershipOperandFact(operands, TRY (mIRLowering__ownership_operands_for_lowered_takes_arg(&self, &takes_mir_arg, &takes_ast_arg, source, :heap)));
     rtoc_idx = rtoc_idx + 1;
     END
     operands = operands |> WHERE (_.kind != :non_owning);
