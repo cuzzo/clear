@@ -10602,7 +10602,7 @@ PRIVATE FN mIRLowering__lower_polymorphic_universal(MUTABLE self: MIRLowering, M
         rtoc_ternary_value_471 = List[];
       END
       rtoc_ternary_value_471? };
-      RETURN ScopeBlock{ body: [Emittable{ PolymorphicMutateFlow: COPY PolymorphicMutateFlow{ cell: Emittable{ AddressOf: COPY cell_mir }, rt: mIRLowering__runtime_binding_name(&self), alias_name: COPY safe_alias, bare_type: bare_type, return_type: COPY mIRLowering__current_function_return_payload_zig(&self), body: COPY body_mir, guard_cond: Emittable{ MIRBinOp: COPY UNWRAP (COPY guard_cond) }, guard_fail_body: guard_fail, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      RETURN ScopeBlock{ body: [Emittable{ PolymorphicMutateFlow: COPY PolymorphicMutateFlow{ cell: Emittable{ AddressOf: COPY cell_mir }, rt: mIRLowering__runtime_binding_name(&self), alias_name: COPY safe_alias, bare_type: bare_type, return_type: COPY mIRLowering__current_function_return_payload_zig(&self), body: COPY body_mir, guard_cond: COPY UNWRAP (guard_cond), guard_fail_body: guard_fail, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     ELSE
       body_mir = TRY (mIRLowering__wrap_body_with_guard(&self, &node, body_mir, NIL));
       RETURN ScopeBlock{ body: [Emittable{ PolymorphicMutate: COPY PolymorphicMutate{ cell: Emittable{ AddressOf: COPY cell_mir }, rt: mIRLowering__runtime_binding_name(&self), alias_name: COPY safe_alias, bare_type: bare_type, body: COPY body_mir, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
@@ -11819,16 +11819,14 @@ END
 PRIVATE FN mIRLowering__next_expr_plan(MUTABLE self: MIRLowering, node: NextExpr, alloc_sym: String@symbol) RETURNS !NextExprPlan ->
     MUTABLE promise_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.expr)) }));
     MUTABLE result_type = TRY (aST__full_type_mut(Locatable{ NextExpr: COPY node }));
-    MUTABLE async_shape:? = IF node.expr IS_A Identifier THEN
-      (IF locatable__symbol(UNWRAP (locatable__expr( Locatable{ NextExpr: COPY node }))) != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_526:? = (locatable__symbol(node.expr));
-    symbolEntry__async_result_shape( UNWRAP (rtoc_local_receiver_526)) }
-    ELSE
-      NIL
-    END)
-    ELSE
-      NIL
-    END;
+    # The shape comes off the identifier's symbol entry; an owned value out of
+    # a nested IF expression has no owner on the success path.
+    MUTABLE async_shape: ?AsyncResultShape = NIL;
+    IF node.expr IS_A Identifier THEN
+      IF locatable__symbol(node.expr) EXISTS AS rtoc_expr_symbol THEN
+        async_shape = symbolEntry__async_result_shape(rtoc_expr_symbol);
+      END
+    END
     MUTABLE tense_plan: ?TenseOperationPlan = COPY CAST(node.tense_plan AS ?TenseOperationPlan);
     MUTABLE scalar_future = (((IF async_shape EXISTS AS promise_shape THEN asyncResultShape__promise?(promise_shape) ELSE FALSE END) OR TRY (type__single_future?(promise_type))) OR type__shared_promise?(promise_type));
     IF (scalar_future AND FALSE) THEN
@@ -11837,21 +11835,22 @@ PRIVATE FN mIRLowering__next_expr_plan(MUTABLE self: MIRLowering, node: NextExpr
     IF (scalar_future AND ((!(tense_plan) OR (tense_plan.operation != TenseOperationKind.Next)))) THEN
       panic("scalar NEXT lowering requires its annotation-produced TenseOperationPlan");
     END
-    MUTABLE source_kind =   IF (type__promise_list?(promise_type) AND FALSE) THEN
-      :promise_list
-    ELSE_IF tense_plan THEN
-      (PARTIAL MATCH tense_plan.backend_form START
-      TenseBackendForm.SharedPromiseNext -> :shared_promise,
-      TenseBackendForm.ObservableStringNext -> :observable_string,
-      DEFAULT -> :plain
-    END)
+    # A MATCH arm is not a value expression for an IF-expression branch, and
+    # the plan is optional -- both want the statement form.
+    MUTABLE source_kind: String@symbol = :plain;
+    IF (type__promise_list?(promise_type) AND FALSE) THEN
+      source_kind = :promise_list;
+    ELSE_IF tense_plan EXISTS AS rtoc_tense_plan THEN
+      PARTIAL MATCH rtoc_tense_plan.backend_form START
+        TenseBackendForm.SharedPromiseNext -> source_kind = :shared_promise;,
+        TenseBackendForm.ObservableStringNext -> source_kind = :observable_string;,
+        DEFAULT -> PASS;
+      END
     ELSE_IF TRY (type__observable_array_future?(promise_type)) THEN
-      :observable_list
+      source_kind = :observable_list;
     ELSE_IF (type__observable?(promise_type) AND TRY (mIRLowering__observable_next_string?(self, promise_type))) THEN
-      :observable_string
-    ELSE
-      :plain
-    END;
+      source_kind = :observable_string;
+    END
     RETURN NextExprPlan{ source_kind: COPY source_kind, promise_type: COPY promise_type, async_result_shape: COPY async_shape, result_type: COPY result_type, result_alloc: COPY TRY (mIRLowering__next_result_owned_alloc(&self, promise_type, result_type, alloc_sym)), inner: COPY CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.expr))) AS Emittable) };
 END
 PRIVATE FN mIRLowering__observable_next_string?(self: MIRLowering, promise_type: Type) RETURNS !Bool ->
@@ -12516,7 +12515,7 @@ PRIVATE FN mIRLowering__emit_unit_variant_comparison(MUTABLE self: MIRLowering, 
     MUTABLE tag_target: Emittable = tag_target_branch_value?;
     RETURN MIRBinOp{ op: COPY UNWRAP (plan.op_str), left: Emittable{ Call: COPY TRY (mIRLowering__active_tag_call(&self, tag_target)) }, right: Emittable{ EnumTag: COPY EnumTag{ variant: COPY (UNWRAP (plan.variant)).variant_name } }, lowered_node_id: NIL, ownership_consumption: NIL };
 END
-PRIVATE FN mIRLowering__raise_union_equality_error(self: MIRLowering, plan: BinaryOperationPlan) RETURNS Void ->
+PRIVATE FN mIRLowering__raise_union_equality_error(self: MIRLowering, plan: BinaryOperationPlan) RETURNS Emittable ->
     MUTABLE type_name = COPY symbol(UNWRAP (plan.union_error_type));
     panic("{}work on tagged unions. Either compare against a unit variant {}std.meta.activeTag(s) == .Variant -- or use a MATCH expression to discriminate the active variant.\\n(See transpile-tests/255_union_equality.clear.)");
 END
