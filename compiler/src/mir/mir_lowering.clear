@@ -16498,11 +16498,12 @@ PRIVATE FN mIRLowering__ownership_marks_for_transferred_temp(MUTABLE self: MIRLo
       IF !((guarded OR cleanupEntry__present?(entry))) THEN
         RETURN CAST(List[] AS []Emittable);
       END
-      MUTABLE alloc = (target_alloc OR_ELSE (IF cleanupEntry__present?(entry) THEN
-        cleanupEntry__alloc(entry)
-      ELSE
-        :heap
-      END));
+      MUTABLE alloc: String@symbol = :heap;
+      IF target_alloc EXISTS AS rtoc_target_alloc THEN
+        alloc = COPY rtoc_target_alloc;
+      ELSE_IF cleanupEntry__present?(entry) THEN
+        alloc = COPY cleanupEntry__alloc(entry);
+      END
       RETURN TRY (mIRLowering__ownership_transfer_marks(&self, name, :owned_sink, alloc, guarded));
     ELSE
       RETURN CAST(List[] AS []Emittable);
