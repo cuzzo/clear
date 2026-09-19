@@ -14382,14 +14382,11 @@ PRIVATE FN mIRLowering__lower_raise(MUTABLE self: MIRLowering, node: Raise) RETU
     ELSE
       Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }
     END;
-    MUTABLE msg_expr_branch_value: ?Lit = NIL;
+    MUTABLE msg_expr: Emittable = Emittable{ Lit: COPY Lit{ value: "\"\"", lowered_node_id: NIL, ownership_consumption: NIL } };
     IF node.message_expr EXISTS AS MUTABLE rtoc_message_expr_present THEN
-      msg_expr_branch_value = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge(rtoc_message_expr_present)));
-    ELSE
-      msg_expr_branch_value = Lit{ value: "\"\"", lowered_node_id: NIL, ownership_consumption: NIL };
+      msg_expr = UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge(rtoc_message_expr_present))));
     END
-    MUTABLE msg_expr: Lit = msg_expr_branch_value?;
-    MUTABLE line = COPY node.token.line;
+    MUTABLE line: String = node.token.line.toString();
     MUTABLE set_error = MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "setError", args: [CAST(EnumTag{ variant: COPY kind } AS Any), CAST(name_expr AS Any), CAST(msg_expr AS Any), CAST(Lit{ value: COPY line, lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(4)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     MUTABLE ret = ReturnStmt{ value: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "error", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "CheatError", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     RETURN ScopeBlock{ body: COPY [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ MIRMethodCall: COPY set_error }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ ReturnStmt: COPY ret }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
