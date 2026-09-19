@@ -14125,16 +14125,17 @@ END
 PRIVATE FN mIRLowering__lower_range_lit(MUTABLE self: MIRLowering, node: RangeLit) RETURNS !MIRRangeLit ->
     MUTABLE s: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.start)));
     MUTABLE e: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.finish)));
-    MUTABLE elem_type: ?String@symbol = (IF TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ RangeLit: COPY node }))))) != NIL THEN
-      type__resolved((TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ RangeLit: COPY node }))))))))))
-    ELSE
-      NIL
-    END);
+    # `tense_type&.element_type&.resolved` -- each link is optional, and the
+    # CLEAR tense_type is not, so the nil test it was given never typed.
+    MUTABLE elem_type: ?String@symbol = NIL;
+    IF TRY (type__element_type((TRY (type__tense_type((TRY (aST__full_type_mut(Locatable{ RangeLit: COPY node }))))))) ) EXISTS AS rtoc_elem THEN
+      elem_type = type__resolved(rtoc_elem);
+    END
     MUTABLE range_branch_value: ?MIRRangeLit = NIL;
     IF node.inclusive THEN
-      range_branch_value = MIRRangeLit{ start: UNWRAP (COPY s), end_val: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: UNWRAP (COPY e), right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, elem_type: elem_type, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+      range_branch_value = MIRRangeLit{ start: UNWRAP (COPY s), end_val: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "+", left: UNWRAP (COPY e), right: Emittable{ Lit: COPY Lit{ value: "1", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, elem_type: UNWRAP (elem_type), lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     ELSE
-      range_branch_value = MIRRangeLit{ start: UNWRAP (COPY s), end_val: UNWRAP (COPY e), elem_type: elem_type, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+      range_branch_value = MIRRangeLit{ start: UNWRAP (COPY s), end_val: UNWRAP (COPY e), elem_type: UNWRAP (elem_type), lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     END
     MUTABLE range: MIRRangeLit = range_branch_value?;
     range.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(Locatable{ RangeLit: COPY node })) }));
@@ -14172,11 +14173,18 @@ PRIVATE FN mIRLowering__lower_assert(MUTABLE self: MIRLowering, MUTABLE node: As
     MUTABLE cond: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.condition)));
     MUTABLE raw = node.message;
     MUTABLE msg_str: String = "";
-    IF (((FALSE) OR (raw == :Any)) OR raw.empty?()) THEN
-      msg_str = "assertion failed";
-    ELSE
-      msg_str = COPY CAST(raw AS String);
-    END
+    msg_str = "assertion failed";
+    PARTIAL MATCH raw START
+        AssertMessage.StringValue AS rtoc_raw_text ->
+          IF (rtoc_raw_text.codepointCount() > 0) THEN
+            msg_str = COPY rtoc_raw_text;
+          END,
+        AssertMessage.SymbolValue AS rtoc_raw_sym ->
+          IF (rtoc_raw_sym != :Any) THEN
+            msg_str = COPY CAST(rtoc_raw_sym AS String);
+          END,
+        DEFAULT -> PASS;
+      END
     MUTABLE msg = msg_str.replace("\"", "\\\"");
     RETURN MIRLoweringReturnValue{ AssertStmt: COPY AssertStmt{ cond: UNWRAP (COPY cond), message: "\"${msg}\"", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
 END
