@@ -14556,7 +14556,7 @@ PRIVATE FN mIRLowering__lower_clone(MUTABLE self: MIRLowering, MUTABLE node: Kee
     END
     MUTABLE lifecycle = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), UNWRAP (ti)));
     IF (lifecycle.copy_strategy == :bit_copy) THEN
-      RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value))), zig_type: NIL, elem_type: NIL, strategy: :passthrough, alloc: NIL, copy_shape: deepCopy__copy_shape_for_zig_type(NIL), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
+      RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)))), zig_type: NIL, elem_type: NIL, strategy: :passthrough, alloc: NIL, copy_shape: deepCopy__copy_shape_for_zig_type(NIL), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     IF !((lifecycle.copy_strategy == :retain)) THEN
       panic("annotation admitted KEEP without retain lifecycle for {}");
@@ -14571,7 +14571,7 @@ PRIVATE FN mIRLowering__lower_clone(MUTABLE self: MIRLowering, MUTABLE node: Kee
         func = "rcRetain";
       END
       MUTABLE retained = RcRetain{ source: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_base: TRY (mIRLowering__rc_payload_zig_type(self, wrapped)), func: COPY func, lowered_node_id: NIL, ownership_consumption: NIL };
-      MUTABLE cloned = IfOptional{ optional: COPY TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value))), capture: COPY capture, then_expr: Emittable{ RcRetain: COPY retained }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+      MUTABLE cloned = IfOptional{ optional: COPY UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)))), capture: COPY capture, then_expr: Emittable{ RcRetain: COPY retained }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
       cloned.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (ti)}));
       RETURN Emittable{ IfOptional: COPY cloned };
     END
@@ -15127,20 +15127,20 @@ END
 PRIVATE FN mIRLowering__hash_literal_put_stmt(MUTABLE self: MIRLowering, MUTABLE key_node: Locatable, MUTABLE val_node: Locatable, plan: HashLiteralPlan, alloc_expr: MIRMethodCall, hm_name: String) RETURNS !ExprStmt ->
     MUTABLE key_mir: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(key_node)));
     MUTABLE value_type = TRY (type__value_type(plan.type_info));
-    MUTABLE raw_value = mIRLowering__with_decl_alloc(&self, plan.alloc, %() USE(plan, val_node, value_type, MUTABLE self) -> {
-    MUTABLE lowered_branch_value: ?U = NIL;
+    MUTABLE raw_value = mIRLowering__with_decl_alloc(&self, plan.alloc, %() USE(plan, MUTABLE val_node, value_type, MUTABLE self) -> {
+    MUTABLE lowered_branch_value: ?Emittable = NIL;
       IF value_type THEN
-        lowered_branch_value = mIRLowering__with_expected_type(&self, value_type, %() USE(val_node, MUTABLE self) -> {
+        lowered_branch_value = mIRLowering__with_expected_type(&self, value_type, %() USE(MUTABLE val_node, MUTABLE self) -> {
       MUTABLE rtoc_lambda_result_646: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(val_node)));
       rtoc_lambda_result_646
         });
       ELSE
         lowered_branch_value = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(val_node)));
       END
-    MUTABLE lowered: U = lowered_branch_value?;
-    MUTABLE placed: Emittable = lowered;
+    MUTABLE lowered: ?Emittable = lowered_branch_value;
+    MUTABLE placed: Emittable = COPY UNWRAP (lowered);
     IF value_type THEN
-      placed = COPY TRY (mIRLowering__place_value_for_destination(&self, &lowered, &val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }));
+      placed = COPY TRY (mIRLowering__place_value_for_destination(&self, COPY UNWRAP (lowered), &val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }));
     END
     TRY (mIRLowering__materialize_owned_sink_value(&self, placed, val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }))
     });
