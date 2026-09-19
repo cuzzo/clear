@@ -14084,15 +14084,15 @@ PRIVATE FN mIRLowering__lower_block_expr(MUTABLE self: MIRLowering, node: BlockE
         IF cleanupEntry__needs_cleanup?(entry_value) THEN
         cleanupEntry__mark_moved_guard_mut( UNWRAP (entry));
         MUTABLE rtoc_index_receiver_595 = mIRLowering__function_state(&self).guarded_cleanup_names;
-        rtoc_index_receiver_595[transfer_name] = TRUE;
+        rtoc_index_receiver_595[UNWRAP (transfer_name)] = TRUE;
       END
       END
     END
     MUTABLE body = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(node.body)));
     IF node.result EXISTS AS optional_value_value THEN
       MUTABLE optional_value_value_mutable = COPY optional_value_value;
-      MUTABLE result, result_hoists = mIRLowering__lower_head(&self, %() USE(node, MUTABLE self) -> {
-    rtoc_lambda_result_596 = TRY (mIRLowering__lower(&self, castOptionalLocatableToMIRLoweringLowerableStmt(optional_value_value_mutable)));
+      MUTABLE result, result_hoists = mIRLowering__lower_head(&self, %() USE(node, MUTABLE optional_value_value_mutable, MUTABLE self) -> {
+    MUTABLE rtoc_lambda_result_596: ?Emittable = TRY (mIRLowering__lower(&self, castOptionalLocatableToMIRLoweringLowerableStmt(optional_value_value_mutable)));
     rtoc_lambda_result_596
       });
       body = ruby_array_concat_Emittable__mir_lowering(body, CAST(result_hoists AS []Emittable));
@@ -14412,13 +14412,15 @@ PRIVATE FN mIRLowering__copy_source_type_info(self: MIRLowering, source: Locatab
         RETURN COPY elem_value;
       END
     END
-    MUTABLE sym_type =   IF (IF source IS_A Identifier AS identifier THEN TRUE ELSE FALSE END) THEN
-      symbolEntry__type(UNWRAP (locatable__symbol(source)))
-    ELSE
-      NIL
-    END;
-    IF (sym_type IS_A Type AND !(type__untyped?(sym_type))) THEN
-      RETURN sym_type;
+    # Ruby reads the symbol's type only when the source is an identifier that
+    # has one, and keeps it only when it is a resolved Type.
+    IF source IS_A Identifier THEN
+      IF locatable__symbol(source) EXISTS AS rtoc_source_symbol THEN
+        MUTABLE sym_type: Type = symbolEntry__type(rtoc_source_symbol);
+        IF !(type__untyped?(sym_type)) THEN
+          RETURN sym_type;
+        END
+      END
     END
     RETURN TRY (type__from_node_mut(source, "COPY value"));
 END
@@ -14703,7 +14705,7 @@ PRIVATE FN mIRLowering__lower_resolve(MUTABLE self: MIRLowering, node: ResolveNo
     MUTABLE inner: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     MUTABLE ti = TRY (aST__full_type_mut(node.value));
     MUTABLE base = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ StringValue: COPY CAST(type__resolved(ti) AS String) }));
-    MUTABLE source = (type__link_source(ti) OR :multiowned);
+    MUTABLE source: String@symbol = (type__link_source(ti) OR_ELSE :multiowned);
     MUTABLE func: String = "";
     IF (source == :shared) THEN
       func = "weakArcUpgrade";
