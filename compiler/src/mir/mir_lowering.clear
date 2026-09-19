@@ -15111,15 +15111,15 @@ PRIVATE FN mIRLowering__list_literal_plan(MUTABLE self: MIRLowering, node: ListL
     END
     MUTABLE elem_ti: ?Type = elem_ti_branch_value;
     MUTABLE requested_alloc = (mIRLowering__function_state(&self).current_decl_alloc OR_ELSE TRY (mIRLowering__alloc_for_node(&self, Locatable{ ListLit: COPY node })));
-    RETURN ListLiteralPlan{ type_info: COPY type_info, alloc: COPY requested_alloc, element_type: COPY elem_ti, element_zig: COPY IF elem_ti != NIL THEN
-      TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY elem_ti }))
-    ELSE
-      "u8"
-    END, element_needs_owned_storage: IF elem_ti != NIL THEN
-      TRY (type__recursive_cleanup_shape?(elem_ti, mIRLowering__mir_schema_lookup(&self)))
-    ELSE
-      FALSE
-    END };
+    # An owned String does not leave an IF expression implicitly; both fields
+    # default to the no-element answer and only differ when there is one.
+    MUTABLE rtoc_element_zig: String = "u8";
+    MUTABLE rtoc_needs_owned: Bool = FALSE;
+    IF elem_ti EXISTS AS rtoc_elem_ti THEN
+      rtoc_element_zig = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY rtoc_elem_ti }));
+      rtoc_needs_owned = TRY (type__recursive_cleanup_shape?(rtoc_elem_ti, mIRLowering__mir_schema_lookup(&self)));
+    END
+    RETURN ListLiteralPlan{ type_info: COPY type_info, alloc: COPY requested_alloc, element_type: COPY elem_ti, element_zig: COPY rtoc_element_zig, element_needs_owned_storage: rtoc_needs_owned };
 END
 PRIVATE FN mIRLowering__hash_literal_plan(MUTABLE self: MIRLowering, node: HashLit) RETURNS !HashLiteralPlan ->
     MUTABLE expected_ti: ?Type = TRY (type__from_node(mIRLowering__function_state(&self).current_expected_type));
@@ -15199,19 +15199,20 @@ PRIVATE FN mIRLowering__compose_capability_wrap(self: MIRLowering, inner_mir: Em
     MUTABLE is_atomic_ptr = type__atomic_ptr?(ft);
     MUTABLE sync_fn: ?String = mIRLowering__sync_wrap_constructor(self, type__sync(ft), is_atomic_ptr);
     MUTABLE sync_t: ?String = mIRLowering__sync_wrap_type(self, type__sync(ft), bare_zig_t, is_atomic_ptr);
-    MUTABLE own_fn = PARTIAL MATCH type__ownership(ft) START
-      :shared -> (IF type__atomic?(ft) THEN
-          NIL
-        ELSE
-          "arcCreate"
-        END),
-      :multiowned -> (IF type__atomic?(ft) THEN
-          NIL
-        ELSE
-          "rcCreate"
-        END),
-      DEFAULT -> NIL
-    END;
+    # A MATCH whose arms are optional strings has no implicitly copyable
+    # result; the statement form assigns each arm.
+    MUTABLE own_fn: ?String = NIL;
+    PARTIAL MATCH type__ownership(ft) START
+      :shared ->
+        IF !(type__atomic?(ft)) THEN
+          own_fn = "arcCreate";
+        END,
+      :multiowned ->
+        IF !(type__atomic?(ft)) THEN
+          own_fn = "rcCreate";
+        END,
+      DEFAULT -> PASS;
+    END
     IF ((sync_fn != NIL) AND own_fn) THEN
       RETURN Emittable{ CapWrap: COPY CapWrap{ inner: COPY inner_mir, zig_base: COPY bare_zig_t, strategy: :both, sync_fn: COPY sync_fn, sync_type: COPY sync_t, own_fn: COPY own_fn, alloc: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE_IF sync_fn THEN
