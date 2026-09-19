@@ -1,0 +1,103 @@
+# A pipeline element expression is a per-iteration body: `_` is the loop
+# capture. An allocating sub-expression inside it used to hoist to the
+# ENCLOSING statement, outside the loop, and the emitted Zig then read an
+# undeclared `it`. Covers the materializing ops (WHERE, UNNEST) and the
+# scalar folds (COUNT, SUM), which share the element-lowering path.
+
+STRUCT Decl { n: Int64 }
+UNION Item { Decl: Decl, ArrayValue: []Decl }
+UNION Raw { Decl: Decl, ArrayValue: []Item }
+
+FN to_raw(value: Item) RETURNS Raw ->
+  PARTIAL MATCH value START
+    Item.Decl AS d -> RETURN Raw{ Decl: COPY d };,
+    DEFAULT -> RETURN Raw{ Decl: Decl{ n: 0 } };
+  END
+  RETURN Raw{ Decl: Decl{ n: 0 } };
+END
+
+FN coerce(raw: Raw) RETURNS ![]Decl EFFECTS REENTRANT ->
+  MUTABLE out: []Decl = List[];
+  PARTIAL MATCH raw START
+    Raw.Decl AS d -> &out.append(COPY d);,
+    DEFAULT -> PASS;
+  END
+  RETURN out;
+END
+
+UNION Input { Decl: Decl, ArrayValue: []Item }
+
+FN one(raw: Raw) RETURNS !Int64 EFFECTS REENTRANT ->
+  RETURN 1;
+END
+
+FN ok(raw: Raw) RETURNS !Bool EFFECTS REENTRANT ->
+  RETURN TRUE;
+END
+
+FN run_where(raw: ?Input) RETURNS ![]Item EFFECTS REENTRANT ->
+  IF raw EXISTS AS rv THEN
+    IF rv IS_A []Item AS array THEN
+      RETURN array |> WHERE TRY (ok(to_raw(_)));
+    END
+    panic("nope");
+  ELSE
+    MUTABLE empty: []Item = List[];
+    RETURN empty;
+  END
+END
+
+FN run_count(raw: ?Input) RETURNS !Int64 EFFECTS REENTRANT ->
+  IF raw EXISTS AS rv THEN
+    IF rv IS_A []Item AS array THEN
+      RETURN array |> COUNT TRY (ok(to_raw(_)));
+    END
+    panic("nope");
+  ELSE
+    RETURN 0;
+  END
+END
+
+FN run_sum(raw: ?Input) RETURNS !Int64 EFFECTS REENTRANT ->
+  IF raw EXISTS AS rv THEN
+    IF rv IS_A []Item AS array THEN
+      RETURN array |> SUM TRY (one(to_raw(_)));
+    END
+    panic("nope");
+  ELSE
+    RETURN 0;
+  END
+END
+
+FN run_unnest(raw: ?Input) RETURNS ![]Decl EFFECTS REENTRANT ->
+  IF raw EXISTS AS raw_value THEN
+    IF raw_value IS_A []Item AS array THEN
+      RETURN array |> UNNEST TRY (coerce(to_raw(_)));
+    END
+    panic("nope");
+  ELSE
+    MUTABLE empty: []Decl = List[];
+    RETURN empty;
+  END
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE items: []Item = List[];
+  &items.append(Item{ Decl: Decl{ n: 7 } });
+  ASSERT TRY (run_count(Input{ ArrayValue: COPY items })) == 1_i64, "count";
+  ASSERT TRY (run_sum(Input{ ArrayValue: COPY items })) == 1_i64, "sum";
+  MUTABLE w: []Item = TRY (run_where(Input{ ArrayValue: COPY items }));
+  MUTABLE u: []Decl = TRY (run_unnest(Input{ ArrayValue: COPY items }));
+  MUTABLE wn: Int64 = 0;
+  FOR x IN w DO
+    wn = wn + 1;
+  END
+  MUTABLE un: Int64 = 0;
+  FOR d IN u DO
+    ASSERT d.n == 7_i64, "unnest element";
+    un = un + 1;
+  END
+  ASSERT wn == 1_i64, "where count";
+  ASSERT un == 1_i64, "unnest count";
+  RETURN;
+END

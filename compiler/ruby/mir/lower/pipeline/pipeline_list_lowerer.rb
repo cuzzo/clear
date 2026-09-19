@@ -30,6 +30,7 @@ class PipelineListLowerer < T::Struct
   const :visit_mir, T.proc.params(node: AST::Node).returns(MIR::Node)
   const :visit_expr, T.proc.params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node)
   const :visit_expr_head, T.proc.params(expr_node: AST::Node, placeholder: String, alloc: Symbol).returns(PipelineElementHead)
+  const :visit_element_head, T.proc.params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(PipelineElementHead)
   const :visit_reduce_expr, T.proc.params(expr_node: AST::Node, item_placeholder: String, acc_placeholder: String).returns(MIR::Node)
   const :visit_body, T.proc.params(body_stmts: T::Array[AST::Node], placeholder: String).returns(T::Array[MIR::Emittable])
   const :visit_join_lambda, T.proc.params(body: AST::Node, join_params: T::Hash[String, String]).returns(MIR::Node)
@@ -100,14 +101,15 @@ class PipelineListLowerer < T::Struct
     elem_type = T.must(list_node.full_type!.element_type).resolved.to_s
     elem_zig = self.transpile_type.call(elem_type)
     alloc = self.pipeline_alloc.call(smooth_node)
-    pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
+    pred_head = visit_pipeline_expr_mir(list_node, expr_node)
     self.pipeline_block.call(list_node, lambda do |items, label|
       res = result_binding_name(label)
       [
         MIR::Let.new(res,
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("matches", pred_mir, false, nil, nil),
+          *pred_head.pending,
+          MIR::Let.new("matches", pred_head.value, false, nil, nil),
           MIR::IfStmt.new(MIR::Ident.new("matches"), [
             self.append_owned_value_stmt.call(res, alloc,
               self.borrowed_pipeline_value.call(MIR::Ident.new("it"), Type.new(elem_type), alloc)),
@@ -295,14 +297,15 @@ class PipelineListLowerer < T::Struct
     elem_type = T.must(list_node.full_type!.element_type).resolved.to_s
     elem_zig = self.transpile_type.call(elem_type)
     alloc = self.pipeline_alloc.call(smooth_node)
-    pred_mir = visit_pipeline_expr_mir(list_node, expr_node)
+    pred_head = visit_pipeline_expr_mir(list_node, expr_node)
     self.pipeline_block.call(list_node, lambda do |items, label|
       res = result_binding_name(label)
       [
         MIR::Let.new(res,
           MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("matches", pred_mir, false, nil, nil),
+          *pred_head.pending,
+          MIR::Let.new("matches", pred_head.value, false, nil, nil),
           MIR::IfStmt.new(MIR::UnaryOp.new("!", MIR::Ident.new("matches")),
             [MIR::BreakStmt.new(nil, nil)], nil),
           self.append_owned_value_stmt.call(res, alloc,
@@ -362,7 +365,8 @@ class PipelineListLowerer < T::Struct
     alloc = self.pipeline_alloc.call(smooth_node)
     elem_ti = Type.new(inner_elem_type)
     inner_list_ti = Type.new(unnest_node.expression.full_type!)
-    expr_mir = visit_pipeline_expr_mir(list_node, unnest_node.expression)
+    expr_head = visit_pipeline_expr_mir(list_node, unnest_node.expression)
+    expr_mir = expr_head.value
     # A per-item inner list produced by the UNNEST expression (`_.split(":")`,
     # a list literal) is an OWNED per-iteration transient: it gets a
     # first-class lifecycle (AllocMark + Cleanup, freed each iteration after
@@ -372,7 +376,7 @@ class PipelineListLowerer < T::Struct
     # every other materializing op's borrowed-element path.
     inner_owned = MIR::OwnershipEffect.of(expr_mir).produces_owned ||
       expr_mir.is_a?(MIR::MakeList)
-    inner_stmts = T.let([], T::Array[MIR::Emittable])
+    inner_stmts = T.let(expr_head.pending.dup, T::Array[MIR::Emittable])
     if inner_owned
       entry = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: false,
         zig_type: inner_list_ti.zig_type)
@@ -604,9 +608,14 @@ class PipelineListLowerer < T::Struct
     ])
   end
 
-  sig { params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node) }
+  # An element expression is a PER-ITERATION body: `_` is the loop capture.
+  # Lower it in its own pending-statement scope so an allocating
+  # sub-expression materializes inside the loop, where that capture is in
+  # scope -- flushing it to the enclosing statement strands the placeholder
+  # and the emitted Zig reads an undeclared `it`.
+  sig { params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(PipelineElementHead) }
   def visit_pipeline_expr_mir(list_node, expr_node, placeholder = "it")
-    self.visit_expr.call(list_node, expr_node, placeholder)
+    self.visit_element_head.call(list_node, expr_node, placeholder)
   end
 
   sig { params(list_node: AST::Node, join_node: AST::JoinOp).returns(MIR::Node) }

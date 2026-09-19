@@ -23,7 +23,7 @@ end
 
 class PipelineScalarLowerer < T::Struct
   extend T::Sig
-  const :visit_expr, T.proc.params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node)
+  const :visit_expr_head, T.proc.params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(PipelineElementHead)
   const :pipeline_block, T.proc.params(list_node: AST::Node, blk: T.proc.params(items: String, label: String).returns(T::Array[MIR::Emittable])).returns(MIR::BlockExpr)
   const :transpile_type, T.proc.params(type_info: PipelineTypeInput).returns(String)
   const :loop_mark_stmts, T.proc.returns(T::Array[MIR::Emittable])
@@ -56,11 +56,14 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, count_node: AST::CountOp).returns(MIR::BlockExpr) }
   def lower_count(site, count_node)
     list_node = site.list
-    pred_mir = visit_pipeline_expr_mir(list_node, count_node.expression)
+    pred_mir_head = visit_pipeline_expr_mir(list_node, count_node.expression)
+    pred_mir = pred_mir_head.value
+    element_pending = pred_mir_head.pending
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("count_result", MIR::Lit.new("0"), true, Type.new("i64"), nil),
         scalar_loop(MIR::Ident.new(items), "it", [
+          *element_pending,
           MIR::IfStmt.new(pred_mir, [
             MIR::Set.new(MIR::Ident.new("count_result"),
               MIR::BinOp.new("+", MIR::Ident.new("count_result"), MIR::Lit.new("1"))),
@@ -74,13 +77,16 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, sum_node: AST::SumOp).returns(MIR::BlockExpr) }
   def lower_sum(site, sum_node)
     list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, sum_node.expression)
+    expr_mir_head = visit_pipeline_expr_mir(list_node, sum_node.expression)
+    expr_mir = expr_mir_head.value
+    element_pending = expr_mir_head.pending
     result_type = Type.new(site.options.full_type!)
     zero = result_type.integer? ? "0" : "0.0"
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("sum_result", MIR::Lit.new(zero), true, result_type, nil),
         scalar_loop(MIR::Ident.new(items), "it", [
+          *element_pending,
           MIR::Set.new(MIR::Ident.new("sum_result"),
             MIR::BinOp.new("+", MIR::Ident.new("sum_result"), expr_mir)),
         ], nil),
@@ -92,12 +98,15 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, avg_node: AST::AverageOp).returns(MIR::BlockExpr) }
   def lower_average(site, avg_node)
     list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, avg_node.expression)
+    expr_mir_head = visit_pipeline_expr_mir(list_node, avg_node.expression)
+    expr_mir = expr_mir_head.value
+    element_pending = expr_mir_head.pending
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("avg_sum", MIR::Lit.new("0"), true, Type.new("f64"), nil),
         MIR::Let.new("avg_count", MIR::FieldGet.new(MIR::Ident.new(items), "len"), false, nil, nil),
         scalar_loop(MIR::Ident.new(items), "it", [
+          *element_pending,
           MIR::Set.new(MIR::Ident.new("avg_sum"),
             MIR::BinOp.new("+", MIR::Ident.new("avg_sum"), expr_mir)),
         ], nil),
@@ -114,7 +123,9 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, min_node: AST::MinOp).returns(MIR::BlockExpr) }
   def lower_min(site, min_node)
     list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, min_node.expression)
+    expr_mir_head = visit_pipeline_expr_mir(list_node, min_node.expression)
+    expr_mir = expr_mir_head.value
+    element_pending = expr_mir_head.pending
     result_type = Type.new(min_node.expression.full_type!)
     zig_type = result_type.zig_type
     self.pipeline_block.call(list_node, lambda do |items, label|
@@ -128,6 +139,7 @@ class PipelineScalarLowerer < T::Struct
         MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, zig_type),
           true, result_type, nil),
         scalar_loop(MIR::Ident.new(items), "it", [
+          *element_pending,
           MIR::Let.new("min_val", expr_mir, false, nil, nil),
           MIR::IfStmt.new(
             MIR::BinOp.new("<", MIR::Ident.new("min_val"), MIR::Ident.new("min_result")),
@@ -142,7 +154,9 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, max_node: AST::MaxOp).returns(MIR::BlockExpr) }
   def lower_max(site, max_node)
     list_node = site.list
-    expr_mir = visit_pipeline_expr_mir(list_node, max_node.expression)
+    expr_mir_head = visit_pipeline_expr_mir(list_node, max_node.expression)
+    expr_mir = expr_mir_head.value
+    element_pending = expr_mir_head.pending
     result_type = Type.new(max_node.expression.full_type!)
     zig_type = result_type.zig_type
     sentinel = result_type.unsigned_integer? ? MIR::Lit.new("0") : MIR::TypeSentinel.new(:min, zig_type)
@@ -157,6 +171,7 @@ class PipelineScalarLowerer < T::Struct
         MIR::Let.new("max_result", sentinel,
           true, result_type, nil),
         scalar_loop(MIR::Ident.new(items), "it", [
+          *element_pending,
           MIR::Let.new("max_val", expr_mir, false, nil, nil),
           MIR::IfStmt.new(
             MIR::BinOp.new(">", MIR::Ident.new("max_val"), MIR::Ident.new("max_result")),
@@ -171,11 +186,14 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, any_node: AST::AnyOp).returns(MIR::BlockExpr) }
   def lower_any(site, any_node)
     list_node = site.list
-    pred_mir = visit_pipeline_expr_mir(list_node, any_node.expression)
+    pred_mir_head = visit_pipeline_expr_mir(list_node, any_node.expression)
+    pred_mir = pred_mir_head.value
+    element_pending = pred_mir_head.pending
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("any_result", MIR::Lit.new("false"), true, nil, nil),
         scalar_loop(MIR::Ident.new(items), "it", [
+          *element_pending,
           MIR::IfStmt.new(pred_mir, [
             MIR::Set.new(MIR::Ident.new("any_result"), MIR::Lit.new("true")),
             MIR::BreakStmt.new(nil, nil),
@@ -189,11 +207,14 @@ class PipelineScalarLowerer < T::Struct
   sig { params(site: PipelineSite, all_node: AST::AllOp).returns(MIR::BlockExpr) }
   def lower_all(site, all_node)
     list_node = site.list
-    pred_mir = visit_pipeline_expr_mir(list_node, all_node.expression)
+    pred_mir_head = visit_pipeline_expr_mir(list_node, all_node.expression)
+    pred_mir = pred_mir_head.value
+    element_pending = pred_mir_head.pending
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("all_result", MIR::Lit.new("true"), true, nil, nil),
         scalar_loop(MIR::Ident.new(items), "it", [
+          *element_pending,
           MIR::IfStmt.new(MIR::UnaryOp.new("!", pred_mir), [
             MIR::Set.new(MIR::Ident.new("all_result"), MIR::Lit.new("false")),
             MIR::BreakStmt.new(nil, nil),
@@ -208,13 +229,16 @@ class PipelineScalarLowerer < T::Struct
   def lower_find(site, find_node)
     list_node = site.list
     elem_zig_type = self.transpile_type.call(T.must(list_node.full_type!.element_type).resolved.to_s)
-    pred_mir = visit_pipeline_expr_mir(list_node, find_node.expression)
+    pred_mir_head = visit_pipeline_expr_mir(list_node, find_node.expression)
+    pred_mir = pred_mir_head.value
+    element_pending = pred_mir_head.pending
     self.pipeline_block.call(list_node, lambda do |items, label|
       [
         MIR::Let.new("find_result",
           MIR::Undef.new(nil), true, Type.new(elem_zig_type), nil),
         MIR::Let.new("find_found", MIR::Lit.new("false"), true, nil, nil),
         scalar_loop(MIR::Ident.new(items), "it", [
+          *element_pending,
           MIR::Let.new("find_matches", pred_mir, false, nil, nil),
           MIR::IfStmt.new(MIR::Ident.new("find_matches"), [
             MIR::Set.new(MIR::Ident.new("find_result"), MIR::Ident.new("it")),
@@ -231,9 +255,14 @@ class PipelineScalarLowerer < T::Struct
     end)
   end
 
-  sig { params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(MIR::Node) }
+  # An element expression is a PER-ITERATION body: `_` is the loop capture.
+  # Lower it in its own pending-statement scope so an allocating
+  # sub-expression materializes inside the loop, where that capture is in
+  # scope -- flushing it to the enclosing statement strands the placeholder
+  # and the emitted Zig reads an undeclared `it`.
+  sig { params(list_node: AST::Node, expr_node: AST::Node, placeholder: String).returns(PipelineElementHead) }
   def visit_pipeline_expr_mir(list_node, expr_node, placeholder = "it")
-    self.visit_expr.call(list_node, expr_node, placeholder)
+    self.visit_expr_head.call(list_node, expr_node, placeholder)
   end
 
   # A scalar pipeline accumulates into a scalar, so anything its body allocates

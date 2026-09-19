@@ -1950,6 +1950,9 @@ RSpec.describe "pipeline backend coverage" do
           end
         },
         visit_expr: ->(_list_node, _expr_node, placeholder) { MIR::Ident.new(placeholder) },
+        visit_element_head: ->(_list_node, _expr_node, placeholder) {
+          PipelineElementHead.new(value: MIR::Ident.new(placeholder), pending: [], owned: false)
+        },
         visit_expr_head: ->(_expr_node, placeholder, _alloc) {
           PipelineElementHead.new(value: MIR::Ident.new(placeholder), pending: [], owned: false)
         },

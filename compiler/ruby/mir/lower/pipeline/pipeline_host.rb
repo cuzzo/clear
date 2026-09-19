@@ -79,8 +79,8 @@ class PipelineHost
     PipelineScalarLowerer.new(
       loop_mark_stmts: -> { @lowering_bridge.pipeline_iteration_loop_marks },
       stamp_loop_scopes: ->(stmts, scope) { @lowering_bridge.pipeline_stamp_loop_scopes(stmts, scope) },
-      visit_expr: ->(_list_node, expr_node, placeholder) {
-        with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }
+      visit_expr_head: ->(_list_node, expr_node, placeholder) {
+        with_pipeline_context(placeholder: placeholder) { visit_mir_head(expr_node) }
       },
       pipeline_block: ->(list_node, blk) {
         pipeline_block(list_node) { |items, label| blk.call(items, label) }
@@ -95,6 +95,9 @@ class PipelineHost
       visit_mir: ->(node) { visit_mir(node) },
       visit_expr: ->(_list_node, expr_node, placeholder) {
         with_pipeline_context(placeholder: placeholder) { visit_mir(expr_node) }
+      },
+      visit_element_head: ->(_list_node, expr_node, placeholder) {
+        with_pipeline_context(placeholder: placeholder) { visit_mir_head(expr_node) }
       },
       visit_expr_head: ->(expr_node, placeholder, alloc) {
         # Owned field copies inside the element (COPY dup(_) in a composite)
