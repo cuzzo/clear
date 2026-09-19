@@ -15269,14 +15269,14 @@ PRIVATE FN mIRLowering__lower_module_const(MUTABLE self: MIRLowering, MUTABLE no
     MUTABLE rtoc_index_receiver_650 = TRY (functionState__binding_types(mIRLowering__function_state(&self)));
     rtoc_index_receiver_650[safe_name] = COPY facts.ft;
     MUTABLE heap_value, const_pending = mIRLowering__lower_head(&self, %() USE(MUTABLE node, MUTABLE self) -> {
-    rtoc_lambda_result_652 = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
-    rtoc_lambda_result_651 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
+    MUTABLE rtoc_lambda_result_652: ?Emittable = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
+    MUTABLE rtoc_lambda_result_651: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     rtoc_lambda_result_651
     });
     rtoc_lambda_result_652
     });
     IF ((facts.has_mir_drop OR TRY (mIRLowering__mir_allocates?(&self, heap_value))) OR (const_pending).any?()) THEN
-      RETURN TRY (mIRLowering__lower_runtime_init_const(self, node, facts, safe_name, heap_value, const_pending));
+      RETURN TRY (mIRLowering__lower_runtime_init_const(&self, node, facts, safe_name, UNWRAP (heap_value), const_pending));
     END
     self.state.function_state.pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(&self).pending_stmts, CAST(const_pending AS []Emittable));
     MUTABLE init = mIRLowering__with_decl_alloc(&self, facts.decl_alloc, %() USE(facts, MUTABLE node, MUTABLE self) -> TRY (mIRLowering__lower_var_decl_init(&self, &node, facts.ft, facts.bare_zig, facts.has_caps, facts.decl_alloc)));
@@ -15291,17 +15291,17 @@ PRIVATE FN mIRLowering__lower_module_global(MUTABLE self: MIRLowering, MUTABLE n
     MUTABLE rtoc_index_receiver_653 = TRY (functionState__binding_types(mIRLowering__function_state(&self)));
     rtoc_index_receiver_653[safe_name] = COPY facts.ft;
     MUTABLE heap_value, pending = mIRLowering__lower_head(&self, %() USE(MUTABLE node, MUTABLE self) -> {
-    rtoc_lambda_result_655 = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
-    rtoc_lambda_result_654 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
+    MUTABLE rtoc_lambda_result_655: ?Emittable = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
+    MUTABLE rtoc_lambda_result_654: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     rtoc_lambda_result_654
     });
     rtoc_lambda_result_655
     });
     IF ((facts.has_mir_drop OR TRY (mIRLowering__mir_allocates?(&self, heap_value))) OR (pending).any?()) THEN
-      RETURN TRY (mIRLowering__lower_runtime_init_const(self, node, facts, safe_name, heap_value, pending));
+      RETURN TRY (mIRLowering__lower_runtime_init_const(&self, node, facts, safe_name, UNWRAP (heap_value), pending));
     END
     self.state.function_state.pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(&self).pending_stmts, CAST(pending AS []Emittable));
-    RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY safe_name, init: COPY heap_value, mutable: TRUE, annotation: COPY facts.annotation, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
+    RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: COPY safe_name, init: COPY UNWRAP (heap_value), mutable: TRUE, annotation: COPY facts.annotation, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
 END
 PRIVATE FN mIRLowering__lower_runtime_init_const(MUTABLE self: MIRLowering, node: VarDecl, facts: VarDeclFacts, safe_name: String, value: Emittable, prelude: []Emittable) RETURNS !NodeRoot ->
     MUTABLE annotation: ?Type = COPY facts.annotation;
