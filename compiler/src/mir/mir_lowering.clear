@@ -16379,14 +16379,14 @@ PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, MUTABLE node
         rtoc_root_recv = Locatable{ Identifier: COPY rtoc_root_ident };
       END
       rtoc_root_recv })))
-    ELSE_IF (node.name IS_A String OR node.name IS_A Identifier) THEN
+    ELSE_IF (COPY node.name IS_A String OR COPY node.name IS_A Identifier) THEN
       {
     MUTABLE rtoc_value_block_marker = 0;
     MUTABLE raw_name: String = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_689: ?String = NIL;
-    IF node.name IS_A Identifier THEN
-      rtoc_ternary_value_689 = CAST(assignmentName__name(node.name) AS String);
+    IF COPY node.name IS_A Identifier THEN
+      rtoc_ternary_value_689 = CAST(assignmentName__name(COPY node.name) AS String);
     ELSE
-      rtoc_ternary_value_689 = CAST(node.name AS String);
+      rtoc_ternary_value_689 = CAST(COPY node.name AS String);
     END
     rtoc_ternary_value_689? };
     MUTABLE safe_name: String = TRY (mIRLowering__assignment_storage_name(&self, raw_name, FALSE));
@@ -16408,8 +16408,8 @@ PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, MUTABLE node
       cleanupEntry__alloc(entry)
     ELSE
       NIL
-    END) ELSE TRY (mIRLowering__mir_owned_alloc(&self, value)) END) ELSE (IF node.name IS_A Identifier THEN
-      TRY (mIRLowering__placement_for_node(&self, castAssignmentNameToLocatable__mir_lowering(node.name)))
+    END) ELSE TRY (mIRLowering__mir_owned_alloc(&self, value)) END) ELSE (IF COPY node.name IS_A Identifier THEN
+      TRY (mIRLowering__placement_for_node(&self, castAssignmentNameToLocatable__mir_lowering(COPY node.name)))
     ELSE
       NIL
     END) END)
@@ -16417,7 +16417,7 @@ PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, MUTABLE node
     ELSE
       NIL
     END;
-    TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ Set: COPY result }, &value, &node.value, "MIR::Set", :owned_sink, target_alloc));
+    TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ Set: COPY result }, COPY value, &node.value, "MIR::Set", :owned_sink, target_alloc));
     TRY (mIRLowering__mark_field_assignment_cleanup_mut(&self, &result, plan));
     RETURN Emittable{ Set: COPY result };
 END
