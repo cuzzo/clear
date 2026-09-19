@@ -14619,32 +14619,30 @@ PRIVATE FN mIRLowering__kept_identity_orelse_field_value(MUTABLE self: MIRLoweri
           MUTABLE default_ti:? = (TRY (type__from_node_mut(binary_op_mutable.right, "kept orelse default")));
           MUTABLE default_rc = ((default_ti != NIL) AND (TRY (type__any_rc?(default_ti)) == TRUE));
           IF (!(default_rc) AND TRUE) THEN
-            MUTABLE sig: ?FunctionSignature@multiowned = locatable__matched_signature(UNWRAP (locatable__right( Locatable{ BinaryOp: binary_op_mutable })));
+            MUTABLE sig: ?FunctionSignature@multiowned = locatable__matched_signature(UNWRAP (locatable__right( Locatable{ BinaryOp: COPY binary_op_mutable })));
             MUTABLE rt: ?Type@multiowned = NIL;
-            IF sig != NIL THEN
-              rt = COPY functionSignature__return_type(sig);
+            IF sig EXISTS AS rtoc_sig_rt THEN
+              rt = COPY functionSignature__return_type(rtoc_sig_rt);
             END
-            default_rc = IF rt != NIL THEN
-              ((TRY (type__any_rc?((TRY (type__new(TypeConstructionInput{ Type: COPY rt }))))) OR_ELSE FALSE))
-            ELSE
-              FALSE
-            END;
+            IF rt EXISTS AS rtoc_rt THEN
+              default_rc = TRY (type__any_rc?((TRY (type__new(TypeConstructionInput{ Type: COPY rtoc_rt })))));
+            END
           END
-          MUTABLE wrapped = mIRLowering__lower_scoped(&self, %() USE(alloc, bare, default_rc, expected_ft, binary_op_mutable, MUTABLE self) -> {
+          MUTABLE wrapped: Emittable = TRY (mIRLowering__lower_scoped(&self, %() USE(alloc, bare, default_rc, expected_ft, MUTABLE binary_op_mutable, MUTABLE self) -> {
     IF default_rc THEN
-      RETURN mIRLowering__hoist_alloc(&self, mIRLowering__with_expected_type(&self, expected_ft, %() USE(binary_op_mutable, MUTABLE self) -> {
+      RETURN mIRLowering__hoist_alloc(&self, UNWRAP (mIRLowering__with_expected_type(&self, expected_ft, %() USE(MUTABLE binary_op_mutable, MUTABLE self) -> {
         MUTABLE rtoc_lambda_result_613: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(binary_op_mutable.right)));
         rtoc_lambda_result_613
-      }), binary_op_mutable.right, TRUE);
+      })), &binary_op_mutable.right, TRUE);
     ELSE
-      MUTABLE default_mir = mIRLowering__with_expected_type(&self, bare, %() USE(binary_op_mutable, MUTABLE self) -> {
+      MUTABLE default_mir: ?Emittable = mIRLowering__with_expected_type(&self, bare, %() USE(MUTABLE binary_op_mutable, MUTABLE self) -> {
         MUTABLE rtoc_lambda_result_614: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(binary_op_mutable.right)));
         rtoc_lambda_result_614
       });
-      RETURN TRY (mIRLowering__hoist_alloc(&self, mIRLowering__compose_capability_wrap(self, default_mir, TRY (type__zig_type(bare)), UNWRAP (expected_ft), alloc), binary_op_mutable.right, TRUE));
+      RETURN TRY (mIRLowering__hoist_alloc(&self, mIRLowering__compose_capability_wrap(self, UNWRAP (default_mir), TRY (type__zig_type(bare)), UNWRAP (expected_ft), alloc), &binary_op_mutable.right, TRUE));
     END
     NIL
-          });
+          }));
           MUTABLE still_live = IF mIRLowering__kept_store_liveness(&self) THEN
             !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_616 = UNWRAP (mIRLowering__kept_store_liveness(&self));
           keptEdgeLiveness__last_use?(rtoc_local_receiver_616, identifier_mutable) })
@@ -14661,10 +14659,10 @@ PRIVATE FN mIRLowering__kept_identity_orelse_field_value(MUTABLE self: MIRLoweri
             out.result_type = handle_type;
             RETURN Emittable{ IfOptional: COPY out };
           ELSE
-            out = Orelse{ expr: Emittable{ Ident: COPY Ident{ name: mIRLowering__zig_safe_name(self, identifier__name(identifier_mutable)), lowered_node_id: NIL, ownership_consumption: NIL } }, fallback: COPY wrapped, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-            out.result_type = handle_type;
+            MUTABLE out_orelse = Orelse{ expr: Emittable{ Ident: COPY Ident{ name: mIRLowering__zig_safe_name(self, identifier__name(identifier_mutable)), lowered_node_id: NIL, ownership_consumption: NIL } }, fallback: COPY wrapped, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+            out_orelse.result_type = handle_type;
             TRY (mIRLowering__move_mark_field_mut(&self, Locatable{ Identifier: COPY identifier_mutable }));
-            RETURN TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ IfOptional: COPY out }, [mIRLowering__zig_safe_name(self, identifier__name(identifier_mutable))], "kept optional field store", :owned_sink, alloc));
+            RETURN TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ Orelse: COPY out_orelse }, [mIRLowering__zig_safe_name(self, identifier__name(identifier_mutable))], "kept optional field store", :owned_sink, alloc));
           END
         ELSE
           RETURN NIL;
