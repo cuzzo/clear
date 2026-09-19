@@ -11410,21 +11410,33 @@ PRIVATE FN mIRLowering__bg_capture_materialization(MUTABLE self: MIRLowering, na
     mIRLowering__context_init_field(self, MIRLoweringName{ StringValue: COPY _.name }, Emittable{ Ident: COPY init_val })
     }));
     MUTABLE setup_stmts = TRY (mIRLowering__capture_setup_stmts(self, caps.specs));
-    MUTABLE fresh_heap_cleanup_names = caps.specs |> SELECT:? (IF capture_close_plans.contains?(_.name) THEN NIL ELSE IF captureSpec__needs_moved_guard?(_) THEN
-      _.name
-    ELSE
-      NIL
-    END END) |> WHERE _ != NIL;
-    MUTABLE capture_finalizers = caps.specs |> SELECT:? (IF capture_close_plans.contains?(_.name) THEN NIL ELSE captureSpec__finalizer_mir_for(_, "__ctx_${names.id.toString()}") END) |> WHERE _ != NIL;
-    MUTABLE capture_frees = captured |> SELECT:? {
-    MUTABLE close_plan: ?ResourceClosePlan = COPY capture_close_plans[_._0];
-    (  IF close_plan THEN
-        CaptureCleanupAction{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${names.id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY _._0, lowered_node_id: NIL, ownership_consumption: NIL } }, cleanup_entry: cleanupEntry__build(:resource, :heap, FALSE, close_plan), allocator: NIL }
-      ELSE
-        NIL
-      END)
-    } |> WHERE _ != NIL;
-    RETURN BgCaptureMaterialization{ caps: COPY caps, capture_fields: COPY capture_fields, capture_inits: COPY capture_inits, fresh_heap_cleanup_names: COPY UNWRAP (fresh_heap_cleanup_names), capture_frees: COPY capture_frees, capture_finalizers: COPY capture_finalizers, promoted_decls: COPY setup_stmts };
+    # `filter_map` over the specs: only the guarded names that have no close
+    # plan, and the field that holds them is a plain list of names.
+    MUTABLE fresh_heap_cleanup_names: []String = List[];
+    FOR rtoc_spec IN caps.specs DO
+      IF !(capture_close_plans.contains?(rtoc_spec.name)) THEN
+        IF captureSpec__needs_moved_guard?(rtoc_spec) THEN
+          &fresh_heap_cleanup_names.append(COPY rtoc_spec.name);
+        END
+      END
+    END
+    MUTABLE capture_finalizers: []Emittable = List[];
+    FOR rtoc_fin_spec IN caps.specs DO
+      IF !(capture_close_plans.contains?(rtoc_fin_spec.name)) THEN
+        IF captureSpec__finalizer_mir_for(rtoc_fin_spec, "__ctx_${names.id.toString()}") EXISTS AS rtoc_finalizer THEN
+          &capture_finalizers.append(COPY rtoc_finalizer);
+        END
+      END
+    END
+    # `captured.filter_map { |name, _| ... }` walks a hash: CLEAR yields the
+    # key, and only the names with a close plan produce an action.
+    MUTABLE capture_frees: []CaptureCleanupAction = List[];
+    FOR rtoc_capture_name IN captured.keys() DO
+      IF capture_close_plans[rtoc_capture_name] EXISTS AS close_plan THEN
+        &capture_frees.append(CaptureCleanupAction{ target: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_${names.id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY rtoc_capture_name, lowered_node_id: NIL, ownership_consumption: NIL } }, cleanup_entry: cleanupEntry__build(:resource, :heap, FALSE, close_plan), allocator: NIL });
+      END
+    END
+    RETURN BgCaptureMaterialization{ caps: COPY caps, capture_fields: COPY capture_fields, capture_inits: COPY capture_inits, fresh_heap_cleanup_names: COPY fresh_heap_cleanup_names, capture_frees: COPY capture_frees, capture_finalizers: COPY capture_finalizers, promoted_decls: COPY setup_stmts };
 END
 PRIVATE FN mIRLowering__task_config_plan(self: MIRLowering, stack_size: ?String@symbol, computed_tier: ?String@symbol) RETURNS TaskConfigPlan ->
     MUTABLE lowerer: MIRLowering@multiowned = CAST(self AS MIRLowering@multiowned);
