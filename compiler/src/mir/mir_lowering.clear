@@ -9162,16 +9162,22 @@ PRIVATE FN mIRLowering__concrete_call_type_owned_return?(MUTABLE self: MIRLoweri
     RETURN TRY (mIRLowering__call_type_owned_return?(&self, ti, sig_obj));
 END
 PRIVATE FN mIRLowering__call_type_owned_return?(MUTABLE self: MIRLowering, ti_input: ?Type, sig_obj: ?FunctionSignature) RETURNS !Bool ->
-    MUTABLE ti = COPY ti_input;
-    ti = TRY (type__success_type( UNWRAP (ti)));
-    IF TRY (type__string?( UNWRAP (ti))) THEN
-      IF ( type__symbol?( UNWRAP (ti)) OR type__raw?( UNWRAP (ti))) THEN
+    IF !(ti_input) THEN
+      RETURN FALSE;
+    END
+    MUTABLE ti: Type = COPY ti_input;
+    ti = TRY (type__success_type(ti));
+    IF type__optional?(ti) THEN
+      ti = (TRY (type__wrapped_type(ti)) OR_ELSE COPY ti);
+    END
+    IF TRY (type__string?( ti)) THEN
+      IF ( type__symbol?( ti) OR type__raw?( ti)) THEN
         RETURN FALSE;
       END
       IF ((sig_obj != NIL) AND (functionSignature__heap_carry_return(sig_obj) == TRUE)) THEN
         RETURN TRUE;
       END
-      IF sig_obj EXISTS AS MUTABLE sig_obj_value THEN
+      IF sig_obj EXISTS AS sig_obj_value THEN
         IF TRY (functionSignature__heap_return_alloc?(sig_obj_value)) THEN
         RETURN TRUE;
       END
@@ -9179,12 +9185,12 @@ PRIVATE FN mIRLowering__call_type_owned_return?(MUTABLE self: MIRLowering, ti_in
       IF sig_obj EXISTS AS sig_obj_value THEN
         RETURN FALSE;
       END
-      RETURN type__heap?( UNWRAP (ti));
+      RETURN type__heap?( ti);
     END
-    MUTABLE schema_name = IF type__generic_instance?( UNWRAP (ti)) THEN
-      type__generic_base( UNWRAP (ti))
+    MUTABLE schema_name = IF type__generic_instance?( ti) THEN
+      type__generic_base( ti)
     ELSE
-      type__resolved( UNWRAP (ti))
+      type__resolved( ti)
     END;
     IF (TRY (mIRLowering__enum_schemas(&self))).contains?(schema_name) THEN
       RETURN FALSE;
@@ -9197,11 +9203,15 @@ PRIVATE FN mIRLowering__call_type_owned_return?(MUTABLE self: MIRLowering, ti_in
       ELSE
         variants = {};
       END
-      IF variants |> ANY TRY (type__variant_has_heap?(_._1)) THEN
-        RETURN TRUE;
+      FOR rtoc_variant_name IN variants.keys() DO
+        IF variants[rtoc_variant_name] EXISTS AS rtoc_variant_type THEN
+          IF TRY (type__variant_has_heap?(rtoc_variant_type)) THEN
+            RETURN TRUE;
+          END
+        END
       END
     END
-    RETURN ((((((TRY (type__ownership_bearing?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&self))) OR type__indirect?( UNWRAP (ti))) OR type__collection?( UNWRAP (ti))) OR TRY (type__any_rc?( UNWRAP (ti)))) OR type__any_sync?( UNWRAP (ti))) OR type__resource?( UNWRAP (ti))) OR TRY (type__recursive_cleanup_shape?( UNWRAP (ti), mIRLowering__mir_schema_lookup(&self))));
+    RETURN ((((((TRY (type__ownership_bearing?( ti, mIRLowering__mir_schema_lookup(&self))) OR type__indirect?( ti)) OR type__collection?( ti)) OR TRY (type__any_rc?( ti))) OR type__any_sync?( ti)) OR type__resource?( ti)) OR TRY (type__recursive_cleanup_shape?( ti, mIRLowering__mir_schema_lookup(&self))));
 END
 PRIVATE FN mIRLowering__call_owned_return_from_args?(MUTABLE self: MIRLowering, MUTABLE node: CallNode, sig_obj: ?FunctionSignature) RETURNS !?Bool ->
     IF sig_obj EXISTS AS sig_obj_value THEN
@@ -13855,11 +13865,7 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
       type_name = COPY node.name;
     END
     END
-    MUTABLE field_operands = fields |> UNNEST { MUTABLE rtoc_value_block_marker = 0; MUTABLE field_ast = (IF literal_fields |> FIND (_._0 == CAST(_[:name] AS String)) != NIL THEN
-      (literal_fields |> FIND (_._0 == CAST(_[:name] AS String))).last()
-    ELSE
-      NIL
-    END); (IF !(field_ast) THEN List[] ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE raw_field_type: ?StructLitFieldType = COPY field_types[CAST(_[:name] AS String)]; (IF ((raw_field_type != NIL) AND (raw_field_type IS_A InlineStructVariant)) THEN List[] ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE actual_type: ?Type@multiowned = TRY (mIRLowering__struct_literal_field_actual_type(&self, field_ast)); { MUTABLE rtoc_value_block_marker = 0; actual_type = (actual_type OR_ELSE TRY (type__from_node_mut(field_ast, "struct field payload ownership"))); (IF (IF node.borrowed_field_names != NIL THEN
+    MUTABLE field_operands = fields |> UNNEST { MUTABLE rtoc_value_block_marker = 0; MUTABLE field_ast = literal_fields[CAST(_[:name] AS String)]; (IF !(field_ast) THEN List[] ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE raw_field_type: ?StructLitFieldType = COPY field_types[CAST(_[:name] AS String)]; (IF ((raw_field_type != NIL) AND (raw_field_type IS_A InlineStructVariant)) THEN List[] ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE actual_type: ?Type@multiowned = TRY (mIRLowering__struct_literal_field_actual_type(&self, field_ast)); { MUTABLE rtoc_value_block_marker = 0; actual_type = (actual_type OR_ELSE TRY (type__from_node_mut(field_ast, "struct field payload ownership"))); (IF (IF node.borrowed_field_names != NIL THEN
       node.borrowed_field_names.contains?(CAST(_[:name] AS String))
     ELSE
       NIL
