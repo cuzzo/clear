@@ -8557,7 +8557,7 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
         END;
         MUTABLE lowered = mIRLowering__with_decl_alloc(&self, :heap, %() USE(payload_ft, source, MUTABLE self) -> {
     rtoc_lambda_result_347 = mIRLowering__with_expected_type(&self, payload_ft, %() USE(source, MUTABLE self) -> {
-    rtoc_lambda_result_346 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(source)));
+    rtoc_lambda_result_346 = UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(source))));
     rtoc_lambda_result_346
         });
     rtoc_lambda_result_347
