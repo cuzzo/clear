@@ -8575,13 +8575,12 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
         panic("unhandled CallEdgeOwnershipPlan op {}");
       END
     ELSE
-      IF (IF facts.callee_param != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_348 = CAST(facts.callee_param.symbol AS SymbolEntry);
-      symbolEntry__kept_identity(rtoc_local_receiver_348) }
-      ELSE
-        NIL
-      END) THEN
-        panic("{}{}");
+      IF facts.callee_param EXISTS AS kept_callee_param THEN
+        IF kept_callee_param.symbol EXISTS AS kept_callee_symbol THEN
+          IF symbolEntry__kept_identity(kept_callee_symbol) THEN
+            panic("{}{}");
+          END
+        END
       END
       RETURN NIL;
     END
