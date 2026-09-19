@@ -8769,8 +8769,8 @@ PRIVATE FN mIRLowering__managed_handle_materialized_for_plain_takes?(MUTABLE sel
     END
 END
 PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node: FuncCall) RETURNS !Emittable ->
-    MUTABLE all_args = NIL;
-    MUTABLE mod_alias = NIL;
+    MUTABLE all_args: []Emittable = List[];
+    MUTABLE mod_alias: ?String = NIL;
     MUTABLE intercept: ?Emittable = TRY (mIRLowering__stub_intercept_for(&self, UNWRAP (castCallNameToString(node.name)), NIL, node.args));
     IF intercept EXISTS AS intercept_value THEN
       RETURN COPY intercept_value;
@@ -8810,10 +8810,13 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
     ELSE
       mod_prefix = "";
     END
-    IF (TRUE AND (node.fn_var_call OR_ELSE FALSE)) THEN
-      all_args = ([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL } }] + args_mir);
-      MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(&self, functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature)), node.args, TRY (&args_mir)));
-      RETURN Emittable{ Call: COPY Call{ callee: "try ${node.name}", args: COPY all_args, try_wrap: FALSE, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FuncCall: COPY node })), callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
+    IF (node.fn_var_call OR_ELSE FALSE) THEN
+      # A function VALUE is a closure: the environment its captures live in
+      # travels with the code pointer, so the call passes both.
+      MUTABLE fn_var_safe = mIRLowering__zig_safe_name(self, CAST(node.name AS String));
+      all_args = (([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: "${fn_var_safe}.ctx", lowered_node_id: NIL, ownership_consumption: NIL } }]) + args_mir);
+      MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(&self, COPY node.matched_signature, node.args, args_mir));
+      RETURN Emittable{ Call: COPY Call{ callee: "try ${fn_var_safe}.call", args: COPY all_args, try_wrap: FALSE, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FuncCall: COPY node })), callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     END
     MUTABLE needs_rt = TRY (mIRLowering__callee_needs_rt?(self, CAST(node.name AS String)));
     MUTABLE can_fail = TRY (mIRLowering__callee_can_fail?(self, CAST(node.name AS String)));
