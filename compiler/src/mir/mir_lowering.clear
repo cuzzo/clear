@@ -9066,8 +9066,8 @@ PRIVATE FN mIRLowering__lower_protocol_map_put_call(MUTABLE self: MIRLowering, M
 END
 PRIVATE FN mIRLowering__call_owned_return?(MUTABLE self: MIRLowering, node: Node) RETURNS !Bool ->
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
-    IF (aST__node_name( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
-      sig = TRY (mIRLowering__fn_sig_for(self, (UNWRAP (IF aST__node_name(UNWRAP (castNodeToLocatable(node))) EXISTS AS rtoc_wrap_10278 THEN MIRLoweringName{ SymbolValue: symbol(COPY rtoc_wrap_10278)} ELSE NIL END))));
+    IF aST__node_name(UNWRAP (castNodeToLocatable(node))) EXISTS AS rtoc_node_name THEN
+      sig = TRY (mIRLowering__fn_sig_for(self, MIRLoweringName{ SymbolValue: symbol(COPY rtoc_node_name) }));
     END
     IF aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS THEN
       sig = (sig OR_ELSE aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))));
@@ -9077,13 +9077,10 @@ PRIVATE FN mIRLowering__call_owned_return?(MUTABLE self: MIRLowering, node: Node
         RETURN FALSE;
       END
     END
-    MUTABLE node_ti_branch_value: ?Type = NIL;
+    MUTABLE node_ti: Type = TRY (type__from_node_mut(castNodeToLocatable(node), "call owned return"));
     IF node IS_A FunctionDef AS function_def THEN
-      node_ti_branch_value = functionDef__lowering_return_type(function_def);
-    ELSE
-      node_ti_branch_value = TRY (type__from_node_mut(castNodeToLocatable(node), "call owned return"));
+      node_ti = COPY functionDef__lowering_return_type(function_def);
     END
-    MUTABLE node_ti: Type = node_ti_branch_value?;
     IF (!(type__any?(node_ti)) AND !(type__auto?(node_ti))) THEN
       RETURN TRY (mIRLowering__concrete_call_type_owned_return?(&self, node_ti, sig));
     END
@@ -9093,23 +9090,13 @@ PRIVATE FN mIRLowering__call_owned_return?(MUTABLE self: MIRLowering, node: Node
         RETURN dep;
       END
     END
-    MUTABLE raw_ti: ?Type@multiowned = NIL;
-    IF sig != NIL THEN
-      raw_ti = COPY functionSignature__return_type(sig);
+    # `raw_ti = sig&.return_type` then `raw_ti.is_a?(Type) ? raw_ti : ...` --
+    # the CLEAR return_type is already a Type, so the branch is the identity
+    # and the temp only cost the consuming node its provenance.
+    MUTABLE ti: ?Type = NIL;
+    IF sig EXISTS AS rtoc_sig_for_ti THEN
+      ti = COPY functionSignature__return_type(rtoc_sig_for_ti);
     END
-    MUTABLE ti_branch_value: ?Type = NIL;
-    IF (raw_ti != NIL) THEN
-      ti_branch_value = CAST(raw_ti AS ?Type);
-    ELSE
-      ti_branch_value = ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_382: ?Type = NIL;
-      IF raw_ti != NIL THEN
-        rtoc_ternary_value_382 = TRY (type__new(TypeConstructionInput{ Type: COPY raw_ti }));
-      ELSE
-        rtoc_ternary_value_382 = NIL;
-      END
-      rtoc_ternary_value_382? });
-    END
-    MUTABLE ti: ?Type = ti_branch_value;
     RETURN TRY (mIRLowering__call_type_owned_return?(&self, ti, sig));
 END
 PRIVATE FN mIRLowering__call_never_returns_success?(self: MIRLowering, node: CallNode) RETURNS !Bool ->
@@ -10410,7 +10397,13 @@ PRIVATE FN mIRLowering__materialized_view_capability_bindings(self: MIRLowering,
       RETURN CAST([WithBindingNode{ Emittable: COPY CAST(Let{ name: COPY safe_alias, init: Emittable{ MIRMethodCall: COPY materialize }, mutable: TRUE, annotation: NIL, suppression: "_ = &${safe_alias};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) }] AS []WithBindingNode);
     END
     MUTABLE entry = cleanupEntry__build(:uniform, :heap, FALSE);
-    RETURN TRY (bindingMaterialization__statements((BindingMaterialization{ name: COPY safe_alias, expr: Emittable{ MIRMethodCall: COPY materialize }, alloc: :heap, type_info: COPY TRY (type__tense_type(rt)), mutable: TRUE, suppression: "_ = &${safe_alias};", cleanup_entry: entry, scope: :heap, annotation: NIL, cleanup_mode: :normal, ownership_tracked: TRUE })));
+    # statements() yields Emittable nodes; the caller collects WithBindingNode.
+    MUTABLE rtoc_binding_stmts: []Emittable = TRY (bindingMaterialization__statements((BindingMaterialization{ name: COPY safe_alias, expr: Emittable{ MIRMethodCall: COPY materialize }, alloc: :heap, type_info: COPY TRY (type__tense_type(rt)), mutable: TRUE, suppression: "_ = &${safe_alias};", cleanup_entry: entry, scope: :heap, annotation: NIL, cleanup_mode: :normal, ownership_tracked: TRUE })));
+    MUTABLE rtoc_binding_nodes: []WithBindingNode = List[];
+    FOR rtoc_binding_stmt IN rtoc_binding_stmts DO
+      &rtoc_binding_nodes.append(WithBindingNode{ Emittable: COPY rtoc_binding_stmt });
+    END
+    RETURN rtoc_binding_nodes;
 END
 PRIVATE FN mIRLowering__with_block_control_label(MUTABLE self: MIRLowering, node: WithBlock, clause: ?ErrorClause) RETURNS ?String ->
     IF clause EXISTS AS clause_value THEN
