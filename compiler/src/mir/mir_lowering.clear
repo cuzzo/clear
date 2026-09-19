@@ -9854,11 +9854,12 @@ PRIVATE FN mIRLowering__build_extern_trampoline_method(MUTABLE self: MIRLowering
 END
 PRIVATE FN mIRLowering__extern_trampoline_return_type(self: MIRLowering, node: Locatable, signature: ?FunctionSignature) RETURNS !Type ->
     MUTABLE expression_type = TRY (aST__full_type_mut(node));
-    IF !(type__error_union?((IF signature != NIL THEN
-      functionSignature__return_type(signature)
-    ELSE
-      NIL
-    END))) THEN
+    # Ruby asks `signature&.return_type` and lets error_union? see the nil.
+    MUTABLE rtoc_sig_error_union: Bool = FALSE;
+    IF signature EXISTS AS rtoc_sig THEN
+      rtoc_sig_error_union = type__error_union?(functionSignature__return_type(rtoc_sig));
+    END
+    IF !(rtoc_sig_error_union) THEN
       RETURN expression_type;
     END
     IF type__error_union?(expression_type) THEN
@@ -10053,11 +10054,11 @@ PRIVATE FN mIRLowering__with_cap_zig_target(MUTABLE self: MIRLowering, var_node:
       IF decl EXISTS THEN
         mapped = (TRY (functionState__decl_zig_names(mIRLowering__function_state(&self))))[aST__node_identity(castSymbolEntryRegInputToLocatable(decl))];
       END
-      RETURN (((IF mIRLowering__capture_state(&self).do_capture_map != NIL THEN
-        (mIRLowering__capture_state(&self).do_capture_map)[var_name]
-      ELSE
-        NIL
-      END) OR_ELSE mapped) OR var_name);
+      MUTABLE rtoc_do_mapped: ?String = NIL;
+      IF mIRLowering__capture_state(&self).do_capture_map EXISTS AS rtoc_do_map THEN
+        rtoc_do_mapped = rtoc_do_map[var_name];
+      END
+      RETURN ((rtoc_do_mapped OR_ELSE mapped) OR_ELSE var_name);
     END
 END
 PRIVATE FN mIRLowering__with_cap_is_param?(self: MIRLowering, var_node: CapabilityVarNode) RETURNS Bool ->
