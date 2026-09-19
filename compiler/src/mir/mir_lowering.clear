@@ -15477,7 +15477,7 @@ PRIVATE FN mIRLowering__owned_binding_source_alloc(MUTABLE self: MIRLowering, va
     IF !(node IS_A Identifier) THEN
       RETURN NIL;
     END
-    MUTABLE ti: ?Type = TRY (type__from_node_mut(node, "owned binding source"));
+    MUTABLE ti: Type = TRY (type__from_node_mut(node, "owned binding source"));
     IF !(TRY (mIRLowering__ownership_tracked_transfer_type?(&self, ti))) THEN
       RETURN NIL;
     END
@@ -15492,8 +15492,8 @@ PRIVATE FN mIRLowering__owned_binding_source_alloc(MUTABLE self: MIRLowering, va
     RETURN cleanupEntry__alloc(UNWRAP (entry));
 END
 PRIVATE FN mIRLowering__var_decl_source_transfer_required?(MUTABLE self: MIRLowering, MUTABLE node: VarDecl, facts: VarDeclFacts, init_effect: OwnershipEffect) RETURNS !Bool ->
-    MUTABLE plan: ?PassStateValue = node.ownership_transport_plan;
-    IF (IF UNWRAP (plan) IS_A OwnershipTransportPlan AS transport THEN (transport.action != :move) ELSE FALSE END) THEN
+    MUTABLE plan: ?OwnershipTransportPlan = COPY node.ownership_transport_plan;
+    IF (IF plan EXISTS AS transport THEN (transport.action != :move) ELSE FALSE END) THEN
       RETURN FALSE;
     END
     IF mIRLowering__var_decl_source_borrowed?(self, node) THEN
@@ -16202,11 +16202,12 @@ PRIVATE FN mIRLowering__assignment_storage_name(MUTABLE self: MIRLowering, name:
     END
 END
 PRIVATE FN mIRLowering__capture_mapped_name(MUTABLE self: MIRLowering, name: String) RETURNS ?String ->
-    IF mIRLowering__capture_state(&self).do_capture_map != NIL THEN
-    RETURN ((mIRLowering__capture_state(&self).do_capture_map)?)[name];
-    ELSE
-    RETURN NIL;
+    IF mIRLowering__capture_state(&self).do_capture_map EXISTS AS rtoc_capture_map THEN
+      IF rtoc_capture_map[name] EXISTS AS rtoc_mapped THEN
+        RETURN COPY rtoc_mapped;
+      END
     END
+    RETURN NIL;
 END
 PRIVATE FN mIRLowering__zig_local_name(MUTABLE self: MIRLowering, name: String, renamed: Bool) RETURNS !String ->
     MUTABLE safe = mIRLowering__zig_safe_name(self, name);
