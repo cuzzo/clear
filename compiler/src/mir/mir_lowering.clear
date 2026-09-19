@@ -12113,7 +12113,7 @@ PRIVATE FN mIRLowering__lower_optional_unwrap(MUTABLE self: MIRLowering, node: O
     IF (TRUE AND node.error_union_type) THEN
       target = mIRLowering__strip_try(self, target);
     END
-    MUTABLE owns_foreign_resource = (UNWRAP (aST__node_target(Locatable{ OptionalUnwrap: COPY node })) IS_A Identifier AND ((locatable__symbol(node.target) != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_542 = ((locatable__symbol( Locatable{ OptionalUnwrap: COPY node.target }))?);
+    MUTABLE owns_foreign_resource = (UNWRAP (aST__node_target(Locatable{ OptionalUnwrap: COPY node })) IS_A Identifier AND ((locatable__symbol(node.target) != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_542 = ((locatable__symbol(node.target))?);
     symbolEntry__foreign_out_owner(rtoc_local_receiver_542) } == TRUE)));
     IF owns_foreign_resource THEN
       RETURN Emittable{ ForeignOwnedUnwrap: COPY ForeignOwnedUnwrap{ expr: COPY target, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -12147,18 +12147,23 @@ PRIVATE FN mIRLowering__lower_is_a(MUTABLE self: MIRLowering, MUTABLE node: IsA)
       MUTABLE subject: Emittable = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.left))) AS Emittable);
       RETURN Emittable{ MIRBinOp: COPY MIRBinOp{ op: "==", left: Emittable{ Call: COPY TRY (mIRLowering__active_tag_call(&self, subject)) }, right: Emittable{ EnumTag: COPY EnumTag{ variant: UNWRAP (COPY node.runtime_variant_name) } }, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    RETURN Emittable{ TypeEq: COPY TypeEq{ left: COPY TRY (mIRLowering__lower_type_value_expr(&self, CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castLocatableToNode__auto_inference(node.left) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node))), right: COPY TRY (mIRLowering__lower_type_value_expr(&self, UNWRAP (castIsARightToNode(node.right)))), lowered_node_id: NIL, ownership_consumption: NIL } };
+    RETURN Emittable{ TypeEq: COPY TypeEq{ left: COPY TRY (mIRLowering__lower_type_value_expr(&self, IsARight{ Locatable: COPY node.left })), right: COPY TRY (mIRLowering__lower_type_value_expr(&self, node.right)), lowered_node_id: NIL, ownership_consumption: NIL } };
 END
-PRIVATE FN mIRLowering__lower_type_value_expr(MUTABLE self: MIRLowering, node: Node) RETURNS !Emittable ->
+PRIVATE FN mIRLowering__lower_type_value_expr(MUTABLE self: MIRLowering, node: IsARight) RETURNS !Emittable ->
+    # Ruby's `case node when Type ... when AST::Identifier ...` sees a Type or
+    # an AST node; IsARight is that union, and the AST arm is a Locatable whose
+    # own variants carry the identifier and field cases.
     IF node IS_A Type AS type THEN
       RETURN Emittable{ Ident: COPY Ident{ name: TRY (type__zig_type(type)), lowered_node_id: NIL, ownership_consumption: NIL } };
-    ELSE_IF node IS_A Identifier AS identifier THEN
-      RETURN Emittable{ Ident: COPY Ident{ name: TRY (mIRLowering__type_value_zig_name(self, identifier__name(identifier))), lowered_node_id: NIL, ownership_consumption: NIL } };
-    ELSE_IF node IS_A GetField AS get_field THEN
-      RETURN Emittable{ Ident: COPY Ident{ name: TRY (mIRLowering__dotted_type_value_zig_name(self, get_field)), lowered_node_id: NIL, ownership_consumption: NIL } };
-    ELSE
-      RETURN TRY (mIRLowering__lower(&self, castNodeToMIRLoweringLowerableStmt(node)));
+    ELSE_IF node IS_A Locatable AS rtoc_ast_node THEN
+      IF rtoc_ast_node IS_A Identifier AS identifier THEN
+        RETURN Emittable{ Ident: COPY Ident{ name: TRY (mIRLowering__type_value_zig_name(self, identifier__name(identifier))), lowered_node_id: NIL, ownership_consumption: NIL } };
+      ELSE_IF rtoc_ast_node IS_A GetField AS get_field THEN
+        RETURN Emittable{ Ident: COPY Ident{ name: TRY (mIRLowering__dotted_type_value_zig_name(self, get_field)), lowered_node_id: NIL, ownership_consumption: NIL } };
+      END
+      RETURN UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(rtoc_ast_node))));
     END
+    panic("type value expression is neither a Type nor an AST node");
 END
 PRIVATE FN mIRLowering__type_value_zig_name(self: MIRLowering, name: String) RETURNS !String ->
     RETURN TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ SymbolValue: COPY symbol(name) })))));
@@ -12558,8 +12563,14 @@ PRIVATE FN mIRLowering__unit_variant_access(MUTABLE self: MIRLowering, node: Loc
     END
 END
 PRIVATE FN mIRLowering__union_variant_key(self: MIRLowering, schema: UnionSchema, field: MIRLoweringField) RETURNS ?MIRLoweringReturnValue ->
-    IF schema.variants.contains?(field) THEN
-      RETURN COPY castFieldToOptionalMIRLoweringReturnValue(field);
+    # The variant set is keyed by String; `field` is a union of a symbol and a
+    # string, so the "already a key" test has to ask with the payload.
+    PARTIAL MATCH field START
+      MIRLoweringField.StringValue AS rtoc_field_str ->
+        IF schema.variants.contains?(rtoc_field_str) THEN
+          RETURN MIRLoweringReturnValue{ StringValue: COPY rtoc_field_str };
+        END,
+      DEFAULT -> PASS;
     END
     MUTABLE field_s = COPY CAST(field AS String);
     IF schema.variants.contains?(field_s) THEN
@@ -12709,7 +12720,7 @@ PRIVATE FN mIRLowering__lower_call_smooth(MUTABLE self: MIRLowering, MUTABLE nod
     RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY label, body: COPY (snapshot_stmts + [Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY call_mir, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
 END
 PRIVATE FN mIRLowering__smooth_snapshot_stmts(MUTABLE self: MIRLowering, node: BinaryOp, left: Emittable) RETURNS ![]Emittable ->
-    IF !((mIRLowering__current_function_has_catch?(&self) AND ((TRY (mIRLowering__current_function_snapshot_types(&self))).size == 1))) THEN
+    IF !((mIRLowering__current_function_has_catch?(&self) AND ((TRY (mIRLowering__current_function_snapshot_types(&self))).length() == 1))) THEN
       RETURN CAST(List[] AS []Emittable);
     END
     MUTABLE t = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(node.left)) }));
