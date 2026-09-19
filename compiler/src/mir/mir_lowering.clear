@@ -15661,11 +15661,12 @@ PRIVATE FN mIRLowering__classified_cleanup_var_decl_plan(MUTABLE self: MIRLoweri
       drop_entry = cleanupEntry__with_moved_guard(drop_entry);
     END
     MUTABLE init_effect = TRY (ownershipEffect__of(init));
-    MUTABLE node_alloc = IF placement__explicit_heap?(facts.decl_alloc) THEN
-      :heap
-    ELSE
-      (((IF init_effect.alloc != NIL THEN init_effect.alloc ELSE (COPY facts.init_ownership_effect).alloc END) OR_ELSE cleanupEntry__alloc(drop_entry)))
-    END;
+    # `init_effect.alloc || facts.init_ownership_effect.alloc ||
+    # drop_entry.alloc` -- optional fallbacks ending in a value.
+    MUTABLE node_alloc: String@symbol = :heap;
+    IF !(placement__explicit_heap?(facts.decl_alloc)) THEN
+      node_alloc = ((init_effect.alloc OR_ELSE (COPY facts.init_ownership_effect).alloc) OR_ELSE cleanupEntry__alloc(drop_entry));
+    END
     drop_entry = cleanupEntry__with_alloc(drop_entry, node_alloc);
     MUTABLE rtoc_index_receiver_665 = TRY (functionState__bindings(mIRLowering__function_state(&self)));
     rtoc_index_receiver_665[CAST(node.name AS String)] = drop_entry;
