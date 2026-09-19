@@ -8555,7 +8555,7 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
         ELSE
           inner
         END;
-        MUTABLE lowered = mIRLowering__with_decl_alloc(&self, :heap, %() USE(payload_ft, source, MUTABLE self) -> {
+        MUTABLE lowered: ?Emittable = mIRLowering__with_decl_alloc(&self, :heap, %() USE(payload_ft, source, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_347: ?Emittable = mIRLowering__with_expected_type(&self, payload_ft, %() USE(source, MUTABLE self) -> {
     rtoc_lambda_result_346 = UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(source))));
     rtoc_lambda_result_346
@@ -9046,7 +9046,7 @@ PRIVATE FN mIRLowering__lower_protocol_map_put_call(MUTABLE self: MIRLowering, M
     END
     MUTABLE sink_alloc = TRY (mIRLowering__placement_for_node(&self, receiver_node));
     MUTABLE sink_type = typeExpression__of( TypeExpressionKind{ TypeProjectionExpression: COPY TypeProjectionExpression{ owner: COPY type__resolved((TRY (aST__full_type_mut(receiver_node)))), member: :MIRLoweringValue, protocol: NIL } });
-    MUTABLE value = mIRLowering__with_sink_type(&self, TRY (type__new(TypeConstructionInput{ TypeExpression: COPY sink_type })), %() USE(sink_alloc, value_node, MUTABLE self) -> {
+    MUTABLE value: ?Emittable = mIRLowering__with_sink_type(&self, TRY (type__new(TypeConstructionInput{ TypeExpression: COPY sink_type })), %() USE(sink_alloc, value_node, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_380: ?Emittable = mIRLowering__with_decl_alloc(&self, sink_alloc, %() USE(value_node, MUTABLE self) -> {
     rtoc_lambda_result_379 = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(value_node))) AS Emittable);
     rtoc_lambda_result_379
@@ -11790,7 +11790,7 @@ PRIVATE FN mIRLowering__lower_bg_stream_block(MUTABLE self: MIRLowering, node: B
 END
 PRIVATE FN mIRLowering__lower_yield(MUTABLE self: MIRLowering, MUTABLE node: YieldExpr) RETURNS !Emittable ->
     MUTABLE stream_local = (mIRLowering__capture_state(&self).current_stream_local OR_ELSE "__stream_local");
-    MUTABLE lowered = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
+    MUTABLE lowered: ?Emittable = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
     MUTABLE value: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.expr)));
     TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (value), &node.expr, :heap, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(node.expr)) }))
     });
@@ -16130,7 +16130,7 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
         target_type_branch_value = source_type;
       END
       MUTABLE target_type: Type = target_type_branch_value?;
-      MUTABLE value = mIRLowering__with_reassignment_target(&self, target_name, %() USE(assign_alloc, node, target_type, MUTABLE self) -> {
+      MUTABLE value: ?Emittable = mIRLowering__with_reassignment_target(&self, target_name, %() USE(assign_alloc, node, target_type, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_678: ?Emittable = mIRLowering__with_decl_alloc(&self, assign_alloc, %() USE(assign_alloc, node, target_type, MUTABLE self) -> {
     MUTABLE lowered: ?Emittable = TRY (mIRLowering__lower(&self, node.value));
     TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (lowered), node.value, assign_alloc, TypeTypeInput{ Type: COPY target_type }))
@@ -16471,7 +16471,7 @@ PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowe
     END
     MUTABLE field_lifecycle = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), field_type));
     MUTABLE value, value_pending = mIRLowering__lower_head(&self, %() USE(field_lifecycle, field_type, MUTABLE node, target_alloc, MUTABLE self) -> {
-    MUTABLE lowered = mIRLowering__with_decl_alloc(&self, target_alloc, %() USE(field_type, MUTABLE node, target_alloc, MUTABLE self) -> {
+    MUTABLE lowered: ?Emittable = mIRLowering__with_decl_alloc(&self, target_alloc, %() USE(field_type, MUTABLE node, target_alloc, MUTABLE self) -> {
       MUTABLE raw: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
       TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (raw), &node.value, target_alloc, TypeTypeInput{ Type: COPY field_type }))
     });
@@ -16623,7 +16623,7 @@ PRIVATE FN mIRLowering__lower_direct_indexed_set(MUTABLE self: MIRLowering, node
     END
     MUTABLE target_alloc = TRY (mIRLowering__placement_for_node(&self, node.name.target));
     MUTABLE value_type: ?Type = TRY (type__from_node_mut(node.value, "direct indexed assignment value"));
-    MUTABLE val = mIRLowering__with_decl_alloc(&self, target_alloc, %() USE(node, MUTABLE self) -> {
+    MUTABLE val: ?Emittable = mIRLowering__with_decl_alloc(&self, target_alloc, %() USE(node, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_694: ?Emittable = TRY (mIRLowering__lower(&self, node.value));
     rtoc_lambda_result_694
     });
@@ -16644,7 +16644,7 @@ PRIVATE FN mIRLowering__lower_map_indexed_assignment(MUTABLE self: MIRLowering, 
     MUTABLE shard: ?{String@symbol}String = TRY (mIRLowering__shard_context(self));
     MUTABLE dispatch = TRY (mIRLowering__indexed_assignment_dispatch(&self, kind, receiver_type, target_node, node, &op));
     MUTABLE sink_type = TRY (type__value_type(receiver_type));
-    MUTABLE val = mIRLowering__with_sink_type(&self, sink_type, %() USE(dispatch, MUTABLE node, MUTABLE self) -> {
+    MUTABLE val: ?Emittable = mIRLowering__with_sink_type(&self, sink_type, %() USE(dispatch, MUTABLE node, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_696: ?Emittable = mIRLowering__with_decl_alloc(&self, dispatch.sink_alloc, %() USE(MUTABLE node, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_695: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     rtoc_lambda_result_695
@@ -16657,20 +16657,26 @@ PRIVATE FN mIRLowering__lower_map_indexed_assignment(MUTABLE self: MIRLowering, 
     END
     END
     IF (kind == :string_map) THEN
-      idx = TRY (mIRLowering__hoist_alloc(&self, &idx, node.name.indexOf()));
+      # `node.name.index` -- the assignment target is a GetIndex node, and
+      # `.index` is its field, not the String method rtoc reached for.
+      PARTIAL MATCH node.name START
+        AssignmentName.GetIndex AS rtoc_target_index ->
+          idx = TRY (mIRLowering__hoist_alloc(&self, &idx, COPY rtoc_target_index.index));,
+        DEFAULT -> PASS;
+      END
     END
-    val = TRY (mIRLowering__place_value_for_destination(&self, &val, node.value, dispatch.sink_alloc, TypeTypeInput{ Type: COPY sink_type }));
+    val = TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (val), &node.value, dispatch.sink_alloc, TypeTypeInput{ Type: COPY sink_type }));
     IF !((dispatch.shard_direct AND mIRLowering__rodata_ownership_ast?(&self, node.value))) THEN
-      val = TRY (mIRLowering__materialize_owned_sink_value(&self, val, node.value, dispatch.sink_alloc));
+      val = TRY (mIRLowering__materialize_owned_sink_value(&self, UNWRAP (val), node.value, dispatch.sink_alloc));
     END
-    val = TRY (mIRLowering__hoist_alloc(&self, &val, node.value, TRUE));
+    val = TRY (mIRLowering__hoist_alloc(&self, UNWRAP (val), &node.value, TRUE));
     IF (!(mIRLowering__bc_target?(&self)) AND type__rc_map?(receiver_type)) THEN
-      target = Deref{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Deref: COPY target }, field: "ctrl", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
+      target = Deref{ expr: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Deref: COPY Deref{ expr: COPY target, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "ctrl", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "data", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL };
     END
     IF dispatch.shard_direct THEN
-      RETURN castEmittableToShardedMapPut(TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ ShardedMapPut: COPY ShardedMapPut{ target: Emittable{ Deref: COPY target }, key: COPY idx, value: COPY val, shard_idx: Emittable{ Ident: COPY Ident{ name: COPY UNWRAP (shard)[:idx], lowered_node_id: NIL, ownership_consumption: NIL } }, shard_key: Emittable{ Ident: COPY Ident{ name: COPY UNWRAP (shard)[:key], lowered_node_id: NIL, ownership_consumption: NIL } }, map_kind: COPY kind, stdlib_def: COPY op, key_type: COPY dispatch.key_type, value_type: COPY dispatch.value_type, resolved_allocs: COPY KEEP dispatch.resolved_allocs, template_kind: COPY dispatch.template_kind, target_var: COPY TRY (mIRLowering__extract_root_var_name(&self, &target_node)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, &val, node.value, "MIR::ShardedMapPut", :owned_sink, dispatch.sink_alloc)));
+      RETURN castEmittableToShardedMapPut(TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ ShardedMapPut: COPY ShardedMapPut{ target: Emittable{ Deref: COPY Deref{ expr: COPY target, lowered_node_id: NIL, ownership_consumption: NIL } }, key: COPY idx, value: COPY UNWRAP (val), shard_idx: Emittable{ Ident: COPY Ident{ name: COPY CAST(UNWRAP (UNWRAP (shard)[:idx]) AS String), lowered_node_id: NIL, ownership_consumption: NIL } }, shard_key: Emittable{ Ident: COPY Ident{ name: COPY CAST(UNWRAP (UNWRAP (shard)[:key]) AS String), lowered_node_id: NIL, ownership_consumption: NIL } }, map_kind: COPY kind, stdlib_def: COPY op, key_type: COPY dispatch.key_type, value_type: COPY dispatch.value_type, resolved_allocs: COPY KEEP dispatch.resolved_allocs, template_kind: COPY dispatch.template_kind, target_var: COPY TRY (mIRLowering__extract_root_var_name(&self, &target_node)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, UNWRAP (val), &node.value, "MIR::ShardedMapPut", :owned_sink, dispatch.sink_alloc)));
     END
-    RETURN castEmittableToShardedMapPut(TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ ShardedMapPut: COPY ShardedMapPut{ target: Emittable{ Deref: COPY target }, key: COPY idx, value: COPY val, shard_idx: NIL, shard_key: NIL, map_kind: COPY kind, stdlib_def: COPY op, key_type: COPY dispatch.key_type, value_type: COPY dispatch.value_type, resolved_allocs: COPY KEEP dispatch.resolved_allocs, template_kind: COPY dispatch.template_kind, target_var: COPY TRY (mIRLowering__extract_root_var_name(&self, &target_node)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, &val, node.value, "MIR::ShardedMapPut", :owned_sink, dispatch.sink_alloc)));
+    RETURN castEmittableToShardedMapPut(TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ ShardedMapPut: COPY ShardedMapPut{ target: Emittable{ Deref: COPY Deref{ expr: COPY target, lowered_node_id: NIL, ownership_consumption: NIL } }, key: COPY idx, value: COPY UNWRAP (val), shard_idx: NIL, shard_key: NIL, map_kind: COPY kind, stdlib_def: COPY op, key_type: COPY dispatch.key_type, value_type: COPY dispatch.value_type, resolved_allocs: COPY KEEP dispatch.resolved_allocs, template_kind: COPY dispatch.template_kind, target_var: COPY TRY (mIRLowering__extract_root_var_name(&self, &target_node)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, UNWRAP (val), &node.value, "MIR::ShardedMapPut", :owned_sink, dispatch.sink_alloc)));
 END
 PRIVATE FN mIRLowering__lower_template_indexed_assignment(MUTABLE self: MIRLowering, MUTABLE node: Assignment, MUTABLE target_node: Locatable, receiver_type: Type, target: Emittable, idx: Emittable, kind: String@symbol, MUTABLE op: FunctionSignature) RETURNS !Emittable ->
     MUTABLE val_node = COPY node.value;
@@ -16684,7 +16690,7 @@ PRIVATE FN mIRLowering__lower_template_indexed_assignment(MUTABLE self: MIRLower
     END
     MUTABLE sink_type: Type = sink_type_branch_value?;
     MUTABLE owns_transferred_value = TRY (mIRLowering__ownership_tracked_transfer_type?(&self, sink_type));
-    MUTABLE val = mIRLowering__with_decl_alloc(&self, dispatch.sink_alloc, %() USE(MUTABLE node, sink_type, MUTABLE self) -> {
+    MUTABLE val: ?Emittable = mIRLowering__with_decl_alloc(&self, dispatch.sink_alloc, %() USE(MUTABLE node, sink_type, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_698: ?Emittable = mIRLowering__with_sink_type(&self, sink_type, %() USE(MUTABLE node, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_697: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     rtoc_lambda_result_697
@@ -16865,7 +16871,7 @@ PRIVATE FN mIRLowering__auto_lock_assignment_facts(MUTABLE self: MIRLowering, no
     END) OR_ELSE var_name)) AS String), field: COPY CAST(node.name.field AS String), cleanup_alloc: COPY cleanup_alloc, alloc_sym: COPY (cleanup_alloc) };
 END
 PRIVATE FN mIRLowering__auto_lock_assignment_value(MUTABLE self: MIRLowering, MUTABLE node: Assignment, alloc_sym: String@symbol) RETURNS !Emittable ->
-    MUTABLE value = mIRLowering__with_decl_alloc(&self, alloc_sym, %() USE(alloc_sym, MUTABLE node, MUTABLE self) -> {
+    MUTABLE value: ?Emittable = mIRLowering__with_decl_alloc(&self, alloc_sym, %() USE(alloc_sym, MUTABLE node, MUTABLE self) -> {
     MUTABLE lowered: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge(node.value)));
     MUTABLE placed = TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (lowered), &node.value, alloc_sym, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut( castAssignmentNameToLocatable__type_analysis_session(node.name))) }));
     TRY (mIRLowering__materialize_owned_sink_value(&self, placed, node.value, alloc_sym, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(castAssignmentNameToLocatable__ast(node.name))) }))
@@ -17984,7 +17990,7 @@ PRIVATE FN mIRLowering__return_lowering_plan(MUTABLE self: MIRLowering, MUTABLE 
     IF node.value EXISTS AS rtoc_value_present THEN
       value_branch_value = mIRLowering__with_decl_alloc(&self, ret_alloc, %() USE(node, ret_alloc, MUTABLE self) -> {
     MUTABLE destination_type: ?Type@multiowned = TRY (mIRLowering__return_value_destination_type(&self, node));
-    MUTABLE lowered = mIRLowering__with_expected_type(&self, CAST(destination_type AS ?Type), %() USE(node, MUTABLE self) -> {
+    MUTABLE lowered: ?Emittable = mIRLowering__with_expected_type(&self, CAST(destination_type AS ?Type), %() USE(node, MUTABLE self) -> {
       MUTABLE rtoc_lambda_result_768: ?Emittable = TRY (mIRLowering__lower(&self, &rtoc_value_present));
       rtoc_lambda_result_768
     });
