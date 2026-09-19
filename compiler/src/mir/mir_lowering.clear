@@ -4169,7 +4169,7 @@ PRIVATE FN mIRLowering__lower_static_call(MUTABLE self: MIRLowering, node: Stati
       MUTABLE inherent_call_value_mutable = COPY inherent_call_value;
       RETURN TRY (mIRLowering__lower_func_call(&self, &inherent_call_value_mutable));
     END
-    MUTABLE stdlib_def: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_stdlib_def));
+    MUTABLE stdlib_def: ?FunctionSignature@multiowned = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(KEEP node.matched_stdlib_def));
     IF stdlib_def EXISTS AS stdlib_def_value THEN
       MUTABLE stdlib_def_value_mutable = COPY stdlib_def_value;
       IF TRY (functionSignature__intrinsic_bc?(stdlib_def_value_mutable)) THEN
@@ -9661,7 +9661,7 @@ END
 PRIVATE FN mIRLowering__lower_extern_direct_call(MUTABLE self: MIRLowering, node: FuncCall) RETURNS !Call ->
     MUTABLE mod_alias = NIL;
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
-    sig = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature));
+    sig = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(KEEP node.matched_signature));
     MUTABLE source: ?ExternSource = COPY node.extern_source;
     MUTABLE ast_args = COPY node.args;
     MUTABLE args = {
@@ -9728,7 +9728,7 @@ PRIVATE FN mIRLowering__lower_extern_direct_method(MUTABLE self: MIRLowering, no
     MUTABLE obj: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.object)));
     MUTABLE ast_args = COPY node.args;
     MUTABLE args = ast_args |> SELECT:? TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_))) |> WHERE _ != NIL |> SELECT UNWRAP (_);
-    sig = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature));
+    sig = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(KEEP node.matched_signature));
     RETURN MIRMethodCall{ receiver: UNWRAP (COPY obj), method: COPY node.name, args: COPY args, try_wrap: FALSE, callable_contract: COPY TRY (mIRLowering__callable_contract_for(&self, sig, ([node.object] + ast_args))), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
 END
 PRIVATE FN mIRLowering__lower_extern_arg(MUTABLE self: MIRLowering, ast_arg: Locatable) RETURNS !?Emittable ->
@@ -9837,17 +9837,20 @@ PRIVATE FN mIRLowering__build_extern_trampoline_method(MUTABLE self: MIRLowering
     mIRLoweringCounters__next_extern_id(&rtoc_mutable_receiver_416) };
     MUTABLE obj: Emittable = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.object))) AS Emittable);
     MUTABLE args = node.args |> SELECT ExternTrampolineArg{ expr: UNWRAP (COPY TRY (mIRLowering__lower_extern_arg(&self, _))), field_type: NIL, field_zig_type: NIL };
-    signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(COPY node.matched_signature));
+    signature = functionSignature__unwrap(ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(KEEP node.matched_signature));
     MUTABLE return_type = TRY (mIRLowering__extern_trampoline_return_type(self, Locatable{ MethodCall: COPY node }, signature));
-    RETURN ExternTrampoline{ id: id.value, callee_name: COPY node.name, method_name: COPY node.name, receiver: COPY obj, runtime_args: COPY args, alloc_kind: COPY (IF node.extern_effects != NIL THEN
-      node.extern_effects[:alloc]
-    ELSE
-      NIL
-    END), return_type: CAST(COPY return_type AS Type), stdlib_def: mIRLowering__extern_trampoline_stdlib_def(self, CAST(return_type AS Type), (IF node.extern_effects != NIL THEN
-      node.extern_effects[:alloc]
-    ELSE
-      NIL
-    END), node), module_alias: NIL, comptime_args: List[] };
+    # The effects map holds a union of a symbol and a bool; alloc_kind is the
+    # symbol arm, which Ruby reaches through with `&dig(:alloc)`.
+    MUTABLE rtoc_alloc_kind: ?String@symbol = NIL;
+    IF node.extern_effects EXISTS AS rtoc_effects THEN
+      IF rtoc_effects[:alloc] EXISTS AS rtoc_alloc_value THEN
+        PARTIAL MATCH rtoc_alloc_value START
+          ExternEffectValue.SymbolValue AS rtoc_alloc_sym -> rtoc_alloc_kind = COPY rtoc_alloc_sym;,
+          DEFAULT -> PASS;
+        END
+      END
+    END
+    RETURN ExternTrampoline{ id: id.value, callee_name: COPY node.name, method_name: COPY node.name, receiver: COPY obj, runtime_args: COPY args, alloc_kind: COPY rtoc_alloc_kind, return_type: CAST(COPY return_type AS Type), stdlib_def: TRY (mIRLowering__extern_trampoline_stdlib_def(self, CAST(return_type AS Type), rtoc_alloc_kind, Locatable{ MethodCall: COPY node })), module_alias: NIL, comptime_args: List[] };
 END
 PRIVATE FN mIRLowering__extern_trampoline_return_type(self: MIRLowering, node: Locatable, signature: ?FunctionSignature) RETURNS !Type ->
     MUTABLE expression_type = TRY (aST__full_type_mut(node));
@@ -11489,13 +11492,13 @@ PRIVATE FN mIRLowering__bg_body_materialization(MUTABLE self: MIRLowering, MUTAB
 END
 PRIVATE FN mIRLowering__bg_body_steps(self: MIRLowering, node: BgBlock) RETURNS ![]BgBodyStep ->
     MUTABLE steps: []BgBodyStep = List[];
-    FOR _ IN node.body DO
-    IF _ IS_A ThenChain THEN
-      FOR _ IN locatable__steps(_) DO
-      &steps.append(BgBodyStep{ expr: COPY _.expr, binding: COPY _.binding });
+    FOR rtoc_stmt IN node.body DO
+    IF rtoc_stmt IS_A ThenChain AS rtoc_then_chain THEN
+      FOR rtoc_step IN rtoc_then_chain.steps DO
+      &steps.append(BgBodyStep{ expr: COPY rtoc_step.expr, binding: COPY rtoc_step.binding });
       END
     ELSE
-      &steps.append(BgBodyStep{ expr: COPY _, binding: NIL });
+      &steps.append(BgBodyStep{ expr: COPY rtoc_stmt, binding: NIL });
     END
     END
     RETURN steps;
@@ -19924,7 +19927,7 @@ FN ruby_wrap_optional_Emittable_MIRLoweringLoweredMir(value: ?Emittable) RETURNS
 END
 FN ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(value: ?FunctionSignature) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
-    RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
+    RETURN X{ FunctionSignatureMultiowned: KEEP optional_payload };
   END
   NIL;
 END
