@@ -7972,7 +7972,7 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
     ELSE
       body = ([Emittable{ Let: COPY Let{ name: COPY "result", init: Emittable{ Call: COPY inner_call_mir }, mutable: FALSE, annotation: NIL, suppression: "_ = &result;", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] + debug_stmts  + [Emittable{ ReturnStmt: COPY ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: "result", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]);
     END
-    RETURN FnDef{ name: mIRLowering__zig_safe_name(self, node.name), params: COPY params_mir, ret_type: COPY return_type_str, body: COPY body, visibility: COPY vis, can_fail: FALSE, comptime_params: comptime_params, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN FnDef{ name: mIRLowering__zig_safe_name(self, node.name), params: COPY params_mir, ret_type: COPY return_type_str, body: COPY body, visibility: COPY vis, can_fail: FALSE, comptime_params: COPY comptime_params, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN mIRLowering__build_catch_clauses(MUTABLE self: MIRLowering, MUTABLE node: FunctionDef, fn_can_fail: Bool) RETURNS !CatchLoweringPlan ->
     MUTABLE clauses: []MIRCatchClause = List[];
@@ -8431,7 +8431,7 @@ PRIVATE FN mIRLowering__stdlib_call_facts(MUTABLE self: MIRLowering, MUTABLE nod
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      &facts.append(StdlibCallArgFact{ index: rtoc_idx, ast_arg: COPY ast_args[rtoc_idx], takes: callOwnershipFacts__takes?(ownership, rtoc_idx), coerce_type: COPY TRY (mIRLowering__stdlib_coerce_type(self, TypeTypeInput{ Type: COPY param__type( UNWRAP (param)) })), sink_type: CAST(COPY TRY (mIRLowering__stdlib_sink_type_for_arg(self, CAST(receiver_type AS ?Type), callOwnershipFacts__takes?(ownership, rtoc_idx))) AS ?Type), declared_byte_string: (TRY (mIRLowering__stdlib_coerce_type(self, TypeTypeInput{ Type: COPY param__type( UNWRAP (param)) })) == :String) });
+      &facts.append(StdlibCallArgFact{ index: rtoc_idx, ast_arg: COPY UNWRAP (ast_args[rtoc_idx]), takes: callOwnershipFacts__takes?(ownership, rtoc_idx), coerce_type: COPY TRY (mIRLowering__stdlib_coerce_type(self, TypeTypeInput{ Type: COPY param__type( UNWRAP (param)) })), sink_type: CAST(COPY TRY (mIRLowering__stdlib_sink_type_for_arg(self, CAST(receiver_type AS ?Type), callOwnershipFacts__takes?(ownership, rtoc_idx))) AS ?Type), declared_byte_string: (TRY (mIRLowering__stdlib_coerce_type(self, TypeTypeInput{ Type: COPY param__type( UNWRAP (param)) })) == :String) });
     rtoc_idx = rtoc_idx + 1;
       END
       RETURN StdlibCallFacts{ args: COPY facts, ownership: COPY ownership };
@@ -8530,10 +8530,10 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
       IF (plan_value_mutable.op == :pass_null) OR (plan_value_mutable.op == :move_handle) THEN
         RETURN NIL;
       ELSE_IF (plan_value_mutable.op == :retain_handle) THEN
-        MUTABLE ti: ?Type = TRY (type__from_node_mut(inner, "kept edge retain"));
+        MUTABLE ti: Type = TRY (type__from_node_mut(inner, "kept edge retain"));
         MUTABLE payload: String = "";
         IF TRY (type__any_rc?(ti)) THEN
-          payload = TRY (mIRLowering__rc_payload_zig_type(self, UNWRAP (ti)));
+          payload = TRY (mIRLowering__rc_payload_zig_type(self, ti));
         ELSE
           payload = TRY (type__zig_type( UNWRAP (ti)));
         END
@@ -8563,8 +8563,8 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
     rtoc_lambda_result_347
         });
         IF (plan_value_mutable.op == :copy_wrap) THEN
-          MUTABLE source_ti: ?Type = TRY (type__from_node_mut(source, "kept edge copy override"));
-          IF TRY (type__any_rc?( UNWRAP (source_ti))) THEN
+          MUTABLE source_ti: Type = TRY (type__from_node_mut(source, "kept edge copy override"));
+          IF TRY (type__any_rc?(source_ti)) THEN
             lowered = CapabilityLockTarget{ source: COPY lowered, arc_wrapped: TRUE, comptime_arc_unwrap: FALSE, lowered_node_id: NIL, ownership_consumption: NIL };
           END
           lowered = DeepCopy{ source: COPY lowered, zig_type: COPY TRY (type__zig_type(payload_ft)), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(payload_ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
