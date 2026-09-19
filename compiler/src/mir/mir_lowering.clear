@@ -11971,22 +11971,49 @@ PRIVATE FN mIRLowering__lower_literal(self: MIRLowering, node: Literal) RETURNS 
     IF (node.type == :SYMBOL) THEN
       RETURN Emittable{ SymbolLit: COPY SymbolLit{ value: CAST(node.value AS String), lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE_IF (node.type == :STRING) THEN
-      MUTABLE escaped = (UNWRAP (node.value).bytes() |> SELECT PARTIAL MATCH _ START
-        92 -> "\\\\",
-        34 -> "\\\"",
-        10 -> "\\n",
-        13 -> "\\r",
-        9 -> "\\t",
-        0 -> "\\x00",
-        1 ..= 31 -> "\\x${compilerFormatTemplate("%02x")}",
-        127 -> "\\x${compilerFormatTemplate("%02x")}",
-        128 ..= 255 -> "\\x${compilerFormatTemplate("%02x")}",
-        DEFAULT -> codepointToString(_)
-      END).join("");
+      # Ruby escapes each byte of the literal. This is NOT zig_string_lit:
+      # that one passes 0x80..0xFF through as raw bytes, while a source
+      # literal hex-escapes them too.
+      MUTABLE rtoc_lit_text: String = "";
+      PARTIAL MATCH node.value START
+        TokenValue.StringValue AS rtoc_lit_value -> rtoc_lit_text = COPY rtoc_lit_value;,
+        DEFAULT -> PASS;
+      END
+      MUTABLE escaped = "";
+      MUTABLE rtoc_byte_idx: Int64 = 0;
+      WHILE (rtoc_byte_idx < rtoc_lit_text.bytes()) DO
+        MUTABLE rtoc_b = byteAt(rtoc_lit_text, rtoc_byte_idx);
+        IF (rtoc_b == 92) THEN
+          &escaped.append("\\\\");
+        ELSE_IF (rtoc_b == 34) THEN
+          &escaped.append("\\\"");
+        ELSE_IF (rtoc_b == 10) THEN
+          &escaped.append("\\n");
+        ELSE_IF (rtoc_b == 13) THEN
+          &escaped.append("\\r");
+        ELSE_IF (rtoc_b == 9) THEN
+          &escaped.append("\\t");
+        ELSE_IF (((rtoc_b >= 0) AND (rtoc_b <= 31)) OR (rtoc_b == 127) OR (rtoc_b >= 128)) THEN
+          &escaped.append("\\x");
+          &escaped.append("0123456789abcdef".substr((rtoc_b / 16), 1));
+          &escaped.append("0123456789abcdef".substr((rtoc_b - ((rtoc_b / 16) * 16)), 1));
+        ELSE
+          &escaped.append(codepointToString(rtoc_b));
+        END
+        rtoc_byte_idx = rtoc_byte_idx + 1;
+      END
       RETURN Emittable{ Lit: COPY Lit{ value: "\"${escaped}\"", lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE_IF (node.type == :NUMBER) THEN
       IF ruby_union_scalar_equal_optional_CoerceTypeInput_String_symbol( CAST(locatable__coerced_type( Locatable{ Literal: COPY node }) AS ?CoerceTypeInput), :Int64) THEN
-        RETURN Emittable{ Lit: COPY Lit{ value: COPY (TRY (node.value.toInt())).toString(), lowered_node_id: NIL, ownership_consumption: NIL } };
+      # `node.value.to_i.to_s` over the token union: the number arrives as an
+      # Int64 or as the text of one.
+      MUTABLE rtoc_int_text: String = "0";
+      PARTIAL MATCH node.value START
+        TokenValue.Int64Value AS rtoc_int_value -> rtoc_int_text = rtoc_int_value.toString();,
+        TokenValue.StringValue AS rtoc_int_str -> rtoc_int_text = (rtoc_int_str.toInt() OR_ELSE 0).toString();,
+        DEFAULT -> PASS;
+      END
+        RETURN Emittable{ Lit: COPY Lit{ value: COPY rtoc_int_text, lowered_node_id: NIL, ownership_consumption: NIL } };
       ELSE
         RETURN Emittable{ Lit: COPY Lit{ value: COPY mIRLowering__float_literal_text(self, CAST(node.value AS MIRLoweringValue)), lowered_node_id: NIL, ownership_consumption: NIL } };
       END
