@@ -12488,29 +12488,29 @@ PRIVATE FN mIRLowering__emit_optional_comparison_then_expr(MUTABLE self: MIRLowe
       inner_type_branch_value = UNWRAP (TRY (type__wrapped_type(facts.right_type)));
     END
     MUTABLE inner_type: Type = inner_type_branch_value?;
-    MUTABLE inner_facts = BinaryOperandFacts{ node: COPY facts.node, op: COPY facts.op, left: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_544: ?Ident = NIL;
+    MUTABLE inner_facts = BinaryOperandFacts{ node: COPY facts.node, op: COPY facts.op, left: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_544: ?Emittable = NIL;
     IF (optional_side == OptionalOperandSide.Left) THEN
-      rtoc_ternary_value_544 = capture_ref;
+      rtoc_ternary_value_544 = Emittable{ Ident: COPY capture_ref };
     ELSE
-      rtoc_ternary_value_544 = facts.left;
+      rtoc_ternary_value_544 = COPY facts.left;
     END
-    rtoc_ternary_value_544? }, right: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_545: ?Ident = NIL;
+    rtoc_ternary_value_544? }, right: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_545: ?Emittable = NIL;
     IF (optional_side == OptionalOperandSide.Right) THEN
-      rtoc_ternary_value_545 = capture_ref;
+      rtoc_ternary_value_545 = Emittable{ Ident: COPY capture_ref };
     ELSE
-      rtoc_ternary_value_545 = facts.right;
+      rtoc_ternary_value_545 = COPY facts.right;
     END
     rtoc_ternary_value_545? }, left_type: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_546: ?Type = NIL;
     IF (optional_side == OptionalOperandSide.Left) THEN
-      rtoc_ternary_value_546 = inner_type;
+      rtoc_ternary_value_546 = COPY inner_type;
     ELSE
-      rtoc_ternary_value_546 = facts.left_type;
+      rtoc_ternary_value_546 = COPY facts.left_type;
     END
     rtoc_ternary_value_546? }, right_type: COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_547: ?Type = NIL;
     IF (optional_side == OptionalOperandSide.Right) THEN
-      rtoc_ternary_value_547 = inner_type;
+      rtoc_ternary_value_547 = COPY inner_type;
     ELSE
-      rtoc_ternary_value_547 = facts.right_type;
+      rtoc_ternary_value_547 = COPY facts.right_type;
     END
     rtoc_ternary_value_547? }, int_arithmetic: COPY facts.int_arithmetic, left_unit_variant: COPY facts.left_unit_variant, right_unit_variant: COPY facts.right_unit_variant };
     RETURN TRY (mIRLowering__emit_binary_operation_plan(&self, TRY (mIRLowering__classify_binary_operation(&self, inner_facts))));
