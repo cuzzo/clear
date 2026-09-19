@@ -11795,11 +11795,11 @@ PRIVATE FN mIRLowering__lower_yield(MUTABLE self: MIRLowering, MUTABLE node: Yie
     TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (value), &node.expr, :heap, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(node.expr)) }))
     });
     IF TRY (mIRLowering__mir_allocates?(&self, lowered)) THEN
-      lowered = TRY (mIRLowering__hoist_alloc(&self, &lowered, &node.expr, TRUE));
+      lowered = TRY (mIRLowering__hoist_alloc(&self, UNWRAP (lowered), &node.expr, TRUE));
     END
-    MUTABLE transfer_marks = TRY (mIRLowering__ownership_marks_for_transferred_temp(&self, lowered, :heap));
+    MUTABLE transfer_marks = TRY (mIRLowering__ownership_marks_for_transferred_temp(&self, UNWRAP (lowered), :heap));
     IF (mIRLowering__bc_target?(&self) AND (mIRLowering__capture_state(&self).current_stream_is_inf != NIL)) THEN
-      MUTABLE stream_yield = StreamYield{ value: COPY lowered, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      MUTABLE stream_yield = StreamYield{ value: COPY UNWRAP (lowered), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
       IF (transfer_marks.length() == 0) THEN
         RETURN Emittable{ StreamYield: COPY stream_yield };
       ELSE
@@ -11811,7 +11811,7 @@ PRIVATE FN mIRLowering__lower_yield(MUTABLE self: MIRLowering, MUTABLE node: Yie
     IF ((transfer_marks.length() == 0) OR !(lowered IS_A Ident)) THEN
       push_contract_branch_value = base_contract;
     ELSE
-      MUTABLE operand = ownershipOperandFact__owned_binding(CAST(emittable__name(lowered) AS String), TRY (type__from_node_mut(node.expr, "YIELD ownership transfer")), "stream YIELD push", :heap);
+      MUTABLE operand = ownershipOperandFact__owned_binding(CAST(emittable__name(UNWRAP (lowered)) AS String), TRY (type__from_node_mut(node.expr, "YIELD ownership transfer")), "stream YIELD push", :heap);
       push_contract_branch_value = callableContract__new(base_contract.signature, TRY (ownershipContract__consume_operands([operand])), 1);
     END
     MUTABLE push_contract: CallableContract = push_contract_branch_value?;
@@ -12520,13 +12520,13 @@ PRIVATE FN mIRLowering__emit_symbol_binary_plan(MUTABLE self: MIRLowering, plan:
 END
 PRIVATE FN mIRLowering__emit_standard_binary_plan(self: MIRLowering, plan: BinaryOperationPlan) RETURNS MIRBinOp ->
     MUTABLE facts = COPY plan.facts;
-    MUTABLE right_branch_value: ?Cast = NIL;
+    MUTABLE right_branch_value: ?Emittable = NIL;
     IF ((facts.op == :SHL) OR (facts.op == :SHR)) THEN
-      right_branch_value = MIRCast{ expr: COPY facts.right, target_type: NIL, method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL };
+      right_branch_value = Emittable{ MIRCast: COPY MIRCast{ expr: COPY facts.right, target_type: NIL, method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL  } };
     ELSE
       right_branch_value = COPY facts.right;
     END
-    MUTABLE right: Cast = right_branch_value?;
+    MUTABLE right: Emittable = UNWRAP (right_branch_value);
     RETURN MIRBinOp{ op: COPY UNWRAP (plan.op_str), left: COPY facts.left, right: COPY right, lowered_node_id: NIL, ownership_consumption: NIL };
 END
 PRIVATE FN mIRLowering__emit_symbol_binary_comparison(MUTABLE self: MIRLowering, facts: BinaryOperandFacts) RETURNS !Emittable ->
