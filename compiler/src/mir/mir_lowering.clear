@@ -10384,7 +10384,7 @@ PRIVATE FN mIRLowering__snapshot_capability_binding(MUTABLE self: MIRLowering, c
     MUTABLE safe_alias = mIRLowering__safe_with_capability_alias(self, context.alias_name);
     MUTABLE guard_var = "__${context.var_name}_snap_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_453 = (CAST(self AS MIRLowering@multiowned));
     mIRLowering__stable_node_suffix(&rtoc_local_receiver_453, Locatable{ WithBlock: COPY context.node }) }}";
-    RETURN SnapshotRead{ cell_unwrap: Emittable{ CapabilityUnwrap: COPY CapabilityUnwrap{ source: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, rt: COPY context.rt_name, alias_name: COPY safe_alias, guard_var: guard_var, body: COPY List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN SnapshotRead{ cell_unwrap: Emittable{ CapabilityUnwrap: COPY CapabilityUnwrap{ source: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, rt: COPY context.rt_name, alias_name: COPY safe_alias, guard_var: COPY guard_var, body: COPY List[], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN mIRLowering__materialized_view_capability_bindings(self: MIRLowering, context: WithCapabilityBindingContext) RETURNS ![]WithBindingNode ->
     MUTABLE source_mir = TRY (mIRLowering__with_capability_source_mir(self, context.var_node));
@@ -10583,7 +10583,7 @@ PRIVATE FN mIRLowering__lower_polymorphic_universal(MUTABLE self: MIRLowering, M
     rtoc_lambda_result_469 = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(node.body)));
     rtoc_lambda_result_469
     }));
-    MUTABLE guard_cond: ?MIRBinOp = TRY (mIRLowering__combined_guard_cond(&self, node));
+    MUTABLE guard_cond: ?Emittable = TRY (mIRLowering__combined_guard_cond(&self, node));
     IF TRY (mIRLowering__polymorphic_flow_required?(self, &node)) THEN
       MUTABLE guard_fail = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_471: ?[]Emittable = NIL;
       IF guard_cond != NIL THEN
@@ -10709,21 +10709,33 @@ PRIVATE FN mIRLowering__zig_string_lit(self: MIRLowering, text: String) RETURNS 
     RETURN out;
 END
 PRIVATE FN mIRLowering__wrap_body_with_guard(MUTABLE self: MIRLowering, MUTABLE node: WithBlock, body_mir: []Emittable, with_label: ?String) RETURNS ![]Emittable ->
-    MUTABLE guard_cond: ?MIRBinOp = TRY (mIRLowering__combined_guard_cond(&self, node));
+    MUTABLE guard_cond: ?Emittable = TRY (mIRLowering__combined_guard_cond(&self, node));
     IF guard_cond EXISTS AS guard_cond_value THEN
       MUTABLE guard_cond_value_mutable = COPY guard_cond_value;
       MUTABLE fail_body = TRY (mIRLowering__guard_fail_body(&self, node, with_label));
-      RETURN CAST([Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY guard_cond_value_mutable }, then_body: COPY body_mir, else_body: fail_body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }] AS []Emittable);
+      RETURN CAST([Emittable{ IfStmt: COPY IfStmt{ cond: COPY guard_cond_value_mutable, then_body: COPY body_mir, else_body: fail_body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }] AS []Emittable);
     ELSE
       RETURN COPY body_mir;
     END
 END
-PRIVATE FN mIRLowering__combined_guard_cond(MUTABLE self: MIRLowering, node: WithBlock) RETURNS !?MIRBinOp ->
+PRIVATE FN mIRLowering__combined_guard_cond(MUTABLE self: MIRLowering, node: WithBlock) RETURNS !?Emittable ->
     MUTABLE guarded = TRY (withCapabilityPlan__guarded((TRY (capabilityPlan__require_for(node)))));
     IF (guarded.length() == 0) THEN
       RETURN NIL;
     END
-    RETURN (guarded |> SELECT TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (_.guard_expr))))) |> REDUCE(0) MIRBinOp{ op: "and", left: COPY acc, right: COPY _, lowered_node_id: NIL, ownership_consumption: NIL };
+    # Ruby folds with `reduce` and NO seed: one guard yields that guard's own
+    # lowered node, not a conjunction with a synthetic operand.
+    MUTABLE conds: []Emittable = guarded |> SELECT UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (_.guard_expr)))));
+    IF (conds.length() == 0) THEN
+      RETURN NIL;
+    END
+    MUTABLE acc: Emittable = COPY UNWRAP (conds[0]);
+    MUTABLE rtoc_idx: Int64 = 1;
+    WHILE (rtoc_idx < conds.length()) DO
+      acc = Emittable{ MIRBinOp: COPY MIRBinOp{ op: "and", left: COPY acc, right: COPY UNWRAP (conds[rtoc_idx]), lowered_node_id: NIL, ownership_consumption: NIL } };
+      rtoc_idx = rtoc_idx + 1;
+    END
+    RETURN acc;
 END
 PRIVATE FN mIRLowering__guard_fail_body(MUTABLE self: MIRLowering, node: WithBlock, with_label: ?String) RETURNS ![]Emittable ->
     MUTABLE clause: ?ErrorClause = COPY node.lock_error_clause;
