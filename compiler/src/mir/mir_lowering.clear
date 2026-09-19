@@ -9028,14 +9028,6 @@ PRIVATE FN mIRLowering__inject_protocol_map_allocator_args(MUTABLE self: MIRLowe
       RETURN COPY mir_args;
     END
 END
-      rtoc_indexed_i_375 = rtoc_indexed_i_375 + 1;
-    END
-    rtoc_indexed_output_376
-      };
-    ELSE
-      RETURN COPY mir_args;
-    END
-END
 PRIVATE FN mIRLowering__protocol_map_signature_param?(self: MIRLowering, signature: FunctionSignature, param: Param) RETURNS Bool ->
     MUTABLE bounds: ?[]Type = COPY signature.generic_bounds[type__resolved(param.type)];
     RETURN !(!((((bounds != NIL) AND (bounds |> ANY (type__resolved(_) == :Map))))));
