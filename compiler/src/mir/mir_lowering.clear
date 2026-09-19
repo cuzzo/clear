@@ -14900,11 +14900,11 @@ PRIVATE FN mIRLowering__lower_tuple_items(MUTABLE self: MIRLowering, items: []Lo
       &rtoc_indexed_output_636.append({
     MUTABLE expected_item = COPY UNWRAP ((TRY (type__generic_args(tuple_type)))[rtoc_indexed_i_634]);
     mIRLowering__with_decl_alloc(&self, alloc, %() USE(alloc, expected_item, rtoc_indexed_items_633, rtoc_indexed_i_634, MUTABLE self) -> {
-      MUTABLE value = mIRLowering__with_expected_type(&self, expected_item, %() USE(rtoc_indexed_items_633, rtoc_indexed_i_634, MUTABLE self) -> {
-        rtoc_lambda_result_635 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]))));
+      MUTABLE value: ?Emittable = mIRLowering__with_expected_type(&self, expected_item, %() USE(rtoc_indexed_items_633, rtoc_indexed_i_634, MUTABLE self) -> {
+        MUTABLE rtoc_lambda_result_635: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]))));
         rtoc_lambda_result_635
       });
-      MUTABLE placed = TRY (mIRLowering__place_value_for_destination(&self, &value, UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]), alloc, TypeTypeInput{ Type: COPY expected_item }));
+      MUTABLE placed = TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (value), UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]), alloc, TypeTypeInput{ Type: COPY expected_item }));
       MUTABLE owned = TRY (mIRLowering__materialize_owned_sink_value(&self, placed, UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]), alloc, TypeTypeInput{ Type: COPY expected_item }));
       TRY (mIRLowering__hoist_alloc(&self, &owned, UNWRAP (rtoc_indexed_items_633[rtoc_indexed_i_634]), TRUE))
     })
@@ -15025,20 +15025,21 @@ PRIVATE FN mIRLowering__non_empty_hash_literal(MUTABLE self: MIRLowering, node: 
     MUTABLE hm_name = "__hm_${mIRLoweringGeneratedId__to_s(literal_id)}";
     MUTABLE alloc_expr = TRY (mIRLowering__hash_literal_allocator_expr(&self, plan));
     &items.append(Emittable{ Let: COPY Let{ name: COPY hm_name, init: Emittable{ StructInit: COPY (capability.init_value OR_ELSE mIRLowering__hash_literal_init_struct(self, capability.zig_type, plan.alloc, TRUE)) }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
-    FOR rtoc_key IN node.pairs.keys() DO
-    MUTABLE val_node: Locatable = COPY UNWRAP (node.pairs[rtoc_key]);
+    FOR rtoc_pair IN node.pairs DO
+    MUTABLE rtoc_key: Locatable = COPY rtoc_pair._0;
+    MUTABLE val_node: Locatable = COPY rtoc_pair._1;
     MUTABLE outer_pending = COPY mIRLowering__function_state(&self).pending_stmts;
     self.state.function_state.pending_stmts = List[];
     MUTABLE put_stmt = TRY (mIRLowering__hash_literal_put_stmt(&self, &rtoc_key, &val_node, plan, alloc_expr, hm_name));
     MUTABLE pair_stmts = COPY mIRLowering__function_state(&self).pending_stmts;
     self.state.function_state.pending_stmts = outer_pending;
-    &items.append(({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_644: ?Emittable = NIL;
-      IF (pair_stmts.length() == 0) THEN
-        rtoc_ternary_value_644 = put_stmt;
-      ELSE
-        rtoc_ternary_value_644 = Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: NIL, body: COPY (pair_stmts + [put_stmt]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
-      END
-      rtoc_ternary_value_644? }));
+    # Appending out of a value block leaves the appended node borrowed; the
+    # statement form gives it an owner.
+    IF (pair_stmts.length() == 0) THEN
+      &items.append(Emittable{ ExprStmt: COPY put_stmt });
+    ELSE
+      &items.append(Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: NIL, body: COPY (pair_stmts + [put_stmt]), lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } });
+    END
     END
     MUTABLE result = mIRLowering__hash_literal_result(self, Emittable{ Ident: COPY Ident{ name: COPY hm_name, lowered_node_id: NIL, ownership_consumption: NIL } }, plan, capability);
     IF hashLiteralCapabilityPlan__wraps_result?(capability) THEN
@@ -15248,7 +15249,7 @@ PRIVATE FN mIRLowering__lower_var_decl(MUTABLE self: MIRLowering, MUTABLE node: 
     END
     END
     IF (TRY (type__node_reference?(facts.ft)) AND (!(nodes |> ANY _ IS_A AllocMark))) THEN
-      nodes = ([AllocMark{ name: COPY safe_name, alloc: :heap, type_info: COPY facts.ft, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }] + nodes);
+      nodes = (List[Emittable{ AllocMark: COPY AllocMark{ name: COPY safe_name, alloc: :heap, type_info: COPY facts.ft, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + nodes);
       &nodes.append(CAST(Cleanup{ name: COPY safe_name, cleanup_entry: cleanupEntry__build(:uniform, :heap, FALSE), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
     END
     MUTABLE owner_marks = TRY (mIRLowering__field_owner_move_marks(&self, node));
