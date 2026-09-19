@@ -14608,7 +14608,7 @@ PRIVATE FN mIRLowering__kept_identity_orelse_field_value(MUTABLE self: MIRLoweri
     IF field_node IS_A BinaryOp AS binary_op THEN
       MUTABLE binary_op_mutable = COPY binary_op;
     IF (binary_op_mutable.op == symbol("OR_ELSE")) THEN
-        MUTABLE lhs = binary_op_mutable.left;
+        MUTABLE lhs: Locatable = COPY binary_op_mutable.left;
         IF lhs IS_A Identifier AS identifier THEN
           MUTABLE identifier_mutable = COPY identifier;
           MUTABLE entry: ?CleanupEntry@multiowned = COPY (TRY (functionState__bindings(mIRLowering__function_state(&self))))[identifier__name(identifier_mutable)];
@@ -14616,7 +14616,7 @@ PRIVATE FN mIRLowering__kept_identity_orelse_field_value(MUTABLE self: MIRLoweri
             RETURN NIL;
           END
           MUTABLE bare = TRY (type__bare_data_type( UNWRAP (expected_ft)));
-          MUTABLE default_ti:? = (TRY (type__from_node_mut(binary_op_mutable.right, "kept orelse default")));
+          MUTABLE default_ti:? = (TRY (type__from_node_mut(COPY binary_op_mutable.right, "kept orelse default")));
           MUTABLE default_rc = ((default_ti != NIL) AND (TRY (type__any_rc?(default_ti)) == TRUE));
           IF (!(default_rc) AND TRUE) THEN
             MUTABLE sig: ?FunctionSignature@multiowned = locatable__matched_signature(UNWRAP (locatable__right( Locatable{ BinaryOp: COPY binary_op_mutable })));
