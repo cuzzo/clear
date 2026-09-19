@@ -17492,11 +17492,19 @@ PRIVATE FN mIRLowering__value_if_chain_match_case(MUTABLE self: MIRLowering, nod
     RETURN CAST([mIRLowering__if_chain_branch(self, TRY (mIRLowering__equality_match_condition(&self, subject, match_case)), body)] AS []IfChainBranch);
 END
 PRIVATE FN mIRLowering__string_match_condition(MUTABLE self: MIRLowering, subject: Emittable, match_case: MatchCase) RETURNS !Emittable ->
-    MUTABLE conditions = ([match_case.value] + match_case.extra_values) |> SELECT TRY (mIRLowering__emit_builtin(&self, :strEql, [subject, TRY (mIRLowering__lower(&self, &_))]));
+    MUTABLE conditions: []Emittable = List[];
+    MUTABLE rtoc_case_values: []Locatable = ([match_case.value] + match_case.extra_values);
+    FOR MUTABLE rtoc_case_value IN rtoc_case_values DO
+      &conditions.append(TRY (mIRLowering__emit_builtin(&self, :strEql, [subject, UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(rtoc_case_value))))])));
+    END
     RETURN mIRLowering__disjoin_match_conditions(self, conditions);
 END
 PRIVATE FN mIRLowering__equality_match_condition(MUTABLE self: MIRLowering, subject: Emittable, match_case: MatchCase) RETURNS !Emittable ->
-    MUTABLE conditions = ([match_case.value] + match_case.extra_values) |> SELECT MIRBinOp{ op: "==", left: COPY subject, right: COPY TRY (mIRLowering__lower(&self, &_)), lowered_node_id: NIL, ownership_consumption: NIL };
+    MUTABLE conditions: []Emittable = List[];
+    MUTABLE rtoc_case_values: []Locatable = ([match_case.value] + match_case.extra_values);
+    FOR MUTABLE rtoc_case_value IN rtoc_case_values DO
+      &conditions.append(Emittable{ MIRBinOp: COPY MIRBinOp{ op: "==", left: COPY subject, right: COPY UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(rtoc_case_value)))), lowered_node_id: NIL, ownership_consumption: NIL } });
+    END
     RETURN mIRLowering__disjoin_match_conditions(self, conditions);
 END
 PRIVATE FN mIRLowering__disjoin_match_conditions(self: MIRLowering, conditions: []Emittable) RETURNS Emittable ->
