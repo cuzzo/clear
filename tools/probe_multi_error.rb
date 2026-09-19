@@ -41,7 +41,8 @@ module ProbeMultiError
       begin
         visit(stmt)
       rescue StandardError => e
-        raise unless e.class.name.to_s.end_with?('CompilerError')
+        # Not just CompilerError: full_type! and friends raise RuntimeError,
+        # and those aborted whole rounds after the census had printed.
 
         FN_FAILED << [CURRENT[0], e]
       ensure
@@ -54,7 +55,8 @@ module ProbeMultiError
       begin
         visit_FunctionDef(fn)
       rescue StandardError => e
-        raise unless e.class.name.to_s.end_with?('CompilerError')
+        # Not just CompilerError: full_type! and friends raise RuntimeError,
+        # and those aborted whole rounds after the census had printed.
 
         FN_FAILED << [CURRENT[0], e]
       ensure
@@ -93,7 +95,8 @@ module ProbeMultiError
       begin
         visit(stmt)
       rescue StandardError => e
-        raise unless e.class.name.to_s.end_with?('CompilerError')
+        # Not just CompilerError: full_type! and friends raise RuntimeError,
+        # and those aborted whole rounds after the census had printed.
         # A whole-closure run compiles many units; the token carries a line
         # but no file, so the unit being compiled is what makes it locatable.
         RECORDED << e
@@ -127,6 +130,31 @@ module ProbeMultiError
     nil
   end
 end
+
+# MIR lowering aborts the whole unit on the FIRST failing statement, so a run
+# that clears annotation still reports one error per hour. Catching per
+# top-level statement here turns that into the whole remaining work list --
+# and catches StandardError, not just CompilerError, because full_type! and
+# friends raise RuntimeError and those killed entire rounds.
+module ProbeMultiLowering
+  def lower_top_level(stmt)
+    super
+  rescue StandardError => e
+    name = ProbeMultiError.label_for(stmt)
+    ProbeMultiError::FN_FAILED << [name, e]
+    ProbeMultiError.journal("LOWER\t#{name}\t#{e.message.to_s.gsub(/\e\[[0-9;]*m/, '').lines.map(&:strip).reject(&:empty?).first}")
+    []
+  end
+end
+
+TracePoint.new(:end) do |tp|
+  mod = tp.self
+  next unless mod.is_a?(Module)
+  own = mod.instance_methods(false) + mod.private_instance_methods(false)
+  next unless own.include?(:lower_top_level) && own.include?(:lower_program)
+  mod.prepend(ProbeMultiLowering)
+  tp.disable
+end.enable
 
 TracePoint.new(:end) do |tp|
   mod = tp.self
