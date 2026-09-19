@@ -8620,7 +8620,7 @@ PRIVATE FN mIRLowering__lower_call_arg_from_facts(MUTABLE self: MIRLowering, fac
     IF ((kept_edge == NIL) AND ((facts.edge_plan != NIL) AND (((facts.edge_plan)?).op == :move_handle))) THEN
       MUTABLE inner: Locatable = COPY facts.ast_arg;
       IF facts.ast_arg IS_A MoveNode THEN
-        inner = UNWRAP (castLocatableToMoveNode(facts.ast_arg).value);
+        inner = COPY castLocatableToMoveNode(facts.ast_arg).value;
       END
       IF inner IS_A Identifier THEN
         (&self.kept_edge_temp_stack.last()?.moved_sources).push(mIRLowering__zig_safe_name(self, CAST(aST__node_name(inner) AS String)));
