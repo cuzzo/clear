@@ -13270,15 +13270,17 @@ PRIVATE FN mIRLowering__or_else_exit_facts(self: MIRLowering, ex: OrElseExit, li
     IF ex.kind THEN
       kind = COPY (ex.kind OR_ELSE "");
       IF explicit_error_name EXISTS AS explicit_error_name_value THEN
-        error_name = explicit_error_name;
+        error_name = COPY explicit_error_name_value;
         name_id = TRY (aST__id_of_type(symbol(explicit_error_name_value)));
       ELSE
         clear_type = TRUE;
       END
-    ELSE_IF (explicit_error_name AND TRY (aST__error_type?(symbol(explicit_error_name)))) THEN
-      kind = COPY CAST((TRY (aST__kind_of_type(symbol(explicit_error_name)))) AS String);
-      error_name = explicit_error_name;
-      name_id = TRY (aST__id_of_type(symbol(explicit_error_name)));
+    ELSE_IF explicit_error_name EXISTS AS rtoc_explicit_name THEN
+      IF TRY (aST__error_type?(symbol(rtoc_explicit_name))) THEN
+        kind = COPY CAST((TRY (aST__kind_of_type(symbol(rtoc_explicit_name)))) AS String);
+        error_name = COPY rtoc_explicit_name;
+        name_id = TRY (aST__id_of_type(symbol(rtoc_explicit_name)));
+      END
     END
     RETURN OrElseExitFacts{ kind: COPY kind, error_name: COPY error_name, name_id: name_id, clear_type: clear_type, has_message: !((ex.message == NIL)), line: line.toInt() };
 END
@@ -13310,13 +13312,11 @@ PRIVATE FN mIRLowering__or_else_exit_scope(MUTABLE self: MIRLowering, facts: OrE
     END
     &stmts.append(CAST(Set{ target: Emittable{ FieldGet: COPY mIRLowering__runtime_error_field(&self, "clear_line") }, value: Emittable{ Lit: COPY Lit{ value: COPY facts.line.toString(), lowered_node_id: NIL, ownership_consumption: NIL } }, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
     &stmts.append(CAST(ReturnStmt{ value: COPY return_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
-    RETURN ScopeBlock{ body: COPY stmts |> SELECT ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_570: ?Stmt = NIL;
-    IF ((_ IS_A ReturnStmt OR _ IS_A [Set]Any)) THEN
-      rtoc_ternary_value_570 = _;
+    RETURN ScopeBlock{ body: COPY (stmts |> SELECT (IF ((_ IS_A ReturnStmt) OR (_ IS_A Set)) THEN
+      COPY _
     ELSE
-      rtoc_ternary_value_570 = ExprStmt{ expr: castStmtToEmittable(COPY _), discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    END
-    rtoc_ternary_value_570? }), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+      Emittable{ ExprStmt: COPY ExprStmt{ expr: castStmtToEmittable(COPY _), discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }
+    END)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN mIRLowering__binary_int_arithmetic_facts(self: MIRLowering, node: BinaryOp) RETURNS !BinaryIntArithmeticFacts ->
     MUTABLE left_ti = TRY (aST__full_type_mut(node.left));
