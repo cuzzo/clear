@@ -8595,7 +8595,21 @@ PRIVATE FN mIRLowering__with_kept_edge_call_frame(MUTABLE self: MIRLowering, blk
     IF ((frame.temps.length() == 0) AND (frame.moved_sources.length() == 0)) THEN
       RETURN args_mir;
     END
-    args_mir = args_mir |> SELECT ( castStmtListToEmittableList( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(IF (((_ IS_A Ident OR _ IS_A Lit) OR _ IS_A AllocatorRef) OR _ IS_A MIRUnaryOp) THEN _ ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE stmts, ident = mIRLowering__hoist_normalized_value_expr(&self, _); { MUTABLE rtoc_value_block_marker = 0; ruby_array_concat_Stmt( castStmtListToEmittableList(mIRLowering__function_state(&self).pending_stmts), CAST(stmts AS []Emittable)); ident } } END AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt) AS []Stmt)));
+    # Ruby maps the argument list, hoisting each non-trivial expression and
+    # concatenating its prefix onto pending_stmts as it goes.
+    MUTABLE hoisted_args: []Emittable = List[];
+    FOR arg_mir IN args_mir DO
+      IF ((((arg_mir IS_A Ident OR arg_mir IS_A Lit) OR arg_mir IS_A AllocatorRef) OR arg_mir IS_A MIRUnaryOp)) THEN
+        &hoisted_args.append(COPY arg_mir);
+      ELSE
+        MUTABLE stmts, ident = mIRLowering__hoist_normalized_value_expr(&self, arg_mir);
+        FOR hoist_stmt IN stmts DO
+          &self.state.function_state.pending_stmts.append(COPY hoist_stmt);
+        END
+        &hoisted_args.append(Emittable{ Ident: COPY ident });
+      END
+    END
+    args_mir = hoisted_args;
     FOR concat_stmt IN TRY (mIR__kept_edge_transfer_boundary((frame.temps + frame.moved_sources))) DO
       &self.state.function_state.pending_stmts.append(COPY concat_stmt);
     END
