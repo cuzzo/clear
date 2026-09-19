@@ -13429,15 +13429,12 @@ PRIVATE FN mIRLowering__index_access_plan(MUTABLE self: MIRLowering, node: GetIn
     MUTABLE target_node = COPY node.target;
     MUTABLE target_ast: Locatable = target_node;
     MUTABLE implicit_safe_nav = ((aST__node_safe_nav_chain(target_node) EXISTS) AND (locatable__safe_nav_chain(target_node) == TRUE));
-    MUTABLE explicit_safe_nav = (target_node IS_A OptionalUnwrap AND locatable__safe_navigation?(target_node));
+    MUTABLE explicit_safe_nav = (target_node IS_A OptionalUnwrap AND (locatable__safe_navigation?(target_node) OR_ELSE FALSE));
     MUTABLE optional = (explicit_safe_nav OR implicit_safe_nav);
-    MUTABLE source_ast_branch_value: ?Locatable = NIL;
+    MUTABLE source_ast: Locatable = COPY target_node;
     IF explicit_safe_nav THEN
-      source_ast_branch_value = target_node.target;
-    ELSE
-      source_ast_branch_value = target_node;
+      source_ast = COPY UNWRAP (aST__node_target(target_node));
     END
-    MUTABLE source_ast: Locatable = source_ast_branch_value?;
     MUTABLE optional_source_branch_value: ?Emittable = NIL;
     IF optional THEN
       optional_source_branch_value = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(source_ast))) AS Emittable);
@@ -13460,9 +13457,9 @@ PRIVATE FN mIRLowering__index_access_plan(MUTABLE self: MIRLowering, node: GetIn
     IF type__rank?( UNWRAP (target_type)) THEN
       MUTABLE index_nodes: []Locatable = List[];
       IF node.index IS_A TupleLit THEN
-        index_nodes = locatable__items(node.index);
+        index_nodes = UNWRAP (locatable__items(node.index));
       ELSE
-        index_nodes = [node.index];
+        index_nodes = List[COPY node.index];
       END
       rank_indices = index_nodes |> SELECT CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_))) AS Emittable);
     ELSE
@@ -13474,7 +13471,7 @@ PRIVATE FN mIRLowering__index_access_plan(MUTABLE self: MIRLowering, node: GetIn
     ELSE
       rtoc_ternary_value_571 = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.index))) AS Emittable);
     END
-    rtoc_ternary_value_571? }, optional: optional, optional_source: COPY optional_source, target_ast: COPY target_ast, type_info: COPY target_type, target_name: COPY IF target_node IS_A Identifier THEN
+    rtoc_ternary_value_571? }, optional: optional, optional_source: COPY optional_source, target_ast: COPY target_ast, type_info: COPY UNWRAP (target_type), target_name: COPY IF target_node IS_A Identifier THEN
       CAST(aST__node_name(target_node) AS String)
     ELSE
       NIL
