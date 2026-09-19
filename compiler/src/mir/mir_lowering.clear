@@ -8577,7 +8577,7 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
     ELSE
       IF facts.callee_param EXISTS AS kept_callee_param THEN
         IF kept_callee_param.symbol EXISTS AS kept_callee_symbol THEN
-          IF symbolEntry__kept_identity(kept_callee_symbol) THEN
+          IF (symbolEntry__kept_identity(kept_callee_symbol) EXISTS) THEN
             panic("{}{}");
           END
         END
@@ -8721,7 +8721,7 @@ PRIVATE FN mIRLowering__attach_explicit_move_consumption_mut(MUTABLE self: MIRLo
       MUTABLE kept_edge = FALSE;
       IF contract_params[rtoc_idx] EXISTS AS move_param THEN
         IF move_param.symbol EXISTS AS move_param_symbol THEN
-          kept_edge = symbolEntry__kept_identity(move_param_symbol);
+          kept_edge = (symbolEntry__kept_identity(move_param_symbol) EXISTS);
         END
       END
       IF !(((ast_arg IS_A MoveNode OR aST__moved?(ast_arg)) OR kept_edge)) THEN
