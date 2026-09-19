@@ -8815,7 +8815,7 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
       # travels with the code pointer, so the call passes both.
       MUTABLE fn_var_safe = mIRLowering__zig_safe_name(self, CAST(node.name AS String));
       all_args = (([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: "${fn_var_safe}.ctx", lowered_node_id: NIL, ownership_consumption: NIL } }]) + args_mir);
-      MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(&self, COPY node.matched_signature, node.args, args_mir));
+      MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(&self, COPY node.matched_signature, node.args, &args_mir));
       RETURN Emittable{ Call: COPY Call{ callee: "try ${fn_var_safe}.call", args: COPY all_args, try_wrap: FALSE, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FuncCall: COPY node })), callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     END
     MUTABLE needs_rt = TRY (mIRLowering__callee_needs_rt?(self, CAST(node.name AS String)));
@@ -11477,7 +11477,7 @@ END
 PRIVATE FN mIRLowering__bg_body_materialization(MUTABLE self: MIRLowering, MUTABLE node: BgBlock, caps: FiberCtxBuilderResult, analysis: ?CaptureAnalysis, pointer_captures: [Set]String, bg_rt: String, id: MIRLoweringGeneratedId, is_void: Bool, inner_t: Type, capture_close_plans: {String}ResourceClosePlan) RETURNS !BgBodyMaterialization ->
     MUTABLE run_body: []Emittable = List[];
     MUTABLE emit_body: []Emittable = List[];
-    mIRLowering__with_bg_fiber_body_context(&self, pointer_captures, %() USE(analysis, bg_rt, caps, capture_close_plans, id, inner_t, is_void, MUTABLE node, MUTABLE run_body, MUTABLE self) -> mIRLowering__with_fiber_capture_map(&self, caps.capture_map, caps.capture_symbols, bg_rt, %() USE(analysis, caps, capture_close_plans, id, inner_t, is_void, node, MUTABLE run_body, MUTABLE self) -> {
+    mIRLowering__with_bg_fiber_body_context(&self, pointer_captures, %() USE(analysis, bg_rt, caps, capture_close_plans, id, inner_t, is_void, MUTABLE node, MUTABLE run_body, MUTABLE self) -> mIRLowering__with_fiber_capture_map(&self, caps.capture_map, caps.capture_symbols, bg_rt, %() USE(analysis, caps, capture_close_plans, id, inner_t, is_void, MUTABLE node, MUTABLE run_body, MUTABLE self) -> {
     MUTABLE lowered = TRY (mIRLowering__lower_bg_body_steps(&self, &node, id, is_void, inner_t));
     run_body = TRY (mIRLowering__finalized_boundary_body_for_emit(&self, ((TRY (mIRLowering__capture_ownership_mirror_nodes(self, caps, analysis, "__ctx_${mIRLoweringGeneratedId__to_s(id)}", capture_close_plans)) + TRY (mIRLowering__capture_cleanup_stmts(self, caps.specs, "__ctx_${mIRLoweringGeneratedId__to_s(id)}"))) + lowered.run_body)));
     emit_body = run_body |> WHERE !(mIRLowering__capture_ownership_mirror_node?(self, _, "__ctx_${mIRLoweringGeneratedId__to_s(id)}"));
@@ -11726,7 +11726,7 @@ PRIVATE FN mIRLowering__lower_yield(MUTABLE self: MIRLowering, MUTABLE node: Yie
     MUTABLE stream_local = (mIRLowering__capture_state(&self).current_stream_local OR_ELSE "__stream_local");
     MUTABLE lowered = mIRLowering__with_decl_alloc(&self, :heap, %() USE(node, MUTABLE self) -> {
     MUTABLE value: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.expr)));
-    TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (value), node.expr, :heap, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(node.expr)) }))
+    TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (value), &node.expr, :heap, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(node.expr)) }))
     });
     IF TRY (mIRLowering__mir_allocates?(&self, lowered)) THEN
       lowered = TRY (mIRLowering__hoist_alloc(&self, &lowered, &node.expr, TRUE));
@@ -12100,7 +12100,7 @@ PRIVATE FN mIRLowering__lower_binary_op(MUTABLE self: MIRLowering, MUTABLE node:
       RETURN Emittable{ MIRBinOp: COPY TRY (mIRLowering__lower_lazy_boolean_op(&self, &node)) };
     END
     IF node.string_concat THEN
-      MUTABLE left = TRY (mIRLowering__hoist_alloc(&self, TRY (mIRLowering__widen_symbol_to_bytes(&self, CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable), node.left)), node.left));
+      MUTABLE left = TRY (mIRLowering__hoist_alloc(&self, TRY (mIRLowering__widen_symbol_to_bytes(&self, CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.left))) AS Emittable), node.left)), &node.left));
       MUTABLE right = TRY (mIRLowering__hoist_alloc(&self, TRY (mIRLowering__widen_symbol_to_bytes(&self, CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.right))) AS Emittable), node.right)), node.right));
       MUTABLE alloc = TRY (mIRLowering__alloc_for_node(&self, Locatable{ BinaryOp: COPY node }));
       RETURN Emittable{ ConcatStr: COPY ConcatStr{ parts: [CAST(left AS Any), CAST(right AS Any)], alloc: COPY alloc, rt_expr: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -13735,10 +13735,10 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
       ELSE
         NIL
       END;
-    MUTABLE val, field_hoists = mIRLowering__lower_head(&self, %() USE(borrowed_field, expected_ft, field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
-      rtoc_lambda_result_579 = mIRLowering__with_decl_alloc(&self, field_sink_alloc, %() USE(borrowed_field, expected_ft, field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
-      rtoc_lambda_result_578 = mIRLowering__with_expected_type(&self, expected_ft, %() USE(borrowed_field, expected_ft, field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
-      rtoc_lambda_result_577 = mIRLowering__with_sink_type(&self, expected_ft, %() USE(borrowed_field, expected_ft, field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
+    MUTABLE val, field_hoists = mIRLowering__lower_head(&self, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
+      rtoc_lambda_result_579 = mIRLowering__with_decl_alloc(&self, field_sink_alloc, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
+      rtoc_lambda_result_578 = mIRLowering__with_expected_type(&self, expected_ft, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
+      rtoc_lambda_result_577 = mIRLowering__with_sink_type(&self, expected_ft, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
       IF borrowed_field THEN
         RETURN TRY (mIRLowering__aggregate_dynamic_slice_field_value(&self, UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(field_node)))), CAST(expected_ft AS ?Type), TRUE, field_sink_alloc, &field_node));
       ELSE_IF TRY (mIRLowering__rc_retain_needed?(&self, field_node)) THEN
@@ -14599,9 +14599,9 @@ PRIVATE FN mIRLowering__lower_cap_wrap(MUTABLE self: MIRLowering, MUTABLE node: 
       RETURN Emittable{ MIRMethodCall: COPY TRY (mIRLowering__node_create_mir(&self, CAST(node_value AS Emittable), TRY (aST__full_type_mut(Locatable{ CapabilityWrap: COPY node })), &node.value)) };
     END
     MUTABLE inner_type = TRY (aST__full_type_mut(node.value));
-    MUTABLE inner = mIRLowering__with_decl_alloc(&self, :heap, %() USE(inner_type, node, MUTABLE self) -> {
-    rtoc_lambda_result_621 = mIRLowering__with_sink_type(&self, inner_type, %() USE(inner_type, node, MUTABLE self) -> {
-    rtoc_lambda_result_620 = mIRLowering__with_expected_type(&self, inner_type, %() USE(inner_type, node, MUTABLE self) -> {
+    MUTABLE inner = mIRLowering__with_decl_alloc(&self, :heap, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
+    rtoc_lambda_result_621 = mIRLowering__with_sink_type(&self, inner_type, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
+    rtoc_lambda_result_620 = mIRLowering__with_expected_type(&self, inner_type, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
     MUTABLE value: ?Emittable = TRY (mIRLowering__lower(&self, &node.value));
     TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (value), node.value, :heap, inner_type))
     });
@@ -15187,8 +15187,8 @@ PRIVATE FN mIRLowering__lower_module_const(MUTABLE self: MIRLowering, MUTABLE no
     MUTABLE safe_name = TRY (mIRLowering__var_decl_safe_name(&self, node, FALSE));
     MUTABLE rtoc_index_receiver_650 = TRY (functionState__binding_types(mIRLowering__function_state(&self)));
     rtoc_index_receiver_650[safe_name] = COPY facts.ft;
-    MUTABLE heap_value, const_pending = mIRLowering__lower_head(&self, %() USE(node, MUTABLE self) -> {
-    rtoc_lambda_result_652 = mIRLowering__with_decl_alloc(&self, :heap, %() USE(node, MUTABLE self) -> {
+    MUTABLE heap_value, const_pending = mIRLowering__lower_head(&self, %() USE(MUTABLE node, MUTABLE self) -> {
+    rtoc_lambda_result_652 = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
     rtoc_lambda_result_651 = TRY (mIRLowering__lower(&self, &node.value));
     rtoc_lambda_result_651
     });
@@ -15198,7 +15198,7 @@ PRIVATE FN mIRLowering__lower_module_const(MUTABLE self: MIRLowering, MUTABLE no
       RETURN TRY (mIRLowering__lower_runtime_init_const(self, node, facts, safe_name, heap_value, const_pending));
     END
     self.state.function_state.pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(&self).pending_stmts, CAST(const_pending AS []Emittable));
-    MUTABLE init = mIRLowering__with_decl_alloc(&self, facts.decl_alloc, %() USE(facts, node, MUTABLE self) -> TRY (mIRLowering__lower_var_decl_init(&self, &node, facts.ft, facts.bare_zig, facts.has_caps, facts.decl_alloc)));
+    MUTABLE init = mIRLowering__with_decl_alloc(&self, facts.decl_alloc, %() USE(facts, MUTABLE node, MUTABLE self) -> TRY (mIRLowering__lower_var_decl_init(&self, &node, facts.ft, facts.bare_zig, facts.has_caps, facts.decl_alloc)));
     TRY (mIRLowering__stamp_var_decl_init_target_mut(&self, &init, safe_name, facts.decl_alloc));
     MUTABLE let = Let{ name: COPY safe_name, init: COPY init, mutable: FALSE, annotation: COPY facts.annotation, suppression: COPY TRY (mIRLowering__var_decl_suppression(&self, safe_name, node, facts, &init)), alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
     let.module_const = TRUE;
@@ -15209,8 +15209,8 @@ PRIVATE FN mIRLowering__lower_module_global(MUTABLE self: MIRLowering, MUTABLE n
     MUTABLE safe_name = TRY (mIRLowering__var_decl_safe_name(&self, node, FALSE));
     MUTABLE rtoc_index_receiver_653 = TRY (functionState__binding_types(mIRLowering__function_state(&self)));
     rtoc_index_receiver_653[safe_name] = COPY facts.ft;
-    MUTABLE heap_value, pending = mIRLowering__lower_head(&self, %() USE(node, MUTABLE self) -> {
-    rtoc_lambda_result_655 = mIRLowering__with_decl_alloc(&self, :heap, %() USE(node, MUTABLE self) -> {
+    MUTABLE heap_value, pending = mIRLowering__lower_head(&self, %() USE(MUTABLE node, MUTABLE self) -> {
+    rtoc_lambda_result_655 = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
     rtoc_lambda_result_654 = TRY (mIRLowering__lower(&self, &node.value));
     rtoc_lambda_result_654
     });
@@ -16478,8 +16478,8 @@ PRIVATE FN mIRLowering__lower_map_indexed_assignment(MUTABLE self: MIRLowering, 
     MUTABLE shard: ?{String@symbol}String = TRY (mIRLowering__shard_context(self));
     MUTABLE dispatch = TRY (mIRLowering__indexed_assignment_dispatch(&self, kind, receiver_type, target_node, node, &op));
     MUTABLE sink_type = TRY (type__value_type(receiver_type));
-    MUTABLE val = mIRLowering__with_sink_type(&self, sink_type, %() USE(dispatch, node, MUTABLE self) -> {
-    rtoc_lambda_result_696 = mIRLowering__with_decl_alloc(&self, dispatch.sink_alloc, %() USE(node, MUTABLE self) -> {
+    MUTABLE val = mIRLowering__with_sink_type(&self, sink_type, %() USE(dispatch, MUTABLE node, MUTABLE self) -> {
+    rtoc_lambda_result_696 = mIRLowering__with_decl_alloc(&self, dispatch.sink_alloc, %() USE(MUTABLE node, MUTABLE self) -> {
     rtoc_lambda_result_695 = TRY (mIRLowering__lower(&self, &node.value));
     rtoc_lambda_result_695
     });
@@ -16518,8 +16518,8 @@ PRIVATE FN mIRLowering__lower_template_indexed_assignment(MUTABLE self: MIRLower
     END
     MUTABLE sink_type: Type = sink_type_branch_value?;
     MUTABLE owns_transferred_value = TRY (mIRLowering__ownership_tracked_transfer_type?(&self, sink_type));
-    MUTABLE val = mIRLowering__with_decl_alloc(&self, dispatch.sink_alloc, %() USE(node, sink_type, MUTABLE self) -> {
-    rtoc_lambda_result_698 = mIRLowering__with_sink_type(&self, sink_type, %() USE(node, MUTABLE self) -> {
+    MUTABLE val = mIRLowering__with_decl_alloc(&self, dispatch.sink_alloc, %() USE(MUTABLE node, sink_type, MUTABLE self) -> {
+    rtoc_lambda_result_698 = mIRLowering__with_sink_type(&self, sink_type, %() USE(MUTABLE node, MUTABLE self) -> {
     rtoc_lambda_result_697 = TRY (mIRLowering__lower(&self, &node.value));
     rtoc_lambda_result_697
     });
@@ -16700,7 +16700,7 @@ END
 PRIVATE FN mIRLowering__auto_lock_assignment_value(MUTABLE self: MIRLowering, MUTABLE node: Assignment, alloc_sym: String@symbol) RETURNS !Emittable ->
     MUTABLE value = mIRLowering__with_decl_alloc(&self, alloc_sym, %() USE(alloc_sym, MUTABLE node, MUTABLE self) -> {
     MUTABLE lowered: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge(node.value)));
-    MUTABLE placed = TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (lowered), node.value, alloc_sym, TRY (aST__full_type_mut( castAssignmentNameToLocatable__type_analysis_session(node.name)))));
+    MUTABLE placed = TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (lowered), &node.value, alloc_sym, TRY (aST__full_type_mut( castAssignmentNameToLocatable__type_analysis_session(node.name)))));
     TRY (mIRLowering__materialize_owned_sink_value(&self, placed, node.value, alloc_sym, TRY (aST__full_type_mut(node.name))))
     });
     IF (TRUE AND TRY (mIRLowering__mir_allocates?(&self, value))) THEN
@@ -16758,10 +16758,10 @@ PRIVATE FN mIRLowering__lower_if(MUTABLE self: MIRLowering, node: IfStatement) R
     if_stmt.comptime = node.comptime;
     RETURN mIRLowering__with_pending(self, cond_pending, Emittable{ IfStmt: COPY if_stmt });
 END
-PRIVATE FN mIRLowering__lower_runtime_is_a_if(MUTABLE self: MIRLowering, node: IfStatement, condition: IsA) RETURNS !Emittable ->
+PRIVATE FN mIRLowering__lower_runtime_is_a_if(MUTABLE self: MIRLowering, node: IfStatement, MUTABLE condition: IsA) RETURNS !Emittable ->
     MUTABLE else_body: ?[]Emittable = NIL;
     MUTABLE then_body = NIL;
-    MUTABLE subject, subject_pending = mIRLowering__lower_head(&self, %() USE(condition, MUTABLE self) -> TRY (mIRLowering__lower_control_condition( self, condition.left)));
+    MUTABLE subject, subject_pending = mIRLowering__lower_head(&self, %() USE(condition, MUTABLE self) -> TRY (mIRLowering__lower_control_condition(self, &condition.left)));
     MUTABLE variant: ?String = COPY condition.runtime_variant_name;
     MUTABLE cond = TRY (mIRLowering__union_tag_condition(&self, CAST(subject AS Emittable), UNWRAP (variant)));
     MUTABLE payload_bindings = TRY (mIRLowering__runtime_is_a_payload_bindings(&self, condition, CAST(subject AS Emittable), UNWRAP (variant)));
@@ -17029,9 +17029,9 @@ PRIVATE FN mIRLowering__finalize_loop_frame_alloc_scopes_mut(MUTABLE self: MIRLo
       :function
     END));
 END
-PRIVATE FN mIRLowering__lower_while(MUTABLE self: MIRLowering, node: WhileLoop) RETURNS !WhileStmt ->
+PRIVATE FN mIRLowering__lower_while(MUTABLE self: MIRLowering, MUTABLE node: WhileLoop) RETURNS !WhileStmt ->
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE cond, cond_pending = mIRLowering__lower_head(&self, %() USE(node, MUTABLE self) -> TRY (mIRLowering__lower_control_condition( self, node.condition)));
+    MUTABLE cond, cond_pending = mIRLowering__lower_head(&self, %() USE(node, MUTABLE self) -> TRY (mIRLowering__lower_control_condition(self, &node.condition)));
     MUTABLE b = COPY node.do_branch;
     MUTABLE body = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_733: ?[]Emittable = NIL;
     IF b IS_A []Any THEN
@@ -17048,9 +17048,9 @@ PRIVATE FN mIRLowering__lower_while(MUTABLE self: MIRLowering, node: WhileLoop) 
     END
     RETURN WhileStmt{ cond: COPY TRY (mIRLowering__loop_condition_expr(&self, cond, cond_pending)), body: body, capture: NIL, update: NIL, mark_per_iter: node.mark_per_iter, tight: tight, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
-PRIVATE FN mIRLowering__lower_while_bind(MUTABLE self: MIRLowering, node: WhileBindLoop) RETURNS !WhileStmt ->
+PRIVATE FN mIRLowering__lower_while_bind(MUTABLE self: MIRLowering, MUTABLE node: WhileBindLoop) RETURNS !WhileStmt ->
     MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE cond, cond_pending = mIRLowering__lower_head(&self, %() USE(node, MUTABLE self) -> TRY (mIRLowering__lower_control_condition( self, node.condition, TRUE)));
+    MUTABLE cond, cond_pending = mIRLowering__lower_head(&self, %() USE(node, MUTABLE self) -> TRY (mIRLowering__lower_control_condition(self, &node.condition, TRUE)));
     MUTABLE body = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(node.do_branch)));
     MUTABLE capture_cleanup: ?CleanupEntry@multiowned = TRY (mIRLowering__bind_capture_cleanup(&self, node.condition));
     IF capture_cleanup EXISTS AS capture_cleanup_value THEN
