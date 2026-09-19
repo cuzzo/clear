@@ -14394,7 +14394,7 @@ PRIVATE FN mIRLowering__lower_clone(MUTABLE self: MIRLowering, node: KeepNode) R
     MUTABLE func: String = "";
     MUTABLE ti: ?Type = TRY (type__from_node_mut(node.value, "CLONE value"));
     IF (node.carrier_op == :monomorphic_keep) THEN
-      RETURN Emittable{ MonomorphicKeep: COPY MonomorphicKeep{ source: COPY TRY (mIRLowering__lower(&self, &castLocatableToMIRLoweringLowerableStmt(node.value))), zig_base: COPY CAST(type__resolved( UNWRAP (ti)) AS String), alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL } };
+      RETURN Emittable{ MonomorphicKeep: COPY MonomorphicKeep{ source: COPY TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value))), zig_base: COPY CAST(type__resolved( UNWRAP (ti)) AS String), alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     IF (node.carrier_op == :deferred_specialization) THEN
       panic("KEEP on a carrier-polymorphic parameter requires carrier {}");
