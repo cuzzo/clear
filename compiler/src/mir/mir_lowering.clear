@@ -8737,7 +8737,7 @@ PRIVATE FN mIRLowering__attach_explicit_move_consumption_mut(MUTABLE self: MIRLo
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE takes_mir_arg = UNWRAP (mir_arg);
+      MUTABLE takes_mir_arg = COPY mir_arg;
       MUTABLE takes_ast_arg = COPY ast_arg;
       operands = ruby_array_concat_OwnershipOperandFact(operands, TRY (mIRLowering__ownership_operands_for_lowered_takes_arg(&self, &takes_mir_arg, &takes_ast_arg, source, :heap)));
     rtoc_idx = rtoc_idx + 1;
@@ -8750,16 +8750,20 @@ PRIVATE FN mIRLowering__attach_explicit_move_consumption_mut(MUTABLE self: MIRLo
 END
 PRIVATE FN mIRLowering__managed_handle_materialized_for_plain_takes?(MUTABLE self: MIRLowering, ast_arg: Locatable, contract: ?CallableContract, idx: Int64) RETURNS !Bool ->
     IF contract EXISTS AS contract_value THEN
-      MUTABLE param: ?Param = COPY (TRY (functionSignature__params(contract_value.signature)))[idx];
-      IF !(param?.takes) THEN
+      MUTABLE param_opt: ?Param = COPY (TRY (functionSignature__params(contract_value.signature)))[idx];
+      IF !(param_opt EXISTS) THEN
+        RETURN FALSE;
+      END
+      MUTABLE param: Param = COPY param_opt;
+      IF !((param.takes OR_ELSE FALSE)) THEN
         RETURN FALSE;
       END
       MUTABLE source: Locatable = COPY ast_arg;
       IF ast_arg IS_A MoveNode THEN
         source = UNWRAP (aST__node_value(ast_arg));
       END
-      MUTABLE source_type: ?Type = TRY (type__from_node_mut(source, "managed TAKES materialization"));
-      RETURN ((TRY (type__any_rc?( UNWRAP (source_type))) AND !(TRY (type__any_rc?((TRY (type__new(TypeConstructionInput{ Type: COPY param.type }))))))) AND !(type__generic_type_parameter?((TRY (type__new(TypeConstructionInput{ Type: COPY param.type }))))));
+      MUTABLE source_type: Type = TRY (type__from_node_mut(source, "managed TAKES materialization"));
+      RETURN ((TRY (type__any_rc?(source_type)) AND !(TRY (type__any_rc?((TRY (type__new(TypeConstructionInput{ Type: COPY param.type }))))))) AND !(type__generic_type_parameter?((TRY (type__new(TypeConstructionInput{ Type: COPY param.type }))))));
     ELSE
       RETURN FALSE;
     END
