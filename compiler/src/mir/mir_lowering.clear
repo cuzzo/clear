@@ -12678,15 +12678,14 @@ PRIVATE FN mIRLowering__smooth_collect_block(MUTABLE self: MIRLowering, left: Em
     MUTABLE collect_var = "__collect_acc_${mIRLoweringGeneratedId__to_s(block_id)}";
     MUTABLE val_var = "__collect_val_${mIRLoweringGeneratedId__to_s(block_id)}";
     MUTABLE left_effect = TRY (ownershipEffect__of(left));
-    MUTABLE collect_source_alloc = IF type__observable?(ft) THEN
-      :heap
-    ELSE
-      (IF left_effect.produces_owned THEN
-      ((left_effect.alloc OR_ELSE :heap))
-    ELSE
-      :heap
-    END)
-    END;
+    # An owned String out of a nested IF expression is not implicitly copyable;
+    # the default is :heap and only the owned-left case can differ.
+    MUTABLE collect_source_alloc: String@symbol = :heap;
+    IF !(type__observable?(ft)) THEN
+      IF left_effect.produces_owned THEN
+        collect_source_alloc = (left_effect.alloc OR_ELSE :heap);
+      END
+    END
     MUTABLE collect_cleanup = cleanupEntry__build(:uniform, collect_source_alloc, FALSE, NIL, acc_zig);
     RETURN MIRBlockExpr{ label: COPY label, body: COPY [Emittable{ Let: COPY Let{ name: COPY collect_var, init: COPY left, mutable: FALSE, annotation: COPY ft, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ Cleanup: COPY Cleanup{ name: COPY collect_var, cleanup_entry: collect_cleanup, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Let: COPY Let{ name: COPY val_var, init: Emittable{ MIRMethodCall: COPY TRY (mIRLowering__smooth_collect_call(self, Emittable{ Ident: COPY Ident{ name: COPY collect_var, lowered_node_id: NIL, ownership_consumption: NIL } }, collect_method, collect_args, collect_type, collect_alloc_fact)) }, mutable: FALSE, annotation: COPY collect_type, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ Ident: COPY Ident{ name: COPY val_var, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
 END
@@ -13147,8 +13146,9 @@ PRIVATE FN mIRLowering__tense_map_cleanup_entry(self: MIRLowering, type_info: Ty
     ELSE
       entry_branch_value = cleanupEntry__build(:uniform, :heap, FALSE, NIL, TRY (type__zig_type(type_info)));
     END
-    MUTABLE entry: CleanupEntry = entry_branch_value?;
-    RETURN cleanupEntry__set_lifecycle_plan_mut(&entry, lifecycle);
+    MUTABLE entry: CleanupEntry@multiowned = entry_branch_value?;
+    cleanupEntry__set_lifecycle_plan_mut(&entry, lifecycle);
+    RETURN KEEP entry;
 END
 PRIVATE FN mIRLowering__tense_map_bindings(self: MIRLowering, id: Int64, segment: String, count_value: Int64) RETURNS ![]String ->
     MUTABLE bindings: []String = List[];
@@ -13582,12 +13582,13 @@ PRIVATE FN mIRLowering__struct_lit_type_subst(self: MIRLowering, schema: MIRLowe
       RETURN {};
     END
     MUTABLE out: {String@symbol}TypeTypeInput = {};
-    FOR rtoc_key IN params.zip(args).keys() DO
-    MUTABLE arg: Any = COPY UNWRAP (params.zip(args)[rtoc_key]);
-    IF !(rtoc_key) THEN
-      CONTINUE;
-    END
-    out[symbol(rtoc_key)] = arg;
+    # `params.zip(args).each { |param, arg| ... }` walks the two lists in step
+    # and stops at the shorter one; CLEAR has no zip.
+    MUTABLE rtoc_pair_i: Int64 = 0;
+    WHILE ((rtoc_pair_i < params.length()) AND (rtoc_pair_i < args.length())) DO
+      MUTABLE rtoc_param = COPY UNWRAP (params[rtoc_pair_i]);
+      out[symbol(rtoc_param)] = COPY UNWRAP (args[rtoc_pair_i]);
+      rtoc_pair_i = rtoc_pair_i + 1;
     END
     RETURN out;
 END
