@@ -13756,8 +13756,11 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
       TRY (mIRLowering__alloc_for_node(&self, Locatable{ StructLit: COPY node }))
     END;
     MUTABLE literal_fields = TRY (mIRLowering__struct_lit_fields_with_callsite_defaults(&self, node));
-    MUTABLE fields = literal_fields.keys() |> SELECT {
-    MUTABLE ft: ?StructLitFieldType = COPY field_types[_];
+    # The element expression mutates `hoisted`, which a pipeline block only
+    # borrows; the loop is what lets the append land.
+    MUTABLE fields: []StructInitField = List[];
+    FOR rtoc_field_key IN literal_fields.keys() DO
+    MUTABLE ft: ?StructLitFieldType = COPY field_types[rtoc_field_key];
     MUTABLE field_type_input_branch_value: ?TypeTypeInput = NIL;
       IF ft? IS_A InlineStructVariant AS inline_struct_variant THEN
         field_type_input_branch_value = NIL;
@@ -13765,25 +13768,24 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
         field_type_input_branch_value = castOptionalStructLitFieldTypeToOptionalTypeTypeInput(ft);
       END
     MUTABLE field_type_input: ?TypeTypeInput = field_type_input_branch_value;
-    MUTABLE borrowed_field: Bool = ((node.borrowed_field_names != NIL) AND (((node.borrowed_field_names)?).contains?(_) == TRUE));
-    MUTABLE field_node = mIRLowering__struct_literal_field_node(self, borrowed_field, COPY UNWRAP (literal_fields[_]));
+    MUTABLE borrowed_field: Bool = ((node.borrowed_field_names != NIL) AND (((node.borrowed_field_names)?).contains?(rtoc_field_key) == TRUE));
+    MUTABLE field_node = mIRLowering__struct_literal_field_node(self, borrowed_field, COPY UNWRAP (literal_fields[rtoc_field_key]));
     MUTABLE field_sink_alloc = TRY (mIRLowering__aggregate_field_sink_alloc(&self, field_type_input, field_node, struct_alloc));
     TRY (mIRLowering__move_mark_field_mut(&self, field_node));
-    MUTABLE expected_ft:? = IF field_type_input != NIL THEN
-        ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_576: ?TypeTypeInput = NIL;
-      IF field_type_input IS_A Type THEN
-        rtoc_ternary_value_576 = field_type_input;
+    # `ft && (ft.is_a?(Type) ? ft : Type.new(ft))` -- the nested ternary only
+    # runs when the field has a declared type, and it yields a Type.
+    MUTABLE expected_ft: ?Type = NIL;
+    IF field_type_input EXISTS AS rtoc_field_ti THEN
+      IF rtoc_field_ti IS_A Type AS rtoc_field_ti_type THEN
+        expected_ft = COPY rtoc_field_ti_type;
       ELSE
-        rtoc_ternary_value_576 = TRY (type__new(castTypeTypeInputToTypeConstructionInput__mir_lowering(field_type_input)));
+        expected_ft = TRY (type__new(castTypeTypeInputToTypeConstructionInput__mir_lowering(rtoc_field_ti)));
       END
-      rtoc_ternary_value_576? })
-      ELSE
-        NIL
-      END;
-    MUTABLE val, field_hoists = mIRLowering__lower_head(&self, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
-      rtoc_lambda_result_579 = mIRLowering__with_decl_alloc(&self, field_sink_alloc, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
-      rtoc_lambda_result_578 = mIRLowering__with_expected_type(&self, castTypeTypeInputToType(UNWRAP (expected_ft)), %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
-      rtoc_lambda_result_577 = mIRLowering__with_sink_type(&self, castTypeTypeInputToType(UNWRAP (expected_ft)), %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
+    END
+    MUTABLE val, field_hoists = mIRLowering__lower_head(&self, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, rtoc_field_key, MUTABLE self) -> {
+      rtoc_lambda_result_579 = mIRLowering__with_decl_alloc(&self, field_sink_alloc, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, rtoc_field_key, MUTABLE self) -> {
+      rtoc_lambda_result_578 = mIRLowering__with_expected_type(&self, UNWRAP (expected_ft), %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, rtoc_field_key, MUTABLE self) -> {
+      rtoc_lambda_result_577 = mIRLowering__with_sink_type(&self, UNWRAP (expected_ft), %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, rtoc_field_key, MUTABLE self) -> {
       IF borrowed_field THEN
         RETURN TRY (mIRLowering__aggregate_dynamic_slice_field_value(&self, UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(field_node)))), CAST(expected_ft AS ?Type), TRUE, field_sink_alloc, &field_node));
       ELSE_IF TRY (mIRLowering__rc_retain_needed?(&self, field_node)) THEN
@@ -13796,17 +13798,17 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
           ELSE
             RETURN kept_orelse;
           END
-        ELSE_IF ((IF field_node IS_A CopyNode AS copy_node THEN ((expected_ft != NIL) AND type__collection?(UNWRAP (castTypeTypeInputToType(expected_ft)))) ELSE FALSE END) AND !(TRY (type__any_rc?(UNWRAP (castTypeTypeInputToType(UNWRAP (expected_ft))))))) THEN
-          RETURN TRY (mIRLowering__hoist_alloc(&self, Emittable{ DeepCopy: COPY DeepCopy{ source: COPY TRY (mIRLowering__lower(&self, aST__node_value(field_node))), zig_type: COPY TRY (type__zig_type(expected_ft)), elem_type: NIL, strategy: :full_value, alloc: COPY field_sink_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(expected_ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, &field_node, TRUE));
+        ELSE_IF (((field_node IS_A CopyNode) AND (IF expected_ft EXISTS AS rtoc_ft_collection THEN type__collection?(rtoc_ft_collection) ELSE FALSE END)) AND !(TRY (type__any_rc?(UNWRAP (expected_ft))))) THEN
+          RETURN TRY (mIRLowering__hoist_alloc(&self, Emittable{ DeepCopy: COPY DeepCopy{ source: COPY UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (aST__node_value(field_node)))))), zig_type: COPY TRY (type__zig_type(UNWRAP (expected_ft))), elem_type: NIL, strategy: :full_value, alloc: COPY field_sink_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(UNWRAP (expected_ft)))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, &field_node, TRUE));
         ELSE
-          MUTABLE field_value = TRY (mIRLowering__materialize_owned_sink_value(&self, TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(field_node))), field_node, field_sink_alloc, field_type_input));
-          IF TRY (mIRLowering__struct_field_wants_slice?(self, expected_ft, K{ StringValue: COPY _ }, node)) THEN
+          MUTABLE field_value = TRY (mIRLowering__materialize_owned_sink_value(&self, UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(field_node)))), field_node, field_sink_alloc, field_type_input));
+          IF TRY (mIRLowering__struct_field_wants_slice?(self, expected_ft, K{ StringValue: COPY rtoc_field_key }, node)) THEN
               field_value = TRY (mIRLowering__aggregate_dynamic_slice_field_value(&self, &field_value, expected_ft, borrowed_field, field_sink_alloc, &field_node));
           END
           MUTABLE field_alloc: ?String@symbol = TRY (mIRLowering__mir_owned_alloc(&self, field_value));
           MUTABLE lowered = TRY (mIRLowering__hoist_alloc(&self, &field_value, &field_node, TRUE, FALSE, TRUE, NIL, field_sink_alloc));
-          IF (TRUE AND TRY (mIRLowering__recursive_field_copy_required?(&self, expected_ft, field_node, field_alloc, field_sink_alloc))) THEN
-            MUTABLE copy = (TRY (mIRLowering__retain_handle_for_destination(&self, lowered, expected_ft)) OR_ELSE Emittable{ DeepCopy: COPY DeepCopy{ source: COPY lowered, zig_type: COPY TRY (type__zig_type(expected_ft)), elem_type: NIL, strategy: :full_value, alloc: COPY field_sink_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(expected_ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } });
+          IF (TRUE AND TRY (mIRLowering__recursive_field_copy_required?(&self, UNWRAP (expected_ft), field_node, field_alloc, field_sink_alloc))) THEN
+            MUTABLE copy = (TRY (mIRLowering__retain_handle_for_destination(&self, lowered, UNWRAP (expected_ft))) OR_ELSE Emittable{ DeepCopy: COPY DeepCopy{ source: COPY lowered, zig_type: COPY TRY (type__zig_type(UNWRAP (expected_ft))), elem_type: NIL, strategy: :full_value, alloc: COPY field_sink_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(UNWRAP (expected_ft)))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } });
             RETURN TRY (mIRLowering__hoist_alloc(&self, &copy, &field_node, TRUE));
           ELSE
             RETURN lowered;
@@ -13823,28 +13825,27 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
     });
     MUTABLE rtoc_fn_state = mIRLowering__function_state(&self);
     rtoc_fn_state.pending_stmts = ruby_array_concat_Stmt(rtoc_fn_state.pending_stmts, CAST(field_hoists AS []Emittable));
-    IF (COPY UNWRAP (literal_fields[_])).needs_heap_create THEN
-        MUTABLE field_ti = TRY (aST__full_type_mut(COPY UNWRAP (literal_fields[_])));
-        MUTABLE payload_ti = IF type__optional?(field_ti) THEN
-          TRY (type__wrapped_type(field_ti))
-        ELSE
-          field_ti
-        END;
+    IF ((aST__node_needs_heap_create(UNWRAP (literal_fields[rtoc_field_key]))) OR_ELSE FALSE) THEN
+        MUTABLE field_ti = TRY (aST__full_type_mut(COPY UNWRAP (literal_fields[rtoc_field_key])));
+        MUTABLE payload_ti: Type = COPY field_ti;
+        IF type__optional?(field_ti) THEN
+          payload_ti = (TRY (type__wrapped_type(field_ti)) OR_ELSE COPY field_ti);
+        END
         MUTABLE zig_t = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ StringValue: COPY CAST(type__resolved(payload_ti) AS String) }));
         MUTABLE temp = "__ind_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_580 = mIRLowering__lowering_counters(&self);
-        mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_580)) }}_${_}";
+        mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_580)) }}rtoc_field_key${rtoc_field_key}";
         MUTABLE boxed =     IF type__optional?(field_ti) THEN
           {
       MUTABLE rtoc_value_block_marker = 0;
       capture = "__box_some_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_582 = mIRLowering__lowering_counters(&self);
         mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_582)) }}";
-      IfOptional{ optional: COPY val, capture: COPY capture, then_expr: Emittable{ HeapCreate: COPY HeapCreate{ zig_type: COPY zig_t, init: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: :heap, label: "blk_${_}", lowered_node_id: NIL, ownership_consumption: NIL } }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL }
+      Emittable{ IfOptional: COPY IfOptional{ optional: COPY UNWRAP (val), capture: COPY capture, then_expr: Emittable{ HeapCreate: COPY HeapCreate{ zig_type: COPY zig_t, init: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: :heap, label: "blk_${rtoc_field_key}", lowered_node_id: NIL, ownership_consumption: NIL } }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }
         }
         ELSE
-          HeapCreate{ zig_type: COPY zig_t, init: COPY val, alloc: :heap, label: "blk_${_}", lowered_node_id: NIL, ownership_consumption: NIL }
+          Emittable{ HeapCreate: COPY HeapCreate{ zig_type: COPY zig_t, init: COPY UNWRAP (val), alloc: :heap, label: "blk_${rtoc_field_key}", lowered_node_id: NIL, ownership_consumption: NIL } }
         END;
-        MUTABLE hc = TRY (mIRLowering__with_ownership_consumption_for_value(&self, &boxed, &val, &field_node, "MIR::HeapCreate", :owned_sink, :heap));
-        hoisted = ruby_array_concat_Emittable__mir_lowering(hoisted, CAST(TRY (bindingMaterialization__statements((BindingMaterialization{ name: COPY temp, expr: COPY hc, alloc: :heap, type_info: COPY (COPY UNWRAP (literal_fields[_])).full_type_mut("indirect struct field allocation"), mutable: FALSE, scope: :heap, annotation: NIL, suppression: NIL, cleanup_entry: NIL, cleanup_mode: :normal, ownership_tracked: TRUE }))) AS []Emittable));
+        MUTABLE hc = TRY (mIRLowering__with_ownership_consumption_for_value(&self, &boxed, UNWRAP (val), &field_node, "MIR::HeapCreate", :owned_sink, :heap));
+        hoisted = ruby_array_concat_Emittable__mir_lowering(hoisted, CAST(TRY (bindingMaterialization__statements((BindingMaterialization{ name: COPY temp, expr: COPY hc, alloc: :heap, type_info: COPY TRY (aST__full_type_mut(UNWRAP (literal_fields[rtoc_field_key]))), mutable: FALSE, scope: :heap, annotation: NIL, suppression: NIL, cleanup_entry: NIL, cleanup_mode: :normal, ownership_tracked: TRUE }))) AS []Emittable));
         MUTABLE destroy: Emittable = Emittable{ DestroyPtr: COPY DestroyPtr{ ptr: Emittable{ Ident: COPY Ident{ name: COPY temp, lowered_node_id: NIL, ownership_consumption: NIL } }, alloc: Alloc{ SymbolValue: :heap }, lowered_node_id: NIL, ownership_consumption: NIL } };
         IF type__optional?(field_ti) THEN
           capture = "__box_free_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_583 = mIRLowering__lowering_counters(&self);
@@ -13854,22 +13855,43 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
         &hoisted.append(Emittable{ ErrDeferStmt: COPY ErrDeferStmt{ body: DeferBody{ Emittable: COPY destroy }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
         val = Ident{ name: COPY temp, lowered_node_id: NIL, ownership_consumption: NIL };
     END
-    {:name: _, :value: val, :alloc: field_sink_alloc}
-    };
+      &fields.append(StructInitField{ name: symbol(CAST(rtoc_field_key AS String)), value: COPY UNWRAP (val), alloc: COPY field_sink_alloc });
+    END
     MUTABLE type_name: String = "";
     IF node.type_args EXISTS AS type_args_value THEN
       IF type_args_value.any?() THEN
-      MUTABLE zig_args = (node.type_args |> SELECT TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY _ })))))).join(", ");
+      MUTABLE zig_args = (UNWRAP (node.type_args) |> SELECT TRY (type__zig_type((TRY (type__new(TypeConstructionInput{ Type: COPY _ })))))).join(", ");
       type_name = "${node.name}(${zig_args})";
     ELSE
       type_name = COPY node.name;
     END
     END
-    MUTABLE field_operands = fields |> UNNEST { MUTABLE rtoc_value_block_marker = 0; MUTABLE field_ast = literal_fields[CAST(_[:name] AS String)]; (IF !(field_ast) THEN List[] ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE raw_field_type: ?StructLitFieldType = COPY field_types[CAST(_[:name] AS String)]; (IF ((raw_field_type != NIL) AND (raw_field_type IS_A InlineStructVariant)) THEN List[] ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE actual_type: ?Type@multiowned = TRY (mIRLowering__struct_literal_field_actual_type(&self, field_ast)); { MUTABLE rtoc_value_block_marker = 0; actual_type = (actual_type OR_ELSE TRY (type__from_node_mut(field_ast, "struct field payload ownership"))); (IF (IF node.borrowed_field_names != NIL THEN
-      node.borrowed_field_names.contains?(CAST(_[:name] AS String))
-    ELSE
-      NIL
-    END) THEN [ownershipOperandFact__non_owning(CAST(actual_type AS Type), "MIR::StructInit borrowed field")] ELSE TRY (mIRLowering__ownership_operands_for_sink_value(&self, _[:value], &field_ast, CAST(actual_type AS Type), "MIR::StructInit", struct_alloc, FALSE)) END) } } END) } END) };
+    # Ruby's flat_map with early `next []` guards: a loop states the same
+    # sequence without stacking IF expressions that each yield a list.
+    MUTABLE field_operands: []OwnershipOperandFact = List[];
+    FOR MUTABLE rtoc_fo_field IN fields DO
+      MUTABLE rtoc_fo_name: String = COPY CAST(rtoc_fo_field.name AS String);
+      IF literal_fields[rtoc_fo_name] EXISTS AS rtoc_field_ast THEN
+        MUTABLE field_ast: Locatable = COPY rtoc_field_ast;
+        MUTABLE raw_field_type: ?StructLitFieldType = COPY field_types[rtoc_fo_name];
+        MUTABLE rtoc_inline_variant: Bool = FALSE;
+        IF raw_field_type EXISTS AS rtoc_raw_ft THEN
+          rtoc_inline_variant = (rtoc_raw_ft IS_A InlineStructVariant);
+        END
+        IF !(rtoc_inline_variant) THEN
+          MUTABLE actual_type: Type@multiowned = (TRY (mIRLowering__struct_literal_field_actual_type(&self, field_ast)) OR_ELSE TRY (type__from_node_mut(field_ast, "struct field payload ownership")));
+          MUTABLE rtoc_borrowed: Bool = FALSE;
+          IF node.borrowed_field_names EXISTS AS rtoc_borrowed_names THEN
+            rtoc_borrowed = rtoc_borrowed_names.contains?(rtoc_fo_name);
+          END
+          IF rtoc_borrowed THEN
+            &field_operands.append(ownershipOperandFact__non_owning(CAST(actual_type AS Type), "MIR::StructInit borrowed field"));
+          ELSE
+            field_operands = (field_operands + TRY (mIRLowering__ownership_operands_for_sink_value(&self, &rtoc_fo_field.value, &field_ast, CAST(actual_type AS Type), "MIR::StructInit", struct_alloc, FALSE)));
+          END
+        END
+      END
+    END
     MUTABLE init = StructInit{ zig_type: COPY type_name, fields: COPY fields, lowered_node_id: NIL, ownership_consumption: NIL };
     IF !((field_operands.length() == 0)) THEN
       init.ownership_consumption = OwnershipConsumptionFact{ operands: COPY field_operands, target: :owned_sink, target_alloc: COPY struct_alloc, source: "MIR::StructInit", covers_consuming_params: TRUE };
