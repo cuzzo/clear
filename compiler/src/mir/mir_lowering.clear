@@ -10622,7 +10622,7 @@ PRIVATE FN mIRLowering__guard_fail_flow_body(MUTABLE self: MIRLowering, node: Wi
     IF clause EXISTS AS clause_value THEN
       MUTABLE clause_value_mutable = COPY clause_value;
       IF clause_value_mutable.matched_types.contains?(:GuardFail) THEN
-        MUTABLE line = COPY node.token.line;
+        MUTABLE line: String = node.token.line.toString();
         MUTABLE result: []Emittable = List[];
         IF (clause_value_mutable.action == ErrorActionKind.Return) THEN
           &result.append(Emittable{ ReturnStmt: COPY ReturnStmt{ value: COPY TRY (mIRLowering__lower(&self, castOptionalLocatableToMIRLoweringLowerableStmt(clause_value_mutable.value))), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
@@ -10803,8 +10803,9 @@ PRIVATE FN mIRLowering__multi_mutable_snapshot_txn(MUTABLE self: MIRLowering, pl
 END
 PRIVATE FN mIRLowering__emit_snapshot_mutable_call(MUTABLE self: MIRLowering, MUTABLE node: WithBlock, with_label: ?String) RETURNS !MIRLoweringReturnValue ->
     MUTABLE plan = TRY (mIRLowering__mutable_snapshot_plan(self, &node, with_label));
+    MUTABLE single_cap: ?MutableSnapshotCap = NIL;
     IF !(plan.capabilities[1]) THEN
-      MUTABLE single_cap: ?MutableSnapshotCap = COPY plan.capabilities[0];
+      single_cap = COPY plan.capabilities[0];
     END
     IF single_cap EXISTS AS single_cap_value THEN
       RETURN MIRLoweringReturnValue{ SnapshotTransaction: COPY TRY (mIRLowering__single_mutable_snapshot_txn(&self, plan, single_cap_value)) };
