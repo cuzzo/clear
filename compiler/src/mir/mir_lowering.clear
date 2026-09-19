@@ -14007,8 +14007,11 @@ PRIVATE FN mIRLowering__wrap_indirect_field_hoists(MUTABLE self: MIRLowering, MU
     # the struct is what the break hands back, and normalization hoists that
     # struct into a temp, after which a :block_result mark for a field temp no
     # longer names anything the break expression mentions.
-    FOR _ IN local_alloc_names.intersection(result_names) DO
-    hoisted = ruby_array_concat_Emittable__mir_lowering(hoisted, CAST(TRY (mIRLowering__ownership_transfer_marks(&self, _, :owned_sink, alloc_by_name[_])) AS []Emittable));
+    FOR rtoc_alloc_name_any IN local_alloc_names DO
+      MUTABLE rtoc_alloc_name: String = COPY CAST(rtoc_alloc_name_any AS String);
+      IF result_names.contains?(rtoc_alloc_name) THEN
+    hoisted = ruby_array_concat_Emittable__mir_lowering(hoisted, CAST(TRY (mIRLowering__ownership_transfer_marks(&self, rtoc_alloc_name, :owned_sink, alloc_by_name[rtoc_alloc_name])) AS []Emittable));
+      END
     END
     &hoisted.append(Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: COPY result, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
     MUTABLE inherited_alloc_names = COPY mIRLowering__function_state(&self).lowered_alloc_names;
