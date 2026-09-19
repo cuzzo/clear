@@ -11642,7 +11642,14 @@ PRIVATE FN mIRLowering__lower_bg_stream_block(MUTABLE self: MIRLowering, node: B
       ELSE
         blk_label
       END, NIL, %() USE(node, MUTABLE self) -> {
-    rtoc_lambda_result_518 = node.body |> SELECT TRY (mIRLowering__lower(&self, &_));
+    MUTABLE rtoc_lambda_result_518: []Emittable = List[];
+    FOR MUTABLE rtoc_for_elem_518 IN node.body DO
+      MUTABLE rtoc_stmt_518: MIRLoweringLowerableStmt = castLocatableToMIRLoweringLowerableStmt__mir_lowering(rtoc_for_elem_518);
+      MUTABLE rtoc_lowered_518: ?Emittable = TRY (mIRLowering__lower(&self, &rtoc_stmt_518));
+      IF rtoc_lowered_518 EXISTS AS rtoc_lowered_518_value THEN
+        &rtoc_lambda_result_518.append(rtoc_lowered_518_value);
+      END
+    END
     rtoc_lambda_result_518
       });
       IF is_inf THEN
@@ -11683,19 +11690,19 @@ PRIVATE FN mIRLowering__lower_bg_stream_block(MUTABLE self: MIRLowering, node: B
     END) |> WHERE _ != NIL) |> DISTINCT _;
     mIRLowering__with_stream_body_context(&self, local_stream, is_inf, NIL, inherited_capture_names, %() USE(analysis, caps, node, stream_capture_cleanups, MUTABLE stream_run_body, MUTABLE self) -> {
     rtoc_lambda_result_522 = mIRLowering__with_fiber_capture_map(&self, caps.capture_map, caps.capture_symbols, "__rt", %() USE(analysis, caps, node, stream_capture_cleanups, MUTABLE stream_run_body, MUTABLE self) -> {
-    MUTABLE body_mir = node.body |> UNNEST {
-      MUTABLE mir: ?Emittable = TRY (mIRLowering__lower(&self, &_));
+    MUTABLE body_mir: []Any = List[];
+    FOR MUTABLE rtoc_for_elem_522 IN node.body DO
+      MUTABLE rtoc_stmt_522: MIRLoweringLowerableStmt = castLocatableToMIRLoweringLowerableStmt__mir_lowering(rtoc_for_elem_522);
+      MUTABLE mir: ?Emittable = TRY (mIRLowering__lower(&self, &rtoc_stmt_522));
       MUTABLE pending = TRY (mIRLowering__flush_pending(&self));
       MUTABLE mir_nodes: []Any = List[];
-        IF mir IS_A []@multiowned Any THEN
-          mir_nodes = mir |> WHERE _ != NIL;
-        ELSE
-          mir_nodes = [CAST(mir AS Any)];
-        END
-      (pending + mir_nodes)
-    };
+      IF mir EXISTS AS mir_value THEN
+        mir_nodes = [CAST(mir_value AS Any)];
+      END
+      body_mir = (body_mir + (pending + mir_nodes));
+    END
     stream_run_body = TRY (mIRLowering__finalized_boundary_body_for_emit(&self, ((TRY (mIRLowering__capture_ownership_mirror_nodes(self, caps, analysis, "ctx")) + stream_capture_cleanups) + body_mir)));
-    stream_emit_body = stream_run_body |> WHERE !((mIRLowering__capture_ownership_mirror_node?(self, _, "ctx") OR stream_capture_cleanups.contains?(_)));
+    stream_emit_body = UNWRAP (stream_run_body) |> WHERE !((mIRLowering__capture_ownership_mirror_node?(self, _, "ctx") OR stream_capture_cleanups.contains?(_)));
     NIL
     });
     rtoc_lambda_result_522
@@ -11710,7 +11717,7 @@ PRIVATE FN mIRLowering__lower_bg_stream_block(MUTABLE self: MIRLowering, node: B
     ELSE
       rtoc_ternary_value_523 = {};
     END
-    rtoc_ternary_value_523? }, run_body: COPY stream_run_body, fsm_structure: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
+    rtoc_ternary_value_523? }, run_body: COPY UNWRAP (stream_run_body), fsm_structure: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
     bg.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY tense_t }));
     bg.boundary_fact = TRY (mIRLowering__execution_boundary_fact(&self, :bg_stream, :local, analysis));
     RETURN MIRLoweringReturnValue{ MIRBgBlock: COPY bg };
