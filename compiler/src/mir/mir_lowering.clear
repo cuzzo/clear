@@ -8791,10 +8791,9 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
     MUTABLE callee_sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(self, CAST(node.name AS MIRLoweringName)));
     callee_sig = (callee_sig OR_ELSE TRY (mIRLowering__matched_call_signature(self, CallNode{ FuncCall: COPY node })));
     MUTABLE call_plans = (node.kept_edge_plans OR_ELSE {});
-    MUTABLE call_args = COPY node.args;
-    MUTABLE args_mir = TRY (mIRLowering__with_kept_edge_call_frame(&self, %() USE(call_args, call_plans, callee_sig, MUTABLE self) -> {
+    MUTABLE args_mir = TRY (mIRLowering__with_kept_edge_call_frame(&self, %() USE(node, call_plans, callee_sig, MUTABLE self) -> {
     MUTABLE rtoc_value_block_marker = 0;
-    MUTABLE rtoc_indexed_items_359: []Locatable = call_args;
+    MUTABLE rtoc_indexed_items_359: []Locatable = node.args;
     MUTABLE rtoc_indexed_output_361 = [];
     MUTABLE rtoc_indexed_i_360 = 0;
     WHILE rtoc_indexed_i_360 < rtoc_indexed_items_359.length() DO
@@ -8815,7 +8814,7 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
       # travels with the code pointer, so the call passes both.
       MUTABLE fn_var_safe = mIRLowering__zig_safe_name(self, CAST(node.name AS String));
       all_args = (([Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL } }, Emittable{ Ident: COPY Ident{ name: "${fn_var_safe}.ctx", lowered_node_id: NIL, ownership_consumption: NIL } }]) + args_mir);
-      MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(&self, COPY node.matched_signature, node.args, &args_mir));
+      MUTABLE contract: ?CallableContract@multiowned = TRY (mIRLowering__callable_contract_for_lowered_args(&self, KEEP node.matched_signature, node.args, &args_mir));
       RETURN Emittable{ Call: COPY Call{ callee: "try ${fn_var_safe}.call", args: COPY all_args, try_wrap: FALSE, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FuncCall: COPY node })), callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     END
     MUTABLE needs_rt = TRY (mIRLowering__callee_needs_rt?(self, CAST(node.name AS String)));
@@ -8823,18 +8822,16 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
     IF (TRUE AND (node.retain_error_channel != NIL)) THEN
       can_fail = FALSE;
     END
-    MUTABLE type_args =   IF (TRUE AND ((node.generic_type_args != NIL) AND type__any?( CAST(((node.generic_type_args)?) AS Type)))) THEN
-      node.generic_type_args |> SELECT Ident{ name: TRY (mIRLowering__generic_type_arg_zig(self, _)), lowered_node_id: NIL, ownership_consumption: NIL }
-    ELSE
-      List[]
-    END;
-    MUTABLE rt_args = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_363: ?[]Ident = NIL;
-    IF needs_rt THEN
-      rtoc_ternary_value_363 = [Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL }];
-    ELSE
-      rtoc_ternary_value_363 = List[];
+    MUTABLE type_args: []Emittable = List[];
+    IF node.generic_type_args EXISTS AS rtoc_type_args THEN
+      IF (rtoc_type_args.length() > 0) THEN
+        type_args = rtoc_type_args |> SELECT Emittable{ Ident: COPY Ident{ name: TRY (mIRLowering__generic_type_arg_zig(self, TypeTypeInput{ SymbolValue: COPY _ })), lowered_node_id: NIL, ownership_consumption: NIL } };
+      END
     END
-    rtoc_ternary_value_363? };
+    MUTABLE rt_args: []Emittable = List[];
+    IF needs_rt THEN
+      &rt_args.append(Emittable{ Ident: COPY Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL } });
+    END
     MUTABLE runtime_args = TRY (mIRLowering__inject_protocol_map_allocator_args(&self, callee_sig, node.args, args_mir));
     all_args = ((type_args + rt_args) + runtime_args);
     MUTABLE fn_zig = "${mod_prefix}${mIRLowering__zig_safe_name(self, UNWRAP (castCallNameToString(node.name)))}";
