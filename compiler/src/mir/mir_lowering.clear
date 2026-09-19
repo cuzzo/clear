@@ -11000,13 +11000,29 @@ PRIVATE FN mIRLowering__capture_ownership_mirror_nodes(self: MIRLowering, caps: 
     ELSE
       captured = {};
     END
-    RETURN (caps.specs |> SELECT:? (IF !(captureSpec__needs_moved_guard?(_)) THEN NIL ELSE (IF close_plans.contains?(_.name) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; MUTABLE raw_type: ?Type = COPY captured[_.name]; { MUTABLE rtoc_value_block_marker = 0; MUTABLE type_info_branch_value: ?Type = NIL;
-    IF (raw_type != NIL) THEN
-      type_info_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY raw_type }));
-    ELSE
-      type_info_branch_value = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+    # Ruby's filter_map has four early `next nil` guards and flattens the
+    # packets; the arms of the IF expressions it became yield lists, which do
+    # not leave an expression implicitly.
+    MUTABLE rtoc_mirror: []Emittable = List[];
+    FOR rtoc_spec IN caps.specs DO
+      IF captureSpec__needs_moved_guard?(rtoc_spec) THEN
+        IF !(close_plans.contains?(rtoc_spec.name)) THEN
+          MUTABLE raw_type: ?Type = COPY captured[rtoc_spec.name];
+          MUTABLE type_info: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+          IF raw_type EXISTS AS rtoc_raw_type THEN
+            type_info = TRY (type__new(TypeConstructionInput{ Type: COPY rtoc_raw_type }));
+          END
+          IF !(type__resource?(type_info)) THEN
+            type_info = (captureSpec__cleanup_mirror_type(rtoc_spec) OR_ELSE COPY type_info);
+            MUTABLE name = "${receiver}.${rtoc_spec.name}";
+            MUTABLE entry = cleanupEntry__build(:uniform, :heap, TRUE);
+            MUTABLE mark = AllocMark{ name: COPY name, alloc: :heap, type_info: COPY type_info, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+            rtoc_mirror = (rtoc_mirror + TRY (materializationPacket__statements(materializationPacket__markers(mark, CAST(Cleanup{ name: COPY name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable)))));
+          END
+        END
+      END
     END
-    MUTABLE type_info: Type = type_info_branch_value?; (IF type__resource?(type_info) THEN NIL ELSE { MUTABLE rtoc_value_block_marker = 0; type_info = (captureSpec__cleanup_mirror_type(_) OR_ELSE type_info); { MUTABLE rtoc_value_block_marker = 0; MUTABLE name = "${receiver}.${_.name}"; { MUTABLE rtoc_value_block_marker = 0; MUTABLE entry = cleanupEntry__build(:uniform, :heap, TRUE); { MUTABLE rtoc_value_block_marker = 0; MUTABLE mark = AllocMark{ name: COPY name, alloc: :heap, type_info: COPY type_info, scope: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }; TRY (materializationPacket__statements((materializationPacket__markers(mark, CAST(Cleanup{ name: COPY name, cleanup_entry: entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable))))) } } } } END) } } END) END) |> WHERE _ != NIL).flatten();
+    RETURN rtoc_mirror;
 END
 PRIVATE FN mIRLowering__capture_moved_guard_fields(self: MIRLowering, specs: []CaptureSpec) RETURNS ![]ContextFieldDecl
   REQUIRES self: LOCAL
