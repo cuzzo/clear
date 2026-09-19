@@ -16430,10 +16430,10 @@ PRIVATE FN mIRLowering__special_assignment_result(MUTABLE self: MIRLowering, MUT
       MUTABLE get_index_mutable = COPY get_index;
       RETURN (TRY (mIRLowering__lower_indexed_assignment(&self, &node)));
     END
-    IF (IF name IS_A GetField AS get_field THEN node.auto_lock ELSE FALSE END) THEN
+    IF ((name IS_A GetField) AND (node.auto_lock EXISTS)) THEN
       RETURN (TRY (mIRLowering__lower_auto_lock_assignment(&self, &node)));
     END
-    IF (IF name IS_A GetField AS get_field THEN node.field_pre_cleanup ELSE FALSE END) THEN
+    IF ((name IS_A GetField) AND (node.field_pre_cleanup EXISTS)) THEN
       RETURN CAST(TRY (mIRLowering__lower_field_assignment_with_cleanup(&self, &node)) AS Emittable);
     END
     RETURN NIL;
