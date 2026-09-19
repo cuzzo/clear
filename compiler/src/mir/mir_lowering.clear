@@ -12819,7 +12819,7 @@ PRIVATE FN mIRLowering__lower_smooth_func_call(MUTABLE self: MIRLowering, node: 
       synthetic.zig_pattern = COPY zig_pattern_value;
     END
     IF locatable__coerced_type( Locatable{ FuncCall: COPY rhs }) THEN
-      locatable__set_coerced_type_object_mut( Locatable{ FuncCall: synthetic }, locatable__coerced_type( Locatable{ FuncCall: COPY rhs }));
+      locatable__set_coerced_type_object_mut( Locatable{ FuncCall: COPY synthetic }, locatable__coerced_type_object( Locatable{ FuncCall: COPY rhs }));
     END
     RETURN TRY (mIRLowering__lower_func_call(&self, &synthetic));
 END
