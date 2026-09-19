@@ -8839,7 +8839,7 @@ PRIVATE FN mIRLowering__lower_func_call(MUTABLE self: MIRLowering, MUTABLE node:
     all_args = ((type_args + rt_args) + runtime_args);
     MUTABLE fn_zig = "${mod_prefix}${mIRLowering__zig_safe_name(self, UNWRAP (castCallNameToString(node.name)))}";
     MUTABLE owned_return = TRY (mIRLowering__call_owned_return?(&self, Node{ FuncCall: COPY node }));
-    RETURN TRY (mIRLowering__finalize_call_result(&self, CallNode{ FuncCall: COPY node }, fn_zig, all_args, can_fail, owned_return, TRY (mIRLowering__callable_contract_for_lowered_args(&self, callee_sig, node.args, TRY (&args_mir), call_plans)), node.args, args_mir));
+    RETURN TRY (mIRLowering__finalize_call_result(&self, CallNode{ FuncCall: COPY node }, fn_zig, all_args, can_fail, owned_return, TRY (mIRLowering__callable_contract_for_lowered_args(&self, callee_sig, node.args, TRY (args_mir), call_plans)), node.args, args_mir));
 END
 PRIVATE FN mIRLowering__lower_method_call(MUTABLE self: MIRLowering, MUTABLE node: MethodCall) RETURNS !Emittable ->
     MUTABLE mod_alias = NIL;
@@ -9068,7 +9068,7 @@ END
 PRIVATE FN mIRLowering__call_owned_return?(MUTABLE self: MIRLowering, node: Node) RETURNS !Bool ->
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
     IF (aST__node_name( UNWRAP (castNodeToLocatable(node))) EXISTS) THEN
-      sig = TRY (mIRLowering__fn_sig_for(self, (UNWRAP (IF aST__node_name(UNWRAP (castNodeToLocatable(node))) EXISTS AS rtoc_wrap_10278 THEN MIRLoweringName{ SymbolValue: symbol(COPY rtoc_wrap_10278)} ELSE NIL END))));
+      sig = TRY (mIRLowering__fn_sig_for(self, (IF aST__node_name(UNWRAP (castNodeToLocatable(node))) EXISTS AS rtoc_wrap_10278 THEN MIRLoweringName{ SymbolValue: symbol(COPY rtoc_wrap_10278)} ELSE NIL END)));
     END
     IF aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))) EXISTS THEN
       sig = (sig OR_ELSE aST__node__matched_signature( UNWRAP (castNodeToLocatable(node))));
@@ -9082,7 +9082,7 @@ PRIVATE FN mIRLowering__call_owned_return?(MUTABLE self: MIRLowering, node: Node
     IF node IS_A FunctionDef AS function_def THEN
       node_ti_branch_value = functionDef__lowering_return_type(function_def);
     ELSE
-      node_ti_branch_value = TRY (type__from_node_mut(node, "call owned return"));
+      node_ti_branch_value = TRY (type__from_node_mut(castNodeToLocatable(node), "call owned return"));
     END
     MUTABLE node_ti: Type = node_ti_branch_value?;
     IF (!(type__any?(node_ti)) AND !(type__auto?(node_ti))) THEN
@@ -9431,7 +9431,7 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
     END
     rtoc_indexed_output_389
       };
-      MUTABLE result_type: ?Type = TRY (type__from_node_mut(node, "intrinsic result"));
+      MUTABLE result_type: ?Type = TRY (type__from_node_mut(castNodeToLocatable(node), "intrinsic result"));
       MUTABLE result_ownership_bearing = TRY (mIRLowering__intrinsic_result_ownership_bearing?(&self, UNWRAP (result_type)));
       MUTABLE alloc_metadata = inlineAllocMetadata__new(alloc_placeholder, NIL, val_alloc_placeholder);
       MUTABLE owned_result_alloc: ?String@symbol = TRY (mIRLowering__intrinsic_owned_result_alloc(&self, entry_value_mutable, node, alloc_metadata, result_ownership_bearing));
@@ -11544,7 +11544,7 @@ PRIVATE FN mIRLowering__lower_bg_statement_result(MUTABLE self: MIRLowering, ste
 END
 PRIVATE FN mIRLowering__finalize_bg_discard_expr(MUTABLE self: MIRLowering, expr: Locatable, MUTABLE mir: NodeRoot) RETURNS !NodeRoot ->
     MUTABLE finalized, hoisted_discard = TRY (mIRLowering__materialize_statement_discard(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(expr), mir));
-    IF !((mIRLowering__discard_expr_stmt?(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(expr), finalized) AND !(hoisted_discard))) THEN
+    IF !((mIRLowering__discard_expr_stmt?(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(expr), castNodeRootToEmittable(finalized)) AND !(hoisted_discard))) THEN
       RETURN COPY finalized;
     END
     RETURN NodeRoot{ Emittable: COPY CAST(ExprStmt{ expr: COPY castNodeRootToEmittable(finalized), discard: TRUE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
@@ -12112,7 +12112,7 @@ PRIVATE FN mIRLowering__lower_is_a(MUTABLE self: MIRLowering, MUTABLE node: IsA)
       MUTABLE subject: Emittable = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.left))) AS Emittable);
       RETURN Emittable{ MIRBinOp: COPY MIRBinOp{ op: "==", left: Emittable{ Call: COPY TRY (mIRLowering__active_tag_call(&self, subject)) }, right: Emittable{ EnumTag: COPY EnumTag{ variant: UNWRAP (COPY node.runtime_variant_name) } }, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    RETURN Emittable{ TypeEq: COPY TypeEq{ left: COPY TRY (mIRLowering__lower_type_value_expr(&self, CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castLocatableToNode__auto_inference(node.left) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node))), right: COPY TRY (mIRLowering__lower_type_value_expr(&self, node.right)), lowered_node_id: NIL, ownership_consumption: NIL } };
+    RETURN Emittable{ TypeEq: COPY TypeEq{ left: COPY TRY (mIRLowering__lower_type_value_expr(&self, CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castLocatableToNode__auto_inference(node.left) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node) AS Node))), right: COPY TRY (mIRLowering__lower_type_value_expr(&self, UNWRAP (castIsARightToNode(node.right)))), lowered_node_id: NIL, ownership_consumption: NIL } };
 END
 PRIVATE FN mIRLowering__lower_type_value_expr(MUTABLE self: MIRLowering, node: Node) RETURNS !Emittable ->
     IF node IS_A Type AS type THEN
@@ -12711,7 +12711,7 @@ PRIVATE FN mIRLowering__lower_smooth_func_call(MUTABLE self: MIRLowering, node: 
       synthetic.zig_pattern = COPY zig_pattern_value;
     END
     IF locatable__coerced_type( Locatable{ FuncCall: COPY rhs }) THEN
-      locatable__set_coerced_type_object_mut( Locatable{ FuncCall: &synthetic }, locatable__coerced_type( Locatable{ FuncCall: COPY rhs }));
+      locatable__set_coerced_type_object_mut( Locatable{ FuncCall: synthetic }, locatable__coerced_type( Locatable{ FuncCall: COPY rhs }));
     END
     RETURN TRY (mIRLowering__lower_func_call(&self, &synthetic));
 END
@@ -13275,7 +13275,7 @@ END
 PRIVATE FN mIRLowering__binary_int_arithmetic_facts(self: MIRLowering, node: BinaryOp) RETURNS !BinaryIntArithmeticFacts ->
     MUTABLE left_ti = TRY (aST__full_type_mut(node.left));
     MUTABLE right_ti = TRY (aST__full_type_mut(node.right));
-    RETURN BinaryIntArithmeticFacts{ both_int: (((TRUE) AND (type__integer?(left_ti) == TRUE)) AND ((right_ti != NIL) AND (type__integer?(right_ti) == TRUE))), has_comptime_number_literal: (mIRLowering__comptime_number_literal?(self, node.left, left_ti) OR mIRLowering__comptime_number_literal?(self, node.right, right_ti)), has_float_coercion: (mIRLowering__float_coercion?(self, node.left) OR mIRLowering__float_coercion?(self, node.right)) };
+    RETURN BinaryIntArithmeticFacts{ both_int: (((TRUE) AND (type__integer?(left_ti) == TRUE)) AND ((TRUE) AND (type__integer?(right_ti) == TRUE))), has_comptime_number_literal: (mIRLowering__comptime_number_literal?(self, node.left, left_ti) OR mIRLowering__comptime_number_literal?(self, node.right, right_ti)), has_float_coercion: (mIRLowering__float_coercion?(self, node.left) OR mIRLowering__float_coercion?(self, node.right)) };
 END
 PRIVATE FN mIRLowering__comptime_number_literal?(self: MIRLowering, node: Locatable, ti: ?Type) RETURNS Bool ->
     IF node IS_A Literal AS literal THEN
@@ -13738,7 +13738,7 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
     MUTABLE val, field_hoists = mIRLowering__lower_head(&self, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
       rtoc_lambda_result_579 = mIRLowering__with_decl_alloc(&self, field_sink_alloc, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
       rtoc_lambda_result_578 = mIRLowering__with_expected_type(&self, expected_ft, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
-      rtoc_lambda_result_577 = mIRLowering__with_sink_type(&self, expected_ft, %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
+      rtoc_lambda_result_577 = mIRLowering__with_sink_type(&self, castTypeTypeInputToType(UNWRAP (expected_ft)), %() USE(borrowed_field, expected_ft, MUTABLE field_node, field_sink_alloc, field_type_input, node, _, MUTABLE self) -> {
       IF borrowed_field THEN
         RETURN TRY (mIRLowering__aggregate_dynamic_slice_field_value(&self, UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(field_node)))), CAST(expected_ft AS ?Type), TRUE, field_sink_alloc, &field_node));
       ELSE_IF TRY (mIRLowering__rc_retain_needed?(&self, field_node)) THEN
@@ -13751,7 +13751,7 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
           ELSE
             RETURN kept_orelse;
           END
-        ELSE_IF ((IF field_node IS_A CopyNode AS copy_node THEN ((expected_ft != NIL) AND type__collection?(expected_ft)) ELSE FALSE END) AND !(TRY (type__any_rc?(expected_ft)))) THEN
+        ELSE_IF ((IF field_node IS_A CopyNode AS copy_node THEN ((expected_ft != NIL) AND type__collection?(castTypeTypeInputToType(expected_ft))) ELSE FALSE END) AND !(TRY (type__any_rc?(castTypeTypeInputToType(expected_ft))))) THEN
           RETURN TRY (mIRLowering__hoist_alloc(&self, Emittable{ DeepCopy: COPY DeepCopy{ source: COPY TRY (mIRLowering__lower(&self, aST__node_value(field_node))), zig_type: COPY TRY (type__zig_type(expected_ft)), elem_type: NIL, strategy: :full_value, alloc: COPY field_sink_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(expected_ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, &field_node, TRUE));
         ELSE
           MUTABLE field_value = TRY (mIRLowering__materialize_owned_sink_value(&self, TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(field_node))), field_node, field_sink_alloc, field_type_input));
@@ -14275,7 +14275,7 @@ PRIVATE FN mIRLowering__lower_copy(MUTABLE self: MIRLowering, MUTABLE node: Copy
     MUTABLE source_ti = TRY (mIRLowering__copy_source_type_info(self, node.value));
     MUTABLE ti: Type = source_ti;
     IF locatable__coerced_type_info(Locatable{ CopyNode: COPY node }) EXISTS THEN
-      ti = COPY TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (locatable__coerced_type_info(node)) }));
+      ti = COPY TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (locatable__coerced_type_info(Locatable{ CopyNode: COPY node })) }));
     END
     IF (TRY (type__any_rc?(ti)) AND !(TRY (type__any_rc?(source_ti)))) THEN
       ti = KEEP source_ti;
@@ -14292,9 +14292,9 @@ PRIVATE FN mIRLowering__lower_copy(MUTABLE self: MIRLowering, MUTABLE node: Copy
     MUTABLE alloc = ((IF mIRLowering__function_state(&self).current_decl_alloc != NIL THEN mIRLowering__function_state(&self).current_decl_alloc ELSE node.alloc END) OR_ELSE :heap);
     IF (IF source IS_A Orelse AS orelse THEN lifecyclePlan__needs_drop?(lifecycle) ELSE FALSE END) THEN
       source = TRY (mIRLowering__place_owned_orelse_for_destination(&self, castEmittableToOrelse(UNWRAP (source)), CAST(source_ti AS Type), alloc));
-      source = TRY (mIRLowering__hoist_alloc(&self, &UNWRAP (source), node.value, FALSE, FALSE, FALSE));
+      source = TRY (mIRLowering__hoist_alloc(&self, UNWRAP (source), node.value, FALSE, FALSE, FALSE));
     ELSE_IF TRY (mIRLowering__mir_allocates?(&self, source)) THEN
-      source = TRY (mIRLowering__hoist_alloc(&self, &UNWRAP (source), node.value));
+      source = TRY (mIRLowering__hoist_alloc(&self, UNWRAP (source), node.value));
     END
     IF (lifecycle.copy_strategy == :bit_copy) THEN
       RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY source, zig_type: NIL, elem_type: NIL, strategy: :passthrough, alloc: NIL, copy_shape: deepCopy__copy_shape_for_zig_type(NIL), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -14602,7 +14602,7 @@ PRIVATE FN mIRLowering__lower_cap_wrap(MUTABLE self: MIRLowering, MUTABLE node: 
     MUTABLE inner = mIRLowering__with_decl_alloc(&self, :heap, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
     rtoc_lambda_result_621 = mIRLowering__with_sink_type(&self, inner_type, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
     rtoc_lambda_result_620 = mIRLowering__with_expected_type(&self, inner_type, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
-    MUTABLE value: ?Emittable = TRY (mIRLowering__lower(&self, &node.value));
+    MUTABLE value: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (value), node.value, :heap, inner_type))
     });
     rtoc_lambda_result_620
@@ -15189,7 +15189,7 @@ PRIVATE FN mIRLowering__lower_module_const(MUTABLE self: MIRLowering, MUTABLE no
     rtoc_index_receiver_650[safe_name] = COPY facts.ft;
     MUTABLE heap_value, const_pending = mIRLowering__lower_head(&self, %() USE(MUTABLE node, MUTABLE self) -> {
     rtoc_lambda_result_652 = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
-    rtoc_lambda_result_651 = TRY (mIRLowering__lower(&self, &node.value));
+    rtoc_lambda_result_651 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     rtoc_lambda_result_651
     });
     rtoc_lambda_result_652
@@ -15211,7 +15211,7 @@ PRIVATE FN mIRLowering__lower_module_global(MUTABLE self: MIRLowering, MUTABLE n
     rtoc_index_receiver_653[safe_name] = COPY facts.ft;
     MUTABLE heap_value, pending = mIRLowering__lower_head(&self, %() USE(MUTABLE node, MUTABLE self) -> {
     rtoc_lambda_result_655 = mIRLowering__with_decl_alloc(&self, :heap, %() USE(MUTABLE node, MUTABLE self) -> {
-    rtoc_lambda_result_654 = TRY (mIRLowering__lower(&self, &node.value));
+    rtoc_lambda_result_654 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     rtoc_lambda_result_654
     });
     rtoc_lambda_result_655
@@ -15307,7 +15307,7 @@ PRIVATE FN mIRLowering__var_decl_facts(MUTABLE self: MIRLowering, MUTABLE node: 
       binding_entry = mIRLowering__new();
     END
     MUTABLE empty_optional_init = mIRLowering__optional_nil_initializer?(self, ft, node.value);
-    MUTABLE has_mir_drop = (cleanupEntry__needs_cleanup?(UNWRAP (binding_entry)) AND !(cleanupEntry__match_as?(binding_entry)));
+    MUTABLE has_mir_drop = (cleanupEntry__needs_cleanup?(UNWRAP (binding_entry)) AND !(cleanupEntry__match_as?(UNWRAP (binding_entry))));
     MUTABLE heap_return_var = (!(empty_optional_init) AND mIRLowering__current_function_heap_carry_return_var?(&self, CAST(node.name AS String)));
     MUTABLE heap_return_binding_allocates = (((heap_return_var AND (TRY (mIRLowering__escaping_value_alloc(&self, ft)) == :heap))) == TRUE);
     MUTABLE placement = TRY (mIRLowering__binding_placement_fact(&self, node, ft, UNWRAP (binding_entry), heap_return_var, heap_return_binding_allocates));
@@ -15631,7 +15631,7 @@ END
 PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE node: VarDecl, ft: Type, bare_zig: String, has_caps: Bool, decl_alloc: String@symbol) RETURNS !Emittable ->
     MUTABLE placed = NIL;
     IF node.value IS_A NextExpr THEN
-      RETURN TRY (mIRLowering__lower_next_expr(&self, CAST(&node.value AS NextExpr), decl_alloc));
+      RETURN TRY (mIRLowering__lower_next_expr(&self, CAST(node.value AS NextExpr), decl_alloc));
     END
     MUTABLE rhs = node.value;
     MUTABLE rhs_unwrapped = IF ((rhs IS_A BinaryOp AND (aST__node_op(rhs) == symbol("OR_ELSE")))) THEN
@@ -15641,7 +15641,7 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
     END;
     IF (rhs IS_A BinaryOp AND (aST__node_op(rhs) == symbol("OR_ELSE"))) THEN
       placed = mIRLowering__with_expected_type(&self, ft, %() USE(MUTABLE rhs, MUTABLE self) -> {
-    rtoc_lambda_result_671 = TRY (mIRLowering__lower(&self, &rhs));
+    rtoc_lambda_result_671 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(rhs)));
     rtoc_lambda_result_671
       });
       RETURN TRY (mIRLowering__place_value_for_destination(&self, &placed, &rhs, decl_alloc, TypeTypeInput{ Type: COPY ft }));
@@ -15656,7 +15656,7 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
     END
     IF type__pool?(ft) THEN
       IF ((rhs_unwrapped IS_A MoveNode OR aST__call?(rhs_unwrapped)) OR !(rhs_unwrapped IS_A ListLit)) THEN
-        RETURN TRY (mIRLowering__lower(&self, &node.value));
+        RETURN TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
       END
       MUTABLE inner = ContainerInit{ zig_type: COPY bare_zig, strategy: :pool, alloc: COPY decl_alloc, capacity: COPY type__capacity(ft), lowered_node_id: NIL, ownership_consumption: NIL };
       IF has_caps THEN
@@ -15667,10 +15667,10 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
     END
     IF type__set_collection?(ft) THEN
       IF (IF rhs IS_A BinaryOp AS rtoc_smooth_n THEN binaryOp__smooth?(rtoc_smooth_n) ELSE FALSE END) THEN
-        RETURN TRY (mIRLowering__lower(&self, &node.value));
+        RETURN TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
       END
       IF ((rhs_unwrapped IS_A MoveNode OR aST__call?(rhs_unwrapped)) OR !(rhs_unwrapped IS_A ListLit)) THEN
-        RETURN TRY (mIRLowering__lower(&self, &node.value));
+        RETURN TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
       END
       MUTABLE hint: ?Int64 = type__allocation_hint(ft);
       MUTABLE inner = ContainerInit{ zig_type: COPY bare_zig, strategy: IF hint != NIL THEN
@@ -15686,13 +15686,13 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
     END
     IF type__list_collection?(ft) THEN
       IF rhs_unwrapped IS_A MoveNode THEN
-        RETURN TRY (mIRLowering__lower(&self, &node.value));
+        RETURN TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
       END
       IF rhs_unwrapped IS_A NextExpr AS rhs_unwrapped_narrowed THEN
         RETURN TRY (mIRLowering__lower_next_expr(&self, &rhs_unwrapped_narrowed, decl_alloc));
       END
       IF aST__call?(rhs_unwrapped) THEN
-        RETURN TRY (mIRLowering__lower(&self, &node.value));
+        RETURN TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
       END
       IF ((rhs_unwrapped IS_A CopyNode AND rhs_unwrapped.own) AND TRY (type__any_rc?(TRY (aST__full_type_mut(UNWRAP (aST__node_value(rhs_unwrapped))))))) THEN
         RETURN TRY (mIRLowering__lower(&self, &rhs_unwrapped));
@@ -15701,7 +15701,7 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
         RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (aST__node_value(rhs_unwrapped))))), zig_type: COPY TRY (type__zig_type(ft)), elem_type: NIL, strategy: :full_value, alloc: COPY decl_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
       IF !(rhs_unwrapped IS_A ListLit) THEN
-        RETURN TRY (mIRLowering__lower(&self, &node.value));
+        RETURN TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
       END
       IF !(rhs_unwrapped.items.empty?()) THEN
         RETURN mIRLowering__with_expected_type(&self, ft, %() USE(node, MUTABLE self) -> {
@@ -16196,7 +16196,7 @@ END
 PRIVATE FN mIRLowering__lower_assignment(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !Emittable ->
     MUTABLE special_result: ?Stmt = TRY (mIRLowering__special_assignment_result(&self, &node));
     IF special_result EXISTS AS special_result_value THEN
-      RETURN castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(castStmtToEmittable(special_result_value)) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable));
+      RETURN castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(castStmtToEmittable(castStmtToEmittable(castStmtToEmittable(special_result_value)))) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable));
     END
     MUTABLE plan = TRY (mIRLowering__assignment_target_plan(&self, node));
     MUTABLE kept_value: ?Emittable = TRY (mIRLowering__kept_assignment_field_value(&self, node));
@@ -16251,7 +16251,7 @@ END
 PRIVATE FN mIRLowering__special_assignment_result(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !?Stmt ->
     MUTABLE name = COPY node.name;
     IF mIRLowering__conditional_field_assignment?(self, castAssignmentNameToName(name)) THEN
-      RETURN CAST(TRY (mIRLowering__lower_conditional_field_assignment(&self, node)) AS Emittable);
+      RETURN CAST(TRY (mIRLowering__lower_conditional_field_assignment(&self, &node)) AS Emittable);
     END
     IF name IS_A GetIndex AS get_index THEN
       MUTABLE get_index_mutable = COPY get_index;
@@ -16307,7 +16307,7 @@ PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowe
     MUTABLE field_lifecycle = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), field_type));
     MUTABLE value, value_pending = mIRLowering__lower_head(&self, %() USE(field_lifecycle, field_type, MUTABLE node, target_alloc, MUTABLE self) -> {
     MUTABLE lowered = mIRLowering__with_decl_alloc(&self, target_alloc, %() USE(field_type, MUTABLE node, target_alloc, MUTABLE self) -> {
-      MUTABLE raw: ?Emittable = TRY (mIRLowering__lower(&self, &node.value));
+      MUTABLE raw: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
       TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (raw), node.value, target_alloc, TypeTypeInput{ Type: COPY field_type }))
     });
     MUTABLE materialized =   IF lifecyclePlan__needs_drop?(field_lifecycle) THEN
@@ -16480,7 +16480,7 @@ PRIVATE FN mIRLowering__lower_map_indexed_assignment(MUTABLE self: MIRLowering, 
     MUTABLE sink_type = TRY (type__value_type(receiver_type));
     MUTABLE val = mIRLowering__with_sink_type(&self, sink_type, %() USE(dispatch, MUTABLE node, MUTABLE self) -> {
     rtoc_lambda_result_696 = mIRLowering__with_decl_alloc(&self, dispatch.sink_alloc, %() USE(MUTABLE node, MUTABLE self) -> {
-    rtoc_lambda_result_695 = TRY (mIRLowering__lower(&self, &node.value));
+    rtoc_lambda_result_695 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     rtoc_lambda_result_695
     });
     rtoc_lambda_result_696
@@ -16520,7 +16520,7 @@ PRIVATE FN mIRLowering__lower_template_indexed_assignment(MUTABLE self: MIRLower
     MUTABLE owns_transferred_value = TRY (mIRLowering__ownership_tracked_transfer_type?(&self, sink_type));
     MUTABLE val = mIRLowering__with_decl_alloc(&self, dispatch.sink_alloc, %() USE(MUTABLE node, sink_type, MUTABLE self) -> {
     rtoc_lambda_result_698 = mIRLowering__with_sink_type(&self, sink_type, %() USE(MUTABLE node, MUTABLE self) -> {
-    rtoc_lambda_result_697 = TRY (mIRLowering__lower(&self, &node.value));
+    rtoc_lambda_result_697 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
     rtoc_lambda_result_697
     });
     rtoc_lambda_result_698
@@ -16701,7 +16701,7 @@ PRIVATE FN mIRLowering__auto_lock_assignment_value(MUTABLE self: MIRLowering, MU
     MUTABLE value = mIRLowering__with_decl_alloc(&self, alloc_sym, %() USE(alloc_sym, MUTABLE node, MUTABLE self) -> {
     MUTABLE lowered: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge(node.value)));
     MUTABLE placed = TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (lowered), &node.value, alloc_sym, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut( castAssignmentNameToLocatable__type_analysis_session(node.name))) }));
-    TRY (mIRLowering__materialize_owned_sink_value(&self, placed, node.value, alloc_sym, TRY (aST__full_type_mut(node.name))))
+    TRY (mIRLowering__materialize_owned_sink_value(&self, placed, node.value, alloc_sym, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(castAssignmentNameToLocatable__ast(node.name))) }))
     });
     IF (TRUE AND TRY (mIRLowering__mir_allocates?(&self, value))) THEN
       RETURN TRY (mIRLowering__hoist_alloc(&self, &value, node.value, TRUE));
@@ -17658,12 +17658,12 @@ PRIVATE FN mIRLowering__lower_return(MUTABLE self: MIRLowering, MUTABLE node: Re
       RETURN NodeRoot{ Emittable: COPY CAST(ReturnStmt{ value: Emittable{ TailCall: COPY TailCall{ callee: COPY tail_call_value.callee, args: COPY tail_call_value.args, callable_contract: COPY tail_call_value.callable_contract, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable) };
     END
     END
-    IF (((node.value EXISTS) AND TRY (mIRLowering__rc_retain_needed?(&self, UNWRAP (node.value)))) AND !(TRY (mIRLowering__return_transfers_heap_binding?(&self, node.value)))) THEN
-      MUTABLE retained = TRY (mIRLowering__hoist_alloc(&self, Emittable{ RcRetain: COPY TRY (mIRLowering__make_rc_retain(&self, node.value)) }, node.value, TRUE));
+    IF (((node.value EXISTS) AND TRY (mIRLowering__rc_retain_needed?(&self, UNWRAP (node.value)))) AND !(TRY (mIRLowering__return_transfers_heap_binding?(&self, UNWRAP (node.value))))) THEN
+      MUTABLE retained = TRY (mIRLowering__hoist_alloc(&self, Emittable{ RcRetain: COPY TRY (mIRLowering__make_rc_retain(&self, castLocatableToIdentifier(node.value))) }, node.value, TRUE));
       RETURN TRY (mIRLowering__return_with_transfer_marks(&self, plan, &retained, ReturnStmt{ value: COPY retained, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }));
     ELSE
       IF ((value != NIL) AND !(value IS_A Ident)) THEN
-        value = TRY (mIRLowering__hoist_alloc(&self, &value, node.value, TRUE, FALSE, FALSE));
+        value = TRY (mIRLowering__hoist_alloc(&self, &value, &node.value, TRUE, FALSE, FALSE));
       END
       IF value EXISTS AS value_value THEN
         MUTABLE value_value = TRY (mIRLowering__bind_consuming_call_return_value(&self, value_value));
@@ -19782,7 +19782,7 @@ END
 PUB FN castStmtListToEmittableList(values: []Stmt) RETURNS []Emittable ->
   MUTABLE out: []Emittable = List[];
   FOR value IN values DO
-    &out.append(castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(value) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable)));
+    &out.append(castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(castStmtToEmittable(castStmtToEmittable(value))) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable)));
   END
   RETURN out;
 END
