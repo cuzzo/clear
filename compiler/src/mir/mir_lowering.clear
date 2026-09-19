@@ -13276,34 +13276,30 @@ PRIVATE FN mIRLowering__field_access_plan(MUTABLE self: MIRLowering, node: GetFi
     ELSE
       is_locked_unwrapped = FALSE;
     END
-    MUTABLE target_sync =   IF target_node IS_A OptionalUnwrap THEN
-      (IF locatable__symbol(UNWRAP (aST__node_target( target_node))) != NIL THEN
-      symbolEntry__sync(UNWRAP (locatable__symbol(UNWRAP (locatable__target(target_node)))))
-    ELSE
-      NIL
-    END)
-    ELSE
-      (IF locatable__symbol(target_node) != NIL THEN
-      symbolEntry__sync(UNWRAP (locatable__symbol(target_node)))
-    ELSE
-      NIL
-    END)
-    END;
+    # `(target_node.optional_unwrap? ? target_node.target : target_node)
+    # .symbol&.sync` -- one subject, one optional chain.
+    MUTABLE rtoc_sync_subject: Locatable = COPY target_node;
+    IF target_node IS_A OptionalUnwrap THEN
+      rtoc_sync_subject = COPY UNWRAP (aST__node_target(target_node));
+    END
+    MUTABLE target_sync: ?String@symbol = NIL;
+    IF locatable__symbol(rtoc_sync_subject) EXISTS AS rtoc_sync_symbol THEN
+      target_sync = symbolEntry__sync(rtoc_sync_symbol);
+    END
     IF (target_sync == NIL) THEN
       target_sync = type__sync(TRY (aST__full_type_mut(target_node)));
     END
     MUTABLE path = mIRLowering__field_access_path(self, UNWRAP (ti), target_sync, is_rc_unwrapped, is_locked_unwrapped);
-    IF ((((path == :direct) AND target_node IS_A Identifier) AND ((target_node.symbol != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_567 = ((target_node.symbol)?);
-    symbolEntry__carrier_contract(rtoc_local_receiver_567) } == :monomorphic))) AND !(is_rc_unwrapped)) THEN
+    IF ((((path == :direct) AND target_node IS_A Identifier) AND (IF locatable__symbol(target_node) EXISTS AS rtoc_carrier_symbol THEN ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_567 = COPY rtoc_carrier_symbol;
+    symbolEntry__carrier_contract(rtoc_local_receiver_567) } == :monomorphic) ELSE FALSE END)) AND !(is_rc_unwrapped)) THEN
       path = :comptime_ctrl_data;
     END
     MUTABLE target_type_sym = symbol((CAST(type__resolved( UNWRAP (ti)) AS String)));
-    MUTABLE union_schema = (TRY (mIRLowering__union_schemas(&self)))[target_type_sym];
-    MUTABLE union_variants = IF union_schema IS_A UnionSchema@multiowned THEN
-      union_schema.variants
-    ELSE
-      NIL
-    END;
+    MUTABLE union_schema: ?UnionSchema@multiowned = COPY (TRY (mIRLowering__union_schemas(&self)))[target_type_sym];
+    MUTABLE union_variants: ?{String@symbol}?SchemasUnionSchemaVariantValue = NIL;
+    IF union_schema EXISTS AS rtoc_union_schema THEN
+      union_variants = COPY rtoc_union_schema.variants;
+    END
     MUTABLE field_str: String = "";
     IF (node.tuple_position == NIL) THEN
       field_str = COPY CAST(node.field AS String);
