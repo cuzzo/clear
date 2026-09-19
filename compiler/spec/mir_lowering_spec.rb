@@ -5354,3 +5354,28 @@ RSpec.describe "per-statement hoist scratch" do
       "hoist scratch from a previous statement was emitted into a later function's body"
   end
 end
+
+RSpec.describe "module const init prologue" do
+  # The generated initializer's signature is fixed -- an importing module calls
+  # it across a package boundary -- but its body is whatever the initializers
+  # need, and they are free to need no runtime. Zig rejects the unused
+  # parameter, so the prologue has to consume it unconditionally.
+  it "consumes the runtime parameter even when no initializer uses it" do
+    low = MIRLowering.new(input: MIRLoweringInput.new)
+    low.send(:program_state).runtime_init_consts << ConstInitEntry.new(
+      name: "alloc_ref_def",
+      zig_type: "Sig",
+      init: MIR::Call.new("sig__intrinsic", [], true, false,
+        MIR::CallableContract.no_ownership(0)),
+      type_info: Type.new(:Sig)
+    )
+    items = []
+    low.send(:inject_const_init!, items)
+
+    init_fn = items.find { |n| n.is_a?(MIR::FnDef) && n.name == MIRLowering::CONST_INIT_FN }
+    expect(init_fn).not_to be_nil
+    expect(init_fn.params.map(&:name)).to eq(["rt"])
+    expect(init_fn.body.first).to be_a(MIR::Suppress)
+    expect(init_fn.body.first.name).to eq("rt")
+  end
+end

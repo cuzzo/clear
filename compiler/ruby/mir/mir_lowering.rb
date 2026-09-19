@@ -3534,6 +3534,10 @@ class MIRLowering
       raw.concat(ownership_transfer_marks(tmp, :owned_sink, target_alloc: :heap))
     end
     body = finalize_synthetic_const_init_body!(raw)
+    # Every initializer is free to need no runtime -- a module whose consts are
+    # all plain values, say -- and Zig rejects the unused parameter. The
+    # signature is fixed because importers call it across a module boundary.
+    body.unshift(MIR::Suppress.new("rt"))
     items << MIR::FnDef.new(
       CONST_INIT_FN,
       [MIR::Param.new("rt", "*Runtime", false)],
