@@ -10912,13 +10912,22 @@ PRIVATE FN mIRLowering__build_sorted_acquire_entries(MUTABLE self: MIRLowering, 
 END
 PRIVATE FN mIRLowering__sorted_lock_acquire(MUTABLE self: MIRLowering, fallible_caps: []CapabilityTransition, clause: ?ErrorClause, with_label: ?String, with_node: WithBlock) RETURNS !SortedLockAcquire ->
     MUTABLE fallible = !((clause == NIL));
-    RETURN SortedLockAcquire{ entries: COPY TRY (mIRLowering__build_sorted_acquire_entries(&self, fallible_caps, fallible, with_node)), action: Emittable{ FailureAction: COPY UNWRAP (COPY { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_482: ?FailureAction = NIL;
-    IF clause != NIL THEN
-      rtoc_ternary_value_482 = TRY (mIRLowering__lock_failure_action(&self, clause, with_label, with_node));
-    ELSE
-      rtoc_ternary_value_482 = NIL;
+    # `clause ? lock_failure_action(...) : nil` on a non-optional field: the
+    # clause is what decides, and the guard binds it.
+    MUTABLE rtoc_action: ?Emittable = NIL;
+    IF clause EXISTS AS rtoc_clause THEN
+      rtoc_action = Emittable{ FailureAction: COPY TRY (mIRLowering__lock_failure_action(&self, rtoc_clause, with_label, with_node)) };
     END
-    rtoc_ternary_value_482? }) }, matched_types: COPY clause?.matched_types, bubble_types: COPY clause?.bubble_types, retries: clause?.retries, source_line: COPY CAST(with_node.token?.line AS String), loop_label: "__acq_sort_${mIRLowering__stable_node_suffix(&self, Locatable{ WithBlock: COPY with_node })}", rt_name: mIRLowering__runtime_binding_name(&self), fallible: fallible, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL };
+    MUTABLE rtoc_matched_types: []String@symbol = List[];
+    MUTABLE rtoc_bubble_types: []String@symbol = List[];
+    MUTABLE rtoc_retries: ?Int64 = NIL;
+    IF clause EXISTS AS rtoc_clause_fields THEN
+      rtoc_matched_types = COPY rtoc_clause_fields.matched_types;
+      rtoc_bubble_types = COPY rtoc_clause_fields.bubble_types;
+      rtoc_retries = rtoc_clause_fields.retries;
+    END
+    MUTABLE rtoc_source_line: ?Int64 = with_node.token.line;
+    RETURN SortedLockAcquire{ entries: COPY TRY (mIRLowering__build_sorted_acquire_entries(&self, fallible_caps, fallible, with_node)), action: COPY UNWRAP (rtoc_action), matched_types: COPY rtoc_matched_types, bubble_types: COPY rtoc_bubble_types, retries: rtoc_retries, source_line: rtoc_source_line, loop_label: "__acq_sort_${mIRLowering__stable_node_suffix(&self, Locatable{ WithBlock: COPY with_node })}", rt_name: mIRLowering__runtime_binding_name(&self), fallible: fallible, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL };
 END
 PRIVATE FN mIRLowering__execution_boundary_dispatch(self: MIRLowering, parallel: ?Bool, pinned: ?Pinned) RETURNS String@symbol ->
     IF parallel EXISTS AS parallel_value THEN
