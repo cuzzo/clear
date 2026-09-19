@@ -8666,14 +8666,16 @@ PRIVATE FN mIRLowering__lower_call_arg_from_facts(MUTABLE self: MIRLowering, fac
     END
     NIL
     });
-    MUTABLE arg = TRY (mIRLowering__hoist_alloc(&self, &raw_arg, facts.ast_arg, facts.takes, facts.copy_to_owning, TRUE, IF facts.takes THEN
+    MUTABLE arg_ast_node = COPY facts.ast_arg;
+    MUTABLE arg = TRY (mIRLowering__hoist_alloc(&self, &raw_arg, &arg_ast_node, facts.takes, facts.copy_to_owning, TRUE, IF facts.takes THEN
       facts.arg_alloc
     ELSE
       NIL
     END));
-    MUTABLE boundary_arg = TRY (mIRLowering__cross_boundary_arg(&self, arg, facts.ast_arg, facts.callee_param, facts.callee_param_type, COPY facts.callee_sig, facts.param_index));
+    MUTABLE boundary_ast_node = COPY facts.ast_arg;
+    MUTABLE boundary_arg = TRY (mIRLowering__cross_boundary_arg(&self, arg, &boundary_ast_node, facts.callee_param, facts.callee_param_type, COPY facts.callee_sig, facts.param_index));
     IF TRY (mIRLowering__mir_allocates?(&self, boundary_arg)) THEN
-      RETURN TRY (mIRLowering__hoist_alloc(&self, &boundary_arg, facts.ast_arg, facts.takes));
+      RETURN TRY (mIRLowering__hoist_alloc(&self, &boundary_arg, &boundary_ast_node, facts.takes));
     END
     RETURN boundary_arg;
 END
@@ -8692,7 +8694,7 @@ PRIVATE FN mIRLowering__finalize_call_result(MUTABLE self: MIRLowering, MUTABLE 
       END
     END
     TRY (mIRLowering__attach_explicit_move_consumption_mut(&self, &call, ast_args, mir_args, "call explicit move", contract));
-    IF !((TRUE AND (MATCH node START CallNode.FuncCall AS item -> item.heap_dupe_result, CallNode.MethodCall AS item -> item.heap_dupe_result END))) THEN
+    IF !(((MATCH node START CallNode.FuncCall AS item -> item.heap_dupe_result, CallNode.MethodCall AS item -> item.heap_dupe_result END) OR_ELSE FALSE)) THEN
       RETURN Emittable{ Call: COPY call };
     END
     IF owned_return THEN
