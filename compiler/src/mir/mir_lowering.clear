@@ -13509,15 +13509,14 @@ PRIVATE FN mIRLowering__rank_coordinates(self: MIRLowering, target: Emittable, t
     MUTABLE rank = TRY (type__rank(type_info));
     MUTABLE cast_indices = indices |> SELECT MIRCast{ expr: COPY _, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE index_array = ArrayInit{ elem_type: "usize", count: COPY rank.toString(), items: CAST(COPY cast_indices AS []Emittable), lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE dimensions =   IF TRY (type__fixed_rank?(type_info)) THEN
-      {
-    MUTABLE rtoc_value_block_marker = 0;
-    items = (TRY (type__rank_dimensions(type_info))) |> SELECT Lit{ value: COPY castTypeExpressionDimensionToInt64(_).toString(), lowered_node_id: NIL, ownership_consumption: NIL };
-    ArrayInit{ elem_type: "usize", count: COPY rank.toString(), items: CAST(COPY items AS []Emittable), lowered_node_id: NIL, ownership_consumption: NIL }
-    }
-    ELSE
-      FieldGet{ object: COPY target, field: "shape", lowered_node_id: NIL, ownership_consumption: NIL }
-    END;
+    # Both arms yield a node; the Emittable wrapper is what gives them a
+    # common type, and a statement IF is what lets the array arm build its
+    # item list first.
+    MUTABLE dimensions: Emittable = Emittable{ FieldGet: COPY FieldGet{ object: COPY target, field: "shape", lowered_node_id: NIL, ownership_consumption: NIL } };
+    IF TRY (type__fixed_rank?(type_info)) THEN
+      MUTABLE items = (TRY (type__rank_dimensions(type_info))) |> SELECT Lit{ value: COPY castTypeExpressionDimensionToInt64(_).toString(), lowered_node_id: NIL, ownership_consumption: NIL };
+      dimensions = Emittable{ ArrayInit: COPY ArrayInit{ elem_type: "usize", count: COPY rank.toString(), items: CAST(COPY items AS []Emittable), lowered_node_id: NIL, ownership_consumption: NIL } };
+    END
     RETURN RankCoordinates{ dimensions: COPY dimensions, indices: COPY index_array };
 END
 PRIVATE FN mIRLowering__index_collection_value(MUTABLE self: MIRLowering, target: Emittable, index_value: Emittable, plan: IndexAccessPlan) RETURNS !Emittable ->
@@ -13556,26 +13555,24 @@ PRIVATE FN mIRLowering__lower_builtin_index_get(MUTABLE self: MIRLowering, targe
     RETURN TRY (mIRLowering__emit_builtin(&self, builtin, [target, index_value]));
 END
 PRIVATE FN mIRLowering__struct_lit_field_types(MUTABLE self: MIRLowering, MUTABLE node: StructLit) RETURNS !{String}?StructLitFieldType ->
-    MUTABLE schema: ?TypeSchemaLookupResult = mIRLowering__mir_schema_lookup(&self)(symbol(node.name));
+    MUTABLE rtoc_schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult = mIRLowering__mir_schema_lookup(&self);
+    MUTABLE schema: ?TypeSchemaLookupResult = rtoc_schema_lookup(symbol(node.name));
     IF schema IS_A UnionSchema@multiowned AS union_schema_multiowned THEN
       MUTABLE union_schema_multiowned_mutable = COPY union_schema_multiowned;
       MUTABLE union_subst: {String@symbol}TypeTypeInput = {};
       MUTABLE union_field_types: {String}?StructLitFieldType = {};
-      FOR union_variant IN union_schema_multiowned_mutable.variants DO
-        union_field_types[CAST(union_variant._0 AS String)] = TRY (mIRLowering__substitute_mir_type(self, union_variant._1, union_subst));
+      FOR union_variant IN union_schema_multiowned_mutable.variants.keys() DO
+        union_field_types[CAST(union_variant AS String)] = TRY (mIRLowering__substitute_mir_type(self, castSchemasUnionSchemaVariantValueToStructLitFieldType(UNWRAP (union_schema_multiowned_mutable.variants[union_variant])), union_subst));
       END
       RETURN union_field_types;
     ELSE_IF schema IS_A StructSchema@multiowned AS struct_schema_multiowned THEN
       MUTABLE struct_schema_multiowned_mutable = COPY struct_schema_multiowned;
       MUTABLE struct_subst = TRY (mIRLowering__struct_lit_type_subst(self, MIRLoweringSchema{ StructSchemaMultiowned: COPY struct_schema_multiowned_mutable }, node));
       MUTABLE struct_field_types: {String}?StructLitFieldType = {};
-      FOR struct_field IN struct_schema_multiowned_mutable.fields DO
-        MUTABLE raw = IF struct_field._1 IS_A StructField AS typed_field THEN
-          StructLitFieldType{ TypeMultiowned: COPY typed_field.type }
-        ELSE
-          struct_field._1
-        END;
-        struct_field_types[CAST(struct_field._0 AS String)] = TRY (mIRLowering__substitute_mir_type(self, raw, struct_subst));
+      FOR struct_field IN struct_schema_multiowned_mutable.fields.keys() DO
+        MUTABLE typed_field: StructField = COPY UNWRAP (struct_schema_multiowned_mutable.fields[struct_field]);
+        MUTABLE raw = StructLitFieldType{ TypeMultiowned: COPY typed_field.type };
+        struct_field_types[CAST(struct_field AS String)] = TRY (mIRLowering__substitute_mir_type(self, raw, struct_subst));
       END
       RETURN struct_field_types;
     ELSE
@@ -13912,7 +13909,8 @@ PRIVATE FN mIRLowering__struct_literal_field_actual_type(MUTABLE self: MIRLoweri
 END
 PRIVATE FN mIRLowering__struct_lit_fields_with_callsite_defaults(MUTABLE self: MIRLowering, node: StructLit) RETURNS !{String}Locatable ->
     MUTABLE fields: {String}Locatable = COPY node.fields;
-    MUTABLE schema: ?TypeSchemaLookupResult = mIRLowering__mir_schema_lookup(&self)(symbol(node.name));
+    MUTABLE rtoc_schema_lookup: FN(String@symbol) -> ?TypeSchemaLookupResult = mIRLowering__mir_schema_lookup(&self);
+    MUTABLE schema: ?TypeSchemaLookupResult = rtoc_schema_lookup(symbol(node.name));
     IF schema? IS_A StructSchema AS struct_schema THEN
       FOR rtoc_key IN struct_schema.fields.keys() DO
     MUTABLE field: StructField@multiowned = COPY UNWRAP (struct_schema.fields[rtoc_key]);
@@ -14039,8 +14037,8 @@ PRIVATE FN mIRLowering__union_variant_lit_field_types(MUTABLE self: MIRLowering,
       IF variant_data_value IS_A InlineStructVariant AS inline_struct_variant THEN
         MUTABLE fields = COPY (CAST(inline_struct_variant AS InlineStructVariant@multiowned)).fields;
         MUTABLE inline_field_types: {String}TypeTypeInput = {};
-        FOR inline_field IN fields DO
-          inline_field_types[CAST(inline_field._0 AS String)] = inline_field._1;
+        FOR inline_field IN fields.keys() DO
+          inline_field_types[CAST(inline_field AS String)] = UNWRAP (fields[inline_field]);
         END
         RETURN inline_field_types;
       ELSE
@@ -20444,6 +20442,21 @@ END
 
 # Same layering fix as the scan-root cast: the helper belongs with the
 # union it builds, not in ast.clear which sits below mir.
+
+# The schema's variant value and a struct-literal field type carry the same
+# six shapes under two names; this is the bridge between them.
+FN castSchemasUnionSchemaVariantValueToStructLitFieldType(value: SchemasUnionSchemaVariantValue) RETURNS StructLitFieldType ->
+  PARTIAL MATCH value START
+    SchemasUnionSchemaVariantValue.FunctionType AS rtoc_payload -> RETURN StructLitFieldType{ FunctionType: COPY rtoc_payload };,
+    SchemasUnionSchemaVariantValue.TypeMultiowned AS rtoc_payload -> RETURN StructLitFieldType{ TypeMultiowned: COPY rtoc_payload };,
+    SchemasUnionSchemaVariantValue.SymbolValue AS rtoc_payload -> RETURN StructLitFieldType{ SymbolValue: COPY rtoc_payload };,
+    SchemasUnionSchemaVariantValue.StringValue AS rtoc_payload -> RETURN StructLitFieldType{ StringValue: COPY rtoc_payload };,
+    SchemasUnionSchemaVariantValue.InlineStructVariantMultiowned AS rtoc_payload -> RETURN StructLitFieldType{ InlineStructVariantMultiowned: COPY rtoc_payload };,
+    SchemasUnionSchemaVariantValue.Type AS rtoc_payload -> RETURN StructLitFieldType{ Type: COPY rtoc_payload };,
+    DEFAULT -> PASS;
+  END
+  panic("union schema variant has no struct-literal field type");
+END
 FN castLocatableToMIRLoweringLowerableStmt(value: Locatable) RETURNS MIRLoweringLowerableStmt ->
   PARTIAL MATCH value START
     Locatable.Program AS cast_payload -> RETURN MIRLoweringLowerableStmt{ ASTProgram: COPY cast_payload };,
