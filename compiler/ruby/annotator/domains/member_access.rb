@@ -660,6 +660,14 @@ module Annotator
         end
 
         if node.items.empty?
+          # An expected type (a CAST target) names the element type the
+          # deferred inference below would otherwise leave as Any.
+          expected_list = node.coerced_type_info
+          if expected_list&.list_collection?
+            stamp_type!(node, expected_list)
+            node.storage = :stack
+            return
+          end
           # Untyped constructor: List[] or Pool[] — deferred element type.
           # The collection type is set; element type resolves on first append/insert.
           if (coll = node.constructor_collection)

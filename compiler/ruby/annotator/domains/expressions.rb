@@ -55,7 +55,11 @@ module Annotator
         T.bind(self, Annotator::Phases::TypeAnalysisSession)
 
         target_type = Type.new(node.target)
-        if node.value.is_a?(AST::ListLit) && target_type.tuple?
+        # A CAST target is the only expected-type context an inline literal
+        # gets: `CAST(List[] AS []Decl)` has no declaration annotation to
+        # resolve the empty literal's element type from, and it defaults to
+        # Any otherwise.
+        if node.value.is_a?(AST::ListLit) && (target_type.tuple? || target_type.list_collection?)
           node.value.coerced_type = target_type
         elsif node.value.is_a?(AST::HashLit) && target_type.map?
           node.value.coerced_type = target_type

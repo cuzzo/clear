@@ -1,0 +1,26 @@
+# An empty list literal has no element to infer from, and a CAST target is the
+# only expected-type context it gets: without it the literal stays Any and the
+# emitted Zig casts an ArrayListUnmanaged(f64) to the declared element type.
+
+STRUCT Decl { n: Int64 }
+
+FN empty_decls() RETURNS []Decl ->
+  RETURN CAST(List[] AS []Decl);
+END
+
+FN empty_names() RETURNS []String ->
+  RETURN CAST(List[] AS []String);
+END
+
+FN main() RETURNS Void ->
+  MUTABLE e: []Decl = empty_decls();
+  MUTABLE n: Int64 = 0;
+  FOR d IN e DO
+    n = n + 1;
+  END
+  ASSERT n == 0_i64, "empty struct list";
+  MUTABLE s: []String = empty_names();
+  &s.append("x");
+  ASSERT s[0] == "x", "empty string list stays a String list";
+  RETURN;
+END
