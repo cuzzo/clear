@@ -3608,9 +3608,17 @@ class MIREmitter
   end
 
   # One opaque pointer per capture, in capture order.
+  #
+  # A nested lambda's environment is built INSIDE the enclosing lambda's body,
+  # where a name the enclosing lambda also captured is not a local at all --
+  # it is `__cap_name.*`, across a Zig namespace boundary. Read the same
+  # identifier overrides MIR::Ident reads so the slot points at the capture
+  # pointer that is in scope (`&__cap_name.*` is that pointer).
   sig { params(node: MIR::CaptureEnv).returns(String) }
   def emit_capture_env(node)
-    slots = node.names.map { |name| "@ptrCast(&#{name})" }.join(", ")
+    slots = node.names.map { |name|
+      "@ptrCast(&#{@ident_overrides.fetch(name.to_s, name.to_s)})"
+    }.join(", ")
     "[#{node.names.length}]?*const anyopaque{ #{slots} }"
   end
 
@@ -3640,6 +3648,12 @@ class MIREmitter
     names = node.captures || []
     types = node.capture_types || []
     env = node.env_name
+    # Both the environment parameter and every name derived from it are scoped
+    # to this lambda's id: a nested lambda's declarations sit inside the
+    # enclosing lambda's Zig function, where a reused name is a shadow error.
+    env_param = fn.params[1]&.name.to_s
+    suffix = fn.name.to_s.delete_prefix("_lambda")
+    env_slots = "#{LAMBDA_ENV_ARRAY}#{suffix}"
     body_fn = if env
       # The lambda cannot name the types of the scope it came from, so its
       # environment arrives as opaque pointers and the types come back here.
@@ -3649,27 +3663,27 @@ class MIREmitter
         # writes, and the binding it points at was marked mutated for exactly
         # that reason, so casting the const away here writes to a `var`.
         if mutables[i]
-          "const #{capture_ptr_name(name)}: *#{types[i]} = " \
-            "@constCast(@ptrCast(@alignCast(#{LAMBDA_ENV_ARRAY}[#{i}].?)));"
+          "const #{capture_ptr_name(name, suffix)}: *#{types[i]} = " \
+            "@constCast(@ptrCast(@alignCast(#{env_slots}[#{i}].?)));"
         else
-          "const #{capture_ptr_name(name)}: *const #{types[i]} = " \
-            "@ptrCast(@alignCast(#{LAMBDA_ENV_ARRAY}[#{i}].?));"
+          "const #{capture_ptr_name(name, suffix)}: *const #{types[i]} = " \
+            "@ptrCast(@alignCast(#{env_slots}[#{i}].?));"
         end
       end
-      overrides = names.each_with_index.to_h { |name, _i| [name, "#{capture_ptr_name(name)}.*"] }
-      env_head = "const #{LAMBDA_ENV_ARRAY}: *const [#{names.length}]?*const anyopaque = " \
-        "@ptrCast(@alignCast(#{MIRLowering::LAMBDA_ENV_PARAM}.?));"
+      overrides = names.each_with_index.to_h { |name, _i| [name, "#{capture_ptr_name(name, suffix)}.*"] }
+      env_head = "const #{env_slots}: *const [#{names.length}]?*const anyopaque = " \
+        "@ptrCast(@alignCast(#{env_param}.?));"
       with_ident_overrides(overrides) do
         rendered = emit_fn_def(fn)
         # A capture the body never reads is an unused constant, which Zig
         # rejects. The environment still carries it -- the slots are positional
         # -- but nothing binds it here.
-        used = prologue.each_with_index.select { |_line, i| rendered.include?(capture_ptr_name(names[i])) }
+        used = prologue.each_with_index.select { |_line, i| rendered.include?(capture_ptr_name(names[i], suffix)) }
                        .map(&:first)
         splice_prologue(rendered, [env_head, *used])
       end
     else
-      splice_prologue(emit_fn_def(fn), ["_ = #{MIRLowering::LAMBDA_ENV_PARAM};"])
+      splice_prologue(emit_fn_def(fn), ["_ = #{env_param};"])
     end
     ctx = env ? "@ptrCast(&#{env})" : "null"
     "CheatLib.Closure(#{closure_fn_type(fn)}).bind(#{ctx}, &(struct { #{body_fn} }).#{fn.name})"
@@ -3678,8 +3692,8 @@ class MIREmitter
   # The array the environment pointers are read out of, named once.
   LAMBDA_ENV_ARRAY = "__lam_env_slots"
 
-  sig { params(name: String).returns(String) }
-  def capture_ptr_name(name) = "__cap_#{name.gsub(/[^A-Za-z0-9_]/, '_')}"
+  sig { params(name: String, suffix: String).returns(String) }
+  def capture_ptr_name(name, suffix) = "__cap_#{name.gsub(/[^A-Za-z0-9_]/, '_')}#{suffix}"
 
   # The signature a Closure is parameterised by: what the lambda is, with the
   # runtime and the environment pointer in front.

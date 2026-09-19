@@ -969,7 +969,7 @@ module MIRLoweringFunctions
   # original body verbatim. Marked :private so callers go through the
   # outer wrapper (which validates).
   # The closure environment parameter every lambda takes.
-  LAMBDA_ENV_PARAM = "__lam_env"
+  LAMBDA_ENV_PARAM = "__lam_ctx"
 
   sig { params(node: AST::FunctionDef, params_mir: T::Array[MIR::Param], return_type_str: String, prologue: T::Array[MIR::Node], body_mir: T::Array[MIR::Node], comptime_params: T::Array[String]).returns(MIR::FnDef) }
   def build_post_inner_fn(node, params_mir, return_type_str, prologue, body_mir, comptime_params)
@@ -2893,13 +2893,19 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     T.bind(self, MIRLowering) rescue nil
     sig = node.full_type!
     sig = T.must(sig.function_signature) if sig.is_a?(Type)
-    fn_name = "_lambda_#{lowering_counters.next_lambda_id}"
+    lambda_id = lowering_counters.next_lambda_id
+    fn_name = "_lambda_#{lambda_id}"
+    # A lambda body is a Zig function nested inside the function that builds
+    # it, so a nested lambda's parameters shadow the enclosing lambda's --
+    # which Zig rejects outright. The lambda id already distinguishes them.
+    rt_name = "_rt_#{lambda_id}"
+    env_param = "#{LAMBDA_ENV_PARAM}_#{lambda_id}"
 
     params_list = T.unsafe(sig).params
     # Every FN value has the same Zig shape, capturing or not: the closure's
     # environment pointer comes right after the runtime.
-    params_mir = T.let([MIR::Param.new("_rt", "*Runtime", false),
-                        MIR::Param.new(LAMBDA_ENV_PARAM, "?*anyopaque", false)] + params_list.map { |p|
+    params_mir = T.let([MIR::Param.new(rt_name, "*Runtime", false),
+                        MIR::Param.new(env_param, "?*anyopaque", false)] + params_list.map { |p|
       p_type = p.type
       type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
       pt_obj = p_type.is_a?(Type) ? p_type : (Type.new(p_type) rescue nil)
@@ -2917,7 +2923,7 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
 
     # Build body: suppressions + body prefix + implicit final expression return.
     body_mir = []
-    body_mir << MIR::Suppress.new("_rt")
+    body_mir << MIR::Suppress.new(rt_name)
     params_list.each { |p| body_mir << MIR::Suppress.new(p.name) }
     body_nodes = AST.lambda_body_nodes(node.body)
     prefix_nodes = body_nodes[0...-1] || []
@@ -2928,7 +2934,7 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
       params_list.select { |p| p.mutable == true }.map { |p| p.name.to_s }.to_set
     # Inside the lambda the runtime is its own `_rt` parameter; the enclosing
     # function's `rt` is not in scope there (Zig rejects the reference).
-    body_mir.concat(runtime_state.with_rt_name("_rt") { lower_body(prefix_nodes) })
+    body_mir.concat(runtime_state.with_rt_name(rt_name) { lower_body(prefix_nodes) })
     # Capture the return expression's pending hoists INSIDE the lambda: a
     # hoisted allocation (a pipeline block, an owned call) that flushed to
     # the enclosing function's statement list would reference lambda params
@@ -2940,7 +2946,7 @@ if callee_param&.takes && callee_param.carrier_contract == :monomorphic
     # placement it left on the frame still fails the checker here rather than
     # being silently rebuilt somewhere the accumulator does not follow.
     tail_alloc = lambda_tail_pipeline?(return_expr) ? nil : :heap
-    return_value, return_pending = runtime_state.with_rt_name("_rt") do
+    return_value, return_pending = runtime_state.with_rt_name(rt_name) do
       lower_head { tail_alloc ? with_decl_alloc(tail_alloc) { lower(return_expr) } : lower(return_expr) }
     end
     capture_state.current_lambda_pointer_params = previous_pointer_params

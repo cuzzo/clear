@@ -1,0 +1,56 @@
+# A lambda nested inside another lambda, both capturing the same MUTABLE local.
+# The inner environment is built inside the outer lambda's Zig function, where
+# the captured name is not a local -- and every lambda-scoped name (runtime,
+# environment parameter, capture pointers) must be unique across the nesting.
+
+FN noop() RETURNS Void ->
+END
+
+FN each(items: []Int64, f: FN(Int64) -> Void) RETURNS Void ->
+  FOR it IN items DO
+    f(it);
+  END
+END
+
+FN collect_all(rows: [][]Int64) RETURNS []Int64 ->
+  MUTABLE names: []Int64 = List[];
+  collect: FN([]Int64) -> Void = %(row: []Int64) USE(MUTABLE names) -> each(row, %(v: Int64) USE(MUTABLE names) -> {
+    &names.append(v)
+  });
+  FOR r IN rows DO
+    collect(r);
+  END
+  RETURN names;
+END
+
+# A capture the body never reads leaves the slot array itself unused, which
+# Zig rejects just as it rejects the unused capture constant.
+FN count_rows(rows: [][]Int64) RETURNS !Int64 ->
+  MUTABLE unread: Int64 = 99;
+  MUTABLE seen: Int64 = 0;
+  FOR r IN rows DO
+    each(r, %(v: Int64) USE(MUTABLE unread) -> {
+      noop()
+    });
+    seen = seen + 1;
+  END
+  RETURN seen;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE rows: [][]Int64 = List[];
+  &rows.append(List[1, 2]);
+  &rows.append(List[3]);
+  MUTABLE flat: []Int64 = collect_all(rows);
+  MUTABLE total: Int64 = 0;
+  MUTABLE seen: Int64 = 0;
+  FOR v IN flat DO
+    total = total + v;
+    seen = seen + 1;
+  END
+  IF seen == 3 AND total == 6 AND TRY (count_rows(rows)) == 2 THEN
+    print("PASS");
+  ELSE
+    print("FAIL");
+  END
+END
