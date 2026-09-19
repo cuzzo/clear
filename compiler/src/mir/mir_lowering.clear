@@ -8655,12 +8655,12 @@ PRIVATE FN mIRLowering__lower_call_arg_from_facts(MUTABLE self: MIRLowering, fac
     MUTABLE raw_arg = mIRLowering__with_decl_alloc(&self, facts.arg_alloc, %() USE(facts, monomorphic_dest, MUTABLE self) -> {
     IF facts.copy_source THEN
       MUTABLE copy_type: ?String = TRY (type__zig_type(facts.callee_param_type));
-      RETURN DeepCopy{ source: COPY TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (facts.copy_source)))), zig_type: COPY copy_type, elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY copy_type), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+      RETURN DeepCopy{ source: COPY UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (facts.copy_source))))), zig_type: COPY copy_type, elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY copy_type), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
     ELSE_IF monomorphic_dest THEN
       RETURN TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(facts.ast_arg)));
     ELSE
       RETURN mIRLowering__with_expected_type(&self, facts.callee_param_type, %() USE(facts, MUTABLE self) -> {
-        rtoc_lambda_result_353 = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(facts.ast_arg)));
+        rtoc_lambda_result_353 = UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(facts.ast_arg))));
         rtoc_lambda_result_353
       });
     END
