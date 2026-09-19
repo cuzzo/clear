@@ -10778,7 +10778,7 @@ PRIVATE FN mIRLowering__mutable_snapshot_plan(self: MIRLowering, MUTABLE node: W
     MUTABLE body_mir = TRY (mIRLowering__lower_body(&lowerer, castLocatableListToMIRLoweringLowerableStmtList(node.body)));
     MUTABLE rt_name = mIRLowering__runtime_binding_name(&lowerer);
     RETURN MutableSnapshotPlan{ node: COPY node, with_label: COPY with_label, rt_name: COPY rt_name, alloc: :heap, body_mir: COPY body_mir, retries: (IF node.lock_error_clause != NIL THEN
-      node.lock_error_clause.retries
+      UNWRAP (node.lock_error_clause).retries
     ELSE
       NIL
     END), capabilities: COPY TRY (mIRLowering__with_capability_specs(self, node)) |> SELECT TRY (mIRLowering__mutable_snapshot_cap(self, lowerer, _)) };
@@ -11289,7 +11289,7 @@ PRIVATE FN mIRLowering__lower_do_block(MUTABLE self: MIRLowering, node: DoBlock)
 END
 # One DO branch body, lowered under the branch's fiber capture map. Split out
 # because the Ruby original nests this inside the each_with_index map.
-PRIVATE FN mIRLowering__lower_do_branch_body(MUTABLE self: MIRLowering, branch: DoBranch, caps: FiberCtx) RETURNS ![]Emittable
+PRIVATE FN mIRLowering__lower_do_branch_body(MUTABLE self: MIRLowering, branch: DoBranch, caps: FiberCtxBuilderResult) RETURNS ![]Emittable
   EFFECTS REENTRANT ->
     RETURN mIRLowering__with_fiber_capture_map(&self, caps.capture_map, caps.capture_symbols, "__rt", %() USE(branch, caps, MUTABLE self) -> {
     MUTABLE rtoc_value_block_marker = 0;
