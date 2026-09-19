@@ -12600,13 +12600,20 @@ PRIVATE FN mIRLowering__unit_variant_access(MUTABLE self: MIRLowering, node: Loc
         RETURN NIL;
       END
       MUTABLE type_name = symbol(UNWRAP (aST__node_name(get_field.target)));
-      MUTABLE schema:? = (TRY (mIRLowering__union_schemas(&self)))[type_name];
-      IF !(schema IS_A UnionSchema@multiowned) THEN
+      MUTABLE schema: ?UnionSchema@multiowned = COPY (TRY (mIRLowering__union_schemas(&self)))[type_name];
+      IF !(schema) THEN
         RETURN NIL;
       END
-      MUTABLE field_key: ?MIRLoweringExpressionsReturnValue = mIRLowering__union_variant_key(self, UNWRAP (schema), MIRLoweringField{ StringValue: get_field.field });
+      MUTABLE field_key: ?MIRLoweringReturnValue = mIRLowering__union_variant_key(self, schema, MIRLoweringField{ StringValue: get_field.field });
       IF field_key EXISTS AS field_key_value THEN
-        MUTABLE var_data = schema.variants[field_key_value];
+        # The key is the string or symbol the variant lookup produced.
+        MUTABLE rtoc_variant_key: String@symbol = :unknown;
+        PARTIAL MATCH field_key_value START
+          MIRLoweringReturnValue.StringValue AS rtoc_key_str -> rtoc_variant_key = symbol(rtoc_key_str);,
+          MIRLoweringReturnValue.SymbolValue AS rtoc_key_sym -> rtoc_variant_key = rtoc_key_sym;,
+          DEFAULT -> PASS;
+        END
+        MUTABLE var_data: ?SchemasUnionSchemaVariantValue = COPY schema.variants[rtoc_variant_key];
         IF schemas__inline_struct?(var_data) THEN
           RETURN NIL;
         END
@@ -13233,7 +13240,7 @@ PRIVATE FN mIRLowering__unit_variant_constructor(MUTABLE self: MIRLowering, node
       IF !(schema IS_A UnionSchema@multiowned) THEN
         RETURN NIL;
       END
-      MUTABLE field_key: ?MIRLoweringExpressionsReturnValue = mIRLowering__union_variant_key(self, UNWRAP (schema), MIRLoweringField{ StringValue: COPY node.field });
+      MUTABLE field_key: ?MIRLoweringReturnValue = mIRLowering__union_variant_key(self, UNWRAP (schema), MIRLoweringField{ StringValue: COPY node.field });
       IF field_key EXISTS AS field_key_value THEN
         MUTABLE var_data = schema.variants[field_key_value];
         IF schemas__inline_struct?(var_data) THEN
