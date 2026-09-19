@@ -8537,7 +8537,7 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
         ELSE
           payload = TRY (type__zig_type(ti));
         END
-        RETURN Emittable{ RcRetain: COPY RcRetain{ source: COPY TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(inner))), zig_base: COPY payload, func: IF (plan_value_mutable.family == :shared) THEN
+        RETURN Emittable{ RcRetain: COPY RcRetain{ source: COPY UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(inner)))), zig_base: COPY payload, func: IF (plan_value_mutable.family == :shared) THEN
           "arcRetain"
         ELSE
           "rcRetain"
