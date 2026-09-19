@@ -63,11 +63,11 @@ files.each_with_index do |rel, i|
   cmd = ['bundle', 'exec', 'ruby', File.join(ROOT, 'tools', 'selfhost_fn_probe.rb'),
          '--file', rel, '--stage', opts[:stage], '--jobs', opts[:jobs].to_s,
          '--out', File.join(File.dirname(opts[:out]), "probe_2c_#{i}.json")]
-  # Each stage-zig probe gets its own Zig cache, and the shared build cache
-  # grows by ~10G per file. Left alone this fills the disk mid-run (observed:
-  # 154G to 100% and every write failing with ENOSPC).
-  FileUtils.rm_rf(Dir.glob('/tmp/fn-probe*'))
-  FileUtils.rm_rf(File.join(ROOT, 'zig', '.clear-cache'))
+  # Disk is managed by the probe itself, which prunes cache entries and temp
+  # dirs by AGE. Deleting them wholesale from here also deleted whatever a
+  # concurrently running build was using -- an interactive `clear test`, a
+  # second probe -- which surfaced as ENOENT and "failed to rename compilation
+  # results" in the other process, not here.
   probe_out = File.join(File.dirname(opts[:out]), "probe_2c_#{i}.json")
   FileUtils.rm_f(probe_out)
   _out, _err, _st = Open3.capture3({ 'BUNDLE_GEMFILE' => File.join(ROOT, 'Gemfile') }, *cmd, chdir: ROOT)
