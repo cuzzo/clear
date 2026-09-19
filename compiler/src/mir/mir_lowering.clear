@@ -10267,15 +10267,15 @@ PRIVATE FN mIRLowering__borrowed_capability_binding(self: MIRLowering, context: 
     MUTABLE is_param = mIRLowering__with_cap_is_param?(self, context.var_node);
     MUTABLE safe_alias = mIRLowering__safe_with_capability_alias(self, context.alias_name);
     MUTABLE aliased_value =   IF (COPY context.node).polymorphic THEN
-      CapabilityUnwrap{ source: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL }
+      Emittable{ CapabilityUnwrap: COPY CapabilityUnwrap{ source: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL } }
     ELSE_IF TRY (mIRLowering__borrowed_const_param_alias?(self, context, is_param)) THEN
-      Deref{ expr: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL }
+      Emittable{ Deref: COPY Deref{ expr: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL } }
     ELSE_IF (IF context.resolved_type != NIL THEN
       TRY (type__non_string_array?( UNWRAP (context.resolved_type)))
     ELSE
       NIL
     END) THEN
-      ItemsAccess{ expr: COPY source_mir, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL }
+      Emittable{ ItemsAccess: COPY ItemsAccess{ expr: COPY source_mir, safe: TRUE, lowered_node_id: NIL, ownership_consumption: NIL } }
     ELSE
       source_mir
     END;
@@ -10318,11 +10318,11 @@ PRIVATE FN mIRLowering__restrict_capability_binding(self: MIRLowering, context: 
     MUTABLE source_mir = TRY (mIRLowering__with_capability_source_mir(self, context.var_node));
     MUTABLE safe_alias = mIRLowering__safe_with_capability_alias(self, context.alias_name);
     MUTABLE value =   IF (COPY context.node).polymorphic THEN
-      CapabilityUnwrap{ source: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL }
+      Emittable{ CapabilityUnwrap: COPY CapabilityUnwrap{ source: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL } }
     ELSE_IF mIRLowering__with_cap_is_param?(self, context.var_node) THEN
-      Deref{ expr: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL }
+      Emittable{ Deref: COPY Deref{ expr: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL } }
     ELSE_IF context.cap.alias_mutable THEN
-      AddressOf{ expr: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL }
+      Emittable{ AddressOf: COPY AddressOf{ expr: COPY source_mir, lowered_node_id: NIL, ownership_consumption: NIL } }
     ELSE
       source_mir
     END;
@@ -11878,8 +11878,8 @@ PRIVATE FN mIRLowering__lower_next_expr(MUTABLE self: MIRLowering, MUTABLE node:
     IF (TRY (type__stream?(promise_type)) AND !(receiver IS_A Ident)) THEN
       MUTABLE receiver_tmp_id = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_533 = mIRLowering__lowering_counters(&self);
       mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_533) };
-      MUTABLE label = "__next_recv_${receiver_tmp_id}";
-      MUTABLE temp = "__next_source_${receiver_tmp_id}";
+      MUTABLE label = "__next_recv_${mIRLoweringGeneratedId__to_s(receiver_tmp_id)}";
+      MUTABLE temp = "__next_source_${mIRLoweringGeneratedId__to_s(receiver_tmp_id)}";
       MUTABLE block = MIRBlockExpr{ label: COPY label, body: COPY [Emittable{ Let: COPY Let{ name: COPY temp, init: COPY receiver, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Ident: COPY Ident{ name: COPY temp, lowered_node_id: NIL, ownership_consumption: NIL } }, method: IF TRY (type__stream_step?(result_t)) THEN
         "nextStep"
       ELSE
@@ -14710,7 +14710,7 @@ PRIVATE FN mIRLowering__lower_list_lit(MUTABLE self: MIRLowering, MUTABLE node: 
       MUTABLE n: ?TypeArrayCapacity = TRY (type__stream_capacity(ti));
       MUTABLE promise_zig = "CheatLib.Promise(${elem_zig})";
       MUTABLE stream_zig = TRY (type__zig_type(ti));
-      MUTABLE label = "__stream${s_id}";
+      MUTABLE label = "__stream${mIRLoweringGeneratedId__to_s(s_id)}";
       MUTABLE body: []@multiowned Any = List[];
       MUTABLE item_idents = {
     MUTABLE rtoc_value_block_marker = 0;
@@ -14963,7 +14963,7 @@ PRIVATE FN mIRLowering__non_empty_hash_literal(MUTABLE self: MIRLowering, node: 
     END
     MUTABLE result = mIRLowering__hash_literal_result(self, Emittable{ Ident: COPY Ident{ name: COPY hm_name, lowered_node_id: NIL, ownership_consumption: NIL } }, plan, capability);
     IF hashLiteralCapabilityPlan__wraps_result?(capability) THEN
-      MUTABLE wrapped_name = "__hm_wrapped_${literal_id}";
+      MUTABLE wrapped_name = "__hm_wrapped_${mIRLoweringGeneratedId__to_s(literal_id)}";
       &items.append(Emittable{ Let: COPY Let{ name: COPY wrapped_name, init: COPY result, mutable: FALSE, annotation: COPY TRY (type__new(TypeConstructionInput{ Type: COPY plan.type_info })), suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
       result = Emittable{ Ident: COPY Ident{ name: COPY wrapped_name, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
@@ -16268,7 +16268,7 @@ END
 PRIVATE FN mIRLowering__conditional_field_assignment?(self: MIRLowering, name: MIRLoweringName) RETURNS Bool ->
     RETURN (IF name IS_A GetField AS get_field THEN get_field.target IS_A OptionalUnwrap ELSE FALSE END);
 END
-PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowering, node: Assignment) RETURNS !IfBindStmt ->
+PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !IfBindStmt ->
     MUTABLE field: GetField = COPY castAssignmentNameToGetField(node.name);
     MUTABLE unwrap: OptionalUnwrap = COPY CAST(field.target AS OptionalUnwrap);
     MUTABLE source = COPY unwrap.target;
@@ -16305,8 +16305,8 @@ PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowe
       field_type = UNWRAP (TRY (type__wrapped_type(field_type)));
     END
     MUTABLE field_lifecycle = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), field_type));
-    MUTABLE value, value_pending = mIRLowering__lower_head(&self, %() USE(field_lifecycle, field_type, node, target_alloc, MUTABLE self) -> {
-    MUTABLE lowered = mIRLowering__with_decl_alloc(&self, target_alloc, %() USE(field_type, node, target_alloc, MUTABLE self) -> {
+    MUTABLE value, value_pending = mIRLowering__lower_head(&self, %() USE(field_lifecycle, field_type, MUTABLE node, target_alloc, MUTABLE self) -> {
+    MUTABLE lowered = mIRLowering__with_decl_alloc(&self, target_alloc, %() USE(field_type, MUTABLE node, target_alloc, MUTABLE self) -> {
       MUTABLE raw: ?Emittable = TRY (mIRLowering__lower(&self, &node.value));
       TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (raw), node.value, target_alloc, TypeTypeInput{ Type: COPY field_type }))
     });
@@ -16731,13 +16731,13 @@ PRIVATE FN mIRLowering__lower_control_condition(self: MIRLowering, MUTABLE ast_n
       RETURN lowered;
     END
 END
-PRIVATE FN mIRLowering__lower_if(MUTABLE self: MIRLowering, node: IfStatement) RETURNS !Emittable ->
+PRIVATE FN mIRLowering__lower_if(MUTABLE self: MIRLowering, MUTABLE node: IfStatement) RETURNS !Emittable ->
     MUTABLE else_body: ?[]Emittable = NIL;
     MUTABLE then_body: []Emittable = List[];
     IF (UNWRAP (locatable__condition(Locatable{ IfStatement: COPY node })) IS_A IsA AND UNWRAP (locatable__condition( Locatable{ IfStatement: COPY node })).runtime_variant_name) THEN
       RETURN TRY (mIRLowering__lower_runtime_is_a_if(&self, node, castLocatableToIsA__mir_lowering(node.condition)));
     END
-    MUTABLE cond, cond_pending = mIRLowering__lower_head(&self, %() USE(node, MUTABLE self) -> TRY (mIRLowering__lower_control_condition(self, &node.condition)));
+    MUTABLE cond, cond_pending = mIRLowering__lower_head(&self, %() USE(MUTABLE node, MUTABLE self) -> TRY (mIRLowering__lower_control_condition(self, &node.condition)));
     IF node.expr_mode THEN
       MUTABLE label = "__if_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_712 = mIRLowering__lowering_counters(&self);
       mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_712)) }}";
@@ -17207,8 +17207,8 @@ PRIVATE FN mIRLowering__for_each_loop_stmt(MUTABLE self: MIRLowering, node: ForE
     ELSE_IF type__set_collection?(ct) THEN
       MUTABLE for_id = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_756 = mIRLowering__lowering_counters(&self);
       mIRLoweringCounters__next_for_loop_id(&rtoc_mutable_receiver_756) };
-      MUTABLE iter_var = "__kit_${for_id}";
-      MUTABLE ptr_var = "__kptr_${for_id}";
+      MUTABLE iter_var = "__kit_${mIRLoweringGeneratedId__to_s(for_id)}";
+      MUTABLE ptr_var = "__kptr_${mIRLoweringGeneratedId__to_s(for_id)}";
       iter_init = Let{ name: COPY iter_var, init: Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: COPY coll, method: "keyIterator", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } }, mutable: TRUE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
       MUTABLE deref = Let{ name: COPY var, init: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY ptr_var, lowered_node_id: NIL, ownership_consumption: NIL } }, field: "*", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL };
       full_body = ([Emittable{ Let: COPY deref }, Emittable{ Suppress: COPY Suppress{ name: COPY var, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] + body);
