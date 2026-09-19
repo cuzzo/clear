@@ -8623,7 +8623,14 @@ PRIVATE FN mIRLowering__lower_call_arg_from_facts(MUTABLE self: MIRLowering, fac
         inner = COPY castLocatableToMoveNode(facts.ast_arg).value;
       END
       IF inner IS_A Identifier THEN
-        (&self.kept_edge_temp_stack.last()?.moved_sources).push(mIRLowering__zig_safe_name(self, CAST(aST__node_name(inner) AS String)));
+        # Ruby's `kept_edge_temp_stack.last&.moved_sources&.push(...)`: the
+        # frame is read back, appended to, and written into place.
+        MUTABLE stack_top = self.kept_edge_temp_stack.length();
+        IF stack_top > 0 THEN
+          MUTABLE top_frame = UNWRAP (self.kept_edge_temp_stack[stack_top - 1]);
+          &top_frame.moved_sources.append(mIRLowering__zig_safe_name(self, CAST(aST__node_name(inner) AS String)));
+          self.kept_edge_temp_stack[stack_top - 1] = COPY top_frame;
+        END
       END
     END
     IF kept_edge EXISTS AS kept_edge_value THEN
@@ -8631,11 +8638,17 @@ PRIVATE FN mIRLowering__lower_call_arg_from_facts(MUTABLE self: MIRLowering, fac
       MUTABLE name = "__tmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_351 = mIRLowering__lowering_counters(&self);
       mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_351)) }}";
       MUTABLE materialized = BindingMaterialization{ name: COPY name, expr: COPY kept_edge_value_mutable, alloc: :heap, type_info: CAST(COPY TRY (mIRLowering__mir_alloc_mark_type_info(&self, kept_edge_value_mutable, facts.ast_arg, "kept edge handle")) AS Type), mutable: FALSE, cleanup_entry: cleanupEntry__build(:rc, :heap, TRUE), cleanup_mode: :err, annotation: NIL, suppression: NIL, scope: NIL, ownership_tracked: TRUE };
-      self.state.function_state.pending_stmts = ruby_array_concat_Stmt(mIRLowering__function_state(&self).pending_stmts, TRY (bindingMaterialization__statements(materialized)));
+      FOR materialized_stmt IN TRY (bindingMaterialization__statements(materialized)) DO
+        &self.state.function_state.pending_stmts.append(COPY materialized_stmt);
+      END
       &self.state.function_state.lowered_alloc_names.insert(name);
-      MUTABLE rtoc_index_receiver_352 = mIRLowering__function_state(&self).guarded_cleanup_names;
-      rtoc_index_receiver_352[name] = TRUE;
-      (&self.kept_edge_temp_stack.last()?.temps).push(name);
+      self.state.function_state.guarded_cleanup_names[COPY name] = TRUE;
+      MUTABLE temp_stack_top = self.kept_edge_temp_stack.length();
+      IF temp_stack_top > 0 THEN
+        MUTABLE temp_frame = UNWRAP (self.kept_edge_temp_stack[temp_stack_top - 1]);
+        &temp_frame.temps.append(COPY name);
+        self.kept_edge_temp_stack[temp_stack_top - 1] = COPY temp_frame;
+      END
       RETURN Emittable{ Ident: COPY Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     MUTABLE monomorphic_dest = ((facts.callee_param != NIL) AND (((facts.callee_param)?).carrier_contract == :monomorphic));
