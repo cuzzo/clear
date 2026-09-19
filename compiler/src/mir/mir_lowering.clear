@@ -16148,12 +16148,25 @@ PRIVATE FN mIRLowering__destructure_source_transfer(MUTABLE self: MIRLowering, n
       IF !(mIRLowering__function_state(&self).guarded_cleanup_names[name_value]) THEN
         RETURN CAST(List[] AS []Emittable);
       END
-      MUTABLE reassigns_owner = node.targets |> ANY (IF (_.name == "_") THEN FALSE ELSE (IF (aST__node_identity(UNWRAP (castOptionalSymbolEntryRegInputToOptionalLocatable((UNWRAP (_.symbol)).reg))) == aST__node_identity(Locatable{ DestructureTarget: COPY _ })) THEN FALSE ELSE (IF mIRLowering__function_state(&self).guarded_cleanup_names[mIRLowering__zig_safe_name(self, _.name)] != NIL THEN mIRLowering__function_state(&self).guarded_cleanup_names[mIRLowering__zig_safe_name(self, _.name)] ELSE (IF (TRY (functionState__bindings(mIRLowering__function_state(&self))))[_.name] != NIL THEN
-        { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_681:? = ((TRY (functionState__bindings(mIRLowering__function_state(&self))))[_.name]);
-      cleanupEntry__needs_cleanup?( UNWRAP (rtoc_local_receiver_681)) }
-      ELSE
-        NIL
-      END) END) END) END);
+      # Ruby's `any?` block has three early `next false` guards and a final
+      # `||`; each arm answers with a Bool, and the map lookups are optional.
+      MUTABLE reassigns_owner: Bool = FALSE;
+      FOR rtoc_target IN node.targets DO
+        IF (CAST(rtoc_target.name AS String) != "_") THEN
+          MUTABLE rtoc_guarded: Bool = FALSE;
+          IF mIRLowering__function_state(&self).guarded_cleanup_names[mIRLowering__zig_safe_name(self, CAST(rtoc_target.name AS String))] EXISTS AS rtoc_guard_flag THEN
+            rtoc_guarded = rtoc_guard_flag;
+          END
+          IF !(rtoc_guarded) THEN
+            IF (TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(rtoc_target.name AS String)] EXISTS AS rtoc_target_entry THEN
+              rtoc_guarded = cleanupEntry__needs_cleanup?(rtoc_target_entry);
+            END
+          END
+          IF rtoc_guarded THEN
+            reassigns_owner = TRUE;
+          END
+        END
+      END
       IF !(reassigns_owner) THEN
         RETURN CAST(List[] AS []Emittable);
       END
