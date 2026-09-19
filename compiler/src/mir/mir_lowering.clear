@@ -13105,7 +13105,7 @@ PRIVATE FN mIRLowering__lower_future_tense_map(MUTABLE self: MIRLowering, MUTABL
     MUTABLE inner_bindings = TRY (mIRLowering__tense_map_bindings(self, id, "inner", inner_layers.length()));
     MUTABLE mapped_root: String = "";
     IF (inner_bindings.length() == 0) THEN
-      mapped_root = source_value;
+      mapped_root = COPY source_value;
     ELSE
       mapped_root = COPY UNWRAP (inner_bindings.last());
     END
@@ -13123,15 +13123,15 @@ PRIVATE FN mIRLowering__lower_future_tense_map(MUTABLE self: MIRLowering, MUTABL
     MUTABLE source_split = tenseEnvelope__split_future(source_envelope);
     MUTABLE source_result_type = TRY (type__new(TypeConstructionInput{ TypeExpression: COPY TRY (tenseEnvelope__wrap_layers(source_envelope.payload_expression, source_split.inner)) }));
     MUTABLE run_body = mIRLowering__with_bg_fiber_body_context(&self, Set[], %() USE(id, inner_bindings, inner_layers, inner_result_type, mapped_root, mapper, names, node, operation, result_shape, source_result_type, source_value, MUTABLE self) -> {
-    MUTABLE rtoc_lambda_result_564: ?Emittable = mIRLowering__with_runtime_binding_name(&self, names.bg_rt, %() USE(id, inner_bindings, inner_layers, inner_result_type, mapped_root, mapper, node, operation, result_shape, source_result_type, source_value, MUTABLE self) -> {
+    MUTABLE rtoc_lambda_result_564: []Emittable = mIRLowering__with_runtime_binding_name(&self, names.bg_rt, %() USE(id, inner_bindings, inner_layers, inner_result_type, mapped_root, mapper, MUTABLE node, operation, result_shape, source_result_type, source_value, MUTABLE self) -> {
     MUTABLE source_receiver = FieldGet{ object: Emittable{ Ident: COPY Ident{ name: "__ctx_map${id.toString()}", lowered_node_id: NIL, ownership_consumption: NIL } }, field: "source", lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE source_guard_branch_value: ?DeferStmt = NIL;
+    MUTABLE source_guard_branch_value: ?Emittable = NIL;
       IF (operation.handle_use == TenseHandleUse.SharedRead) THEN
-        source_guard_branch_value = MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY MIRMethodCall{ receiver: Emittable{ FieldGet: COPY source_receiver }, method: "deinit", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+        source_guard_branch_value = Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY MIRMethodCall{ receiver: Emittable{ FieldGet: COPY source_receiver }, method: "deinit", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL  } };
       ELSE
         source_guard_branch_value = NIL;
       END
-    MUTABLE source_guard: DeferStmt = source_guard_branch_value?;
+    MUTABLE source_guard: ?Emittable = source_guard_branch_value;
     MUTABLE source_shape = TRY (asyncResultShape__promise(source_result_type, (operation.handle_use == TenseHandleUse.SharedRead)));
     MUTABLE source_lifecycle = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), source_result_type));
     MUTABLE next_call = MIRMethodCall{ receiver: Emittable{ FieldGet: COPY source_receiver }, method: "next", args: List[], try_wrap: !(asyncResultShape__boxes_fallible_payload?(source_shape)), callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: IF lifecyclePlan__needs_drop?(source_lifecycle) THEN
@@ -13140,13 +13140,13 @@ PRIVATE FN mIRLowering__lower_future_tense_map(MUTABLE self: MIRLowering, MUTABL
         NIL
       END, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     next_call.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY source_result_type }));
-    MUTABLE next_value_branch_value: ?AsyncPayloadTake = NIL;
+    MUTABLE next_value_branch_value: ?Emittable = NIL;
       IF asyncResultShape__boxes_fallible_payload?(source_shape) THEN
-        next_value_branch_value = AsyncPayloadTake{ source: Emittable{ TryExpr: COPY TryExpr{ expr: Emittable{ MIRMethodCall: COPY next_call }, lowered_node_id: NIL, ownership_consumption: NIL } }, result_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY source_result_type })) };
+        next_value_branch_value = Emittable{ AsyncPayloadTake: COPY AsyncPayloadTake{ source: Emittable{ TryExpr: COPY TryExpr{ expr: Emittable{ MIRMethodCall: COPY next_call }, lowered_node_id: NIL, ownership_consumption: NIL } }, result_type: COPY TRY (type__new(TypeConstructionInput{ Type: COPY source_result_type }))  } };
       ELSE
         next_value_branch_value = next_call;
       END
-    MUTABLE next_value: AsyncPayloadTake = next_value_branch_value?;
+    MUTABLE next_value: Emittable = UNWRAP (next_value_branch_value);
     MUTABLE source_cleanup_branch_value: ?CleanupEntry@multiowned = NIL;
       IF lifecyclePlan__needs_drop?(source_lifecycle) THEN
         source_cleanup_branch_value = TRY (mIRLowering__tense_map_cleanup_entry(self, source_result_type, source_lifecycle));
@@ -13154,18 +13154,18 @@ PRIVATE FN mIRLowering__lower_future_tense_map(MUTABLE self: MIRLowering, MUTABL
         source_cleanup_branch_value = NIL;
       END
     MUTABLE source_cleanup: CleanupEntry@multiowned = source_cleanup_branch_value?;
-    MUTABLE source_binding = BindingMaterialization{ name: COPY source_value, expr: Emittable{ AsyncPayloadTake: COPY next_value }, alloc: :heap, type_info: COPY source_result_type, mutable: FALSE, cleanup_entry: source_cleanup, scope: :function, ownership_tracked: lifecyclePlan__needs_drop?(source_lifecycle), annotation: NIL, suppression: NIL, cleanup_mode: :normal };
+    MUTABLE source_binding = BindingMaterialization{ name: COPY source_value, expr: COPY next_value, alloc: :heap, type_info: COPY source_result_type, mutable: FALSE, cleanup_entry: source_cleanup, scope: :function, ownership_tracked: lifecyclePlan__needs_drop?(source_lifecycle), annotation: NIL, suppression: NIL, cleanup_mode: :normal };
     MUTABLE body: []Emittable = List[];
     IF source_guard THEN
         &body.append(source_guard);
     END
     body = ruby_array_concat_Emittable__mir_lowering(body, CAST(TRY (bindingMaterialization__statements(source_binding)) AS []Emittable));
     MUTABLE mapped_value = mIRLowering__with_decl_alloc(&self, :heap, %() USE(mapped_root, mapper) -> mapper(mapped_root));
-    MUTABLE inner_map =   IF (inner_layers.length() == 0) THEN
-        mapped_value
-      ELSE
-        mIRLowering__direct_tense_map(self, Emittable{ Ident: COPY Ident{ name: COPY source_value, lowered_node_id: NIL, ownership_consumption: NIL } }, mapped_value, inner_layers, inner_bindings, id, inner_result_type, "inner")
-      END;
+    # Both arms produce a node; the direct map is one variant of it.
+    MUTABLE inner_map: Emittable = COPY mapped_value;
+    IF (inner_layers.length() != 0) THEN
+      inner_map = Emittable{ DirectTenseMap: COPY mIRLowering__direct_tense_map(self, Emittable{ Ident: COPY Ident{ name: COPY source_value, lowered_node_id: NIL, ownership_consumption: NIL } }, mapped_value, inner_layers, inner_bindings, id, inner_result_type, "inner") };
+    END
     MUTABLE placed = TRY (mIRLowering__place_value_for_destination(&self, &inner_map, &node, :heap, TypeTypeInput{ Type: COPY inner_result_type }));
     MUTABLE result_lifecycle = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), inner_result_type));
     IF ((TRY (mIRLowering__mir_allocates?(&self, placed)) OR placed IS_A Call) OR placed IS_A MIRMethodCall) THEN
@@ -13190,15 +13190,14 @@ PRIVATE FN mIRLowering__lower_future_tense_map(MUTABLE self: MIRLowering, MUTABL
     MUTABLE site_id = (id + 1);
     MUTABLE profiled = mIRLowering__profiled_task_config_plan(self, task, site_id, PinMode{ SymbolValue: :local });
     MUTABLE spawn = mIRLowering__fiber_spawn_call_plan(self, mIRLowering__runtime_binding_name(&self), names.ctx_type, names.ctx_var, profiled, PinMode{ SymbolValue: :local });
-    MUTABLE profile = ProfileTaskSite{ site_id: site_id, line: ((IF locatable__token(node) != NIL THEN
-      (locatable__token(node)).line
-    ELSE
-      NIL
-    END) OR_ELSE 0), column: ((IF locatable__token(node) != NIL THEN
-      (locatable__token(node)).column
-    ELSE
-      NIL
-    END) OR_ELSE 0), dispatch: :local, form: :stack };
+    # `node.token&.line || 0` -- the guard binds the token it tested.
+    MUTABLE rtoc_site_line: Int64 = 0;
+    MUTABLE rtoc_site_column: Int64 = 0;
+    IF locatable__token(node) EXISTS AS rtoc_site_token THEN
+      rtoc_site_line = rtoc_site_token.line;
+      rtoc_site_column = rtoc_site_token.column;
+    END
+    MUTABLE profile = ProfileTaskSite{ site_id: site_id, line: rtoc_site_line, column: rtoc_site_column, dispatch: :local, form: :stack };
     MUTABLE structural = FutureMapPlan{ id: COPY id, ctx_type: COPY names.ctx_type, ctx_var: COPY names.ctx_var, alloc_var: COPY names.alloc_var, promise_var: COPY names.promise_var, blk_label: COPY names.blk_label, raw_rt: COPY names.bg_rt, rt_name: COPY mIRLowering__runtime_binding_name(&self), source: COPY source, source_field: "source", source_shared: (operation.handle_use == TenseHandleUse.SharedRead), run_body: COPY run_body, promise_zig: COPY promise_zig, spawn_call: COPY spawn, profile_site: COPY profile, result_type: COPY future_type };
     MUTABLE bg = MIRBgBlock{ code: BgBlockPlan{ FutureMapPlan: COPY structural }, captures: {}, run_body: COPY run_body, fsm_structure: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, boundary_fact: NIL, result_type: NIL };
     bg.result_type = future_type;
