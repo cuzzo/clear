@@ -17877,7 +17877,7 @@ PRIVATE FN mIRLowering__switch_match_pattern(MUTABLE self: MIRLowering, value: L
     IF is_enum_match THEN
       RETURN SwitchPattern{ EnumSwitchPattern: COPY EnumSwitchPattern{ variant: COPY CAST(castLocatableToGetField__mir_lowering(value).field AS String) } };
     END
-    RETURN TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(value)));
+    RETURN SwitchPattern{ Emittable: COPY UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(value)))) };
 END
 PRIVATE FN mIRLowering__hoist_unhoisted_return_allocs(MUTABLE self: MIRLowering, body: []Emittable, ast_stmts: []Locatable) RETURNS ![]Emittable ->
     MUTABLE returns: []Locatable = List[];
