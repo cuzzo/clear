@@ -12064,13 +12064,10 @@ PRIVATE FN mIRLowering__float_literal_text(self: MIRLowering, value: MIRLowering
 END
 PRIVATE FN mIRLowering__lower_identifier(MUTABLE self: MIRLowering, MUTABLE node: Identifier) RETURNS !Emittable ->
     IF mIRLowering__synthetic_pipeline_binding_name?(self, node.name) THEN
-      MUTABLE line: String = "?";
-      IF TRUE THEN
-        line = ((node.token)).line;
-      END
-      panic("{}{}in the same pipeline expression where they are used.");
+      MUTABLE line: String = node.token.line.toString();
+      panic("line ${line}: Undefined pipeline binding '${node.name}'. Pipeline bindings must be declared with 'AS ${node.name}' in the same pipeline expression where they are used.");
     END
-    IF (TRUE AND node.fn_ref) THEN
+    IF (node.fn_ref OR_ELSE FALSE) THEN
       RETURN Emittable{ FnRef: COPY FnRef{ name: mIRLowering__zig_safe_name(self, node.name), lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     MUTABLE rc_map = (mIRLowering__capability_state(&self).rc_unwrap_map OR_ELSE {});
@@ -12094,7 +12091,15 @@ PRIVATE FN mIRLowering__lower_identifier(MUTABLE self: MIRLowering, MUTABLE node
     IF node.symbol != NIL THEN
       decl_node = COPY ((node.symbol)?).reg;
     END
-    MUTABLE zig_name = (((((decl_node != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(&self))))[aST__node_identity(castSymbolEntryRegInputToLocatable(COPY decl_node))] != NIL))) OR (TRY (functionState__rename_map(mIRLowering__function_state(&self))))[mIRLowering__zig_safe_name(self, node.name)]) OR mIRLowering__zig_safe_name(self, node.name));
+    MUTABLE zig_name: String = mIRLowering__zig_safe_name(self, node.name);
+    IF (TRY (functionState__rename_map(mIRLowering__function_state(&self))))[mIRLowering__zig_safe_name(self, node.name)] EXISTS AS rtoc_renamed THEN
+      zig_name = COPY rtoc_renamed;
+    END
+    IF decl_node EXISTS AS rtoc_decl_node THEN
+      IF (TRY (functionState__decl_zig_names(mIRLowering__function_state(&self))))[aST__node_identity(castSymbolEntryRegInputToLocatable(COPY rtoc_decl_node))] EXISTS AS rtoc_decl_zig THEN
+        zig_name = COPY rtoc_decl_zig;
+      END
+    END
     MUTABLE ident = Ident{ name: COPY zig_name, lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE symbol: ?SymbolEntry = COPY node.symbol;
     IF (((symbol != NIL) AND { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_537 = symbol;
@@ -12107,7 +12112,7 @@ PRIVATE FN mIRLowering__lower_identifier(MUTABLE self: MIRLowering, MUTABLE node
       END
       RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Deref: COPY Deref{ expr: Emittable{ Ident: COPY ident }, lowered_node_id: NIL, ownership_consumption: NIL } }, method: "load", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
     END
-    IF (TRUE AND node.heap_dupe_result) THEN
+    IF (node.heap_dupe_result OR_ELSE FALSE) THEN
       RETURN Emittable{ DupeSlice: COPY DupeSlice{ source: Emittable{ Ident: COPY ident }, alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     MUTABLE binding_type: ?Type@multiowned = NIL;
