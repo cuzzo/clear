@@ -17599,7 +17599,7 @@ PRIVATE FN mIRLowering__if_chain_branch(self: MIRLowering, cond: Emittable, body
 END
 PRIVATE FN mIRLowering__union_if_chain_match_case(MUTABLE self: MIRLowering, node: MatchStatement, match_case: MatchCase, subject: Emittable, body: []Emittable) RETURNS ![]IfChainBranch ->
     MUTABLE variants = TRY (mIRLowering__union_match_case_variants( CAST(Locatable{ MatchStatement: CAST(COPY self AS MatchStatement)} AS MIRLowering), match_case));
-    MUTABLE is_mutable = (locatable__expr(Locatable{ MatchStatement: COPY node }) IS_A Identifier AND (locatable__expr( Locatable{ MatchStatement: COPY node }).was_moved == TRUE));
+    MUTABLE is_mutable = (IF node.expr IS_A Identifier AS rtoc_expr_ident THEN (rtoc_expr_ident.was_moved == TRUE) ELSE FALSE END);
     MUTABLE has_payload_binding = !(!(((IF match_case.binding != NIL THEN match_case.binding ELSE match_case.destructure END))));
     IF (has_payload_binding AND (variants.length() > 1)) THEN
       RETURN variants |> SELECT mIRLowering__if_chain_branch(self, Emittable{ MIRBinOp: COPY TRY (mIRLowering__union_tag_condition(&self, subject, _)) }, (TRY (mIRLowering__union_if_chain_payload_bindings(&self, match_case, subject, _, is_mutable)) + COPY body));
@@ -17610,7 +17610,7 @@ PRIVATE FN mIRLowering__union_if_chain_match_case(MUTABLE self: MIRLowering, nod
     ELSE
       branch_body = COPY body;
     END
-    RETURN CAST([mIRLowering__if_chain_branch(self, mIRLowering__disjoin_match_conditions(self, variants |> SELECT TRY (mIRLowering__union_tag_condition(&self, subject, _))), branch_body)] AS []IfChainBranch);
+    RETURN CAST([mIRLowering__if_chain_branch(self, mIRLowering__disjoin_match_conditions(self, variants |> SELECT Emittable{ MIRBinOp: COPY TRY (mIRLowering__union_tag_condition(&self, subject, _)) }), branch_body)] AS []IfChainBranch);
 END
 PRIVATE FN mIRLowering__union_if_chain_payload_bindings(MUTABLE self: MIRLowering, match_case: MatchCase, subject: Emittable, variant: String, is_mutable: Bool) RETURNS ![]Emittable ->
     MUTABLE payload: Emittable = Emittable{ UnionPayloadGet: COPY UnionPayloadGet{ subject: mIRLowering__deref_if_pointer_shaped(&self, subject), variant: COPY variant, pointer: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
