@@ -11753,14 +11753,26 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
     IF !((matchSubjectPlan__enum?(plan) OR matchSubjectPlan__union?(plan))) THEN
       RETURN;
     END
-    MUTABLE covered = (node.cases |> UNNEST TRY (typeAnalysisSession__match_variant_names(&rtoc_self_view, _))) |> DISTINCT _;
+    MUTABLE covered: [Set]String = Set[];
+    MUTABLE rtoc_case_names: []String = List[];
+    FOR rtoc_mc IN node.cases DO
+      rtoc_case_names = TRY (typeAnalysisSession__match_variant_names(&rtoc_self_view, rtoc_mc));
+      FOR rtoc_vn IN rtoc_case_names DO
+        &covered.insert(COPY rtoc_vn);
+      END
+    END
     MUTABLE all_variants: [Set]String@symbol = Set[];
     IF matchSubjectPlan__enum?(plan) THEN
       all_variants = typeAnalysisSession__match_enum_schema(&rtoc_self_view, plan).variants |> DISTINCT _;
     ELSE
       all_variants = typeAnalysisSession__match_union_schema(&rtoc_self_view, plan).variants.keys() |> DISTINCT _;
     END
-    MUTABLE missing = (all_variants |> WHERE !(covered.contains?(_.toString())));
+    MUTABLE missing: []String@symbol = List[];
+    FOR rtoc_av IN all_variants DO
+      IF !(covered.contains?(rtoc_av.toString())) THEN
+        &missing.append(COPY rtoc_av);
+      END
+    END
     IF missing.empty?() THEN
       RETURN;
     END
