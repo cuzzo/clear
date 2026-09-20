@@ -12324,7 +12324,7 @@ FN loweredBodyId__equals?<T>(self: LoweredBodyId, other: T) RETURNS Bool EFFECTS
   COMPTIME IF !(T IS_A LoweredBodyId) THEN
     RETURN FALSE;
   END
-  MUTABLE other_body: LoweredBodyId = CAST(other AS LoweredBodyId);
+  MUTABLE other_body: LoweredBodyId = CAST(COPY other AS LoweredBodyId);
   RETURN (other_body.node_ids == self.node_ids);
 END
 FN loweredBodyId__eql?(self: LoweredBodyId, other: Any) RETURNS Bool ->
