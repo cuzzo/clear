@@ -13151,10 +13151,10 @@ PRIVATE FN mIRLowering__lower_get_field(MUTABLE self: MIRLowering, MUTABLE node:
         zig_type = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ StringValue: COPY type__resolved(payload) }));
         shared = type__shared_node?( UNWRAP (inner_type));
         IF !(shared) THEN
-          &self.state.function_state.node_store_types.insert(zig_type);
+          &self.state.function_state.node_store_types.insert(COPY zig_type);
         END
         MUTABLE store = TRY (mIRLowering__node_store_type_mir(&self, zig_type, shared));
-        inner_mir = Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Call: COPY store }, method: "getBound", args: [CAST(Ident{ name: mIRLowering__node_store_binding_name(self, zig_type, shared), lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(inner_mir AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
+        inner_mir = Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Call: COPY store }, method: "getBound", args: [CAST(Ident{ name: mIRLowering__node_store_binding_name(self, zig_type, shared), lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(COPY inner_mir AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
       END
       MUTABLE safe_root: Emittable = Emittable{ Ident: COPY Ident{ name: "_r", lowered_node_id: NIL, ownership_consumption: NIL } };
       IF type__indirect?( UNWRAP (inner_type)) THEN
@@ -13176,13 +13176,13 @@ PRIVATE FN mIRLowering__lower_get_field(MUTABLE self: MIRLowering, MUTABLE node:
       zig_type = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ StringValue: COPY type__resolved(payload) }));
       shared = type__shared_node?( UNWRAP (target_type));
       IF !(shared) THEN
-        &self.state.function_state.node_store_types.insert(zig_type);
+        &self.state.function_state.node_store_types.insert(COPY zig_type);
       END
       MUTABLE store = TRY (mIRLowering__node_store_type_mir(&self, zig_type, shared));
-      MUTABLE resolved = MIRMethodCall{ receiver: Emittable{ Call: COPY store }, method: "getBound", args: [CAST(Ident{ name: mIRLowering__node_store_binding_name(self, zig_type, shared), lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(CAST(target AS Emittable) AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-      target = MIROptionalUnwrap{ expr: Emittable{ MIRMethodCall: COPY resolved }, lowered_node_id: NIL, ownership_consumption: NIL };
+      MUTABLE resolved = MIRMethodCall{ receiver: Emittable{ Call: COPY store }, method: "getBound", args: [CAST(Ident{ name: mIRLowering__node_store_binding_name(self, zig_type, shared), lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(COPY UNWRAP (target) AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+      target = Emittable{ MIROptionalUnwrap: COPY MIROptionalUnwrap{ expr: Emittable{ MIRMethodCall: COPY resolved }, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    RETURN fieldAccessPlan__value((TRY (mIRLowering__field_access_plan(&self, node, CAST(target AS Emittable)))));
+    RETURN fieldAccessPlan__value((TRY (mIRLowering__field_access_plan(&self, node, UNWRAP (target)))));
 END
 PRIVATE FN mIRLowering__lower_tense_navigation_field(MUTABLE self: MIRLowering, MUTABLE node: GetField, navigation: TenseNavigation) RETURNS !Emittable ->
     RETURN TRY (mIRLowering__lower_tense_navigation(&self, Locatable{ GetField: COPY node }, navigation, %(receiver: String) USE(MUTABLE node, MUTABLE self) -> fieldAccessPlan__value(TRY (mIRLowering__field_access_plan(&self, node, Emittable{ Ident: COPY Ident{ name: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL } })))));
