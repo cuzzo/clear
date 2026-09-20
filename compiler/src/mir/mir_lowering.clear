@@ -16900,11 +16900,24 @@ PRIVATE FN mIRLowering__auto_lock_assignment_facts(MUTABLE self: MIRLowering, no
     MUTABLE auto_lock: AutoLockPlan = UNWRAP (COPY node.auto_lock);
     MUTABLE var_name = COPY auto_lock.var;
     MUTABLE cleanup_alloc: ?String@symbol = COPY node.field_pre_cleanup;
-    RETURN AutoLockAssignmentFacts{ var_name: COPY var_name, sync: COPY auto_lock.sync, guard_var: "__${var_name}_guard", alias_var: "__${var_name}_inner", zig_var: COPY CAST((((IF mIRLowering__capture_state(&self).do_capture_map != NIL THEN
-      (mIRLowering__capture_state(&self).do_capture_map)[var_name]
+    MUTABLE rtoc_field_name: ?GetField = NIL;
+    PARTIAL MATCH node.name START
+      AssignmentName.GetField AS rtoc_gf -> rtoc_field_name = COPY rtoc_gf;,
+      DEFAULT -> PASS;
+    END
+    MUTABLE rtoc_zig_var: String = COPY var_name;
+    IF mIRLowering__capture_state(&self).do_capture_map EXISTS AS rtoc_cap_map THEN
+      IF rtoc_cap_map[var_name] EXISTS AS rtoc_mapped THEN
+        rtoc_zig_var = COPY rtoc_mapped;
+      END
+    END
+    MUTABLE rtoc_alloc_sym: String@symbol = :heap;
+    IF cleanup_alloc EXISTS AS rtoc_cleanup_alloc THEN
+      rtoc_alloc_sym = COPY rtoc_cleanup_alloc;
     ELSE
-      NIL
-    END) OR_ELSE var_name)) AS String), field: COPY CAST(node.name.field AS String), cleanup_alloc: COPY cleanup_alloc, alloc_sym: COPY (cleanup_alloc) };
+      rtoc_alloc_sym = TRY (mIRLowering__placement_for_node(&self, (IF mIRLowering__root_receiver_node(self, castAssignmentNameToOptionalLocatable__mir_lowering(node.name)) EXISTS AS rtoc_root THEN Locatable{ Identifier: COPY rtoc_root } ELSE UNWRAP (castAssignmentNameToOptionalLocatable__mir_lowering(node.name)) END)));
+    END
+    RETURN AutoLockAssignmentFacts{ var_name: COPY var_name, sync: COPY auto_lock.sync, guard_var: "__${var_name}_guard", alias_var: "__${var_name}_inner", zig_var: COPY rtoc_zig_var, field: COPY UNWRAP (rtoc_field_name).field, cleanup_alloc: COPY cleanup_alloc, alloc_sym: COPY rtoc_alloc_sym };
 END
 PRIVATE FN mIRLowering__auto_lock_assignment_value(MUTABLE self: MIRLowering, MUTABLE node: Assignment, alloc_sym: String@symbol) RETURNS !Emittable ->
     MUTABLE value: ?Emittable = mIRLowering__with_decl_alloc(&self, alloc_sym, %() USE(alloc_sym, MUTABLE node, MUTABLE self) -> {
