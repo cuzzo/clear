@@ -15845,7 +15845,7 @@ PRIVATE FN mIRLowering__binding_metadata_var_decl_plan(MUTABLE self: MIRLowering
     ELSE
       ((mIRLowering__mir_owned_alloc(&self, init) OR_ELSE facts.decl_alloc))
     END;
-    MUTABLE alloc_mark = mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, mIRLowering__cleanup_entry_scope_opt(&binding_entry));
+    MUTABLE alloc_mark = mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, mIRLowering__cleanup_entry_scope_opt(binding_entry));
     IF !(lifecyclePlan__needs_drop?((TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), facts.ft))))) THEN
       RETURN materializationPacket__owned(alloc_mark, Emittable{ Let: COPY let_node });
     END
