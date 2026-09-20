@@ -17929,14 +17929,14 @@ PRIVATE FN mIRLowering__lower_return(MUTABLE self: MIRLowering, MUTABLE node: Re
     END
     END
     IF (((node.value EXISTS) AND TRY (mIRLowering__rc_retain_needed?(&self, UNWRAP (node.value)))) AND !(TRY (mIRLowering__return_transfers_heap_binding?(&self, UNWRAP (node.value))))) THEN
-      MUTABLE retained = TRY (mIRLowering__hoist_alloc(&self, Emittable{ RcRetain: COPY TRY (mIRLowering__make_rc_retain(&self, castLocatableToIdentifier(UNWRAP (node.value)))) }, node.value, TRUE));
+      MUTABLE retained = TRY (mIRLowering__hoist_alloc(&self, Emittable{ RcRetain: COPY TRY (mIRLowering__make_rc_retain(&self, UNWRAP (castLocatableToIdentifier(UNWRAP (node.value))))) }, &node.value, TRUE));
       RETURN TRY (mIRLowering__return_with_transfer_marks(&self, plan, &retained, ReturnStmt{ value: COPY retained, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }));
     ELSE
       IF ((value != NIL) AND !(value IS_A Ident)) THEN
         value = TRY (mIRLowering__hoist_alloc(&self, &value, &node.value, TRUE, FALSE, FALSE));
       END
-      IF value EXISTS AS value_value THEN
-        MUTABLE value_value = TRY (mIRLowering__bind_consuming_call_return_value(&self, value_value));
+      IF value != NIL THEN
+        value = TRY (mIRLowering__bind_consuming_call_return_value(&self, value));
       END
       RETURN TRY (mIRLowering__return_with_transfer_marks(&self, plan, &value, ReturnStmt{ value: UNWRAP (COPY value), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }));
     END
