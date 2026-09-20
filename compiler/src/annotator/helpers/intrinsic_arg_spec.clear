@@ -26,7 +26,7 @@ END
 
 FN intrinsicArgSpec__from_registry(raw: IntrinsicArgSpecRawArgSpecEntry) RETURNS IntrinsicArgSpec ->
   IF raw IS_A Any@multiowned AS raw_map THEN
-    raw_fields = CAST(raw_map AS {String@symbol}Any);
+    MUTABLE raw_fields: {String@symbol}Any = CAST(COPY raw_map AS {String@symbol}Any);
     RETURN IntrinsicArgSpec{ name: COPY intrinsicArgSpec__normalize_name(intrinsicArgSpec__string_value_of(raw_fields[:name])), type: COPY intrinsicArgSpec__normalize_type(intrinsicArgSpec__symbol_value_of(raw_fields[:type])), sync: COPY intrinsicArgSpec__normalize_symbol(intrinsicArgSpec__symbol_value_of(raw_fields[:sync])), ownership: COPY intrinsicArgSpec__normalize_symbol(intrinsicArgSpec__symbol_value_of(raw_fields[:ownership])), mutable: (raw_fields[:mutable] == TRUE), takes: (raw_fields[:takes] == TRUE) };
   END
   IF raw IS_A String@symbol AS string_symbol THEN
