@@ -3553,11 +3553,112 @@ PRIVATE FN mIREmitter__emit_capture_env(MUTABLE self: MIREmitter, node: CaptureE
     END
     RETURN "[${node.names.length().toString()}]?*const anyopaque{ ${slots.join(", ")} }";
 END
+# The array the environment pointers are read out of, named once.
+PRIVATE FN mIREmitter__lambda_env_array() RETURNS String ->
+    RETURN "__lam_env_slots";
+END
+PRIVATE FN mIREmitter__capture_ptr_name(name: String, suffix: String) RETURNS String ->
+    MUTABLE safe: String = "";
+    MUTABLE rtoc_ni: Int64 = 0;
+    WHILE (rtoc_ni < name.length()) DO
+      MUTABLE ch = name.charAt(rtoc_ni);
+      IF (((((ch >= "a") AND (ch <= "z")) OR ((ch >= "A") AND (ch <= "Z"))) OR ((ch >= "0") AND (ch <= "9"))) OR (ch == "_")) THEN
+        safe = (safe $+ ch);
+      ELSE
+        safe = (safe $+ "_");
+      END
+      rtoc_ni = (rtoc_ni + 1);
+    END
+    RETURN "__cap_${safe}${suffix}";
+END
+# The signature a Closure is parameterised by: what the lambda is, with the
+# runtime and the environment pointer in front.
+PRIVATE FN mIREmitter__closure_fn_type(fn: FnDef) RETURNS String ->
+    MUTABLE params = (fn.params |> SELECT COPY _.zig_type).join(", ");
+    MUTABLE ret: String = COPY fn.ret_type;
+    IF fn.can_fail THEN
+      ret = "!${fn.ret_type}";
+    END
+    RETURN "fn(${params}) ${ret}";
+END
+PRIVATE FN mIREmitter__splice_prologue(rendered: String, prologue: []String) RETURNS String ->
+    IF rendered.indexOf("{\n") EXISTS AS cut THEN
+      MUTABLE head = rendered.substr(0, cut);
+      MUTABLE rest = rendered.substr((cut + 2), (rendered.length() - (cut + 2)));
+      RETURN "${head}{\n${prologue.join("\n")}\n${rest}";
+    END
+    RETURN COPY rendered;
+END
 PRIVATE FN mIREmitter__emit_lambda(MUTABLE self: MIREmitter, node: LambdaExpr) RETURNS !String
   EFFECTS REENTRANT ->
     MUTABLE fn = node.fn_def;
-    MUTABLE fn_zig = TRY (mIREmitter__emit_fn_def(&self, fn));
-    RETURN "&(struct { ${fn_zig} }).${fn.name}";
+    MUTABLE names = COPY node.captures;
+    MUTABLE types = COPY node.capture_types;
+    # Both the environment parameter and every name derived from it are scoped
+    # to this lambda's id: a nested lambda's declarations sit inside the
+    # enclosing lambda's Zig function, where a reused name is a shadow error.
+    MUTABLE env_param: String = "";
+    IF fn.params[1] EXISTS AS rtoc_env_param THEN
+      env_param = COPY rtoc_env_param.name;
+    END
+    MUTABLE suffix: String = COPY fn.name;
+    IF fn.name.startsWith?("_lambda") THEN
+      suffix = fn.name.substr(7, (fn.name.length() - 7));
+    END
+    MUTABLE env_slots = "${mIREmitter__lambda_env_array()}${suffix}";
+    MUTABLE body_fn: String = "";
+    IF node.env_name EXISTS AS rtoc_env_name THEN
+      # The lambda cannot name the types of the scope it came from, so its
+      # environment arrives as opaque pointers and the types come back here.
+      MUTABLE mutables = COPY node.capture_mutables;
+      MUTABLE prologue: []String = List[];
+      MUTABLE rtoc_ci: Int64 = 0;
+      WHILE (rtoc_ci < names.length()) DO
+        MUTABLE ptr_name = mIREmitter__capture_ptr_name(UNWRAP (names[rtoc_ci]), suffix);
+        # An environment slot is const: `USE(x)` only reads. `USE(MUTABLE x)`
+        # writes, and the binding it points at was marked mutated for exactly
+        # that reason, so casting the const away here writes to a `var`.
+        IF (UNWRAP (mutables[rtoc_ci]) == TRUE) THEN
+          &prologue.append("const ${ptr_name}: *${UNWRAP (types[rtoc_ci])} = @constCast(@ptrCast(@alignCast(${env_slots}[${rtoc_ci.toString()}].?)));");
+        ELSE
+          &prologue.append("const ${ptr_name}: *const ${UNWRAP (types[rtoc_ci])} = @ptrCast(@alignCast(${env_slots}[${rtoc_ci.toString()}].?));");
+        END
+        rtoc_ci = (rtoc_ci + 1);
+      END
+      MUTABLE overrides: {String}String = {};
+      FOR _ IN names DO
+        overrides[COPY _] = "${mIREmitter__capture_ptr_name(_, suffix)}.*";
+      END
+      MUTABLE env_head = "const ${env_slots}: *const [${names.length().toString()}]?*const anyopaque = @ptrCast(@alignCast(${env_param}.?));";
+      body_fn = mIREmitter__with_ident_overrides(&self, overrides, %() USE(fn, names, prologue, env_head, env_param, suffix, MUTABLE self) -> {
+        MUTABLE rendered = TRY (mIREmitter__emit_fn_def(&self, fn));
+        # A capture the body never reads is an unused constant, which Zig
+        # rejects. The environment still carries it -- the slots are
+        # positional -- but nothing binds it here.
+        MUTABLE used: []String = List[];
+        MUTABLE rtoc_pi: Int64 = 0;
+        WHILE (rtoc_pi < prologue.length()) DO
+          IF rendered.contains?(mIREmitter__capture_ptr_name(UNWRAP (names[rtoc_pi]), suffix)) THEN
+            &used.append(COPY UNWRAP (prologue[rtoc_pi]));
+          END
+          rtoc_pi = (rtoc_pi + 1);
+        END
+        # With no capture bound, the slot array itself is unused -- also a Zig
+        # error. The environment pointer still has to be consumed.
+        MUTABLE head: []String = ["_ = ${env_param};"];
+        IF (used.length() > 0) THEN
+          head = ([COPY env_head] + used);
+        END
+        mIREmitter__splice_prologue(rendered, head)
+      });
+    ELSE
+      body_fn = mIREmitter__splice_prologue(TRY (mIREmitter__emit_fn_def(&self, fn)), ["_ = ${env_param};"]);
+    END
+    MUTABLE ctx: String = "null";
+    IF node.env_name EXISTS AS rtoc_ctx_env THEN
+      ctx = "@ptrCast(&${rtoc_ctx_env})";
+    END
+    RETURN "CheatLib.Closure(${mIREmitter__closure_fn_type(fn)}).bind(${ctx}, &(struct { ${body_fn} }).${fn.name})";
 END
 PRIVATE FN mIREmitter__emit_items_access(MUTABLE self: MIREmitter, node: ItemsAccess) RETURNS !String
   EFFECTS REENTRANT ->
