@@ -4513,20 +4513,20 @@ PUB FN mIRLowering__task_config_variant(self: MIRLowering, stack_size: ?String@s
     END
     IF stack_size EXISTS AS stack_size_value THEN
       IF (stack_size_value == :stack) THEN
-        RETURN ({NIL: "Standard", :micro: "Micro", :standard: "Standard", :large: "Large", :xl: "Xl", "micro": "Micro", "standard": "Standard", "large": "Large", "xl": "Xl", :service: "Huge"}[(computed_tier OR_ELSE :standard)] OR_ELSE default);
+        RETURN ({NIL: "Standard", :micro: "Micro", :standard: "Standard", :large: "Large", :xl: "Xl", "micro": "Micro", "standard": "Standard", "large": "Large", "xl": "Xl", :service: "Huge"}[(computed_tier OR_ELSE :standard)] OR_ELSE COPY default);
       ELSE
-        RETURN ({NIL: "Standard", :micro: "Micro", :standard: "Standard", :large: "Large", :xl: "Xl", "micro": "Micro", "standard": "Standard", "large": "Large", "xl": "Xl", :service: "Huge"}[stack_size_value] OR_ELSE default);
+        RETURN ({NIL: "Standard", :micro: "Micro", :standard: "Standard", :large: "Large", :xl: "Xl", "micro": "Micro", "standard": "Standard", "large": "Large", "xl": "Xl", :service: "Huge"}[stack_size_value] OR_ELSE COPY default);
       END
     ELSE
     IF computed_tier EXISTS AS computed_tier_value THEN
-        MUTABLE computed = ({NIL: "Standard", :micro: "Micro", :standard: "Standard", :large: "Large", :xl: "Xl", "micro": "Micro", "standard": "Standard", "large": "Large", "xl": "Xl", :service: "Huge"}[computed_tier_value] OR_ELSE default);
+        MUTABLE computed = ({NIL: "Standard", :micro: "Micro", :standard: "Standard", :large: "Large", :xl: "Xl", "micro": "Micro", "standard": "Standard", "large": "Large", "xl": "Xl", :service: "Huge"}[computed_tier_value] OR_ELSE COPY default);
         IF (({"Micro": 0, "Standard": 1, "Large": 2, "Xl": 3, "Huge": 4}[computed] OR_ELSE 0) >= ({"Micro": 0, "Standard": 1, "Large": 2, "Xl": 3, "Huge": 4}[default] OR_ELSE 0)) THEN
           RETURN computed;
         ELSE
-          RETURN default;
+          RETURN COPY default;
         END
     ELSE
-        RETURN default;
+        RETURN COPY default;
     END
     END
 END
