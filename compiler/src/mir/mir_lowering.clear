@@ -15759,7 +15759,7 @@ PRIVATE FN mIRLowering__var_decl_materialization_plan(MUTABLE self: MIRLowering,
     RETURN materializationPacket__value_only(Emittable{ Let: COPY let_node });
 END
 PRIVATE FN mIRLowering__classified_cleanup_var_decl_plan(MUTABLE self: MIRLowering, node: VarDecl, facts: VarDeclFacts, safe_name: String, init: Emittable, let_node: Let) RETURNS !MaterializationPacket ->
-    MUTABLE drop_entry = COPY facts.binding_entry;
+    MUTABLE drop_entry: CleanupEntry = COPY facts.binding_entry;
     TRY (mIRLowering__build_drop_entry_mut(&self, &drop_entry, TRY (aST__full_type_mut(Locatable{ VarDecl: COPY node })), node));
     IF TRY (type__bounded_stream?(facts.ft)) THEN
       drop_entry = cleanupEntry__with_moved_guard(drop_entry);
@@ -15777,7 +15777,7 @@ PRIVATE FN mIRLowering__classified_cleanup_var_decl_plan(MUTABLE self: MIRLoweri
     IF cleanupEntry__has_moved_guard?(drop_entry) THEN
       mIRLowering__mark_guarded_cleanup_name_mut(&self, safe_name);
     END
-    RETURN materializationPacket__owned(mIRLowering__var_decl_alloc_mark(self, safe_name, node_alloc, facts.ft, drop_entry), Emittable{ Let: COPY let_node }, CAST(Cleanup{ name: COPY safe_name, cleanup_entry: drop_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
+    RETURN materializationPacket__owned(mIRLowering__var_decl_alloc_mark(self, safe_name, node_alloc, facts.ft, mIRLowering__cleanup_entry_scope_opt(drop_entry)), Emittable{ Let: COPY let_node }, CAST(Cleanup{ name: COPY safe_name, cleanup_entry: drop_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
 END
 PRIVATE FN mIRLowering__owned_return_call_var_decl_plan(MUTABLE self: MIRLowering, node: VarDecl, facts: VarDeclFacts, safe_name: String, init: Emittable, let_node: Let) RETURNS !MaterializationPacket ->
     MUTABLE mir_alloc = (mIRLowering__mir_owned_alloc(&self, init) OR_ELSE facts.decl_alloc);
@@ -15785,14 +15785,14 @@ PRIVATE FN mIRLowering__owned_return_call_var_decl_plan(MUTABLE self: MIRLowerin
     TRY (mIRLowering__build_drop_entry_mut(&self, &cleanup_entry, TRY (aST__full_type_mut(Locatable{ VarDecl: COPY node })), node));
     cleanupEntry__mark_moved_guard_mut(&cleanup_entry);
     mIRLowering__mark_guarded_cleanup_name_mut(&self, safe_name);
-    RETURN materializationPacket__owned(mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, COPY facts.binding_entry), Emittable{ Let: COPY let_node }, CAST(Cleanup{ name: COPY safe_name, cleanup_entry: cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
+    RETURN materializationPacket__owned(mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, mIRLowering__cleanup_entry_scope_opt(facts.binding_entry)), Emittable{ Let: COPY let_node }, CAST(Cleanup{ name: COPY safe_name, cleanup_entry: cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
 END
 PRIVATE FN mIRLowering__transfer_only_var_decl?(self: MIRLowering, facts: VarDeclFacts, init: Emittable) RETURNS !Bool ->
     RETURN ((!(facts.heap_return_var) AND TRY (mIRLowering__owned_return_transfer_binding?(self, KEEP facts.binding_entry, init))) AND !(facts.generic_id));
 END
 PRIVATE FN mIRLowering__transfer_only_var_decl_plan(MUTABLE self: MIRLowering, node: VarDecl, facts: VarDeclFacts, safe_name: String, init: Emittable, let_node: Let) RETURNS MaterializationPacket ->
     MUTABLE mir_alloc = (mIRLowering__mir_owned_alloc(&self, init) OR_ELSE facts.decl_alloc);
-    RETURN materializationPacket__owned(mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, COPY facts.binding_entry), Emittable{ Let: COPY let_node });
+    RETURN materializationPacket__owned(mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, mIRLowering__cleanup_entry_scope_opt(facts.binding_entry)), Emittable{ Let: COPY let_node });
 END
 PRIVATE FN mIRLowering__mutated_owned_var_decl?(MUTABLE self: MIRLowering, facts: VarDeclFacts, MUTABLE init: Emittable) RETURNS !Bool ->
     RETURN (((({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_666 = (COPY facts.binding_entry);
@@ -15809,7 +15809,7 @@ PRIVATE FN mIRLowering__mutated_owned_var_decl_plan(MUTABLE self: MIRLowering, n
     END, mir_alloc, TRUE);
     TRY (mIRLowering__build_drop_entry_mut(&self, &cleanup_entry, TRY (aST__full_type_mut(Locatable{ VarDecl: COPY node })), node));
     mIRLowering__mark_guarded_cleanup_name_mut(&self, safe_name);
-    RETURN materializationPacket__owned(mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, COPY facts.binding_entry), Emittable{ Let: COPY let_node }, CAST(Cleanup{ name: COPY safe_name, cleanup_entry: cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
+    RETURN materializationPacket__owned(mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, mIRLowering__cleanup_entry_scope_opt(facts.binding_entry)), Emittable{ Let: COPY let_node }, CAST(Cleanup{ name: COPY safe_name, cleanup_entry: cleanup_entry, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
 END
 PRIVATE FN mIRLowering__binding_metadata_var_decl_plan(MUTABLE self: MIRLowering, MUTABLE node: VarDecl, facts: VarDeclFacts, safe_name: String, MUTABLE init: Emittable, let_node: Let) RETURNS !MaterializationPacket ->
     MUTABLE binding_entry = COPY facts.binding_entry;
@@ -15821,7 +15821,7 @@ PRIVATE FN mIRLowering__binding_metadata_var_decl_plan(MUTABLE self: MIRLowering
     ELSE
       ((mIRLowering__mir_owned_alloc(&self, init) OR_ELSE facts.decl_alloc))
     END;
-    MUTABLE alloc_mark = mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, binding_entry);
+    MUTABLE alloc_mark = mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, mIRLowering__cleanup_entry_scope_opt(&binding_entry));
     IF !(lifecyclePlan__needs_drop?((TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), facts.ft))))) THEN
       RETURN materializationPacket__owned(alloc_mark, Emittable{ Let: COPY let_node });
     END
@@ -15831,7 +15831,7 @@ PRIVATE FN mIRLowering__binding_metadata_var_decl_plan(MUTABLE self: MIRLowering
 END
 PRIVATE FN mIRLowering__allocating_init_var_decl_plan(MUTABLE self: MIRLowering, node: VarDecl, facts: VarDeclFacts, safe_name: String, init: Emittable, let_node: Let) RETURNS !MaterializationPacket ->
     MUTABLE mir_alloc = (mIRLowering__mir_owned_alloc(&self, init) OR_ELSE facts.decl_alloc);
-    MUTABLE alloc_mark = mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, KEEP facts.binding_entry);
+    MUTABLE alloc_mark = mIRLowering__var_decl_alloc_mark(self, safe_name, mir_alloc, facts.ft, mIRLowering__cleanup_entry_scope_opt(facts.binding_entry));
     IF type__rodata?(facts.ft) THEN
       RETURN materializationPacket__value_only(Emittable{ Let: COPY let_node });
     END
@@ -15871,15 +15871,17 @@ PRIVATE FN mIRLowering__type_requires_alloc_cleanup?(MUTABLE self: MIRLowering, 
     MUTABLE _ = COPY alloc;
     RETURN lifecyclePlan__needs_drop?((TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), ft))));
 END
-PRIVATE FN mIRLowering__var_decl_alloc_mark(self: MIRLowering, name: String, alloc: String@symbol, type_info: Type, binding_entry: CleanupEntry) RETURNS AllocMark ->
+PRIVATE FN mIRLowering__cleanup_entry_scope_opt(entry: CleanupEntry) RETURNS ?String@symbol ->
+    IF cleanupEntry__present?(entry) THEN
+      RETURN cleanupEntry__scope(entry);
+    END
+    RETURN NIL;
+END
+PRIVATE FN mIRLowering__var_decl_alloc_mark(self: MIRLowering, name: String, alloc: String@symbol, type_info: Type, binding_scope: ?String@symbol) RETURNS AllocMark ->
     MUTABLE mark = AllocMark{ name: COPY name, alloc: COPY alloc, type_info: COPY type_info, scope: COPY IF placement__explicit_heap?(alloc) THEN
       :heap
     ELSE
-      (IF cleanupEntry__present?(binding_entry) THEN
-      cleanupEntry__scope(binding_entry)
-    ELSE
-      :iteration
-    END)
+      (binding_scope OR_ELSE :iteration)
     END, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     RETURN mark;
 END
