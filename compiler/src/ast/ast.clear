@@ -690,6 +690,7 @@ PUB STRUCT IsA {
   right: IsARight@boxed,
   binding: ?String,
   binding_mutable: ?Bool,
+  runtime_subject_optional: ?Bool,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
   collection_return: ?Type,

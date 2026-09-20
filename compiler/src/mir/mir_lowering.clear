@@ -17021,19 +17021,24 @@ PRIVATE FN mIRLowering__lower_runtime_is_a_if(MUTABLE self: MIRLowering, node: I
     MUTABLE then_body = NIL;
     MUTABLE subject, subject_pending = mIRLowering__lower_head(&self, %() USE(MUTABLE condition, MUTABLE self) -> TRY (mIRLowering__lower_control_condition(self, &condition.left)));
     MUTABLE variant: ?String = COPY condition.runtime_variant_name;
-    MUTABLE cond = TRY (mIRLowering__union_tag_condition(&self, CAST(subject AS Emittable), UNWRAP (variant)));
-    MUTABLE payload_bindings = TRY (mIRLowering__runtime_is_a_payload_bindings(&self, condition, CAST(subject AS Emittable), UNWRAP (variant)));
+    MUTABLE optional_subject = (condition.runtime_subject_optional == TRUE);
+    MUTABLE cond = TRY (mIRLowering__union_tag_condition(&self, CAST(COPY subject AS Emittable), UNWRAP (variant), optional_subject));
+    MUTABLE payload_subject: Emittable = CAST(COPY subject AS Emittable);
+    IF optional_subject THEN
+      payload_subject = Emittable{ MIROptionalUnwrap: COPY MIROptionalUnwrap{ expr: CAST(COPY subject AS Emittable), lowered_node_id: NIL, ownership_consumption: NIL } };
+    END
+    MUTABLE payload_bindings = TRY (mIRLowering__runtime_is_a_payload_bindings(&self, condition, payload_subject, UNWRAP (variant)));
     IF node.expr_mode THEN
       MUTABLE label = "__if_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_713 = mIRLowering__lowering_counters(&self);
       mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_block_expr_id(&rtoc_mutable_receiver_713)) }}";
-      then_body = (payload_bindings + TRY (mIRLowering__lower_body_with_break(&self, node.then_branch, label)));
+    MUTABLE then_body = (payload_bindings + TRY (mIRLowering__lower_body_with_break(&self, castLocatableListToMIRLoweringLowerableStmtList(node.then_branch), label)));
       else_body = TRY (mIRLowering__lower_body_with_break(&self, castLocatableListToMIRLoweringLowerableStmtList((node.else_branch OR_ELSE List[])), label));
       MUTABLE block = MIRBlockExpr{ label: COPY label, body: [Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRBinOp: COPY cond }, then_body: then_body, else_body: else_body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } }], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
       RETURN mIRLowering__with_pending(self, subject_pending, Emittable{ MIRBlockExpr: COPY block });
     END
-    then_body = (payload_bindings + TRY (mIRLowering__lower_body(&self, node.then_branch)));
+    MUTABLE then_body = (payload_bindings + TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(node.then_branch))));
     IF (((node.else_branch != NIL) AND !(((node.else_branch)?).empty?()))) THEN
-      else_body = TRY (mIRLowering__lower_body(&self, (node.else_branch OR_ELSE List[])));
+      else_body = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList((node.else_branch OR_ELSE List[]))));
     ELSE
       else_body = NIL;
     END
@@ -17683,8 +17688,18 @@ PRIVATE FN mIRLowering__union_if_chain_payload_bindings(MUTABLE self: MIRLowerin
       RETURN CAST(List[] AS []Emittable);
     END
 END
-PRIVATE FN mIRLowering__union_tag_condition(MUTABLE self: MIRLowering, subject: Emittable, variant: String) RETURNS !MIRBinOp ->
-    RETURN MIRBinOp{ op: "==", left: Emittable{ Call: COPY TRY (mIRLowering__active_tag_call(&self, subject)) }, right: Emittable{ EnumTag: COPY EnumTag{ variant: COPY variant } }, lowered_node_id: NIL, ownership_consumption: NIL };
+PRIVATE FN mIRLowering__union_tag_condition(MUTABLE self: MIRLowering, subject: Emittable, variant: String, optional_subject: Bool = FALSE) RETURNS !MIRBinOp ->
+    # An optional subject has no tag when it is absent, so the null check has
+    # to short-circuit before activeTag ever sees it.
+    MUTABLE tagged: Emittable = COPY subject;
+    IF optional_subject THEN
+      tagged = Emittable{ MIROptionalUnwrap: COPY MIROptionalUnwrap{ expr: COPY subject, lowered_node_id: NIL, ownership_consumption: NIL } };
+    END
+    MUTABLE test = MIRBinOp{ op: "==", left: Emittable{ Call: COPY TRY (mIRLowering__active_tag_call(&self, tagged)) }, right: Emittable{ EnumTag: COPY EnumTag{ variant: COPY variant } }, lowered_node_id: NIL, ownership_consumption: NIL };
+    IF !(optional_subject) THEN
+      RETURN test;
+    END
+    RETURN MIRBinOp{ op: "and", left: Emittable{ MIRBinOp: COPY MIRBinOp{ op: "!=", left: COPY subject, right: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL } }, right: Emittable{ MIRBinOp: COPY test }, lowered_node_id: NIL, ownership_consumption: NIL };
 END
 PRIVATE FN mIRLowering__value_if_chain_match_case(MUTABLE self: MIRLowering, node: MatchStatement, match_case: MatchCase, subject: Emittable, body: []Emittable) RETURNS ![]IfChainBranch ->
     IF node.string_match THEN
