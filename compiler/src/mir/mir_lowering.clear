@@ -11714,7 +11714,7 @@ PRIVATE FN mIRLowering__lower_bg_result_step(MUTABLE self: MIRLowering, step: ?B
         TRY (mIRLowering__lower_bg_statement_result(&self, step_value_mutable, &body_mir));
         RETURN;
       END
-      TRY (mIRLowering__lower_bg_value_result(&self, step_value_mutable, &body_mir, id, inner_t));
+      TRY (mIRLowering__lower_bg_value_result(&self, &step_value_mutable, &body_mir, id, inner_t));
     ELSE
       RETURN;
     END
@@ -12449,7 +12449,7 @@ PRIVATE FN mIRLowering__string_comparison_operator(self: MIRLowering, op: String
     RETURN COPY (CAST({:EQ: "==", :NEQ: "!=", :LT: "<", :LTE: "<=", :GT: ">", :GTE: ">="} AS {String@symbol}String))[op];
 END
 PRIVATE FN mIRLowering__classify_optional_binary_comparison(MUTABLE self: MIRLowering, facts: BinaryOperandFacts) RETURNS ?BinaryOperationPlan ->
-    IF !((optional_comparison_ops |> ANY (_ == facts.op))) THEN
+    IF !((([:EQ, :NEQ, :LT, :LTE, :GT, :GTE]).contains?(facts.op))) THEN
       RETURN NIL;
     END
     IF !((type__optional?(facts.left_type) OR type__optional?(facts.right_type))) THEN
@@ -20348,7 +20348,7 @@ FN ruby_wrap_optional_Emittable_MIRLoweringLoweredMir(value: ?Emittable) RETURNS
 END
 FN ruby_wrap_optional_FunctionSignature_multiowned_X__mir_lowering(value: ?FunctionSignature) RETURNS ?X ->
   IF value EXISTS AS optional_payload THEN
-    RETURN X{ FunctionSignatureMultiowned: KEEP optional_payload };
+    RETURN X{ FunctionSignatureMultiowned: COPY optional_payload };
   END
   NIL;
 END
