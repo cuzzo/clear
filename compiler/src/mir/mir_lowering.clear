@@ -2914,7 +2914,7 @@ END
 FN mIRLowering__visible_owned_operand_value?(MUTABLE self: MIRLowering, ast_value_input: Locatable, value_mir: Emittable, mapped: String) RETURNS !Bool ->
     MUTABLE ast_value = COPY ast_value_input;
     IF ast_value IS_A MoveNode AS move_node THEN
-      ast_value = CAST(move_node.value AS Locatable);
+      ast_value = COPY CAST(move_node.value AS Locatable);
     END
     RETURN !(!(((((IF ast_value IS_A Identifier AS identifier THEN value_mir IS_A Ident ELSE FALSE END) AND (CAST(emittable__name(value_mir) AS String) == mapped)) AND !(TRY (mIRLowering__borrowed_ownership_ast?(&self, ast_value)))))));
 END
@@ -4973,7 +4973,7 @@ END
 PRIVATE FN mIRLowering__owned_sink_source_node(self: MIRLowering, ast_node: Locatable) RETURNS Locatable ->
     MUTABLE node = COPY ast_node;
     IF node IS_A MoveNode AS move_node THEN
-      node = CAST(move_node.value AS Locatable);
+      node = COPY CAST(move_node.value AS Locatable);
     END
     RETURN node;
 END
@@ -9275,7 +9275,7 @@ END
 PRIVATE FN mIRLowering__ast_expr_produces_heap?(MUTABLE self: MIRLowering, expr: Locatable) RETURNS !Bool ->
     MUTABLE node = COPY expr;
     IF node IS_A MoveNode AS move_node THEN
-      node = CAST(move_node.value AS Locatable);
+      node = COPY CAST(move_node.value AS Locatable);
     END
     IF (IF node IS_A BinaryOp AS binary_op THEN (binary_op.op == symbol("OR_ELSE")) ELSE FALSE END) THEN
       MUTABLE node: ?Locatable@boxed = locatable__left(node);
