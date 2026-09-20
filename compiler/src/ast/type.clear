@@ -436,6 +436,13 @@ PUB FN type__float_types() RETURNS [2]String@symbol EFFECTS REENTRANT ->
   RETURN [:Float32, :Float64];
 END
 PUB UNION TypeEnumVariantsItem { StringValue: String, SymbolValue: String@symbol }
+PUB FN typeEnumVariantsItem__to_s(value: TypeEnumVariantsItem) RETURNS String ->
+  PARTIAL MATCH value START
+    TypeEnumVariantsItem.StringValue AS item -> RETURN COPY item;,
+    TypeEnumVariantsItem.SymbolValue AS item -> RETURN item.toString();,
+  END
+  RETURN "";
+END
 PUB UNION TypeSchemaLookupResult { EnumSchemaMultiowned: EnumSchema@multiowned, StructSchemaMultiowned: StructSchema@multiowned, UnionSchemaMultiowned: UnionSchema@multiowned, ResourceSchemaMultiowned: ResourceSchema@multiowned, ArrayValue: []TypeEnumVariantsItem }
 PUB FN type__indirect_type?(value: Type) RETURNS Bool ->
   RETURN (type__indirect?(value) == TRUE);

@@ -17908,23 +17908,18 @@ PRIVATE FN mIRLowering__lower_switch_match(MUTABLE self: MIRLowering, node: Matc
       default = (default OR_ELSE List[]);
     END
     IF facts.is_enum_match THEN
-      MUTABLE all_variants: []Any = List[];
-      IF (IF (TRY (mIRLowering__enum_schemas(&self)))[facts.expr_type_sym] != NIL THEN
-        ((TRY (mIRLowering__enum_schemas(&self)))[facts.expr_type_sym]) |> SELECT _.toString()
-      ELSE
-        NIL
-      END) != NIL THEN
-        all_variants = COPY (((IF (TRY (mIRLowering__enum_schemas(&self)))[facts.expr_type_sym] != NIL THEN
-        ((TRY (mIRLowering__enum_schemas(&self)))[facts.expr_type_sym]) |> SELECT _.toString()
-      ELSE
-        NIL
-      END))) |> ORDER_BY _;
+      MUTABLE all_variants: []String = List[];
+      IF (TRY (mIRLowering__enum_schemas(&self)))[facts.expr_type_sym] EXISTS AS rtoc_enum_schema THEN
+        all_variants = (rtoc_enum_schema |> SELECT typeEnumVariantsItem__to_s(_)) |> ORDER_BY _;
       END
-      MUTABLE covered = (node.cases |> UNNEST {
-    MUTABLE value: GetField = CAST(matchCase__value(_) AS GetField);
-    MUTABLE extras = matchCase__extra_values(_) |> SELECT CAST(castLocatableToGetField__mir_lowering(_).field AS String);
-    ([CAST(value.field AS String)] + extras)
-      }) |> ORDER_BY _;
+      MUTABLE covered: []String = List[];
+      FOR _ IN node.cases DO
+        &covered.append(COPY CAST(castLocatableToGetField__mir_lowering(matchCase__value(_)).field AS String));
+        FOR rtoc_extra IN matchCase__extra_values(_) DO
+          &covered.append(COPY CAST(castLocatableToGetField__mir_lowering(rtoc_extra).field AS String));
+        END
+      END
+      covered = covered |> ORDER_BY _;
       MUTABLE exhaustive = (covered == all_variants);
       IF ((default != NIL) AND exhaustive) THEN
         default = NIL;
