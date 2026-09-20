@@ -5597,7 +5597,7 @@ PUB FN mIRLowering__emit_fsm_lock_error_arm_split(MUTABLE self: MIRLowering, cla
     IF (clause.action == ErrorActionKind.Raise) THEN
       RETURN FsmLockErrorArmSplit{ body_stmts: COPY TRY (mIRLowering__lock_error_done_stmts(self, ctx_id, Emittable{ Lit: COPY Lit{ value: "\"lock acquire failed\"", lowered_node_id: NIL, ownership_consumption: NIL } }, CAST(line AS String), "error.CheatError")), exit_kind: :done };
     ELSE_IF (clause.action == ErrorActionKind.Exit) THEN
-      MUTABLE message_mir = mIRLowering__with_fiber_capture_map(&self, capture_map, {}, bg_rt, %() USE(clause, MUTABLE self) -> {
+      MUTABLE message_mir: ?Emittable = mIRLowering__with_fiber_capture_map(&self, capture_map, {}, bg_rt, %() USE(clause, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_214: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(UNWRAP (clause.message))));
     rtoc_lambda_result_214
       });
