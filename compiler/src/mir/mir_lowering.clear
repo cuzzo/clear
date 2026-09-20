@@ -9331,10 +9331,12 @@ PRIVATE FN mIRLowering__lower_safe_nav_method_call(MUTABLE self: MIRLowering, no
     RETURN result;
 END
 PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node: Node) RETURNS !Emittable ->
-    IF ((IF node IS_A FuncCall AS func_call THEN (CAST(funcCall__name(func_call) AS String) == "symbol") ELSE FALSE END) AND ((node__args(node)).length() == 1)) THEN
-      MUTABLE literal = (node__args(node) OR_ELSE List[]).first();
-      IF (IF literal IS_A Literal AS string_literal THEN (string_literal.type == :STRING) ELSE FALSE END) THEN
-        RETURN Emittable{ SymbolLit: COPY SymbolLit{ value: CAST(UNWRAP (literal.value) AS String), lowered_node_id: NIL, ownership_consumption: NIL } };
+    IF ((IF node IS_A FuncCall AS func_call THEN (CAST(funcCall__name(func_call) AS String) == "symbol") ELSE FALSE END) AND ((UNWRAP (node__args(node))).length() == 1)) THEN
+      MUTABLE literal: ?Locatable = (UNWRAP (node__args(node))).first();
+      IF literal IS_A Literal AS string_literal THEN
+        IF (string_literal.type == :STRING) THEN
+          RETURN Emittable{ SymbolLit: COPY SymbolLit{ value: CAST(UNWRAP (string_literal.value) AS String), lowered_node_id: NIL, ownership_consumption: NIL } };
+        END
       END
     END
     IF node__zig_pattern(node) EXISTS THEN
@@ -9362,10 +9364,10 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
       MUTABLE receiver_type: ?Type@multiowned = TRY (mIRLowering__intrinsic_receiver_type(self, node));
       MUTABLE stdlib_facts = TRY (mIRLowering__stdlib_call_facts(&self, &node));
       MUTABLE ownership_facts = COPY stdlib_facts.ownership;
-      MUTABLE intrinsic_args: ?[]Locatable = node__args(node);
-      MUTABLE mir_args: []U = List[];
+      MUTABLE intrinsic_args: []Locatable = UNWRAP (node__args(node));
+      MUTABLE mir_args: []Emittable = List[];
       IF node IS_A MethodCall AS method_call THEN
-        MUTABLE obj_mir = mIRLowering__with_expected_type(&self, CAST(receiver_type AS ?Type), %() USE(method_call, MUTABLE self) -> {
+        MUTABLE obj_mir: ?Emittable = mIRLowering__with_expected_type(&self, CAST(receiver_type AS ?Type), %() USE(method_call, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_386: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(method_call.object)));
     rtoc_lambda_result_386
         });
@@ -9381,7 +9383,7 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
         MUTABLE lowered_args: []Emittable = List[];
         MUTABLE intrinsic_i: Int64 = 0;
         WHILE (intrinsic_i < intrinsic_args.length()) DO
-          MUTABLE recv_fact = COPY stdlib_facts.args[(intrinsic_i + 1)];
+          MUTABLE recv_fact: ?StdlibCallArgFact = COPY stdlib_facts.args[(intrinsic_i + 1)];
           MUTABLE recv_sink: ?Type = NIL;
           IF recv_fact EXISTS AS recv_fact_value THEN
             recv_sink = COPY recv_fact_value.sink_type;
@@ -9389,12 +9391,12 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
           &lowered_args.append(TRY (mIRLowering__lower_intrinsic_arg(&self, UNWRAP (intrinsic_args[intrinsic_i]), recv_sink, callOwnershipFacts__takes?(ownership_facts, (intrinsic_i + 1)), pre_resolved_alloc)));
           intrinsic_i = (intrinsic_i + 1);
         END
-        mir_args = ([obj_mir] + lowered_args);
+        mir_args = ([UNWRAP (obj_mir)] + lowered_args);
       ELSE
         MUTABLE plain_args: []Emittable = List[];
         MUTABLE plain_i: Int64 = 0;
         WHILE (plain_i < intrinsic_args.length()) DO
-          MUTABLE plain_fact = COPY stdlib_facts.args[plain_i];
+          MUTABLE plain_fact: ?StdlibCallArgFact = COPY stdlib_facts.args[plain_i];
           MUTABLE plain_sink: ?Type = NIL;
           IF plain_fact EXISTS AS plain_fact_value THEN
             plain_sink = COPY plain_fact_value.sink_type;
@@ -9417,24 +9419,30 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
       MUTABLE alloc_placeholder: ?String@symbol = NIL;
       MUTABLE val_alloc_placeholder: ?String@symbol = NIL;
       IF entry_alloc EXISTS AS entry_alloc_value THEN
-        MUTABLE resolved = pre_resolved_alloc;
+        MUTABLE resolved: ?String@symbol = COPY pre_resolved_alloc;
         alloc_placeholder = resolved;
       END
-      MUTABLE arg_materialization = TRY (mIRLowering__materialize_stdlib_arguments(&self, mir_args, stdlib_facts, ownership_facts, ((alloc_placeholder OR_ELSE pre_resolved_alloc) OR :heap), NIL));
+      MUTABLE rtoc_sink_alloc: String@symbol = :heap;
+      IF alloc_placeholder EXISTS AS rtoc_ap THEN
+        rtoc_sink_alloc = COPY rtoc_ap;
+      ELSE_IF pre_resolved_alloc EXISTS AS rtoc_pra THEN
+        rtoc_sink_alloc = COPY rtoc_pra;
+      END
+      MUTABLE arg_materialization = TRY (mIRLowering__materialize_stdlib_arguments(&self, mir_args, stdlib_facts, ownership_facts, rtoc_sink_alloc, NIL));
       mir_args = COPY arg_materialization.mir_args;
       MUTABLE consumed_names = COPY arg_materialization.consumed_names;
       MUTABLE consumed_operands = COPY arg_materialization.consumed_operands;
       val_alloc_placeholder = COPY arg_materialization.val_alloc_placeholder;
       mir_args = {
     MUTABLE rtoc_value_block_marker = 0;
-    MUTABLE rtoc_indexed_items_387: []U = mir_args;
+    MUTABLE rtoc_indexed_items_387: []Emittable = mir_args;
     MUTABLE rtoc_indexed_output_389 = [];
     MUTABLE rtoc_indexed_i_388 = 0;
     WHILE rtoc_indexed_i_388 < rtoc_indexed_items_387.length() DO
       &rtoc_indexed_output_389.append({
     MUTABLE ast_arg: ?Locatable = mIRLowering__intrinsic_ast_arg(self, node, stdlib_facts, rtoc_indexed_i_388);
     (    IF mIRLowering__node_store_create_call?(self, UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388])) THEN
-          mIRLowering__hoist_evaluation_barrier(&self, UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388]))
+          Emittable{ Ident: COPY mIRLowering__hoist_evaluation_barrier(&self, UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388])) }
         ELSE_IF TRY (mIRLowering__mir_allocates?(&self, UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388]))) THEN
           TRY (mIRLowering__hoist_alloc(&self, UNWRAP (rtoc_indexed_items_387[rtoc_indexed_i_388]), &ast_arg, callOwnershipFacts__takes?(ownership_facts, rtoc_indexed_i_388)))
         ELSE
@@ -9453,7 +9461,15 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
       IF callOwnershipFacts__takes_any?(ownership_facts) THEN
         MUTABLE operands: []OwnershipOperandFact = List[];
         IF (consumed_operands.length() == 0) THEN
-          operands = consumed_names |> SELECT ownershipOperandFact__owned_binding(_, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "stdlib ownership", (((IF val_alloc_placeholder != NIL THEN val_alloc_placeholder ELSE alloc_placeholder END) OR_ELSE pre_resolved_alloc) OR :heap));
+          MUTABLE rtoc_owned_alloc: String@symbol = :heap;
+          IF val_alloc_placeholder EXISTS AS rtoc_vap THEN
+            rtoc_owned_alloc = COPY rtoc_vap;
+          ELSE_IF alloc_placeholder EXISTS AS rtoc_ap2 THEN
+            rtoc_owned_alloc = COPY rtoc_ap2;
+          ELSE_IF pre_resolved_alloc EXISTS AS rtoc_pra2 THEN
+            rtoc_owned_alloc = COPY rtoc_pra2;
+          END
+          operands = consumed_names |> SELECT ownershipOperandFact__owned_binding(_, TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })), "stdlib ownership", rtoc_owned_alloc);
         ELSE
           operands = consumed_operands;
         END
@@ -9461,19 +9477,19 @@ PRIVATE FN mIRLowering__lower_intrinsic(MUTABLE self: MIRLowering, MUTABLE node:
       END
       MUTABLE receiver_mutates = ((node__mutates_receiver(node) OR_ELSE FALSE) OR TRY (functionSignature__mutates_receiver?(entry_value_mutable)));
       MUTABLE target_var: ?String = NIL;
-      MUTABLE first_arg = (node__args(node) OR_ELSE List[]).first();
+      MUTABLE first_arg: ?Locatable = (UNWRAP (node__args(node))).first();
       IF ((IF node IS_A MethodCall AS method_call THEN receiver_mutates ELSE FALSE END) AND TRUE) THEN
         target_var = TRY (mIRLowering__extract_root_var_name(&self, UNWRAP (node__object(node))));
       ELSE_IF (receiver_mutates AND ((first_arg != NIL) AND TRUE)) THEN
         target_var = TRY (mIRLowering__extract_root_var_name(&self, &first_arg));
       END
-      RETURN Emittable{ RegistryCall: COPY RegistryCall{ entry: entry_value_mutable, args: COPY TRY (mIRLowering__registry_call_args(self, mir_args, stdlib_facts)), reason: "intrinsic", ownership_contract: ownership_contract, allocs: { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_390: ?Void = NIL;
+      RETURN Emittable{ RegistryCall: COPY RegistryCall{ entry: entry_value_mutable, args: COPY TRY (mIRLowering__registry_call_args(self, mir_args, stdlib_facts)), reason: "intrinsic", ownership_contract: ownership_contract, allocs: { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_390: ?InlineAllocMetadata = NIL;
       IF inlineAllocMetadata__empty?(alloc_metadata) THEN
         rtoc_ternary_value_390 = NIL;
       ELSE
-        rtoc_ternary_value_390 = alloc_metadata;
+        rtoc_ternary_value_390 = COPY alloc_metadata;
       END
-      rtoc_ternary_value_390? }, owned_result_alloc: COPY owned_result_alloc, target_var: COPY target_var, result_type: COPY result_type, result_ownership_bearing: result_ownership_bearing, key_type: COPY (IF receiver_type != NIL THEN
+      rtoc_ternary_value_390 }, owned_result_alloc: COPY owned_result_alloc, target_var: COPY target_var, result_type: COPY result_type, result_ownership_bearing: result_ownership_bearing, key_type: COPY (IF receiver_type != NIL THEN
         TRY (type__key_type(receiver_type))
       ELSE
         NIL
