@@ -15871,13 +15871,13 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
       rhs
     END;
     IF (rhs IS_A BinaryOp AND (aST__node_op(rhs) == symbol("OR_ELSE"))) THEN
-      placed = mIRLowering__with_expected_type(&self, ft, %() USE(MUTABLE rhs, MUTABLE self) -> {
+      MUTABLE placed: ?Emittable = mIRLowering__with_expected_type(&self, ft, %() USE(MUTABLE rhs, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_671: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(rhs)));
     rtoc_lambda_result_671
       });
-      RETURN TRY (mIRLowering__place_value_for_destination(&self, &placed, &rhs, decl_alloc, TypeTypeInput{ Type: COPY ft }));
+      RETURN TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (placed), &rhs, decl_alloc, TypeTypeInput{ Type: COPY ft }));
     END
-    IF ((TRY (type__dynamic_rank?(ft)) AND rhs_unwrapped IS_A ListLit) AND locatable__items(rhs_unwrapped).empty?()) THEN
+    IF ((TRY (type__dynamic_rank?(ft)) AND rhs_unwrapped IS_A ListLit) AND UNWRAP (locatable__items(rhs_unwrapped)).empty?()) THEN
       MUTABLE inner = ContainerInit{ zig_type: COPY bare_zig, strategy: :grid_empty, alloc: COPY decl_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
       IF has_caps THEN
         RETURN mIRLowering__compose_capability_wrap(self, Emittable{ ContainerInit: COPY inner }, bare_zig, ft, decl_alloc);
@@ -15889,7 +15889,10 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
       IF ((rhs_unwrapped IS_A MoveNode OR aST__call?(rhs_unwrapped)) OR !(rhs_unwrapped IS_A ListLit)) THEN
         RETURN UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value))));
       END
-      MUTABLE inner = ContainerInit{ zig_type: COPY bare_zig, strategy: :pool, alloc: COPY decl_alloc, capacity: COPY type__capacity(ft), lowered_node_id: NIL, ownership_consumption: NIL };
+      MUTABLE inner: ContainerInit = ContainerInit{ zig_type: COPY bare_zig, strategy: :pool, alloc: COPY decl_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+      IF type__capacity(ft) EXISTS AS rtoc_cap THEN
+        inner.capacity = Emittable{ Lit: COPY Lit{ value: type__capacity_text(rtoc_cap), lowered_node_id: NIL, ownership_consumption: NIL } };
+      END
       IF has_caps THEN
         RETURN mIRLowering__compose_capability_wrap(self, Emittable{ ContainerInit: COPY inner }, bare_zig, ft, decl_alloc);
       ELSE
@@ -15904,11 +15907,14 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
         RETURN UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value))));
       END
       MUTABLE hint: ?Int64 = type__allocation_hint(ft);
-      MUTABLE inner = ContainerInit{ zig_type: COPY bare_zig, strategy: IF hint != NIL THEN
+      MUTABLE inner: ContainerInit = ContainerInit{ zig_type: COPY bare_zig, strategy: IF hint != NIL THEN
         :set_capacity
       ELSE
         :set_empty
-      END, alloc: COPY decl_alloc, capacity: COPY hint, lowered_node_id: NIL, ownership_consumption: NIL };
+      END, alloc: COPY decl_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+      IF hint EXISTS AS rtoc_h THEN
+        inner.capacity = Emittable{ Lit: COPY Lit{ value: rtoc_h.toString(), lowered_node_id: NIL, ownership_consumption: NIL } };
+      END
       IF has_caps THEN
         RETURN mIRLowering__compose_capability_wrap(self, Emittable{ ContainerInit: COPY inner }, bare_zig, ft, decl_alloc);
       ELSE
@@ -15920,13 +15926,14 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
         RETURN UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value))));
       END
       IF rhs_unwrapped IS_A NextExpr AS rhs_unwrapped_narrowed THEN
-        RETURN TRY (mIRLowering__lower_next_expr(&self, &rhs_unwrapped_narrowed, decl_alloc));
+        MUTABLE rtoc_next_expr = COPY rhs_unwrapped_narrowed;
+        RETURN TRY (mIRLowering__lower_next_expr(&self, &rtoc_next_expr, decl_alloc));
       END
       IF aST__call?(rhs_unwrapped) THEN
         RETURN UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value))));
       END
-      IF ((rhs_unwrapped IS_A CopyNode AND rhs_unwrapped.own) AND TRY (type__any_rc?(TRY (aST__full_type_mut(UNWRAP (aST__node_value(rhs_unwrapped))))))) THEN
-        RETURN TRY (mIRLowering__lower(&self, &rhs_unwrapped));
+      IF ((IF rhs_unwrapped IS_A CopyNode AS rtoc_copy_node THEN (rtoc_copy_node.own OR_ELSE FALSE) ELSE FALSE END) AND TRY (type__any_rc?(TRY (aST__full_type_mut(UNWRAP (aST__node_value(rhs_unwrapped))))))) THEN
+        RETURN UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY rhs_unwrapped))));
       END
       IF mIRLowering__list_collection_copy?(self, rhs_unwrapped) THEN
         RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(UNWRAP (aST__node_value(rhs_unwrapped)))))), zig_type: COPY TRY (type__zig_type(ft)), elem_type: NIL, strategy: :full_value, alloc: COPY decl_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
@@ -15934,10 +15941,10 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
       IF !(rhs_unwrapped IS_A ListLit) THEN
         RETURN UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value))));
       END
-      IF !(locatable__items(rhs_unwrapped).empty?()) THEN
+      IF !((UNWRAP (locatable__items(rhs_unwrapped))).empty?()) THEN
         RETURN mIRLowering__with_expected_type(&self, ft, %() USE(node, MUTABLE self) -> {
-    MUTABLE rtoc_lambda_result_672: ?Emittable = TRY (mIRLowering__lower(&self, node.value));
-    rtoc_lambda_result_672
+    MUTABLE rtoc_lambda_result_672: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY node.value)));
+    UNWRAP (rtoc_lambda_result_672)
         });
       END
       MUTABLE init_capacity: ?Int64 = type__allocation_hint(ft);
@@ -15946,7 +15953,10 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
       ELSE
         :array_list_empty
       END;
-      MUTABLE inner = ContainerInit{ zig_type: COPY bare_zig, strategy: COPY init_kind, alloc: COPY decl_alloc, capacity: COPY init_capacity, lowered_node_id: NIL, ownership_consumption: NIL };
+      MUTABLE inner: ContainerInit = ContainerInit{ zig_type: COPY bare_zig, strategy: COPY init_kind, alloc: COPY decl_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+      IF init_capacity EXISTS AS rtoc_ic THEN
+        inner.capacity = Emittable{ Lit: COPY Lit{ value: rtoc_ic.toString(), lowered_node_id: NIL, ownership_consumption: NIL } };
+      END
       IF has_caps THEN
         RETURN mIRLowering__compose_capability_wrap(self, Emittable{ ContainerInit: COPY inner }, bare_zig, ft, decl_alloc);
       ELSE
@@ -15954,7 +15964,10 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
       END
     END
     IF type__fixed_soa?(ft) THEN
-      MUTABLE inner = ContainerInit{ zig_type: COPY bare_zig, strategy: :list_capacity, alloc: COPY decl_alloc, capacity: COPY type__capacity(ft), lowered_node_id: NIL, ownership_consumption: NIL };
+      MUTABLE inner: ContainerInit = ContainerInit{ zig_type: COPY bare_zig, strategy: :list_capacity, alloc: COPY decl_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+      IF type__capacity(ft) EXISTS AS rtoc_cap THEN
+        inner.capacity = Emittable{ Lit: COPY Lit{ value: type__capacity_text(rtoc_cap), lowered_node_id: NIL, ownership_consumption: NIL } };
+      END
       IF has_caps THEN
         RETURN mIRLowering__compose_capability_wrap(self, Emittable{ ContainerInit: COPY inner }, bare_zig, ft, decl_alloc);
       ELSE
@@ -15962,7 +15975,7 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
       END
     END
     MUTABLE retain_source = mIRLowering__var_decl_retain_source(self, node.value);
-    IF ((IF retain_source IS_A Identifier AS identifier THEN (node.value.was_moved != TRUE) ELSE FALSE END) AND TRY (mIRLowering__rc_retain_needed?(&self, retain_source))) THEN
+    IF ((IF retain_source IS_A Identifier AS identifier THEN (identifier.was_moved != TRUE) ELSE FALSE END) AND TRY (mIRLowering__rc_retain_needed?(&self, retain_source))) THEN
       RETURN Emittable{ RcRetain: COPY TRY (mIRLowering__make_rc_retain(&self, castLocatableToIdentifier__mir_lowering(retain_source))) };
     END
     MUTABLE wraps_value = (has_caps AND !(TRY (mIRLowering__source_already_has_declared_capability?(self, node.value, ft))));
@@ -15973,18 +15986,18 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
       value_ft_branch_value = COPY ft;
     END
     MUTABLE value_ft: Type = value_ft_branch_value?;
-    placed = mIRLowering__with_expected_type(&self, value_ft, %() USE(node, MUTABLE self) -> {
+    MUTABLE placed: ?Emittable = mIRLowering__with_expected_type(&self, value_ft, %() USE(node, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_673: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY node.value)));
     rtoc_lambda_result_673
     });
-    placed = TRY (mIRLowering__place_value_for_destination(&self, &placed, node.value, decl_alloc, TypeTypeInput{ Type: COPY value_ft }));
+    placed = TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (placed), &node.value, decl_alloc, TypeTypeInput{ Type: COPY value_ft }));
     IF (wraps_value AND TRY (mIRLowering__borrowed_wrap_source?(self, node.value))) THEN
-      placed = DeepCopy{ source: COPY placed, zig_type: COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY value_ft })), elem_type: NIL, strategy: :full_value, alloc: COPY decl_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY value_ft }))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+      placed = Emittable{ DeepCopy: COPY DeepCopy{ source: COPY UNWRAP (placed), zig_type: COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY value_ft })), elem_type: NIL, strategy: :full_value, alloc: COPY decl_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY value_ft }))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    IF (wraps_value AND !(mIRLowering__capability_wrapped_mir?(self, placed))) THEN
-      RETURN mIRLowering__compose_capability_wrap(self, placed, bare_zig, ft, decl_alloc);
+    IF (wraps_value AND !(mIRLowering__capability_wrapped_mir?(self, UNWRAP (placed)))) THEN
+      RETURN mIRLowering__compose_capability_wrap(self, UNWRAP (placed), bare_zig, ft, decl_alloc);
     ELSE
-      RETURN placed;
+      RETURN UNWRAP (placed);
     END
 END
 PRIVATE FN mIRLowering__borrowed_wrap_source?(self: MIRLowering, value: ?Locatable) RETURNS !Bool
