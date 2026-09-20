@@ -15733,11 +15733,10 @@ PRIVATE FN mIRLowering__var_decl_safe_name(MUTABLE self: MIRLowering, node: VarD
     RETURN safe_name;
 END
 PRIVATE FN mIRLowering__var_decl_suppression(MUTABLE self: MIRLowering, safe_name: String, node: VarDecl, facts: VarDeclFacts, MUTABLE init: Emittable) RETURNS !?String ->
-    MUTABLE lowering = self;
     IF !(mIRLowering__current_function_context(&self)) THEN
       RETURN NIL;
     END
-    MUTABLE owned_cleanup_value = (((facts.has_mir_drop OR ((TRY (mIRLowering__mir_allocates?(&lowering, init)) AND mIRLowering__ownership_bearing_type?(&lowering, facts.ft))))) == TRUE);
+    MUTABLE owned_cleanup_value = (((facts.has_mir_drop OR ((TRY (mIRLowering__mir_allocates?(&self, init)) AND mIRLowering__ownership_bearing_type?(&self, facts.ft))))) == TRUE);
     IF facts.keyword_mutable THEN
       IF ((facts.actually_mutated AND (node.var_used != NIL)) AND !(facts.forced_var)) THEN
         RETURN NIL;
