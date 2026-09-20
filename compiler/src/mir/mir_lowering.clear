@@ -17623,7 +17623,7 @@ PRIVATE FN mIRLowering__union_if_chain_payload_bindings(MUTABLE self: MIRLowerin
     END
     MUTABLE destructure: ?StructPattern = COPY match_case.destructure;
     IF destructure EXISTS AS destructure_value THEN
-      RETURN destructure_value.fields |> SELECT:? (IF patternField__wildcard?(_) THEN NIL ELSE (IF !(patternField__bind?(_)) THEN NIL ELSE Let{ name: COPY _.name, init: Emittable{ FieldGet: COPY FieldGet{ object: COPY payload, field: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: "_ = &${_.name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } END) END) |> WHERE _ != NIL;
+      RETURN destructure_value.fields |> SELECT:? (IF patternField__wildcard?(_) THEN NIL ELSE (IF !(patternField__bind?(_)) THEN NIL ELSE Emittable{ Let: COPY Let{ name: COPY _.name, init: Emittable{ FieldGet: COPY FieldGet{ object: COPY payload, field: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: "_ = &${_.name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } } END) END) |> WHERE _ != NIL |> SELECT UNWRAP _;
     ELSE
       RETURN CAST(List[] AS []Emittable);
     END
