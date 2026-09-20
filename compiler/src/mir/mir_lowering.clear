@@ -5189,7 +5189,7 @@ PRIVATE FN mIRLowering__lower_step_stmts(MUTABLE self: MIRLowering, stmts: []Loc
           declared_result_type = COPY async_result_shape.payload_type;
         END
         MUTABLE result_alloc: ?String@symbol = TRY (mIRLowering__escaping_value_alloc(&self, declared_result_type));
-        MUTABLE last_mir = mIRLowering__with_decl_alloc(&self, result_alloc, %() USE(last_step_value_mutable, MUTABLE self) -> {
+        MUTABLE last_mir: ?Emittable = mIRLowering__with_decl_alloc(&self, result_alloc, %() USE(last_step_value_mutable, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_196: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(last_step_value_mutable.expr)));
     rtoc_lambda_result_196
         });
@@ -5200,8 +5200,8 @@ PRIVATE FN mIRLowering__lower_step_stmts(MUTABLE self: MIRLowering, stmts: []Loc
           result_destination_type_branch_value = declared_result_type;
         END
         MUTABLE result_destination_type: Type = result_destination_type_branch_value?;
-        IF last_mir EXISTS AS MUTABLE last_mir_value THEN
-          MUTABLE last_mir_value = TRY (mIRLowering__place_value_for_destination(&self, &last_mir_value, &last_step_value_mutable.expr, result_alloc, TypeTypeInput{ Type: COPY result_destination_type }));
+        IF last_mir != NIL THEN
+          last_mir = TRY (mIRLowering__place_value_for_destination(&self, &last_mir, &last_step_value_mutable.expr, result_alloc, TypeTypeInput{ Type: COPY result_destination_type }));
         END
         IF ((last_mir != NIL) AND ((TRY (mIRLowering__mir_allocates?(&self, last_mir)) OR lifecyclePlan__needs_drop?((TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), result_destination_type))))))) THEN
           last_mir = TRY (mIRLowering__hoist_alloc(&self, &last_mir, &last_step_value_mutable.expr, TRUE, FALSE, TRUE, result_alloc));
@@ -17755,8 +17755,8 @@ END
 PRIVATE FN mIRLowering__lower_union_match(MUTABLE self: MIRLowering, node: MatchStatement, facts: MatchLoweringFacts) RETURNS !UnionMatchStmt ->
     MUTABLE arms = node.cases |> UNNEST TRY (mIRLowering__union_match_arm_plans(&self, _, node, facts.expr_label));
     MUTABLE default: ?[]Emittable = TRY (mIRLowering__union_match_default_body(&self, node, facts, arms));
-    IF default EXISTS AS default_value THEN
-      MUTABLE default_value = TRY (mIRLowering__hoist_unhoisted_return_allocs(&self, default_value, (node.default_case OR_ELSE List[])));
+    IF default != NIL THEN
+      default = TRY (mIRLowering__hoist_unhoisted_return_allocs(&self, default, (node.default_case OR_ELSE List[])));
     END
     RETURN UnionMatchStmt{ subject: COPY facts.subject, arms: arms |> SELECT UnionMatchArm{ variant: COPY _.variant, payload: COPY _.payload_name, body: COPY _.body, pointer_payload: _.pointer_payload }, default_body: default, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
