@@ -1954,9 +1954,9 @@ PRIVATE FN typeAnalysisSession__emit_can_smash_unsupported_error_mut(MUTABLE sel
       fix = TRY (fix__new(TRY (typeAnalysisSession__fix_description(self, :REPLACE_CAN_SMASH_WITH_SERVICE)), [edit__new(span__new(NIL, tok.line, tok.column, (CAST(tok.value AS String)).codepointCount()), "@service")], :auto));
     END
     IF !(fix) THEN
-      RETURN TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :CAN_SMASH_NOT_SUPPORTED }));
+      RETURN TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :CAN_SMASH_NOT_SUPPORTED }));
     END
-    TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), :reentrance, [fix], NIL, :CAN_SMASH_NOT_SUPPORTED, :error));
+    TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable__type_analysis_session(node)), :reentrance, [fix], NIL, :CAN_SMASH_NOT_SUPPORTED, :error));
 END
 PRIVATE FN typeAnalysisSession__emit_type_mismatch_assign_error_mut(MUTABLE self: TypeAnalysisSession, node: Node, target_type: TypeTypeInput, value_type: String@symbol) RETURNS !Void ->
     MUTABLE kw = CAST({:got: value_type, :expected: target_type} AS {String@symbol}Any);
@@ -17972,6 +17972,13 @@ PUB FN castAssignmentNameToLocatable__type_analysis_session(value: AssignmentNam
     AssignmentName.Identifier AS cast_payload -> RETURN Locatable{ Identifier: COPY cast_payload };,
     AssignmentName.GetField AS cast_payload -> RETURN Locatable{ GetField: COPY cast_payload };,
     AssignmentName.GetIndex AS cast_payload -> RETURN Locatable{ GetIndex: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to Locatable");
+  END
+  panic("Invalid cast to Locatable");
+END
+FN castAsyncValidationNodeToLocatable__type_analysis_session(value: AsyncValidationNode) RETURNS Locatable ->
+  PARTIAL MATCH value START
+    AsyncValidationNode.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to Locatable");
   END
   panic("Invalid cast to Locatable");
