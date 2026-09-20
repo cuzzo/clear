@@ -127,6 +127,7 @@ PUB STRUCT Binding {
   symbol: ?SymbolEntry@multiowned,
   capture: ?String,
   predicate: String@symbol,
+  mutable: ?Bool,
   mir_binding_entry: ?CleanupEntry@multiowned
 }
 PUB STRUCT Capability {
@@ -640,6 +641,7 @@ PUB STRUCT BinaryOp {
   op: String@symbol,
   right: Locatable@boxed,
   paren_bind: ?Bool,
+  bind_mutable: ?Bool,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
   collection_return: ?Type,

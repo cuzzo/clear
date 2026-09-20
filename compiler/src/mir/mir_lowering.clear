@@ -17081,14 +17081,14 @@ PRIVATE FN mIRLowering__lower_if_bind(MUTABLE self: MIRLowering, node: IfBind) R
       IF TRY (mIRLowering__plain_map_pointer_bind?(&self, rtoc_mutable_block_param_720.expr)) THEN
         MUTABLE index: GetIndex = COPY castLocatableToGetIndex(rtoc_mutable_block_param_720.expr);
         MUTABLE expr_target: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(index.target)));
-        RETURN MIRMethodCall{ receiver: UNWRAP (COPY expr_target), method: "getPtr", args: [CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(index.index))) AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+        RETURN Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: UNWRAP (COPY expr_target), method: "getPtr", args: [CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(index.index))) AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
       ELSE_IF TRY (mIRLowering__mutable_struct_list_bind?(self, rtoc_mutable_block_param_720.expr)) THEN
         index = COPY castLocatableToGetIndex(rtoc_mutable_block_param_720.expr);
         MUTABLE target: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(index.target)));
         IF !(mIRLowering__collection_param_receiver?(&self, index.target)) THEN
-            target = AddressOf{ expr: UNWRAP (COPY target), lowered_node_id: NIL, ownership_consumption: NIL };
+            target = Emittable{ AddressOf: COPY AddressOf{ expr: UNWRAP (COPY target), lowered_node_id: NIL, ownership_consumption: NIL } };
         END
-        RETURN TRY (mIRLowering__emit_builtin(&self, :getAtPtrOpt, [Emittable{ AddressOf: CAST(COPY target AS AddressOf)}, TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(index.index)))]));
+        RETURN TRY (mIRLowering__emit_builtin(&self, :getAtPtrOpt, [COPY UNWRAP (target), UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(index.index))))]));
       ELSE
         RETURN TRY (mIRLowering__lower_control_condition(self, &rtoc_mutable_block_param_720.expr, TRUE));
       END
@@ -17101,33 +17101,74 @@ PRIVATE FN mIRLowering__lower_if_bind(MUTABLE self: MIRLowering, node: IfBind) R
         &capture_markers.append(CAST(AllocMark{ name: COPY capture_name, alloc: :heap, type_info: CAST(COPY capture_type AS Type), scope: :function, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
         &capture_markers.append(CAST(Cleanup{ name: COPY capture_name, cleanup_entry: capture_cleanup_value, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
     END
-    {:expr: { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_719: ?Emittable = NIL;
+    MIRIfBinding{ expr: UNWRAP ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_719: ?Emittable = NIL;
       IF (rtoc_mutable_block_param_720.predicate == :is_ok) THEN
-        rtoc_ternary_value_719 = mIRLowering__strip_try(self, TRY (mIRLowering__loop_condition_expr(&self, expr, pending)));
+        rtoc_ternary_value_719 = mIRLowering__strip_try(self, TRY (mIRLowering__loop_condition_expr(&self, UNWRAP (expr), pending)));
       ELSE
-        rtoc_ternary_value_719 = TRY (mIRLowering__loop_condition_expr(&self, expr, pending));
+        rtoc_ternary_value_719 = TRY (mIRLowering__loop_condition_expr(&self, UNWRAP (expr), pending));
       END
-      rtoc_ternary_value_719? }, :capture: rtoc_mutable_block_param_720.name, :node_ref: TRY (type__node_reference?((TRY (type__from_node_mut(rtoc_mutable_block_param_720.expr))))), :owns_capture: TRY (aST__capture_expr_owns_result?(rtoc_mutable_block_param_720.expr)), :predicate: rtoc_mutable_block_param_720.predicate}
+      rtoc_ternary_value_719 }), capture: MirCapture{ StringValue: COPY rtoc_mutable_block_param_720.name }, node_ref: TRY (type__node_reference?((TRY (type__from_node_mut(rtoc_mutable_block_param_720.expr))))), owns_capture: TRY (aST__capture_expr_owns_result?(rtoc_mutable_block_param_720.expr)), predicate: rtoc_mutable_block_param_720.predicate, pointer_capture: (rtoc_mutable_block_param_720.mutable == TRUE), pointer_shaped: ((TRY (mIRLowering__plain_map_pointer_bind?(&self, rtoc_mutable_block_param_720.expr)) OR TRY (mIRLowering__mutable_struct_list_bind?(self, rtoc_mutable_block_param_720.expr))) OR TRY (mIRLowering__union_list_pointer_bind?(&self, rtoc_mutable_block_param_720.expr)))}
     } };
-    MUTABLE lowered_then = mIRLowering__with_if_bind_alias_maps(&self, node, %() USE(node, MUTABLE self) -> {
-    rtoc_lambda_result_721 = TRY (mIRLowering__lower_body(&self, node.then_branch));
-    rtoc_lambda_result_721
+    MUTABLE pointer_binds: []String = mir_bindings |> WHERE (_.pointer_shaped OR_ELSE FALSE) |> SELECT CAST(_.capture AS String);
+    MUTABLE lowered_then: []Emittable = mIRLowering__with_pointer_shaped_binds(&self, pointer_binds, %() USE(node, MUTABLE self) -> {
+      TRY (mIRLowering__with_if_bind_alias_maps(&self, node, %() USE(node, MUTABLE self) -> {
+        TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(node.then_branch)))
+      }))
     });
-    MUTABLE existing_capture_names = (lowered_then |> SELECT:? (  IF _ IS_A AllocMark THEN
-      CAST(_.name AS String)
-    ELSE
-      NIL
-    END) |> WHERE _ != NIL) |> DISTINCT _;
-    capture_markers = capture_markers |> WHERE !(((aST__node_name(castEmittableToLocatable__mir_lowering(_)) EXISTS) AND existing_capture_names.contains?(CAST(_.name AS String))));
+    MUTABLE existing_capture_names: [Set]String = Set[];
+    FOR _ IN lowered_then DO
+      IF _ IS_A AllocMark AS rtoc_alloc_mark THEN
+        &existing_capture_names.insert(COPY rtoc_alloc_mark.name);
+      END
+    END
+    capture_markers = capture_markers |> WHERE (IF emittable__name(_) EXISTS AS rtoc_marker_name THEN !(existing_capture_names.contains?(CAST(rtoc_marker_name AS String))) ELSE TRUE END);
     MUTABLE then_body = (capture_markers + lowered_then);
     MUTABLE else_body_branch_value: ?[]Emittable = NIL;
-    IF (((node.else_branch EXISTS) AND !(node.else_branch.empty?()))) THEN
-      else_body_branch_value = TRY (mIRLowering__lower_body(&self, node.else_branch));
+    IF !(node.else_branch.empty?()) THEN
+      else_body_branch_value = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(node.else_branch)));
     ELSE
       else_body_branch_value = NIL;
     END
     MUTABLE else_body: ?[]Emittable = else_body_branch_value;
     RETURN IfBindStmt{ bindings: COPY mir_bindings, then_body: then_body, else_body: else_body, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+END
+PRIVATE FN mIRLowering__union_list_pointer_bind?(MUTABLE self: MIRLowering, expr: Locatable) RETURNS !Bool ->
+    IF expr IS_A GetIndex AS get_index THEN
+      MUTABLE get_index_mutable = COPY get_index;
+      MUTABLE receiver = TRY (aST__full_type_mut(get_index_mutable.target));
+      IF !(type__list_collection?(receiver)) THEN
+        RETURN FALSE;
+      END
+      MUTABLE result = TRY (aST__full_type_mut( Locatable{ GetIndex: COPY get_index_mutable }));
+      MUTABLE inner: Type = COPY result;
+      IF type__optional?(result) THEN
+        inner = COPY UNWRAP (TRY (type__wrapped_type(result)));
+      END
+      MUTABLE name: ?String@symbol = type__resolved(inner);
+      IF type__generic_instance?(inner) THEN
+        name = type__generic_base(inner);
+      END
+      IF name EXISTS AS rtoc_union_name THEN
+        RETURN (TRY (mIRLowering__union_schemas(&self))).contains?(rtoc_union_name);
+      END
+      RETURN FALSE;
+    ELSE
+      RETURN FALSE;
+    END
+END
+# Zig `switch` and std.meta.activeTag do not auto-deref, so a pointer-shaped
+# capture has to be recorded for the body that matches on it.
+PRIVATE FN mIRLowering__with_pointer_shaped_binds<U>(MUTABLE self: MIRLowering, names: []String, blk: FN() -> U) RETURNS U ->
+    IF (names.length() == 0) THEN
+      RETURN blk();
+    END
+    MUTABLE previous = COPY mIRLowering__capture_state(&self).current_lambda_pointer_params;
+    FOR _ IN names DO
+      &mIRLowering__capture_state(&self).current_lambda_pointer_params.insert(COPY _);
+    END
+    MUTABLE rtoc_pointer_bind_result = blk();
+    mIRLowering__capture_state(&self).current_lambda_pointer_params = COPY previous;
+    RETURN rtoc_pointer_bind_result;
 END
 PRIVATE FN mIRLowering__mutable_struct_list_bind?(self: MIRLowering, expr: Locatable) RETURNS !Bool ->
     IF expr IS_A GetIndex AS get_index THEN

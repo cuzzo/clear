@@ -1454,7 +1454,8 @@ PUB STRUCT MIRIfBinding {
   node_ref: ?Bool,
   owns_capture: ?Bool,
   predicate: ?String@symbol,
-  pointer_capture: ?Bool
+  pointer_capture: ?Bool,
+  pointer_shaped: ?Bool
 }
 
 PUB STRUCT IfBindStmt {

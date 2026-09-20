@@ -39,7 +39,7 @@ PRIVATE FN clearParser__parse_if_chain(MUTABLE self: ClearParser, if_token: Toke
       IF (TRY (clearParser__match?(&self, :KEYWORD, "AND")) OR TRY (clearParser__match?(&self, :LEGACY_LOGICAL, "&&"))) THEN
         TRY (clearParser__error_mut(&self, if_token, CodeOrMessage{ SymbolValue: :MULTIPLE_BINDINGS_NEED_PARENS }));
       END
-      MUTABLE bindings = [Binding{ expr: COPY condition, name: COPY TRY (token__text_mut(name_tok)), name_token: name_tok, unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, predicate: :exists, mir_binding_entry: NIL }];
+      MUTABLE bindings = [Binding{ expr: COPY condition, name: COPY TRY (token__text_mut(name_tok)), name_token: name_tok, mutable: NIL, unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, predicate: :exists, mir_binding_entry: NIL }];
       RETURN ClearParserReturnValue{ IfBind: COPY TRY (clearParser__parse_if_bind_body(&self, if_token, bindings)) };
     END
     TRY (clearParser__consume(&self, :KEYWORD, "THEN"));
@@ -136,7 +136,7 @@ PRIVATE FN clearParser__refinement_steps(MUTABLE self: ClearParser, node: Locata
         ELSE
           :exists
         END;
-        RETURN [StepsItem{ Binding: COPY Binding{ expr: COPY binary_op.left, name: COPY right.name, name_token: right.token, predicate: COPY predicate, unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, mir_binding_entry: NIL } }];
+        RETURN [StepsItem{ Binding: COPY Binding{ expr: COPY binary_op.left, name: COPY right.name, name_token: right.token, predicate: COPY predicate, mutable: (binary_op.bind_mutable == TRUE), unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, mir_binding_entry: NIL } }];
       END
       IF ((binary_op.op == symbol("OR")) AND clearParser__contains_refinement_binding?(self, Locatable{ BinaryOp: COPY binary_op })) THEN
         TRY (clearParser__error_mut(&self, binary_op.token, CodeOrMessage{ SymbolValue: :CONDITIONAL_BINDING_UNDER_OR }));
@@ -217,8 +217,9 @@ PRIVATE FN clearParser__parse_conditional_binding(MUTABLE self: ClearParser, exp
       :exists
     END;
     TRY (clearParser__consume(&self, :KEYWORD, "AS"));
+    MUTABLE mutable = castClearParserReturnValueToBool(TRY (clearParser__match_mut(&self, :KEYWORD, "MUTABLE")));
     MUTABLE name_tok = TRY (clearParser__consume(&self, :VAR_ID));
-    RETURN Binding{ expr: COPY expr, name: COPY TRY (token__text_mut(name_tok)), name_token: name_tok, predicate: COPY predicate, unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, mir_binding_entry: NIL };
+    RETURN Binding{ expr: COPY expr, name: COPY TRY (token__text_mut(name_tok)), name_token: name_tok, predicate: COPY predicate, mutable: mutable, unwrapped_type: TRY (type__new(TypeConstructionInput{ SymbolValue: :Untyped })), symbol: NIL, capture: NIL, mir_binding_entry: NIL };
 END
 PRIVATE FN clearParser__parse_if_bind_body(MUTABLE self: ClearParser, if_token: Token, bindings: []Binding) RETURNS !IfBind
   EFFECTS REENTRANT ->

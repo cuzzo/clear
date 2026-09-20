@@ -2384,13 +2384,23 @@ PRIVATE FN mIREmitter__emit_if_bind_stmt(MUTABLE self: MIREmitter, node: IfBindS
           result = (result $+ " else |_| {}");
         END
       ELSE
-        MUTABLE capture: String = "";
-        IF b.pointer_capture THEN
-          capture = "*${CAST(b.capture AS String)}";
-        ELSE
-          capture = CAST(b.capture AS String);
+        # A pointer capture of an already-pointer-shaped subject reads fine
+        # through auto-deref but is one level too many at a call site, so it
+        # rebinds through a __ptr temporary instead.
+        MUTABLE take_address = ((b.pointer_capture OR_ELSE FALSE) AND !((b.pointer_shaped OR_ELSE FALSE)));
+        MUTABLE capture: String = CAST(b.capture AS String);
+        MUTABLE rebind: String = "";
+        IF take_address THEN
+          capture = "*${CAST(b.capture AS String)}__ptr";
+          rebind = "var ${CAST(b.capture AS String)} = ${CAST(b.capture AS String)}__ptr;\n";
         END
-        result = "if (${expr}) |${capture}| {\n${suppress}${then_body}\n}";
+        # An `anytype` parameter declared ?T can arrive as a bare T, which
+        # `if (x) |y|` rejects. Only a bare binding can have that shape.
+        MUTABLE subject: String = COPY expr;
+        IF ((b.expr IS_A Ident) AND !((b.pointer_capture OR_ELSE FALSE))) THEN
+          subject = "CheatLib.optionalOf(${expr})";
+        END
+        result = "if (${subject}) |${capture}| {\n${rebind}${suppress}${then_body}\n}";
         IF else_body EXISTS AS else_body_value THEN
           result = (result $+ " else {\n${else_body_value}\n}");
         END
