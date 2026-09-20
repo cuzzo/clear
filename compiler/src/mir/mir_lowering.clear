@@ -15485,10 +15485,10 @@ PRIVATE FN mIRLowering__var_decl_facts(MUTABLE self: MIRLowering, MUTABLE node: 
     MUTABLE node_entry: ?CleanupEntry@multiowned = COPY node.mir_binding_entry;
     MUTABLE decl_name = COPY CAST(node.name AS String);
     MUTABLE binding_entry:? = node_entry;
-    MUTABLE transport_plan: ?PassStateValue = COPY node.ownership_transport_plan;
-    MUTABLE inferred_borrow = (IF transport_plan IS_A OwnershipTransportPlan AS inferred_transport THEN (inferred_transport.action == :borrow) ELSE FALSE END);
+    MUTABLE transport_plan: ?OwnershipTransportPlan = COPY node.ownership_transport_plan;
+    MUTABLE inferred_borrow = (IF transport_plan EXISTS AS inferred_transport THEN (inferred_transport.action == :borrow) ELSE FALSE END);
     IF inferred_borrow THEN
-      binding_entry = mIRLowering__new();
+      binding_entry = cleanupEntry__none();
     END
     MUTABLE empty_optional_init = mIRLowering__optional_nil_initializer?(self, ft, node.value);
     MUTABLE has_mir_drop = (cleanupEntry__needs_cleanup?(UNWRAP (binding_entry)) AND !(cleanupEntry__match_as?(UNWRAP (binding_entry))));
@@ -15512,7 +15512,7 @@ PRIVATE FN mIRLowering__var_decl_facts(MUTABLE self: MIRLowering, MUTABLE node: 
     MUTABLE needs_annotation = ((((zigTypeMapper__zig_primitives().contains?(zig_type) OR type__fn_type?(ft)) OR type__error_union?(ft)) OR ((node.value IS_A Literal AND (locatable__type(node.value) == symbol("NIL"))))) OR ((TRY (type__string?(ft)) AND is_heap)));
     MUTABLE annotation_branch_value: ?Type = NIL;
     IF needs_annotation THEN
-      annotation_branch_value = ft;
+      annotation_branch_value = COPY ft;
     ELSE
       annotation_branch_value = NIL;
     END
@@ -15549,11 +15549,11 @@ PRIVATE FN mIRLowering__var_decl_facts(MUTABLE self: MIRLowering, MUTABLE node: 
     IF has_caps THEN
       bare_ft_branch_value = TRY (type__bare_data_type((TRY (type__non_optional_type(ft)))));
     ELSE
-      bare_ft_branch_value = ft;
+      bare_ft_branch_value = COPY ft;
     END
     MUTABLE bare_ft: Type = bare_ft_branch_value?;
     MUTABLE bare_zig = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY bare_ft }));
-    RETURN VarDeclFacts{ ft: COPY ft, binding_entry: binding_entry, has_mir_drop: has_mir_drop, actually_mutated: actually_mutated, forced_var: forced_var, keyword_mutable: keyword_mutable, annotation: COPY annotation, heap_return_var: (heap_return_var == TRUE), decl_alloc: COPY decl_alloc, init_ownership_effect: init_ownership_effect, source_owned_binding: !((source_owned_alloc == NIL)), has_caps: has_caps, bare_zig: COPY bare_zig, generic_id: type__id_handle?(ft) };
+    RETURN VarDeclFacts{ ft: COPY ft, binding_entry: UNWRAP (binding_entry), has_mir_drop: has_mir_drop, actually_mutated: actually_mutated, forced_var: forced_var, keyword_mutable: keyword_mutable, annotation: COPY annotation, heap_return_var: (heap_return_var == TRUE), decl_alloc: COPY decl_alloc, init_ownership_effect: init_ownership_effect, source_owned_binding: !((source_owned_alloc == NIL)), has_caps: has_caps, bare_zig: COPY bare_zig, generic_id: type__id_handle?(ft) };
 END
 PRIVATE FN mIRLowering__optional_nil_initializer?(self: MIRLowering, type_info: Type, value: Locatable) RETURNS Bool ->
     IF !(type__optional?(type_info)) THEN
