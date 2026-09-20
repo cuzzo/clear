@@ -18288,10 +18288,13 @@ PRIVATE FN mIRLowering__collect_returned_binding_names(MUTABLE self: MIRLowering
         IF identifier.symbol != NIL THEN
           decl = COPY ((identifier.symbol)?).reg;
         END
-        MUTABLE name = ((((decl != NIL) AND ((TRY (functionState__decl_zig_names(mIRLowering__function_state(&self))))[aST__node_identity(castSymbolEntryRegInputToLocatable(decl))] != NIL))) OR TRUE);
-        IF name THEN
-          &names.insert(name);
+        MUTABLE name: String = mIRLowering__zig_safe_name(self, identifier.name);
+        IF decl EXISTS AS rtoc_decl THEN
+          IF (TRY (functionState__decl_zig_names(mIRLowering__function_state(&self))))[aST__node_identity(castSymbolEntryRegInputToLocatable(rtoc_decl))] EXISTS AS rtoc_zig_name THEN
+            name = COPY rtoc_zig_name;
+          END
         END
+        &names.insert(COPY name);
       ELSE_IF (expr_value IS_A Cast) OR (expr_value IS_A MoveNode) OR (expr_value IS_A ShareNode) THEN
         TRY (mIRLowering__collect_returned_binding_names(&self, aST__node_value(expr_value), &names));
       ELSE_IF expr_value IS_A CopyNode AS copy_node THEN
