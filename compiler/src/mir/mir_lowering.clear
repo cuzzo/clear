@@ -18211,7 +18211,20 @@ PRIVATE FN mIRLowering__heap_carry_recursive_param_value(MUTABLE self: MIRLoweri
     END
 END
 PRIVATE FN mIRLowering__tail_call_return?(MUTABLE self: MIRLowering, value: ?Emittable) RETURNS Bool ->
-    RETURN !(!(((((mIRLowering__current_function_tail_call?(&self) AND !(mIRLowering__program_state(self).debug_mode)) AND ((value != NIL) AND (value IS_A Call))) AND (emittable__callee(value) == mIRLowering__current_function_zig_name(&self))))));
+    IF !(mIRLowering__current_function_tail_call?(&self)) THEN
+      RETURN FALSE;
+    END
+    IF mIRLowering__program_state(self).debug_mode THEN
+      RETURN FALSE;
+    END
+    IF value EXISTS AS rtoc_tail_value THEN
+      IF rtoc_tail_value IS_A Call THEN
+        MUTABLE rtoc_callee: ?String = emittable__callee(rtoc_tail_value);
+        MUTABLE rtoc_self_name: ?String = mIRLowering__current_function_zig_name(&self);
+        RETURN (rtoc_callee == rtoc_self_name);
+      END
+    END
+    RETURN FALSE;
 END
 PRIVATE FN mIRLowering__return_with_transfer_marks(MUTABLE self: MIRLowering, plan: ReturnOwnershipPlan, MUTABLE value: ?Emittable, ret: ReturnStmt) RETURNS !NodeRoot ->
     MUTABLE names = TRY (returnOwnershipPlan__returned_names(plan));
