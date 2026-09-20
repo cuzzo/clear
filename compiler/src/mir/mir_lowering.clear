@@ -15165,9 +15165,9 @@ PRIVATE FN mIRLowering__hash_literal_put_stmt(MUTABLE self: MIRLowering, MUTABLE
     MUTABLE lowered: ?Emittable = lowered_branch_value;
     MUTABLE placed: Emittable = COPY UNWRAP (lowered);
     IF value_type THEN
-      placed = COPY TRY (mIRLowering__place_value_for_destination(&self, COPY UNWRAP (lowered), &val_node, plan.alloc, TypeTypeInput{ Type: COPY UNWRAP (value_type) }));
+      placed = COPY TRY (mIRLowering__place_value_for_destination(&self, COPY UNWRAP (lowered), &val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }));
     END
-    TRY (mIRLowering__materialize_owned_sink_value(&self, placed, val_node, plan.alloc, TypeTypeInput{ Type: COPY UNWRAP (value_type) }))
+    TRY (mIRLowering__materialize_owned_sink_value(&self, placed, val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }))
     });
     MUTABLE value_mir = TRY (mIRLowering__hoist_alloc(&self, &raw_value, &val_node, TRUE));
     MUTABLE operands = (TRY (mIRLowering__ownership_operands_for_value(&self, UNWRAP (key_mir), &key_node, "hash literal key", plan.alloc)) + TRY (mIRLowering__ownership_operands_for_value(&self, &value_mir, &val_node, "hash literal value", plan.alloc)));
