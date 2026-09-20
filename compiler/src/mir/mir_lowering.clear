@@ -16483,7 +16483,7 @@ PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowe
     MUTABLE source = COPY unwrap.target;
     MUTABLE target_alloc = TRY (mIRLowering__placement_for_node(&self, source));
     MUTABLE source_type: ?Type = TRY (type__from_node_mut(source, "conditional assignment receiver"));
-    MUTABLE optional_ptr_branch_value: ?MethodCall = NIL;
+    MUTABLE optional_ptr_branch_value: ?Emittable = NIL;
     IF source IS_A GetIndex AS get_index THEN
       MUTABLE index = get_index;
       MUTABLE receiver: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(index.target)));
@@ -16491,7 +16491,7 @@ PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowe
         receiver = AddressOf{ expr: Emittable{ AddressOf: CAST(COPY receiver AS AddressOf)}, lowered_node_id: NIL, ownership_consumption: NIL };
       END
       target_alloc = TRY (mIRLowering__placement_for_node(&self, index.target));
-      optional_ptr_branch_value = TRY (mIRLowering__emit_builtin(&self, :getAtPtrOpt, [Emittable{ AddressOf: CAST(COPY receiver AS AddressOf)}, TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(index.index)))]));
+      optional_ptr_branch_value = castMIRLoweringReturnValueToEmittable__mir_lowering(TRY (mIRLowering__emit_builtin(&self, :getAtPtrOpt, [Emittable{ AddressOf: CAST(COPY receiver AS AddressOf)}, UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(index.index))))])));
     ELSE
       IF TRY (type__node_reference?( UNWRAP (source_type))) THEN
         MUTABLE payload = UNWRAP (TRY (type__node_payload_type( UNWRAP (source_type))));
@@ -16500,12 +16500,12 @@ PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowe
         IF !(shared) THEN
           &self.state.function_state.node_store_types.insert(zig_type);
         END
-        optional_ptr_branch_value = MIRMethodCall{ receiver: Emittable{ Call: COPY TRY (mIRLowering__node_store_type_mir(&self, zig_type, shared)) }, method: "getBound", args: [CAST(Ident{ name: mIRLowering__node_store_binding_name(self, zig_type, shared), lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(source))) AS Emittable) AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+        optional_ptr_branch_value = Emittable{ MIRMethodCall: COPY MIRMethodCall{ receiver: Emittable{ Call: COPY TRY (mIRLowering__node_store_type_mir(&self, zig_type, shared)) }, method: "getBound", args: [CAST(Ident{ name: mIRLowering__node_store_binding_name(self, zig_type, shared), lowered_node_id: NIL, ownership_consumption: NIL } AS Any), CAST(CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(source))) AS Emittable) AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL } };
       ELSE
-        optional_ptr_branch_value = TRY (mIRLowering__emit_builtin(&self, :getOptionalPtr, [Emittable{ AddressOf: COPY AddressOf{ expr: COPY CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(source))) AS Emittable), lowered_node_id: NIL, ownership_consumption: NIL } }]));
+        optional_ptr_branch_value = castMIRLoweringReturnValueToEmittable__mir_lowering(TRY (mIRLowering__emit_builtin(&self, :getOptionalPtr, [Emittable{ AddressOf: COPY AddressOf{ expr: COPY CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(source))) AS Emittable), lowered_node_id: NIL, ownership_consumption: NIL } }])));
       END
     END
-    MUTABLE optional_ptr: MethodCall = optional_ptr_branch_value?;
+    MUTABLE optional_ptr: Emittable = UNWRAP (optional_ptr_branch_value);
     MUTABLE capture = "__conditional_mut_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_690 = mIRLowering__lowering_counters(&self);
     mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_690)) }}";
     MUTABLE target = FieldGet{ object: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, field: COPY CAST(field.field AS String), lowered_node_id: NIL, ownership_consumption: NIL };
@@ -16519,22 +16519,22 @@ PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowe
       MUTABLE raw: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
       TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (raw), &node.value, target_alloc, TypeTypeInput{ Type: COPY field_type }))
     });
-    MUTABLE materialized =   IF lifecyclePlan__needs_drop?(field_lifecycle) THEN
-        TRY (mIRLowering__materialize_owned_sink_value(&self, lowered, node.value, target_alloc))
+    MUTABLE materialized: ?Emittable =   IF lifecyclePlan__needs_drop?(field_lifecycle) THEN
+        TRY (mIRLowering__materialize_owned_sink_value(&self, UNWRAP (lowered), node.value, target_alloc))
       ELSE
         lowered
       END;
     IF mIRLowering__node_store_create_call?(self, materialized) THEN
-      RETURN mIRLowering__hoist_evaluation_barrier(&self, materialized);
+      RETURN Emittable{ Ident: COPY mIRLowering__hoist_evaluation_barrier(&self, UNWRAP (materialized)) };
     ELSE_IF TRY (mIRLowering__mir_allocates?(&self, materialized)) THEN
-      RETURN TRY (mIRLowering__hoist_alloc(&self, &materialized, &node.value, TRUE));
+      RETURN TRY (mIRLowering__hoist_alloc(&self, UNWRAP (materialized), &node.value, TRUE));
     ELSE
       RETURN materialized;
     END
     NIL
     });
-    MUTABLE set = Set{ target: Emittable{ FieldGet: COPY target }, value: COPY value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    MUTABLE stmt = TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ Set: COPY set }, &value, node.value, "MIR::Set", :owned_sink, target_alloc));
+    MUTABLE set = Set{ target: Emittable{ FieldGet: COPY target }, value: COPY UNWRAP (value), needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    MUTABLE stmt = TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ Set: COPY set }, UNWRAP (value), &node.value, "MIR::Set", :owned_sink, target_alloc));
     MUTABLE then_body: []Emittable = List[];
     then_body = ruby_array_concat_Stmt(then_body, CAST(value_pending AS []Emittable));
     IF lifecyclePlan__needs_drop?(field_lifecycle) THEN
@@ -16542,7 +16542,7 @@ PRIVATE FN mIRLowering__lower_conditional_field_assignment(MUTABLE self: MIRLowe
       &then_body.append(CAST(ExprStmt{ expr: Emittable{ Call: COPY cleanup_call }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
     END
     &then_body.append(castEmittableToStmt(stmt));
-    RETURN IfBindStmt{ bindings: COPY [{:expr: optional_ptr, :capture: capture, :node_ref: FALSE}], then_body: then_body, else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    RETURN IfBindStmt{ bindings: COPY [MIRIfBinding{ expr: COPY optional_ptr, capture: MirCapture{ StringValue: COPY capture }, node_ref: FALSE, owns_capture: NIL, predicate: NIL, pointer_capture: NIL, pointer_shaped: NIL }], then_body: then_body, else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN mIRLowering__assignment_target_plan(MUTABLE self: MIRLowering, node: Assignment) RETURNS !AssignmentTargetPlan ->
     MUTABLE name = COPY node.name;
