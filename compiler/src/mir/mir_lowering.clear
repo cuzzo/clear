@@ -18075,20 +18075,20 @@ PRIVATE FN mIRLowering__synthetic_return_ownership_plan(MUTABLE self: MIRLowerin
 END
 PRIVATE FN mIRLowering__return_lowering_plan(MUTABLE self: MIRLowering, MUTABLE node: ReturnNode) RETURNS !ReturnOwnershipPlan ->
     MUTABLE ret_alloc: ?String@symbol = TRY (mIRLowering__return_destination_alloc(&self, node));
-    MUTABLE value_branch_value: ?U = NIL;
+    MUTABLE value_branch_value: ?Emittable = NIL;
     IF node.value EXISTS AS rtoc_value_present THEN
-      value_branch_value = mIRLowering__with_decl_alloc(&self, ret_alloc, %() USE(node, ret_alloc, MUTABLE self) -> {
+      value_branch_value = mIRLowering__with_decl_alloc(&self, ret_alloc, %() USE(MUTABLE node, ret_alloc, MUTABLE self) -> {
     MUTABLE destination_type: ?Type@multiowned = TRY (mIRLowering__return_value_destination_type(&self, node));
-    MUTABLE lowered: ?Emittable = mIRLowering__with_expected_type(&self, CAST(destination_type AS ?Type), %() USE(node, MUTABLE self) -> {
-      MUTABLE rtoc_lambda_result_768: ?Emittable = TRY (mIRLowering__lower(&self, &rtoc_value_present));
+    MUTABLE lowered: ?Emittable = mIRLowering__with_expected_type(&self, CAST(destination_type AS ?Type), %() USE(MUTABLE node, MUTABLE self) -> {
+      MUTABLE rtoc_lambda_result_768: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY UNWRAP (node.value))));
       rtoc_lambda_result_768
     });
-    TRY (mIRLowering__place_value_for_destination(&self, &lowered, node.value, ret_alloc, ruby_wrap_optional_Type_multiowned_TypeTypeInput(destination_type)))
+    TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (lowered), UNWRAP (node.value), ret_alloc, ruby_wrap_optional_Type_multiowned_TypeTypeInput(destination_type)))
       });
     ELSE
       value_branch_value = NIL;
     END
-    MUTABLE value: ?U = value_branch_value;
+    MUTABLE value: ?Emittable = COPY value_branch_value;
     MUTABLE explicit_return_names: [Set]String = Set[];
     IF ((node.value EXISTS) AND !(mIRLowering__aggregate_return_literal?(&self, UNWRAP (node.value)))) THEN
       explicit_return_names = TRY (mIRLowering__returned_binding_names(&self, UNWRAP (node.value)));
@@ -18102,11 +18102,10 @@ PRIVATE FN mIRLowering__return_lowering_plan(MUTABLE self: MIRLowering, MUTABLE 
       &direct_value_names.insert(CAST(emittable__name(value) AS String));
     END
     MUTABLE returned_names: [Set]String = Set[];
-    FOR _ IN ([explicit_return_names, moved_root_names, consumed_root_names, direct_value_names]) DO
-    FOR _ IN _ DO
-    &returned_names.insert(COPY _);
-    END
-    END
+    &returned_names.merge(explicit_return_names);
+    &returned_names.merge(moved_root_names);
+    &returned_names.merge(consumed_root_names);
+    &returned_names.merge(direct_value_names);
     MUTABLE transfer_required_names = TRY (mIRLowering__return_transfer_required_names(&self, returned_names));
     MUTABLE move_guard_required_names = TRY (mIRLowering__return_move_guard_required_names(&self, returned_names));
     RETURN ReturnOwnershipPlan{ value: COPY value, explicit_return_names: COPY explicit_return_names, moved_root_names: COPY moved_root_names, consumed_root_names: COPY consumed_root_names, direct_value_names: COPY direct_value_names, converted_cleanup_names: COPY Set[], transfer_required_names: COPY transfer_required_names, move_guard_required_names: COPY move_guard_required_names };
