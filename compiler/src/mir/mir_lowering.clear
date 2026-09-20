@@ -9067,7 +9067,8 @@ PRIVATE FN mIRLowering__inject_protocol_map_allocator_args(MUTABLE self: MIRLowe
         &rtoc_out.append(COPY UNWRAP (mir_args[rtoc_i]));
         IF rtoc_param EXISTS AS rtoc_param_value THEN
           IF mIRLowering__protocol_map_signature_param?(self, signature_value, rtoc_param_value) THEN
-            &rtoc_out.append(TRY (mIRLowering__protocol_map_allocator_for(&self, UNWRAP (ast_args[rtoc_i]))));
+            MUTABLE rtoc_alloc_arg: Locatable = COPY UNWRAP (ast_args[rtoc_i]);
+            &rtoc_out.append(TRY (mIRLowering__protocol_map_allocator_for(&self, &rtoc_alloc_arg)));
           END
         END
         rtoc_i = rtoc_i + 1;
@@ -9105,13 +9106,14 @@ PRIVATE FN mIRLowering__lower_protocol_map_put_call(MUTABLE self: MIRLowering, r
     });
     rtoc_lambda_result_380
     });
-    value = TRY (mIRLowering__materialize_owned_sink_value(&self, value, value_node, sink_alloc, TypeTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ TypeExpression: COPY sink_type })) }));
+    value = TRY (mIRLowering__materialize_owned_sink_value(&self, UNWRAP (value), value_node, sink_alloc, TypeTypeInput{ Type: COPY TRY (type__new(TypeConstructionInput{ TypeExpression: COPY sink_type })) }));
     IF TRY (mIRLowering__mir_allocates?(&self, value)) THEN
-      value = TRY (mIRLowering__hoist_alloc(&self, &value, &value_node, TRUE));
+      value = TRY (mIRLowering__hoist_alloc(&self, UNWRAP (value), &value_node, TRUE));
     END
-    MUTABLE allocator = TRY (mIRLowering__protocol_map_allocator_for(&self, &receiver_node));
-    MUTABLE call = ProtocolCall{ protocol: :Map, operation: :put, receiver: COPY receiver, args: [CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(key_node))) AS Emittable), value, allocator, allocator], lowered_node_id: NIL, ownership_consumption: NIL };
-    RETURN TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ ProtocolCall: COPY call }, &value, &value_node, "Map protocol put", :owned_sink, sink_alloc));
+    MUTABLE rtoc_recv_node: Locatable = COPY receiver_node;
+    MUTABLE allocator = TRY (mIRLowering__protocol_map_allocator_for(&self, &rtoc_recv_node));
+    MUTABLE call = ProtocolCall{ protocol: :Map, operation: :put, receiver: COPY receiver, args: [CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(key_node))) AS Emittable), UNWRAP (value), COPY allocator, COPY allocator], lowered_node_id: NIL, ownership_consumption: NIL };
+    RETURN TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ ProtocolCall: COPY call }, UNWRAP (value), &value_node, "Map protocol put", :owned_sink, sink_alloc));
 END
 PRIVATE FN mIRLowering__call_owned_return?(MUTABLE self: MIRLowering, node: Node) RETURNS !Bool ->
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
