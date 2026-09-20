@@ -7957,7 +7957,15 @@ PRIVATE FN mIRLowering__build_post_inner_fn(self: MIRLowering, node: FunctionDef
 END
 PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: FunctionDef, params_mir: []MIRParam, return_type_str: String, fn_needs_rt: Bool, vis: String@symbol, comptime_params: []String) RETURNS !FnDef ->
     MUTABLE inner_name = "__${mIRLowering__zig_safe_name(self, node.name)}_post_body";
-    MUTABLE mutable_scalar = ((((node.params |> WHERE ((_.mutable != NIL) AND !(((TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY _.type }, TRUE))).startsWith?("[]") OR (TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY _.type }, TRUE))).startsWith?("*")))))) |> SELECT _.name)) |> DISTINCT _;
+    MUTABLE mutable_scalar: [Set]String = Set[];
+    FOR rtoc_pp IN node.params DO
+      IF rtoc_pp.mutable != NIL THEN
+        MUTABLE rtoc_pz = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY rtoc_pp.type }, TRUE));
+        IF !((rtoc_pz.startsWith?("[]") OR rtoc_pz.startsWith?("*"))) THEN
+          &mutable_scalar.insert(COPY rtoc_pp.name);
+        END
+      END
+    END
     MUTABLE forward_name = %(p: Param) USE(mutable_scalar) -> {
     IF mutable_scalar.contains?(p.name) THEN
       RETURN "_m_${p.name}";
@@ -7966,7 +7974,10 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
     END
     NIL
     };
-    MUTABLE arg_idents = node.params |> SELECT Emittable{ Ident: COPY Ident{ name: forward_name(_), lowered_node_id: NIL, ownership_consumption: NIL } };
+    MUTABLE arg_idents: []Emittable = List[];
+    FOR rtoc_ai IN node.params DO
+      &arg_idents.append(Emittable{ Ident: COPY Ident{ name: forward_name(rtoc_ai), lowered_node_id: NIL, ownership_consumption: NIL } });
+    END
     IF fn_needs_rt THEN
       arg_idents = ([Emittable{ Ident: COPY Ident{ name: "rt", lowered_node_id: NIL, ownership_consumption: NIL } }] + arg_idents);
     END
@@ -7986,19 +7997,20 @@ PRIVATE FN mIRLowering__build_post_outer_fn(MUTABLE self: MIRLowering, node: Fun
     MUTABLE inner_contract = callableContract__new(inner_sig, TRY (ownershipContract__new(List[], List[], List[], TRUE)), node.params.length());
     MUTABLE inner_call_mir = Call{ callee: COPY inner_name, args: COPY arg_idents, try_wrap: is_error_union, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FunctionDef: COPY node })), callable_contract: COPY inner_contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
     inner_call_mir.result_type = TRY (type__new((IF payload_type EXISTS AS inner_payload THEN TypeConstructionInput{ Type: COPY inner_payload } ELSE TypeConstructionInput{ SymbolValue: :Void } END)));
-    MUTABLE check_stmts = (((node.post_clauses OR_ELSE List[]))) |> SELECT {
-    MUTABLE expr: Locatable = CAST(UNWRAP (_[:expr]) AS Locatable);
-    MUTABLE source: String = CAST((_[:source] OR_ELSE ContractClauseValue{ StringValue: "" }) AS String);
-    MUTABLE cond_mir: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(expr)));
-    MUTABLE msg_text: String = "DEBUG_POST failed";
-      IF !(source.empty?()) THEN
-        msg_text = "DEBUG_POST failed: ${source}";
-      END
-    IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY UNWRAP (cond_mir), lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Panic: COPY Panic{ message: COPY msg_text, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL }
-    };
+    MUTABLE check_stmts: []Emittable = List[];
+    FOR _ IN (((node.post_clauses OR_ELSE List[]))) DO
+      MUTABLE expr: Locatable = CAST(UNWRAP (_[:expr]) AS Locatable);
+      MUTABLE source: String = CAST((_[:source] OR_ELSE ContractClauseValue{ StringValue: "" }) AS String);
+      MUTABLE cond_mir: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(expr)));
+      MUTABLE msg_text: String = "DEBUG_POST failed";
+        IF !(source.empty?()) THEN
+          msg_text = "DEBUG_POST failed: ${source}";
+        END
+      &check_stmts.append(Emittable{ IfStmt: COPY IfStmt{ cond: Emittable{ MIRUnaryOp: COPY MIRUnaryOp{ op: "!", operand: COPY UNWRAP (cond_mir), lowered_node_id: NIL, ownership_consumption: NIL } }, then_body: [Emittable{ Panic: COPY Panic{ message: COPY msg_text, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }], else_body: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, comptime: NIL } });
+    END
     MUTABLE debug_stmts: []Emittable = List[];
     IF !((check_stmts.length() == 0)) THEN
-      debug_stmts = [Emittable{ DebugOnly: COPY DebugOnly{ body: check_stmts |> SELECT Emittable{ IfStmt: COPY _ }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
+      debug_stmts = [Emittable{ DebugOnly: COPY DebugOnly{ body: COPY check_stmts, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
     END
     MUTABLE body: []Emittable = List[];
     IF is_void THEN
