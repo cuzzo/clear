@@ -5927,7 +5927,7 @@ PRIVATE FN mIRLowering__stub_intercept_for(MUTABLE self: MIRLowering, fn_name: S
     MUTABLE suppress_names = (call_inputs |> UNNEST TRY (mIRLowering__stub_local_idents(&self, UNWRAP (_)))) |> DISTINCT _ |> SELECT COPY _;
     MUTABLE suppress_stmts = suppress_names |> SELECT Suppress{ name: COPY _, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
     MUTABLE counter = (mIRLowering__test_state(&self).stub_label_counter + 1);
-    self.state.test.stub_label_counter = counter;
+    self.state.test.stub_label_counter = COPY counter;
     IF (stub_info.kind == :returns) THEN
       IF (suppress_stmts.length() == 0) THEN
         RETURN Emittable{ Ident: COPY Ident{ name: COPY (stub_info).var, lowered_node_id: NIL, ownership_consumption: NIL } };
