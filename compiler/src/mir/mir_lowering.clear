@@ -17724,13 +17724,9 @@ PRIVATE FN mIRLowering__match_lowering_facts(MUTABLE self: MIRLowering, node: Ma
     IF ((is_union AND (match_ident != NIL)) AND mIRLowering__capability_state(&self).if_bind_pointer_aliases.contains?(match_ident.name)) THEN
       subject = Deref{ expr: Emittable{ Deref: CAST(COPY subject AS Deref)}, lowered_node_id: NIL, ownership_consumption: NIL };
     END
-    MUTABLE expr_type = locatable__expr( Locatable{ MatchStatement: COPY node }).resolved_type;
-    MUTABLE expr_type_sym = IF expr_type IS_A Type THEN
-      type__resolved(expr_type)
-    ELSE
-      expr_type
-    END;
-    MUTABLE is_int_match = !(!(((((!(is_union) AND !(node.string_match)) AND ((((((expr_type == :Int64) OR (expr_type == :Int32)) OR (expr_type == :Int16)) OR (expr_type == :Int8)) OR ((expr_type IS_A Type AND type__integer?(expr_type)))))) AND (node.cases |> ALL (((matchCase__kind(_) != :when) AND (matchCase__kind(_) != :struct_pattern)) AND (([matchCase__value(_)] + (matchCase__extra_values(_))) |> ALL (_ IS_A Literal AND (((_.type() == :INT64) OR (_.type() == :NUMBER)))))))))));
+    MUTABLE expr_type: ?String@symbol = locatable__resolved_type(node.expr);
+    MUTABLE expr_type_sym: ?String@symbol = COPY expr_type;
+    MUTABLE is_int_match = !(!(((((!(is_union) AND !(node.string_match)) AND ((((((expr_type == :Int64) OR (expr_type == :Int32)) OR (expr_type == :Int16)) OR (expr_type == :Int8))))) AND (node.cases |> ALL (((matchCase__kind(_) != :when) AND (matchCase__kind(_) != :struct_pattern)) AND (([matchCase__value(_)] + (matchCase__extra_values(_))) |> ALL (IF _ IS_A Literal AS rtoc_pat_lit THEN (((rtoc_pat_lit.type == :INT64) OR (rtoc_pat_lit.type == :NUMBER))) ELSE FALSE END))))))));
     MUTABLE is_enum_match = !(!((((((!(is_union) AND !(node.string_match)) AND expr_type_sym) AND (TRY (mIRLowering__enum_schemas(&self))).contains?(expr_type_sym)) AND (node.cases |> ALL (((matchCase__kind(_) != :when) AND (matchCase__kind(_) != :struct_pattern)) AND (([matchCase__value(_)] + (matchCase__extra_values(_))) |> ALL _ IS_A GetField)))))));
     RETURN MatchLoweringFacts{ expr_label: COPY expr_label, subject: Emittable{ Deref: CAST(COPY subject AS Deref)}, is_union: is_union, is_int_match: is_int_match, is_enum_match: is_enum_match, expr_type_sym: COPY CAST(IF is_union THEN
       union_lookup
