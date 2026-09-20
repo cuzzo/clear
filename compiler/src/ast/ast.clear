@@ -3525,6 +3525,13 @@ PUB STRUCT RangeLit {
   zig_pattern: ?String@symbol
 }
 PUB UNION ExternEffectValue { SymbolValue: String@symbol, BoolValue: Bool }
+PUB FN externEffectValue__to_s(value: ExternEffectValue) RETURNS String ->
+  PARTIAL MATCH value START
+    ExternEffectValue.SymbolValue AS item -> RETURN item.toString();,
+    ExternEffectValue.BoolValue AS item -> RETURN (IF item THEN "true" ELSE "false" END);,
+  END
+  RETURN "";
+END
 PUB STRUCT ExternFnDecl {
   token: Token,
   name: String,

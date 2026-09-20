@@ -9796,21 +9796,21 @@ PRIVATE FN mIRLowering__build_extern_trampoline_call(MUTABLE self: MIRLowering, 
         &runtime_ast_args.append(COPY a);
       END
     END
-    MUTABLE comptime_mir = comptime_args |> SELECT TRY (mIRLowering__lower_extern_arg(&self, _));
+    MUTABLE comptime_mir = comptime_args |> SELECT:? TRY (mIRLowering__lower_extern_arg(&self, _)) |> SELECT UNWRAP _;
     MUTABLE sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(self, CAST(node.name AS MIRLoweringName)));
     MUTABLE sig_params = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_412: ?[]Param = NIL;
-    IF sig != NIL THEN
-      rtoc_ternary_value_412 = (TRY (functionSignature__params(sig))) |> WHERE !(_.comptime);
+    IF sig EXISTS AS rtoc_tramp_sig THEN
+      rtoc_ternary_value_412 = (TRY (functionSignature__params(rtoc_tramp_sig))) |> WHERE !(_.comptime);
     ELSE
       rtoc_ternary_value_412 = List[];
     END
-    rtoc_ternary_value_412? };
+    UNWRAP (rtoc_ternary_value_412) };
     MUTABLE args: []Emittable = List[];
     MUTABLE extern_arg_i: Int64 = 0;
     WHILE (extern_arg_i < runtime_ast_args.length()) DO
       MUTABLE extern_param: ?Param = COPY sig_params[extern_arg_i];
-      MUTABLE lowered_extern: Emittable = TRY (mIRLowering__lower_c_abi_callback_arg(&self, UNWRAP (runtime_ast_args[extern_arg_i]), extern_param, source));
-      IF (((source != NIL) AND (source.abi == :c)) AND TRY (mIRLowering__c_abi_param_uses_address?(self, extern_param))) THEN
+      MUTABLE lowered_extern: Emittable = UNWRAP ( TRY (mIRLowering__lower_c_abi_callback_arg(&self, UNWRAP (runtime_ast_args[extern_arg_i]), extern_param, source)));
+      IF ((IF source EXISTS AS rtoc_tramp_src THEN (rtoc_tramp_src.abi == :c) ELSE FALSE END) AND TRY (mIRLowering__c_abi_param_uses_address?(self, extern_param))) THEN
         &args.append(Emittable{ AddressOf: COPY AddressOf{ expr: COPY lowered_extern, lowered_node_id: NIL, ownership_consumption: NIL } });
       ELSE
         &args.append(COPY lowered_extern);
@@ -9825,30 +9825,26 @@ PRIVATE FN mIRLowering__build_extern_trampoline_call(MUTABLE self: MIRLowering, 
     WHILE rtoc_indexed_i_414 < rtoc_indexed_items_413.length() DO
       &rtoc_indexed_output_415.append({
     MUTABLE p:? = sig_params[rtoc_indexed_i_414];
-    MUTABLE field_type = NIL;
+    MUTABLE field_type: ?Type = NIL;
     MUTABLE field_zig_type: ?String = NIL;
-    IF (p AND ((source != NIL) AND (source.abi == :c))) THEN
-        field_zig_type = TRY (mIRLowering__c_abi_param_zig_type(self, p));
-    ELSE_IF p THEN
-        MUTABLE pt = param__type(p);
-        MUTABLE type_obj_branch_value: ?Type = NIL;
-        IF pt IS_A Type THEN
-          type_obj_branch_value = pt;
-        ELSE
-          type_obj_branch_value = TRY (type__new(pt));
-        END
-        MUTABLE type_obj: Type = type_obj_branch_value?;
+    IF p EXISTS AS rtoc_tramp_param THEN
+      IF (IF source EXISTS AS rtoc_tr_src THEN (rtoc_tr_src.abi == :c) ELSE FALSE END) THEN
+        field_zig_type = TRY (mIRLowering__c_abi_param_zig_type(self, rtoc_tramp_param));
+      ELSE
+        # param__type already yields a Type, so Ruby's is_a? test is settled here.
+        MUTABLE type_obj: ?Type = COPY param__type(rtoc_tramp_param);
         IF sig EXISTS AS sig_value THEN
-          IF functionSignature__module_alias(sig_value) THEN
-          MUTABLE resolved = type__resolved(type_obj);
-          IF !(((type__numeric?(type_obj) OR (resolved == :Bool)) OR (resolved == :Boolean))) THEN
-            type_obj = NIL;
+          IF functionSignature__module_alias(sig_value) != NIL THEN
+            MUTABLE resolved = type__resolved(UNWRAP (type_obj));
+            IF !(((type__numeric?(UNWRAP (type_obj)) OR (resolved == :Bool)) OR (resolved == :Boolean))) THEN
+              type_obj = NIL;
+            END
           END
+        IF type_obj EXISTS AS rtoc_field_type THEN
+          field_type = COPY rtoc_field_type;
         END
-        END
-        IF NIL THEN
-          field_type = COPY NIL;
-        END
+    END
+      END
     END
     ExternTrampolineArg{ expr: COPY UNWRAP (rtoc_indexed_items_413[rtoc_indexed_i_414]), field_type: COPY field_type, field_zig_type: COPY field_zig_type }
     });
@@ -9857,7 +9853,20 @@ PRIVATE FN mIRLowering__build_extern_trampoline_call(MUTABLE self: MIRLowering, 
     rtoc_indexed_output_415
     };
     MUTABLE return_type = TRY (mIRLowering__extern_trampoline_return_type(self, Locatable{ FuncCall: COPY node }, sig));
-    RETURN ExternTrampoline{ id: id.value, callee_name: COPY CAST(((source.symbol OR_ELSE node.name)) AS String), module_alias: COPY mod_alias, comptime_args: COPY comptime_mir, runtime_args: COPY args_with_types, alloc_kind: COPY alloc_kind, return_type: CAST(COPY return_type AS Type), stdlib_def: TRY (mIRLowering__extern_trampoline_stdlib_def(self, CAST(return_type AS Type), alloc_kind, Locatable{ FuncCall: COPY node })), method_name: NIL, receiver: NIL };
+    MUTABLE rtoc_tramp_callee: String = COPY CAST(node.name AS String);
+    IF source EXISTS AS rtoc_src_name THEN
+      IF rtoc_src_name.symbol EXISTS AS rtoc_src_symbol THEN
+        rtoc_tramp_callee = COPY rtoc_src_symbol;
+      END
+    END
+    MUTABLE rtoc_alloc_kind_sym: ?String@symbol = NIL;
+    IF alloc_kind EXISTS AS rtoc_ak THEN
+      PARTIAL MATCH rtoc_ak START
+        ExternEffectValue.SymbolValue AS rtoc_ak_sym -> rtoc_alloc_kind_sym = COPY rtoc_ak_sym;,
+        DEFAULT -> PASS;
+      END
+    END
+    RETURN ExternTrampoline{ id: id.value, callee_name: COPY rtoc_tramp_callee, module_alias: COPY mod_alias, comptime_args: COPY comptime_mir, runtime_args: COPY args_with_types, alloc_kind: COPY rtoc_alloc_kind_sym, return_type: CAST(COPY return_type AS Type), stdlib_def: TRY (mIRLowering__extern_trampoline_stdlib_def(self, CAST(return_type AS Type), rtoc_alloc_kind_sym, Locatable{ FuncCall: COPY node })), method_name: NIL, receiver: NIL };
 END
 PRIVATE FN mIRLowering__build_extern_trampoline_method(MUTABLE self: MIRLowering, node: MethodCall) RETURNS !ExternTrampoline ->
     MUTABLE signature: ?FunctionSignature@multiowned = NIL;
