@@ -9685,15 +9685,14 @@ PRIVATE FN mIRLowering__lower_extern_direct_call(MUTABLE self: MIRLowering, node
     MUTABLE rtoc_indexed_i_403 = 0;
     WHILE rtoc_indexed_i_403 < rtoc_indexed_items_402.length() DO
       &rtoc_indexed_output_406.append({
-    MUTABLE param = (IF sig != NIL THEN
-        TRY (functionSignature__params(sig))
-      ELSE
-        NIL
-      END)[rtoc_indexed_i_403];
+    MUTABLE param: ?Param = NIL;
+    IF sig EXISTS AS rtoc_sig THEN
+      param = COPY (TRY (functionSignature__params(rtoc_sig)))[rtoc_indexed_i_403];
+    END
     MUTABLE lowered: ?Emittable = TRY (mIRLowering__lower_c_abi_callback_arg(&self, UNWRAP (rtoc_indexed_items_402[rtoc_indexed_i_403]), param, source));
-    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_405: ?AddressOf = NIL;
+    ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_405: ?Emittable = NIL;
       IF (((source != NIL) AND (source.abi == :c)) AND TRY (mIRLowering__c_abi_param_uses_address?(self, param))) THEN
-        rtoc_ternary_value_405 = AddressOf{ expr: COPY lowered, lowered_node_id: NIL, ownership_consumption: NIL };
+        rtoc_ternary_value_405 = Emittable{ AddressOf: COPY AddressOf{ expr: COPY UNWRAP (lowered), lowered_node_id: NIL, ownership_consumption: NIL } };
       ELSE
         rtoc_ternary_value_405 = lowered;
       END
@@ -9703,39 +9702,54 @@ PRIVATE FN mIRLowering__lower_extern_direct_call(MUTABLE self: MIRLowering, node
     END
     rtoc_indexed_output_406
     };
-    MUTABLE alloc_kind:? = (IF node.extern_effects != NIL THEN
-      node.extern_effects[:alloc]
-    ELSE
-      NIL
-    END);
-    IF (TRUE AND (alloc_kind)) THEN
+    MUTABLE alloc_kind: ?ExternEffectValue = NIL;
+    IF node.extern_effects EXISTS AS rtoc_extern_effects THEN
+      alloc_kind = COPY rtoc_extern_effects[:alloc];
+    END
+    IF alloc_kind EXISTS AS rtoc_alloc_kind THEN
       MUTABLE rt = Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL };
       MUTABLE alloc_call_branch_value: ?MIRMethodCall = NIL;
-      IF (alloc_kind == :heap) THEN
+      IF (rtoc_alloc_kind == ExternEffectValue{ SymbolValue: :heap }) THEN
         alloc_call_branch_value = MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "heapAlloc", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
       ELSE
         alloc_call_branch_value = MIRMethodCall{ receiver: Emittable{ Ident: COPY rt }, method: "frameAlloc", args: List[], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(0)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
       END
-      MUTABLE alloc_call: MIRMethodCall = alloc_call_branch_value?;
-      MUTABLE n_comptime = ast_args |> COUNT { MUTABLE rtoc_mutable_block_param_409 = COPY _;
-      (TRY (aST__full_type_mut(rtoc_mutable_block_param_409)) == :Type) };
-      args = ((args.substr(0, n_comptime) + [alloc_call]) + args.substr(n_comptime, (args.length() - n_comptime)));
+      MUTABLE alloc_call: MIRMethodCall = UNWRAP (alloc_call_branch_value);
+      MUTABLE n_comptime: Int64 = 0;
+      FOR _ IN ast_args DO
+        IF (type__resolved(TRY (aST__full_type_mut(_))) == :Type) THEN
+          n_comptime = (n_comptime + 1);
+        END
+      END
+      MUTABLE rtoc_spliced: []Emittable = List[];
+      MUTABLE rtoc_ai: Int64 = 0;
+      FOR _ IN args DO
+        IF (rtoc_ai == n_comptime) THEN
+          &rtoc_spliced.append(Emittable{ MIRMethodCall: COPY alloc_call });
+        END
+        &rtoc_spliced.append(COPY _);
+        rtoc_ai = (rtoc_ai + 1);
+      END
+      IF (n_comptime >= args.length()) THEN
+        &rtoc_spliced.append(Emittable{ MIRMethodCall: COPY alloc_call });
+      END
+      args = COPY rtoc_spliced;
     END
-    mod_alias = node.module_alias;
-    IF ((source != NIL) AND (source.abi == :c)) THEN
+    MUTABLE mod_alias: ?String = COPY node.module_alias;
+    IF (IF source EXISTS AS rtoc_src_abi THEN (rtoc_src_abi.abi == :c) ELSE FALSE END) THEN
       mod_alias = NIL;
     END
     MUTABLE mod_prefix: String = "";
-    IF NIL THEN
-      mod_prefix = "${mIRLowering__zig_module_alias(self, NIL)}.";
-    ELSE
-      mod_prefix = "";
+    IF mod_alias EXISTS AS rtoc_mod_alias THEN
+      mod_prefix = "${mIRLowering__zig_module_alias(self, rtoc_mod_alias)}.";
     END
-    MUTABLE callee_name = node.name;
-    IF source != NIL THEN
-      callee_name = source.symbol;
+    MUTABLE callee_name: String = COPY CAST(node.name AS String);
+    IF source EXISTS AS rtoc_src_sym THEN
+      IF rtoc_src_sym.symbol EXISTS AS rtoc_ext_symbol THEN
+        callee_name = COPY rtoc_ext_symbol;
+      END
     END
-    RETURN Call{ callee: "${mod_prefix}${(callee_name OR_ELSE "")}", args: COPY args, try_wrap: FALSE, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FuncCall: COPY node })), callable_contract: COPY TRY (mIRLowering__callable_contract_for(&self, sig, ast_args)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
+    RETURN Call{ callee: "${mod_prefix}${callee_name}", args: COPY args, try_wrap: FALSE, owned_return: TRY (mIRLowering__call_owned_return?(&self, Node{ FuncCall: COPY node })), callable_contract: COPY TRY (mIRLowering__callable_contract_for(&self, sig, ast_args)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
 END
 PRIVATE FN mIRLowering__lower_extern_direct_method(MUTABLE self: MIRLowering, node: MethodCall) RETURNS !MIRMethodCall ->
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
