@@ -1358,7 +1358,7 @@ PUB FN mIRLowering__lower(MUTABLE self: MIRLowering, MUTABLE node: MIRLoweringLo
         MUTABLE rename_map = TRY (functionState__rename_map(mIRLowering__function_state(&self)));
         MUTABLE escaped = (return.escaped_vars OR_ELSE Set[]) |> SELECT {
         MUTABLE escaped_safe_name = mIRLowering__zig_safe_name(self, _);
-        (rename_map[escaped_safe_name] OR_ELSE escaped_safe_name)
+        (rename_map[escaped_safe_name] OR_ELSE COPY escaped_safe_name)
       };
         Emittable{ ReturnMark: COPY ReturnMark{ escaped_vars: escaped, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }
       },
@@ -5298,7 +5298,7 @@ PRIVATE FN mIRLowering__guard_fsm_result_cleanup_mut(MUTABLE self: MIRLowering, 
         CONTINUE;
           END
           MUTABLE node_name = COPY CAST(emittable__name(UNWRAP (body[rtoc_idx_n1])) AS String);
-          MUTABLE rendered_name = COPY (rename_map[node_name] OR_ELSE node_name);
+          MUTABLE rendered_name = COPY (rename_map[node_name] OR_ELSE COPY node_name);
           IF !(((node_name == emittable__name( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(UNWRAP (facts[rtoc_idx]) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable))) OR (rendered_name == UNWRAP (facts[rtoc_idx]).name))) THEN
               rtoc_idx_n1 = rtoc_idx_n1 + 1;
         CONTINUE;
@@ -5336,7 +5336,7 @@ PRIVATE FN mIRLowering__fsm_result_transfer_facts(MUTABLE self: MIRLowering, res
     MUTABLE result_type:? = (destination_type OR_ELSE TRY (type__from_node_mut(ast_node, "FSM result owner")));
     IF (IF result_owner IS_A Ident AS ident THEN TRY (mIRLowering__ownership_tracked_transfer_type?(&self, UNWRAP (result_type))) ELSE FALSE END) THEN
       MUTABLE owner_name = COPY CAST(emittable__name(result_owner) AS String);
-      owner_name = COPY (rename_map[owner_name] OR_ELSE owner_name);
+      owner_name = COPY (rename_map[owner_name] OR_ELSE COPY owner_name);
       MUTABLE mir_entry: CleanupEntry@multiowned = cleanupEntry__none();
       IF bindings[CAST(emittable__name(result_owner) AS String)] EXISTS AS direct_entry THEN
         mir_entry = KEEP direct_entry;
@@ -5359,7 +5359,7 @@ PRIVATE FN mIRLowering__fsm_result_transfer_facts(MUTABLE self: MIRLowering, res
     WHILE rtoc_idx < consumed.length() DO
       MUTABLE consumed_name: String = COPY UNWRAP (consumed[rtoc_idx]);
       MUTABLE safe = mIRLowering__fsm_zig_safe_name(self, consumed_name);
-      safe = COPY (rename_map[safe] OR_ELSE safe);
+      safe = COPY (rename_map[safe] OR_ELSE COPY safe);
       MUTABLE binding_entry: CleanupEntry@multiowned = cleanupEntry__none();
       IF bindings[consumed_name] EXISTS AS direct_binding THEN
         binding_entry = KEEP direct_binding;
@@ -5378,7 +5378,7 @@ PRIVATE FN mIRLowering__fsm_result_transfer_facts(MUTABLE self: MIRLowering, res
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_199.length() DO
       MUTABLE name = COPY CAST(emittable__name(rtoc_each_items_199[rtoc_idx]) AS String);
-      MUTABLE safe = COPY (rename_map[name] OR_ELSE name);
+      MUTABLE safe = COPY (rename_map[name] OR_ELSE COPY name);
       MUTABLE entry: CleanupEntry@multiowned = cleanupEntry__none();
       IF bindings[name] EXISTS AS direct_entry THEN
         entry = KEEP direct_entry;
@@ -5470,7 +5470,7 @@ PRIVATE FN mIRLowering__fsm_owned_transfer_identifier?(MUTABLE self: MIRLowering
       RETURN FALSE;
     END
     MUTABLE safe = mIRLowering__fsm_zig_safe_name(self, node.name);
-    safe = COPY (rename_map[safe] OR_ELSE safe);
+    safe = COPY (rename_map[safe] OR_ELSE COPY safe);
     MUTABLE entry: CleanupEntry@multiowned = cleanupEntry__none();
     IF bindings[node.name] EXISTS AS named_entry THEN
       entry = KEEP named_entry;
@@ -14789,7 +14789,7 @@ PRIVATE FN mIRLowering__move_mark_field_mut(MUTABLE self: MIRLowering, v: Locata
       END
       MUTABLE nm = mIRLowering__zig_safe_name(self, identifier__name(identifier_mutable));
       MUTABLE rename_map = TRY (functionState__rename_map(mIRLowering__function_state(&self)));
-      nm = COPY (rename_map[nm] OR_ELSE nm);
+      nm = COPY (rename_map[nm] OR_ELSE COPY nm);
       MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(&self))))[identifier__name(identifier_mutable)] OR_ELSE cleanupEntry__none());
       IF !(cleanupEntry__present?(entry)) THEN
         RETURN;
