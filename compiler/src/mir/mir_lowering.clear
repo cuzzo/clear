@@ -17242,12 +17242,13 @@ PRIVATE FN mIRLowering__with_pointer_shaped_binds<U>(MUTABLE self: MIRLowering, 
     IF (names.length() == 0) THEN
       RETURN blk();
     END
-    MUTABLE previous = COPY mIRLowering__capture_state(&self).current_lambda_pointer_params;
+    MUTABLE rtoc_cap_state = mIRLowering__capture_state(&self);
+    MUTABLE previous = COPY rtoc_cap_state.current_lambda_pointer_params;
     FOR _ IN names DO
-      &mIRLowering__capture_state(&self).current_lambda_pointer_params.insert(COPY _);
+      &rtoc_cap_state.current_lambda_pointer_params.insert(COPY _);
     END
     MUTABLE rtoc_pointer_bind_result = blk();
-    mIRLowering__capture_state(&self).current_lambda_pointer_params = COPY previous;
+    rtoc_cap_state.current_lambda_pointer_params = COPY previous;
     RETURN rtoc_pointer_bind_result;
 END
 PRIVATE FN mIRLowering__mutable_struct_list_bind?(self: MIRLowering, expr: Locatable) RETURNS !Bool ->
