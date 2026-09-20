@@ -14929,7 +14929,7 @@ PRIVATE FN mIRLowering__lower_list_lit(MUTABLE self: MIRLowering, MUTABLE node: 
     MUTABLE ti = COPY plan.type_info;
     IF TRY (listLiteralPlan__bounded_stream?(plan)) THEN
       IF mIRLowering__bc_target?(&self) THEN
-        MUTABLE items_mir_bc = node.items |> SELECT TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_)));
+        MUTABLE items_mir_bc = node.items |> SELECT UNWRAP (TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_))));
         RETURN Emittable{ MakeList: COPY MakeList{ elem_type: "__bc_stream__", items: COPY items_mir_bc, alloc: :frame, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
       MUTABLE s_id = mIRLowering__next_stream_literal_id(&self);
@@ -14951,8 +14951,8 @@ PRIVATE FN mIRLowering__lower_list_lit(MUTABLE self: MIRLowering, MUTABLE node: 
       rtoc_lambda_result_627
     });
     body = (body + pending);
-    MUTABLE item_name = "__stream${s_id}_item${rtoc_indexed_i_626.toString()}";
-    &body.append(Let{ name: COPY item_name, init: COPY item_mir, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL });
+    MUTABLE item_name = "__stream${mIRLoweringGeneratedId__to_s(s_id)}_item${rtoc_indexed_i_626.toString()}";
+    &body.append(Emittable{ Let: COPY Let{ name: COPY item_name, init: COPY UNWRAP (item_mir), mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } });
     Ident{ name: COPY item_name, lowered_node_id: NIL, ownership_consumption: NIL }
       });
       rtoc_indexed_i_626 = rtoc_indexed_i_626 + 1;
@@ -14961,7 +14961,7 @@ PRIVATE FN mIRLowering__lower_list_lit(MUTABLE self: MIRLowering, MUTABLE node: 
       };
       MUTABLE stream_value = StructInit{ zig_type: COPY stream_zig, fields: [CAST({:name: "items", :value: ArrayInit{ elem_type: COPY promise_zig, count: COPY CAST(n AS String), items: COPY item_idents, lowered_node_id: NIL, ownership_consumption: NIL }} AS Any)], lowered_node_id: NIL, ownership_consumption: NIL };
       stream_value = castEmittableToStructInit(TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ StructInit: COPY stream_value }, item_idents |> UNNEST TRY (mIRLowering__mir_ident_names(self, Emittable{ Ident: COPY _ })), "MIR::BoundedStream", :owned_sink, :heap, FALSE)));
-      &body.append(BreakStmt{ label: COPY label, value: Emittable{ StructInit: COPY stream_value }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL });
+      &body.append(Emittable{ BreakStmt: COPY BreakStmt{ label: COPY label, value: Emittable{ StructInit: COPY stream_value }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } });
       MUTABLE block = MIRBlockExpr{ label: COPY label, body: COPY body, lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
       block.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY ti }));
       RETURN Emittable{ MIRBlockExpr: COPY block };
@@ -14969,11 +14969,11 @@ PRIVATE FN mIRLowering__lower_list_lit(MUTABLE self: MIRLowering, MUTABLE node: 
     MUTABLE list_alloc = COPY plan.alloc;
     MUTABLE elem_type: ?Type = COPY plan.element_type;
     elem_zig = COPY plan.element_zig;
-    MUTABLE items_mir = node.items |> SELECT mIRLowering__with_decl_alloc(&self, list_alloc, %() USE(elem_type, elem_zig, list_alloc, node, plan, _, MUTABLE self) -> {
+    MUTABLE items_mir = node.items |> SELECT:? mIRLowering__with_decl_alloc(&self, list_alloc, %() USE(elem_type, elem_zig, list_alloc, node, plan, _, MUTABLE self) -> {
     IF ((listLiteralPlan__fixed_stack_or_frame?(plan, node) AND _ IS_A Literal) AND ([:STRING, :SYMBOL]).contains?(CAST(locatable__type(_) AS String@symbol))) THEN
         RETURN TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_)));
     END
-    MUTABLE lowered_item_branch_value: ?U = NIL;
+    MUTABLE lowered_item_branch_value: ?Emittable = NIL;
       IF elem_type EXISTS AS elem_type_value THEN
         lowered_item_branch_value = mIRLowering__with_expected_type(&self, elem_type_value, %() USE(_, MUTABLE self) -> {
       MUTABLE rtoc_lambda_result_629: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_)));
@@ -14982,26 +14982,27 @@ PRIVATE FN mIRLowering__lower_list_lit(MUTABLE self: MIRLowering, MUTABLE node: 
       ELSE
         lowered_item_branch_value = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(_)));
       END
-    MUTABLE lowered_item: U = lowered_item_branch_value?;
+    MUTABLE lowered_item: Emittable = UNWRAP (lowered_item_branch_value);
     MUTABLE placed_item: Emittable = lowered_item;
     IF elem_type != NIL THEN
-      placed_item = COPY TRY (mIRLowering__place_value_for_destination(&self, &lowered_item, &_, list_alloc, TypeTypeInput{ Type: COPY elem_type }));
+      placed_item = COPY TRY (mIRLowering__place_value_for_destination(&self, &lowered_item, COPY _, list_alloc, TypeTypeInput{ Type: COPY elem_type }));
     END
     MUTABLE item_value = TRY (mIRLowering__materialize_owned_sink_value(&self, placed_item, _, list_alloc, ruby_wrap_optional_Type_TypeTypeInput__mir_lowering(elem_type)));
-    MUTABLE item_alloc = (mIRLowering__mir_owned_alloc(&self, item_value) OR_ELSE (IF TRY (mIRLowering__ast_expr_produces_heap?(&self, _)) THEN
-        :heap
-      ELSE
-        TRY (mIRLowering__placement_for_node(&self, _))
-      END));
-    MUTABLE needs_allocator_transport = ((plan.element_needs_owned_storage AND TRUE) AND (item_alloc != list_alloc));
-    MUTABLE item = TRY (mIRLowering__hoist_alloc(&self, &item_value, &_, !(needs_allocator_transport)));
-    IF needs_allocator_transport THEN
-      RETURN TRY (mIRLowering__hoist_alloc(&self, Emittable{ DeepCopy: COPY DeepCopy{ source: COPY item, zig_type: COPY elem_zig, elem_type: NIL, strategy: :full_value, alloc: COPY list_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY elem_zig), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, &_, TRUE));
-    ELSE
-      RETURN item;
+    MUTABLE item_alloc: String@symbol = :heap;
+    IF !(TRY (mIRLowering__ast_expr_produces_heap?(&self, _))) THEN
+      item_alloc = TRY (mIRLowering__placement_for_node(&self, COPY _));
     END
-    NIL
-    });
+    IF TRY (mIRLowering__mir_owned_alloc(&self, item_value)) EXISTS AS rtoc_owned_alloc THEN
+      item_alloc = COPY rtoc_owned_alloc;
+    END
+    MUTABLE needs_allocator_transport = ((plan.element_needs_owned_storage AND TRUE) AND (item_alloc != list_alloc));
+    MUTABLE item = TRY (mIRLowering__hoist_alloc(&self, &item_value, COPY _, !(needs_allocator_transport)));
+    MUTABLE rtoc_item_out: Emittable = COPY item;
+    IF needs_allocator_transport THEN
+      rtoc_item_out = TRY (mIRLowering__hoist_alloc(&self, Emittable{ DeepCopy: COPY DeepCopy{ source: COPY item, zig_type: COPY elem_zig, elem_type: NIL, strategy: :full_value, alloc: COPY list_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY elem_zig), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, COPY _, TRUE));
+    END
+    rtoc_item_out
+    }) |> SELECT UNWRAP _;
     IF listLiteralPlan__fixed_stack_or_frame?(plan, node) THEN
       RETURN Emittable{ ArrayInit: COPY castEmittableToArrayInit(TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ ArrayInit: COPY ArrayInit{ elem_type: COPY elem_zig, count: COPY CAST(node.items.length() AS String), items: COPY items_mir, lowered_node_id: NIL, ownership_consumption: NIL } }, items_mir |> UNNEST TRY (mIRLowering__mir_ident_names(self, _)), "MIR::ArrayInit", :owned_sink, list_alloc))) };
     END
@@ -15011,10 +15012,10 @@ PRIVATE FN mIRLowering__lower_list_lit(MUTABLE self: MIRLowering, MUTABLE node: 
         IF mIRLowering__list_literal_capability_wrap_needed?(self, ti) THEN
           inner_ti_branch_value = TRY (type__bare_data_type(ti));
         ELSE
-          inner_ti_branch_value = ti;
+          inner_ti_branch_value = COPY ti;
         END
         MUTABLE inner_ti: Type = inner_ti_branch_value?;
-        inner = ContainerInit{ zig_type: COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY inner_ti })), strategy: :array_list_empty, alloc: COPY list_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+        MUTABLE inner: ContainerInit = ContainerInit{ zig_type: COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY inner_ti })), strategy: :array_list_empty, alloc: COPY list_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
         RETURN TRY (mIRLowering__wrap_list_literal_capability(self, Emittable{ ContainerInit: COPY inner }, ti, list_alloc));
       END
       IF type__set_collection?(ti) THEN
@@ -15022,16 +15023,16 @@ PRIVATE FN mIRLowering__lower_list_lit(MUTABLE self: MIRLowering, MUTABLE node: 
         IF mIRLowering__list_literal_capability_wrap_needed?(self, ti) THEN
           inner_ti_branch_value = TRY (type__bare_data_type(ti));
         ELSE
-          inner_ti_branch_value = ti;
+          inner_ti_branch_value = COPY ti;
         END
         MUTABLE inner_ti: Type = inner_ti_branch_value?;
-        inner = ContainerInit{ zig_type: COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY inner_ti })), strategy: :set_empty, alloc: COPY list_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+        MUTABLE inner: ContainerInit = ContainerInit{ zig_type: COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY inner_ti })), strategy: :set_empty, alloc: COPY list_alloc, capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
         RETURN TRY (mIRLowering__wrap_list_literal_capability(self, Emittable{ ContainerInit: COPY inner }, ti, list_alloc));
       END
       RETURN TRY (mIRLowering__wrap_list_literal_capability(self, Emittable{ MakeList: COPY MakeList{ elem_type: COPY elem_zig, items: List[], alloc: COPY list_alloc, minimum_capacity: NIL, lowered_node_id: NIL, ownership_consumption: NIL } }, ti, list_alloc));
     END
-    inner = castEmittableToMakeList(TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ MakeList: COPY MakeList{ elem_type: COPY elem_zig, items: COPY items_mir, alloc: COPY list_alloc, minimum_capacity: type__allocation_hint(ti), lowered_node_id: NIL, ownership_consumption: NIL } }, items_mir |> UNNEST TRY (mIRLowering__mir_ident_names(self, _)), "MIR::MakeList", :owned_sink, list_alloc)));
-    RETURN TRY (mIRLowering__wrap_list_literal_capability(self, Emittable{ MakeList: COPY inner }, ti, list_alloc));
+    MUTABLE inner_list: MakeList = castEmittableToMakeList(TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ MakeList: COPY MakeList{ elem_type: COPY elem_zig, items: COPY items_mir, alloc: COPY list_alloc, minimum_capacity: type__allocation_hint(ti), lowered_node_id: NIL, ownership_consumption: NIL } }, items_mir |> UNNEST TRY (mIRLowering__mir_ident_names(self, _)), "MIR::MakeList", :owned_sink, list_alloc)));
+    RETURN TRY (mIRLowering__wrap_list_literal_capability(self, Emittable{ MakeList: COPY inner_list }, ti, list_alloc));
 END
 PRIVATE FN mIRLowering__lower_tuple_lit(MUTABLE self: MIRLowering, node: TupleLit) RETURNS !TupleLiteral ->
     MUTABLE tuple_type = TRY (type__new(TypeConstructionInput{ Type: COPY (locatable__coerced_type_info(Locatable{ TupleLit: COPY node }) OR_ELSE TRY (aST__full_type_mut(Locatable{ TupleLit: COPY node }))) }));
