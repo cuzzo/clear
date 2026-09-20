@@ -333,7 +333,7 @@ PRIVATE FN clearParser__parse_extern_struct(MUTABLE self: ClearParser, extern_to
     IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&self, :KEYWORD, "FROM"))) THEN
       from_module = TRY (token__text_mut(TRY (clearParser__consume(&self, :STRING))));
     END
-    MUTABLE source = TRY (clearParser__parse_extern_source(&self, (from_module OR_ELSE ""), (as_type OR_ELSE name)));
+    MUTABLE source = TRY (clearParser__parse_extern_source(&self, (from_module OR_ELSE ""), (as_type OR_ELSE COPY name)));
     TRY (clearParser__match_mut(&self, :CHAR, ";"));
     RETURN ExternStructDecl{ token: COPY extern_tok, name: COPY name, field_decls: fields, from_module: COPY from_module, type_params: COPY type_params, close_method: COPY close_method, as_type: COPY as_type, extern_source: source, can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL };
 END
