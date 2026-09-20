@@ -16931,10 +16931,10 @@ PRIVATE FN mIRLowering__auto_lock_assignment_value(MUTABLE self: MIRLowering, MU
     MUTABLE placed = TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (lowered), &node.value, alloc_sym, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut( castAssignmentNameToLocatable__type_analysis_session(node.name))) }));
     TRY (mIRLowering__materialize_owned_sink_value(&self, placed, node.value, alloc_sym, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(castAssignmentNameToLocatable__ast(node.name))) }))
     });
-    IF (TRUE AND TRY (mIRLowering__mir_allocates?(&self, value))) THEN
-      RETURN TRY (mIRLowering__hoist_alloc(&self, UNWRAP (value), &node.value, TRUE));
+    IF (value != NIL AND TRY (mIRLowering__mir_allocates?(&self, value))) THEN
+      RETURN TRY (mIRLowering__hoist_alloc(&self, &value, &node.value, TRUE));
     ELSE
-      RETURN value;
+      RETURN UNWRAP (value);
     END
 END
 PRIVATE FN mIRLowering__loop_condition_expr(MUTABLE self: MIRLowering, cond: Emittable, pending_value: []Emittable) RETURNS !Emittable ->
