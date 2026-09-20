@@ -122,6 +122,13 @@ PUB FN compilerFrontend__synthesize_test_body_wrappers_mut(ast: Program, MUTABLE
   END
   RETURN wrappers;
 END
+FN castStructFieldMapToSchemasStructSchemaFieldInputMap(values: {String}StructField) RETURNS {String@symbol}SchemasStructSchemaFieldInput ->
+  MUTABLE out: {String@symbol}SchemasStructSchemaFieldInput = {};
+  FOR key IN values.keys() DO
+    out[symbol(key)] = SchemasStructSchemaFieldInput{ StructField: COPY (values[key] OR_ELSE panic("missing hash key")) };
+  END
+  RETURN out;
+END
 FN castProgramToLocatable__compiler_frontend(value: Program) RETURNS Locatable ->
   RETURN Locatable{ Program: COPY value };
 END

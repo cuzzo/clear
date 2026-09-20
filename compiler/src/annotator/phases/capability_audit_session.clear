@@ -3628,6 +3628,13 @@ PUB FN capabilityAuditSession__new(typed_program: TypedProgramFacts, inputs: Cap
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
+FN castStringListToNameCandidateList(values: []String) RETURNS []NameCandidate ->
+  MUTABLE out: []NameCandidate = List[];
+  FOR value IN values DO
+    &out.append(NameCandidate{ StringValue: COPY value });
+  END
+  RETURN out;
+END
 FN castAsyncBodyNodeToAsyncSpawnNode__capability_audit_session(value: AsyncBodyNode) RETURNS AsyncSpawnNode ->
   PARTIAL MATCH value START
     AsyncBodyNode.BgBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgBlock: COPY cast_payload };,

@@ -682,6 +682,12 @@ PUB FN mIRPass__new(fn_nodes: {String}FunctionDef, schema_lookup: FN(String@symb
   mIRPass__initialize(&self, fn_nodes, schema_lookup, lifecycle_registry, body_summaries, hoist_bindings);
   RETURN self @multiowned;
 END
+FN castLocatableToIdentifier__type_analysis_session(value: Locatable) RETURNS Identifier ->
+  IF value IS_A Identifier AS cast_payload THEN
+    RETURN cast_payload;
+  END
+  RETURN panic("Invalid cast to Identifier");
+END
 FN castLocatableToBgNode__mir_pass(value: Locatable) RETURNS BgNode ->
   PARTIAL MATCH value START
     Locatable.BgStreamBlock AS cast_payload -> RETURN BgNode{ BgStreamBlock: COPY cast_payload };,
