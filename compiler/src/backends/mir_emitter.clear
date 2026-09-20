@@ -3200,7 +3200,11 @@ PRIVATE FN mIREmitter__emit_union_payload_get(MUTABLE self: MIREmitter, node: Un
   EFFECTS REENTRANT ->
     MUTABLE subject = TRY (mIREmitter__emit(&self, node.subject));
     MUTABLE variant = COPY node.variant;
-    RETURN "(switch (${subject}) { .${variant} => |__union_payload| __union_payload, else => unreachable })";
+    MUTABLE capture = "__union_payload";
+    IF (node.pointer OR_ELSE FALSE) THEN
+      capture = "*__union_payload";
+    END
+    RETURN "(switch (${subject}) { .${variant} => |${capture}| __union_payload, else => unreachable })";
 END
 PRIVATE FN mIREmitter__emit_assert_stmt(MUTABLE self: MIREmitter, node: AssertStmt) RETURNS !String
   EFFECTS REENTRANT ->

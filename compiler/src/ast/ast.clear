@@ -686,6 +686,7 @@ PUB STRUCT IsA {
   left: Locatable@boxed,
   right: IsARight@boxed,
   binding: ?String,
+  binding_mutable: ?Bool,
   can_fail: ?Bool,
   coerced_type_object: ?Type,
   collection_return: ?Type,

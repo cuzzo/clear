@@ -1209,8 +1209,23 @@ FN mIRLowering__escaping_value_alloc(MUTABLE self: MIRLowering, type_info: ?Type
     END
     RETURN NIL;
 END
+PRIVATE FN mIRLowering__pointer_shaped_ident?(MUTABLE self: MIRLowering, value: Emittable) RETURNS Bool ->
+    PARTIAL MATCH value START
+      Emittable.Ident AS rtoc_ident -> RETURN mIRLowering__capture_state(&self).current_lambda_pointer_params.contains?(rtoc_ident.name);,
+      DEFAULT -> PASS;
+    END
+    RETURN FALSE;
+END
+# Zig auto-derefs field access through a single-item pointer, but activeTag
+# and switch see the pointer type, so those call sites need the deref.
+PRIVATE FN mIRLowering__deref_if_pointer_shaped(MUTABLE self: MIRLowering, value: Emittable) RETURNS Emittable ->
+    IF mIRLowering__pointer_shaped_ident?(&self, value) THEN
+      RETURN Emittable{ Deref: COPY Deref{ expr: COPY value, lowered_node_id: NIL, ownership_consumption: NIL } };
+    END
+    RETURN COPY value;
+END
 FN mIRLowering__active_tag_call(MUTABLE self: MIRLowering, value: Emittable) RETURNS !Call ->
-    RETURN Call{ callee: "std.meta.activeTag", args: [value], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
+    RETURN Call{ callee: "std.meta.activeTag", args: [mIRLowering__deref_if_pointer_shaped(&self, value)], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
 END
 FN mIRLowering__alloc_mark_type_info(MUTABLE self: MIRLowering, expr: Emittable, ast_node: Locatable, context: String) RETURNS !Type ->
     MUTABLE ti_opt: ?Type = TRY (type__from_node_mut(ast_node, context));
@@ -17035,12 +17050,13 @@ PRIVATE FN mIRLowering__runtime_is_a_payload_bindings(MUTABLE self: MIRLowering,
     IF !(binding) THEN
       RETURN CAST(List[] AS []Emittable);
     END
-    MUTABLE payload: Emittable = Emittable{ UnionPayloadGet: COPY UnionPayloadGet{ subject: COPY subject, variant: COPY variant, lowered_node_id: NIL, ownership_consumption: NIL } };
+    MUTABLE mutable_binding = (condition.binding_mutable == TRUE);
+    MUTABLE payload: Emittable = Emittable{ UnionPayloadGet: COPY UnionPayloadGet{ subject: mIRLowering__deref_if_pointer_shaped(&self, subject), variant: COPY variant, pointer: COPY mutable_binding, lowered_node_id: NIL, ownership_consumption: NIL } };
     IF condition.runtime_indirect_payload_as THEN
       payload = Emittable{ Deref: COPY Deref{ expr: COPY payload, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    MUTABLE is_mutable = (locatable__left( Locatable{ IsA: Locatable{ IsA: COPY condition } }) IS_A Identifier AND (locatable__left(condition).was_moved == TRUE));
-    MUTABLE safe_binding = TRY (mIRLowering__payload_binding_name(&self, CAST(binding AS String), condition, condition.line));
+    MUTABLE is_mutable = (mutable_binding OR (IF condition.left IS_A Identifier AS rtoc_left_ident THEN (rtoc_left_ident.was_moved == TRUE) ELSE FALSE END));
+    MUTABLE safe_binding = TRY (mIRLowering__payload_binding_name(&self, CAST(binding AS String), Locatable{ IsA: COPY condition }, condition.token.line));
     RETURN CAST([Emittable{ Let: COPY Let{ name: COPY safe_binding, init: COPY payload, mutable: is_mutable, annotation: NIL, suppression: "_ = &${safe_binding};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
 END
 PRIVATE FN mIRLowering__lower_if_bind(MUTABLE self: MIRLowering, node: IfBind) RETURNS !IfBindStmt ->
@@ -17603,7 +17619,7 @@ PRIVATE FN mIRLowering__union_if_chain_match_case(MUTABLE self: MIRLowering, nod
     RETURN CAST([mIRLowering__if_chain_branch(self, mIRLowering__disjoin_match_conditions(self, variants |> SELECT TRY (mIRLowering__union_tag_condition(&self, subject, _))), branch_body)] AS []IfChainBranch);
 END
 PRIVATE FN mIRLowering__union_if_chain_payload_bindings(MUTABLE self: MIRLowering, match_case: MatchCase, subject: Emittable, variant: String, is_mutable: Bool) RETURNS ![]Emittable ->
-    MUTABLE payload: Emittable = Emittable{ UnionPayloadGet: COPY UnionPayloadGet{ subject: COPY subject, variant: COPY variant, lowered_node_id: NIL, ownership_consumption: NIL } };
+    MUTABLE payload: Emittable = Emittable{ UnionPayloadGet: COPY UnionPayloadGet{ subject: mIRLowering__deref_if_pointer_shaped(&self, subject), variant: COPY variant, pointer: NIL, lowered_node_id: NIL, ownership_consumption: NIL } };
     IF match_case.indirect_payload_as THEN
       payload = Emittable{ Deref: COPY Deref{ expr: COPY payload, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
