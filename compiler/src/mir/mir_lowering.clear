@@ -17798,7 +17798,7 @@ PRIVATE FN mIRLowering__union_match_arm_plans(MUTABLE self: MIRLowering, c: Matc
     };
 END
 PRIVATE FN mIRLowering__union_match_case_variants(self: MIRLowering, c: MatchCase) RETURNS ![]String ->
-    RETURN ([c.value] + (c.extra_values)) |> SELECT:? TRY (mIRLowering__union_match_variant_name(self, _)) |> WHERE _ != NIL;
+    RETURN ([c.value] + (c.extra_values)) |> SELECT TRY (mIRLowering__union_match_variant_name(self, _));
 END
 PRIVATE FN mIRLowering__union_match_variant_name(self: MIRLowering, value: Locatable) RETURNS !String ->
     IF value IS_A GetField AS get_field THEN
