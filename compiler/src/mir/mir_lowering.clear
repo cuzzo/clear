@@ -15143,9 +15143,9 @@ PRIVATE FN mIRLowering__hash_literal_put_stmt(MUTABLE self: MIRLowering, MUTABLE
     MUTABLE lowered: ?Emittable = lowered_branch_value;
     MUTABLE placed: Emittable = COPY UNWRAP (lowered);
     IF value_type THEN
-      placed = COPY TRY (mIRLowering__place_value_for_destination(&self, COPY UNWRAP (lowered), &val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }));
+      placed = COPY TRY (mIRLowering__place_value_for_destination(&self, COPY UNWRAP (lowered), &val_node, plan.alloc, TypeTypeInput{ Type: COPY UNWRAP (value_type) }));
     END
-    TRY (mIRLowering__materialize_owned_sink_value(&self, placed, val_node, plan.alloc, TypeTypeInput{ Type: COPY value_type }))
+    TRY (mIRLowering__materialize_owned_sink_value(&self, placed, val_node, plan.alloc, TypeTypeInput{ Type: COPY UNWRAP (value_type) }))
     });
     MUTABLE value_mir = TRY (mIRLowering__hoist_alloc(&self, &raw_value, &val_node, TRUE));
     MUTABLE operands = (TRY (mIRLowering__ownership_operands_for_value(&self, UNWRAP (key_mir), &key_node, "hash literal key", plan.alloc)) + TRY (mIRLowering__ownership_operands_for_value(&self, &value_mir, &val_node, "hash literal value", plan.alloc)));
@@ -16587,7 +16587,7 @@ PRIVATE FN mIRLowering__lower_indexed_assignment(MUTABLE self: MIRLowering, MUTA
     MUTABLE target_node: Locatable = COPY UNWRAP (rtoc_target_index).target;
     MUTABLE ti = TRY (aST__full_type_mut(target_node));
     IF mIRLowering__bc_target?(&self) THEN
-      RETURN Emittable{ Set: COPY TRY (mIRLowering__lower_direct_indexed_set(&self, node, FALSE)) };
+      RETURN Emittable{ Set: COPY TRY (mIRLowering__lower_direct_indexed_set(&self, &node, FALSE)) };
     END
     MUTABLE receiver_type = TRY (type__new(TypeConstructionInput{ Type: COPY ti }));
     IF type__rank?(receiver_type) THEN
@@ -16607,7 +16607,7 @@ PRIVATE FN mIRLowering__lower_indexed_assignment(MUTABLE self: MIRLowering, MUTA
       RETURN Emittable{ ExprStmt: COPY ExprStmt{ expr: COPY UNWRAP (call), discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } };
     END
     IF ((type__fixed?(receiver_type) AND !(TRY (type__string?(receiver_type)))) AND !(type__collection?(receiver_type))) THEN
-      RETURN Emittable{ Set: COPY TRY (mIRLowering__lower_direct_indexed_set(&self, node, TRUE)) };
+      RETURN Emittable{ Set: COPY TRY (mIRLowering__lower_direct_indexed_set(&self, &node, TRUE)) };
     END
     MUTABLE kind: ?String@symbol = TRY (type__dispatch_key(ti));
     MUTABLE op: ?FunctionSignature@multiowned = NIL;
@@ -16626,27 +16626,32 @@ PRIVATE FN mIRLowering__lower_indexed_assignment(MUTABLE self: MIRLowering, MUTA
     END
     RETURN TRY (mIRLowering__lower_template_indexed_assignment(&self, &node, &target_node, receiver_type, Emittable{ AddressOf: COPY AddressOf{ expr: COPY target, lowered_node_id: NIL, ownership_consumption: NIL } }, UNWRAP (idx), UNWRAP (kind), &op_value_mutable));
 END
-PRIVATE FN mIRLowering__lower_direct_indexed_set(MUTABLE self: MIRLowering, node: Assignment, cast_index: Bool) RETURNS !Set ->
-    MUTABLE target: ?Emittable = TRY (mIRLowering__lower(&self, assignmentName__name( CAST(node AS AssignmentName)).target));
+PRIVATE FN mIRLowering__lower_direct_indexed_set(MUTABLE self: MIRLowering, MUTABLE node: Assignment, cast_index: Bool) RETURNS !Set ->
+    MUTABLE rtoc_target_index: ?GetIndex = NIL;
+    PARTIAL MATCH node.name START
+      AssignmentName.GetIndex AS rtoc_gi -> rtoc_target_index = COPY rtoc_gi;,
+      DEFAULT -> PASS;
+    END
+    MUTABLE target: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY UNWRAP (rtoc_target_index).target)));
     MUTABLE idx: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY UNWRAP (rtoc_target_index).index)));
     IF cast_index THEN
-      idx = MIRCast{ expr: Emittable{ MIRCast: COPY idx }, target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL };
+      idx = Emittable{ MIRCast: COPY MIRCast{ expr: COPY UNWRAP (idx), target_type: "usize", method: :intCast, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
-    MUTABLE target_alloc = TRY (mIRLowering__placement_for_node(&self, node.name.target));
+    MUTABLE target_alloc = TRY (mIRLowering__placement_for_node(&self, COPY UNWRAP (rtoc_target_index).target));
     MUTABLE value_type: ?Type = TRY (type__from_node_mut(node.value, "direct indexed assignment value"));
-    MUTABLE val: ?Emittable = mIRLowering__with_decl_alloc(&self, target_alloc, %() USE(node, MUTABLE self) -> {
-    MUTABLE rtoc_lambda_result_694: ?Emittable = TRY (mIRLowering__lower(&self, node.value));
+    MUTABLE val: ?Emittable = mIRLowering__with_decl_alloc(&self, target_alloc, %() USE(MUTABLE node, MUTABLE self) -> {
+    MUTABLE rtoc_lambda_result_694: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY node.value)));
     rtoc_lambda_result_694
     });
     IF TRY (mIRLowering__ownership_tracked_transfer_type?(&self, UNWRAP (value_type))) THEN
-      val = TRY (mIRLowering__place_value_for_destination(&self, &val, node.value, target_alloc, TypeTypeInput{ Type: COPY value_type }));
-      val = TRY (mIRLowering__materialize_owned_sink_value(&self, val, node.value, target_alloc, TypeTypeInput{ Type: COPY value_type }));
+      val = TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (val), &node.value, target_alloc, TypeTypeInput{ Type: COPY UNWRAP (value_type) }));
+      val = TRY (mIRLowering__materialize_owned_sink_value(&self, UNWRAP (val), node.value, target_alloc, TypeTypeInput{ Type: COPY UNWRAP (value_type) }));
       IF TRY (mIRLowering__mir_allocates?(&self, val)) THEN
-        val = TRY (mIRLowering__hoist_alloc(&self, &val, node.value, TRUE));
+        val = TRY (mIRLowering__hoist_alloc(&self, UNWRAP (val), &node.value, TRUE));
       END
     END
-    MUTABLE set = Set{ target: Emittable{ IndexGet: COPY IndexGet{ object: COPY target, index: Emittable{ MIRCast: COPY idx }, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY val, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ Set: COPY set }, &val, node.value, "MIR::Set", :owned_sink, target_alloc));
+    MUTABLE set = Set{ target: Emittable{ IndexGet: COPY IndexGet{ object: COPY UNWRAP (target), index: COPY UNWRAP (idx), lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY UNWRAP (val), needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ Set: COPY set }, UNWRAP (val), &node.value, "MIR::Set", :owned_sink, target_alloc));
     RETURN set;
 END
 PRIVATE FN mIRLowering__lower_map_indexed_assignment(MUTABLE self: MIRLowering, MUTABLE node: Assignment, MUTABLE target_node: Locatable, receiver_type: Type, target_input: Emittable, idx_input: Emittable, kind: String@symbol, MUTABLE op: FunctionSignature) RETURNS !ShardedMapPut ->
