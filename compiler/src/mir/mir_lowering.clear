@@ -20050,13 +20050,6 @@ FN castSchemasUnionSchemaVariantValueToTypeTypeInput__mir_lowering(value: Schema
   END
   panic("Invalid cast to TypeTypeInput");
 END
-PUB FN castStmtListToEmittableList(values: []Stmt) RETURNS []Emittable ->
-  MUTABLE out: []Emittable = List[];
-  FOR value IN values DO
-    &out.append(castStmtToEmittable( CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(CAST(castStmtToEmittable(castStmtToEmittable(castStmtToEmittable(value))) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable) AS Emittable)));
-  END
-  RETURN out;
-END
 FN castStmtToEmittable(value: Emittable) RETURNS Emittable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Emittable");
