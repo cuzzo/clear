@@ -8738,12 +8738,10 @@ PRIVATE FN mIRLowering__finalize_call_result(MUTABLE self: MIRLowering, MUTABLE 
     MUTABLE call = Call{ callee: COPY callee, args: COPY args, try_wrap: can_fail, owned_return: owned_return, callable_contract: COPY contract, lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
     call.never_success = TRY (mIRLowering__call_never_returns_success?(self, node));
     IF TRUE THEN
-      MUTABLE retained_error: ?TypeConstructionInput = NIL;
-      IF ((MATCH node START CallNode.FuncCall AS item -> item.retain_error_channel, CallNode.MethodCall AS item -> item.retain_error_channel END) == TRUE) THEN
-        retained_error = (MATCH node START CallNode.FuncCall AS item -> item.error_union_type, CallNode.MethodCall AS item -> item.error_union_type END);
-      END
-      IF retained_error EXISTS AS retained_error_input THEN
-        call.result_type = TRY (type__new(retained_error_input));
+      MUTABLE rtoc_retains_error = ((MATCH node START CallNode.FuncCall AS item -> item.retain_error_channel, CallNode.MethodCall AS item -> item.retain_error_channel END) == TRUE);
+      MUTABLE rtoc_error_union: ?Type = MATCH node START CallNode.FuncCall AS item -> COPY item.error_union_type, CallNode.MethodCall AS item -> COPY item.error_union_type END;
+      IF (rtoc_retains_error AND (rtoc_error_union != NIL)) THEN
+        call.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY rtoc_error_union }));
       ELSE
         call.result_type = TRY (type__from_node_mut(castCallNodeToLocatable(node), "call result"));
       END
