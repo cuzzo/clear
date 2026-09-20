@@ -3236,16 +3236,6 @@ PUB FN mIRChecker__new(fn_name: ?String = NIL, schema_lookup: ?FN(String@symbol)
   mIRChecker__initialize(&self, fn_name, schema_lookup);
   RETURN self @multiowned;
 END
-FN castTypeSchemaLookupResultToSchemaValue(value: TypeSchemaLookupResult) RETURNS SchemaValue ->
-  PARTIAL MATCH value START
-    TypeSchemaLookupResult.EnumSchemaMultiowned AS item -> RETURN SchemaValue{ EnumSchemaMultiowned: COPY item };,
-    TypeSchemaLookupResult.StructSchemaMultiowned AS item -> RETURN SchemaValue{ StructSchemaMultiowned: COPY item };,
-    TypeSchemaLookupResult.UnionSchemaMultiowned AS item -> RETURN SchemaValue{ UnionSchemaMultiowned: COPY item };,
-    TypeSchemaLookupResult.ResourceSchemaMultiowned AS item -> RETURN SchemaValue{ ResourceSchemaMultiowned: COPY item };,
-    DEFAULT -> panic("Invalid cast to SchemaValue");
-  END
-  panic("Invalid cast to SchemaValue");
-END
 FN castEmittableToMIRCheckerCleanup(value: Emittable) RETURNS MIRCheckerCleanup ->
   PARTIAL MATCH value START
     Emittable.Cleanup AS cast_payload -> RETURN MIRCheckerCleanup{ Cleanup: COPY cast_payload };,
