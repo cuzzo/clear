@@ -54,10 +54,10 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
     END
     MUTABLE bound_params = TRY (withMatchCheck__collect_bound_param_names(with_blocks[rtoc_idx]?, param_names));
     IF !(with_blocks[rtoc_idx]?.arms) THEN
-        TRY (withMatchCheck__enforce_polymorphic_iff_rule_mut(with_blocks[rtoc_idx]?, bound_params, requires_map, fn_value, error_handler));
+        TRY (withMatchCheck__enforce_polymorphic_iff_rule_mut(with_blocks[rtoc_idx]?, COPY bound_params, requires_map, fn_value, error_handler));
     END
     IF !(with_blocks[rtoc_idx]?.arms) THEN
-        TRY (withMatchCheck__warn_polymorphic_unhandled_errors_mut(with_blocks[rtoc_idx]?, bound_params, requires_map, policy_handlers, warn_handler?));
+        TRY (withMatchCheck__warn_polymorphic_unhandled_errors_mut(with_blocks[rtoc_idx]?, COPY bound_params, requires_map, policy_handlers, warn_handler?));
     END
     IF with_blocks[rtoc_idx]?.polymorphic THEN
         fn_value.uses_rt = TRUE;
@@ -65,7 +65,7 @@ PUB FN withMatchCheck__check_function_mut(MUTABLE fn_value: FunctionDef, with_bl
     END
     MUTABLE requires_bound_params: [Set]String = Set[];
       IF with_blocks[rtoc_idx]?.polymorphic THEN
-        requires_bound_params = bound_params;
+        requires_bound_params = COPY bound_params;
       ELSE
         requires_bound_params = TRY (withMatchCheck__collect_sync_bound_param_names(with_blocks[rtoc_idx]?, param_names));
       END
