@@ -17832,17 +17832,9 @@ PRIVATE FN mIRLowering__lower_union_match(MUTABLE self: MIRLowering, node: Match
 END
 PRIVATE FN mIRLowering__union_match_default_body(MUTABLE self: MIRLowering, node: MatchStatement, facts: MatchLoweringFacts, arms: []UnionMatchArmPlan) RETURNS !?[]Emittable ->
     MUTABLE schema: ?UnionSchema@multiowned = COPY (TRY (mIRLowering__union_schemas(&self)))[facts.expr_type_sym];
-    MUTABLE all_variants: []Any = List[];
-    IF (IF schema?.variants != NIL THEN
-      (schema?.variants).keys() |> SELECT _.toString()
-    ELSE
-      NIL
-    END) != NIL THEN
-      all_variants = COPY (((IF schema?.variants != NIL THEN
-      (schema?.variants).keys() |> SELECT _.toString()
-    ELSE
-      NIL
-    END))) |> ORDER_BY _;
+    MUTABLE all_variants: []String = List[];
+    IF schema EXISTS AS rtoc_union_schema THEN
+      all_variants = (rtoc_union_schema.variants.keys() |> SELECT _.toString()) |> ORDER_BY _;
     END
     MUTABLE covered = (arms |> SELECT _.variant) |> SELECT _.toString() |> ORDER_BY _;
     IF (covered == all_variants) THEN
