@@ -106,7 +106,7 @@ PRIVATE FN recursiveSplitter__match_mutual_base_case(stmt: Locatable, cycle_name
     IF (!((if_statement.else_branch == NIL)) AND !((UNWRAP (if_statement.else_branch)).empty?())) THEN
       RETURN NIL;
     END
-    MUTABLE then_b: ?[]Locatable = CAST(if_statement.then_branch AS ?[]Locatable);
+    MUTABLE then_b: ?[]Locatable = CAST(COPY if_statement.then_branch AS ?[]Locatable);
     IF then_b EXISTS AS then_b_value THEN
       IF (then_b_value.length() != 1) THEN
         RETURN NIL;
@@ -181,7 +181,7 @@ PRIVATE FN recursiveSplitter__match_base_case(stmt: Locatable, fn_name: String) 
     IF (!((if_statement.else_branch == NIL)) AND !((UNWRAP (if_statement.else_branch)).empty?())) THEN
       RETURN NIL;
     END
-    MUTABLE then_b: ?[]Locatable = CAST(if_statement.then_branch AS ?[]Locatable);
+    MUTABLE then_b: ?[]Locatable = CAST(COPY if_statement.then_branch AS ?[]Locatable);
     IF then_b EXISTS AS then_b_value THEN
       IF (then_b_value.length() != 1) THEN
         RETURN NIL;
