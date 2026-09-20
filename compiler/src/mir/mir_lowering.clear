@@ -15928,7 +15928,7 @@ PRIVATE FN mIRLowering__lower_var_decl_init(MUTABLE self: MIRLowering, MUTABLE n
     END
     MUTABLE value_ft: Type = value_ft_branch_value?;
     placed = mIRLowering__with_expected_type(&self, value_ft, %() USE(node, MUTABLE self) -> {
-    MUTABLE rtoc_lambda_result_673: ?Emittable = TRY (mIRLowering__lower(&self, &node.value));
+    MUTABLE rtoc_lambda_result_673: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY node.value)));
     rtoc_lambda_result_673
     });
     placed = TRY (mIRLowering__place_value_for_destination(&self, &placed, node.value, decl_alloc, TypeTypeInput{ Type: COPY value_ft }));
@@ -16140,10 +16140,15 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
       END
       MUTABLE target_name = TRY (mIRLowering__assignment_storage_name(&self, CAST(node.name AS String), TRUE));
       MUTABLE rp: ?ReassignPlan = COPY node.reassign_cleanup;
-      MUTABLE binding_entry = ((IF mIRLowering__cleanup_entry_for_ast_binding(self, Locatable{ BindExpr: COPY node }) != NIL THEN mIRLowering__cleanup_entry_for_ast_binding(self, Locatable{ BindExpr: COPY node }) ELSE (TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(node.name AS String)] END) OR_ELSE cleanupEntry__none());
+      MUTABLE binding_entry: CleanupEntry@multiowned = cleanupEntry__none();
+      IF mIRLowering__cleanup_entry_for_ast_binding(self, Locatable{ BindExpr: COPY node }) EXISTS AS rtoc_ast_entry THEN
+        binding_entry = KEEP rtoc_ast_entry;
+      ELSE_IF (TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(node.name AS String)] EXISTS AS rtoc_named_entry THEN
+        binding_entry = KEEP rtoc_named_entry;
+      END
       MUTABLE heap_return_var = mIRLowering__current_function_heap_carry_return_var?(&self, CAST(node.name AS String));
       MUTABLE module_global = mIRLowering__program_state(self).module_global_names.contains?(CAST(node.name AS String));
-      MUTABLE assign_alloc =     IF (heap_return_var OR module_global) THEN
+      MUTABLE assign_alloc: ?String@symbol =     IF (heap_return_var OR module_global) THEN
         :heap
       ELSE
         (IF rp THEN
@@ -16158,65 +16163,65 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
       END;
       MUTABLE source_type: ?Type = TRY (type__from_node_mut(node.value, "reassignment value type"));
       MUTABLE target_type_branch_value: ?Type = NIL;
-      IF assign_alloc THEN
-        target_type_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY source_type }, NIL, NIL, NIL, assign_alloc));
+      IF assign_alloc EXISTS AS rtoc_assign_alloc THEN
+        target_type_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (source_type) }, NIL, NIL, NIL, rtoc_assign_alloc));
       ELSE
         target_type_branch_value = source_type;
       END
       MUTABLE target_type: Type = target_type_branch_value?;
-      MUTABLE value: ?Emittable = mIRLowering__with_reassignment_target(&self, target_name, %() USE(assign_alloc, node, target_type, MUTABLE self) -> {
-    MUTABLE rtoc_lambda_result_678: ?Emittable = mIRLowering__with_decl_alloc(&self, assign_alloc, %() USE(assign_alloc, node, target_type, MUTABLE self) -> {
-    MUTABLE lowered: ?Emittable = TRY (mIRLowering__lower(&self, node.value));
-    TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (lowered), node.value, assign_alloc, TypeTypeInput{ Type: COPY target_type }))
+      MUTABLE value: ?Emittable = mIRLowering__with_reassignment_target(&self, target_name, %() USE(assign_alloc, MUTABLE node, target_type, MUTABLE self) -> {
+    MUTABLE rtoc_lambda_result_678: ?Emittable = mIRLowering__with_decl_alloc(&self, assign_alloc, %() USE(assign_alloc, MUTABLE node, target_type, MUTABLE self) -> {
+    MUTABLE lowered: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY node.value)));
+    TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (lowered), &node.value, assign_alloc, TypeTypeInput{ Type: COPY target_type }))
       });
     rtoc_lambda_result_678
       });
       IF (assign_alloc == NIL) THEN
         assign_alloc = TRY (mIRLowering__mir_owned_alloc(&self, value));
       END
-      value = TRY (mIRLowering__copy_container_borrow_if_needed(&self, &value, node.value));
+      value = TRY (mIRLowering__copy_container_borrow_if_needed(&self, UNWRAP (value), &node.value));
       IF (TRUE AND TRUE) THEN
-        TRY (mIRLowering__stamp_allocating_result_target_mut(&self, &value, target_name, assign_alloc));
+        TRY (mIRLowering__stamp_allocating_result_target_mut(&self, UNWRAP (value), target_name, assign_alloc));
       END
       IF ((value != NIL AND TRY (mIRLowering__mir_allocates?(&self, value))) AND !(mIRLowering__fallible_self_fallback_reassign?(self, target_name, value))) THEN
-        value = TRY (mIRLowering__hoist_alloc(&self, &value, node.value, TRUE));
+        value = TRY (mIRLowering__hoist_alloc(&self, &value, &node.value, TRUE));
       END
-      result =     IF rp THEN
+      MUTABLE result: Emittable =     IF rp EXISTS AS rtoc_rp THEN
         {
     MUTABLE rtoc_value_block_marker = 0;
-    plan = cleanupEntry__lifecycle_plan(rp);
+    MUTABLE plan: ?LifecyclePlan = COPY rtoc_rp.lifecycle_plan;
     IF !((IF plan != NIL THEN
         lifecyclePlan__needs_drop?(plan)
       ELSE
-        NIL
+        FALSE
       END)) THEN
         panic("reassignment cleanup lacks annotation lifecycle plan for {}");
       END
-    ReassignWithCleanup{ name: COPY target_name, value: COPY value, zig_type: UNWRAP (UNWRAP (rp).zig_type), alloc: mIRLowering__alloc_from_sym(self, UNWRAP (UNWRAP (rp).alloc)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
+    Emittable{ ReassignWithCleanup: COPY ReassignWithCleanup{ name: COPY target_name, value: COPY UNWRAP (value), zig_type: UNWRAP (rtoc_rp.zig_type), alloc: mIRLowering__alloc_from_sym(self, UNWRAP (rtoc_rp.alloc)), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }
       }
       ELSE_IF (heap_return_var AND lifecyclePlan__needs_drop?((TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), TRY (aST__full_type_mut(Locatable{ BindExpr: COPY node }))))))) THEN
         {
     MUTABLE rtoc_value_block_marker = 0;
     target_type = TRY (aST__full_type_mut(Locatable{ BindExpr: COPY node }));
-    ReassignWithCleanup{ name: COPY target_name, value: COPY value, zig_type: TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY target_type })), alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
+    Emittable{ ReassignWithCleanup: COPY ReassignWithCleanup{ name: COPY target_name, value: COPY UNWRAP (value), zig_type: TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY target_type })), alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }
       }
       ELSE
-        Set{ target: Emittable{ Ident: COPY Ident{ name: COPY target_name, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }
+        Emittable{ Set: COPY Set{ target: Emittable{ Ident: COPY Ident{ name: COPY target_name, lowered_node_id: NIL, ownership_consumption: NIL } }, value: COPY UNWRAP (value), needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }
       END;
-      MUTABLE ownership_value = (mIRLowering__fallible_self_fallback_success_expr(self, target_name, value) OR_ELSE value);
-      MUTABLE ownership_ast =     IF mir__same_node?(ownership_value, value) THEN
+      MUTABLE ownership_value: ?Emittable = (mIRLowering__fallible_self_fallback_success_expr(self, target_name, COPY UNWRAP (value)) OR_ELSE COPY value);
+      MUTABLE ownership_ast =     IF mir__same_node?(UNWRAP (ownership_value), COPY UNWRAP (value)) THEN
         node.value
       ELSE_IF node.value IS_A BinaryOp THEN
-        UNWRAP (locatable__left(UNWRAP (node.value)))
+        UNWRAP (locatable__left(node.value))
       ELSE
         node.value
       END;
-      result = NodeRoot{ Emittable: COPY TRY (mIRLowering__with_ownership_consumption_for_value(&self, &result, &ownership_value, &ownership_ast, emittable__variant_name(result), :owned_sink, IF result IS_A ReassignWithCleanup AS reassign_result THEN
+      result = TRY (mIRLowering__with_ownership_consumption_for_value(&self, &result, UNWRAP (ownership_value), &ownership_ast, emittable__variant_name(result), :owned_sink, IF result IS_A ReassignWithCleanup AS reassign_result THEN
         reassign_result.alloc
       ELSE
         assign_alloc
-      END, TRY (type__from_node_mut(node.value, "reassignment ownership value")))) };
-      RETURN result;
+      END, TRY (type__from_node_mut(node.value, "reassignment ownership value"))));
+      RETURN NodeRoot{ Emittable: COPY result };
     END
 END
 PRIVATE FN mIRLowering__lower_destructuring_assignment(MUTABLE self: MIRLowering, MUTABLE node: DestructuringAssignment) RETURNS !DestructureSet ->
