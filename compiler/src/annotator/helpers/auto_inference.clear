@@ -429,7 +429,7 @@ CATCH Transient, Input, System, NotFound, Permission, Canceled
 END
 FN autoUnifier__initialize(MUTABLE self: AutoUnifier, slots: {AutoSlotId}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS Void ->
     self.slots = COPY slots;
-    self.type_of = (type_of OR_ELSE autoUnifier__default_type_of);
+    self.type_of = (type_of OR_ELSE %(rtoc_auto_node: Locatable) -> { MUTABLE rtoc_auto_t: ?AutoConstraintCollectorObservedType = NIL; IF aST__full_type_mut(rtoc_auto_node) IS_OK AS rtoc_auto_ft THEN rtoc_auto_t = AutoConstraintCollectorObservedType{ Type: COPY rtoc_auto_ft }; END rtoc_auto_t });
 END
 PUB FN autoUnifier__resolve_mut(MUTABLE self: AutoUnifier) RETURNS !Result ->
     MUTABLE resolved: {AutoSlotId@multiowned}Resolution = {};
@@ -607,7 +607,7 @@ PUB FN autoUnifier__stamp_map_pairs_mut(MUTABLE self: AutoUnifier, resolved_slot
         END
 END
 PUB FN autoUnifier__new(slots: {AutoSlotId}Slot@multiowned, type_of: ?FN(Locatable) -> ?AutoConstraintCollectorObservedType = NIL) RETURNS AutoUnifier@multiowned ->
-  MUTABLE self = AutoUnifier{ slots: COPY slots, type_of: (COPY type_of OR_ELSE autoUnifier__default_type_of) };
+  MUTABLE self = AutoUnifier{ slots: COPY slots, type_of: (COPY type_of OR_ELSE %(rtoc_auto_node: Locatable) -> { MUTABLE rtoc_auto_t: ?AutoConstraintCollectorObservedType = NIL; IF aST__full_type_mut(rtoc_auto_node) IS_OK AS rtoc_auto_ft THEN rtoc_auto_t = AutoConstraintCollectorObservedType{ Type: COPY rtoc_auto_ft }; END rtoc_auto_t }) };
   autoUnifier__initialize(&self, slots, type_of);
   RETURN self @multiowned;
 END
