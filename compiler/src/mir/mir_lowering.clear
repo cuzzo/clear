@@ -17618,20 +17618,20 @@ PRIVATE FN mIRLowering__for_range_plan(MUTABLE self: MIRLowering, node: ForRange
     END, tight: node.tight };
 END
 PRIVATE FN mIRLowering__lower_match(MUTABLE self: MIRLowering, node: MatchStatement) RETURNS !Emittable ->
-    MUTABLE result: ?SwitchStmt = NIL;
+    MUTABLE result: Emittable = Emittable{ Lit: COPY Lit{ value: "unreachable", lowered_node_id: NIL, ownership_consumption: NIL } };
     MUTABLE facts = TRY (mIRLowering__match_lowering_facts(&self, node));
     MUTABLE expr_label: ?String = COPY facts.expr_label;
     MUTABLE subject = COPY facts.subject;
     MUTABLE is_union = facts.is_union;
     IF (facts.is_int_match OR facts.is_enum_match) THEN
-      result = TRY (mIRLowering__lower_switch_match(&self, node, facts));
+      result = Emittable{ SwitchStmt: COPY TRY (mIRLowering__lower_switch_match(&self, node, facts)) };
     ELSE_IF (is_union AND mIRLowering__union_match_switchable?(self, node)) THEN
-      result = TRY (mIRLowering__lower_union_match(&self, node, facts));
+      result = Emittable{ UnionMatchStmt: COPY TRY (mIRLowering__lower_union_match(&self, node, facts)) };
     ELSE
-      result = TRY (mIRLowering__lower_if_chain_match(&self, node, facts));
+      result = Emittable{ IfChain: COPY TRY (mIRLowering__lower_if_chain_match(&self, node, facts)) };
     END
     IF expr_label EXISTS AS expr_label_value THEN
-      RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY expr_label_value, body: COPY [Emittable{ Set: COPY result }], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
+      RETURN Emittable{ MIRBlockExpr: COPY MIRBlockExpr{ label: COPY expr_label_value, body: COPY [COPY result], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL } };
     ELSE
       RETURN result;
     END
