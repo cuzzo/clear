@@ -14466,7 +14466,7 @@ PRIVATE FN typeAnalysisSession__unrequired_polymorphic_runtime_bound_name(MUTABL
     MUTABLE bound_fact = withCapabilityPlan__first_transition(capability_plan);
     MUTABLE bound_var = COPY bound_fact.var_node;
     MUTABLE bound_sym: ?SymbolEntry@multiowned = aST__node__symbol(bound_var);
-    IF !(((TRUE AND TRUE) AND symbolEntry__is_param(UNWRAP (bound_sym)))) THEN
+    IF !((IF bound_sym EXISTS AS rtoc_bound_sym THEN symbolEntry__is_param(rtoc_bound_sym) ELSE FALSE END)) THEN
       RETURN NIL;
     END
     RETURN COPY bound_fact.var_name;
@@ -14523,7 +14523,7 @@ PRIVATE FN typeAnalysisSession__retryable_with_universal_poly_candidate?(MUTABLE
     MUTABLE bound_var = COPY bound_fact.var_node;
     MUTABLE bound_name = COPY bound_fact.var_name;
     MUTABLE bound_sym: ?SymbolEntry@multiowned = aST__node__symbol(bound_var);
-    MUTABLE is_param = ((TRUE AND TRUE) AND symbolEntry__is_param(UNWRAP (bound_sym)));
+    MUTABLE is_param = (IF bound_sym EXISTS AS rtoc_bound_sym THEN symbolEntry__is_param(rtoc_bound_sym) ELSE FALSE END);
     MUTABLE fn_node: ?FunctionDef@multiowned = TRY (typeAnalysisSession__function_node_for(&self, typeAnalysisSession__current_fn_ctx(&self)?.name));
     MUTABLE has_req = ((((fn_node != NIL) AND TRUE) AND fn_node.requires) AND fn_node.requires.contains?(bound_name));
     RETURN (is_param AND !(has_req));

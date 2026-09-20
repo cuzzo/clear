@@ -13312,7 +13312,7 @@ PRIVATE FN mIRLowering__field_access_plan(MUTABLE self: MIRLowering, node: GetFi
     ELSE
       field_str = "@\"${UNWRAP (node.tuple_position).toString()}\"";
     END
-    MUTABLE union_payload = (TRUE AND (((union_variants.contains?(node.field) OR union_variants.contains?(field_str)) OR union_variants.contains?(CAST(symbol(field_str) AS String)))));
+    MUTABLE union_payload = (IF union_variants EXISTS AS rtoc_uv THEN (((rtoc_uv.contains?(node.field) OR rtoc_uv.contains?(field_str)) OR rtoc_uv.contains?(CAST(symbol(field_str) AS String)))) ELSE FALSE END);
     RETURN FieldAccessPlan{ target: COPY target, field: COPY field_str, path: COPY path, union_payload: (union_payload == TRUE), union_payload_zig: COPY IF union_payload THEN
       TRY (type__zig_type( UNWRAP (ti)))
     ELSE
@@ -13873,7 +13873,8 @@ PRIVATE FN mIRLowering__lower_struct_lit(MUTABLE self: MIRLowering, MUTABLE node
           END
           MUTABLE field_alloc: ?String@symbol = TRY (mIRLowering__mir_owned_alloc(&self, field_value));
           MUTABLE lowered = TRY (mIRLowering__hoist_alloc(&self, &field_value, &field_node, TRUE, FALSE, TRUE, NIL, field_sink_alloc));
-          IF (TRUE AND TRY (mIRLowering__recursive_field_copy_required?(&self, UNWRAP (expected_ft), field_node, field_alloc, field_sink_alloc))) THEN
+          MUTABLE fresh_construction = (field_node IS_A StructLit OR field_node IS_A UnionVariantLit);
+          IF (IF expected_ft EXISTS AS rtoc_eft THEN (!((fresh_construction AND TRY (type__any_rc?(rtoc_eft)))) AND TRY (mIRLowering__recursive_field_copy_required?(&self, rtoc_eft, field_node, field_alloc, field_sink_alloc))) ELSE FALSE END) THEN
             MUTABLE copy = (TRY (mIRLowering__retain_handle_for_destination(&self, lowered, UNWRAP (expected_ft))) OR_ELSE Emittable{ DeepCopy: COPY DeepCopy{ source: COPY lowered, zig_type: COPY TRY (type__zig_type(UNWRAP (expected_ft))), elem_type: NIL, strategy: :full_value, alloc: COPY field_sink_alloc, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(UNWRAP (expected_ft)))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL } });
             RETURN TRY (mIRLowering__hoist_alloc(&self, &copy, &field_node, TRUE));
           ELSE
@@ -16153,7 +16154,7 @@ PRIVATE FN mIRLowering__lower_bind_expr(MUTABLE self: MIRLowering, MUTABLE node:
       IF (TRUE AND TRUE) THEN
         TRY (mIRLowering__stamp_allocating_result_target_mut(&self, &value, target_name, assign_alloc));
       END
-      IF ((TRUE AND TRY (mIRLowering__mir_allocates?(&self, value))) AND !(mIRLowering__fallible_self_fallback_reassign?(self, target_name, value))) THEN
+      IF ((value != NIL AND TRY (mIRLowering__mir_allocates?(&self, value))) AND !(mIRLowering__fallible_self_fallback_reassign?(self, target_name, value))) THEN
         value = TRY (mIRLowering__hoist_alloc(&self, &value, node.value, TRUE));
       END
       result =     IF rp THEN
