@@ -8877,7 +8877,7 @@ PRIVATE FN mIRLowering__lower_method_call(MUTABLE self: MIRLowering, MUTABLE nod
     IF node.protocol_operation EXISTS AS protocol_operation_value THEN
       MUTABLE protocol_operation_value_mutable = COPY protocol_operation_value;
       IF (protocol_operation_value_mutable == :put) THEN
-        RETURN TRY (mIRLowering__lower_protocol_map_put_call(&self, &node.object, UNWRAP (node.args[0]), UNWRAP (node.args[1])));
+        RETURN TRY (mIRLowering__lower_protocol_map_put_call(&self, COPY node.object, UNWRAP (node.args[0]), COPY UNWRAP (node.args[1])));
       END
       MUTABLE receiver: Emittable = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.object))) AS Emittable);
       IF !(mIRLowering__collection_param_receiver?(&self, node.object)) THEN
@@ -8901,10 +8901,15 @@ PRIVATE FN mIRLowering__lower_method_call(MUTABLE self: MIRLowering, MUTABLE nod
     END
     MUTABLE callee_sig: ?FunctionSignature@multiowned = TRY (mIRLowering__fn_sig_for(self, MIRLoweringName{ StringValue: COPY node.name }));
     callee_sig = (callee_sig OR_ELSE TRY (mIRLowering__matched_call_signature(self, CallNode{ MethodCall: COPY node })));
-    MUTABLE lowered_recv_and_args = mIRLowering__with_kept_edge_call_frame(&self, %() USE(callee_sig, node, MUTABLE self) -> {
+    MUTABLE lowered_recv_and_args = TRY (mIRLowering__with_kept_edge_call_frame(&self, %() USE(callee_sig, node, MUTABLE self) -> {
     MUTABLE recv = TRY (mIRLowering__lower_call_arg_from_facts(&self, TRY (mIRLowering__call_arg_facts(&self, node.object, callee_sig, 0))));
-    IF (node.object IS_A Identifier AND ((locatable__symbol(node.object) != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_364 = ((node.object.symbol)?);
-    symbolEntry__carrier_contract(rtoc_local_receiver_364) } == :monomorphic))) THEN
+    MUTABLE rtoc_monomorphic_recv = FALSE;
+    IF node.object IS_A Identifier AS rtoc_recv_ident THEN
+      IF rtoc_recv_ident.symbol EXISTS AS rtoc_recv_sym THEN
+        rtoc_monomorphic_recv = (symbolEntry__carrier_contract(rtoc_recv_sym) == :monomorphic);
+      END
+    END
+    IF rtoc_monomorphic_recv THEN
         recv = Emittable{ ComptimeCarrierPayload: COPY ComptimeCarrierPayload{ source: COPY recv, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     MUTABLE method_args = COPY node.args;
@@ -8919,25 +8924,19 @@ PRIVATE FN mIRLowering__lower_method_call(MUTABLE self: MIRLowering, MUTABLE nod
       END
       rtoc_indexed_output_367
     })
-    });
+    }));
     MUTABLE obj_mir = COPY UNWRAP (lowered_recv_and_args.first());
     MUTABLE args_mir = lowered_recv_and_args |> SKIP 1;
     MUTABLE mod_prefix: String = "";
-    IF mod_alias THEN
-      mod_prefix = "${mIRLowering__zig_module_alias(self, mod_alias)}.";
-    ELSE
-      mod_prefix = "";
-    END
     MUTABLE needs_rt = TRY (mIRLowering__callee_needs_rt?(self, node.name));
     MUTABLE can_fail = TRY (mIRLowering__callee_can_fail?(self, node.name));
     IF (TRUE AND (node.retain_error_channel != NIL)) THEN
       can_fail = FALSE;
     END
-    MUTABLE type_args =   IF (TRUE AND ((node.generic_type_args != NIL) AND type__any?(((node.generic_type_args)?)))) THEN
-      node.generic_type_args |> SELECT Ident{ name: TRY (mIRLowering__generic_type_arg_zig(self, _)), lowered_node_id: NIL, ownership_consumption: NIL }
-    ELSE
-      List[]
-    END;
+    MUTABLE type_args: []Emittable = List[];
+    IF ((node.generic_type_args != NIL) AND ((UNWRAP (node.generic_type_args)).length() > 0)) THEN
+      type_args = UNWRAP (node.generic_type_args) |> SELECT Emittable{ Ident: COPY Ident{ name: TRY (mIRLowering__generic_type_arg_zig(self, TypeTypeInput{ SymbolValue: COPY _ })), lowered_node_id: NIL, ownership_consumption: NIL } };
+    END
     MUTABLE rt_args = { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_ternary_value_369: ?[]Ident = NIL;
     IF needs_rt THEN
       rtoc_ternary_value_369 = [Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL }];
@@ -8946,15 +8945,15 @@ PRIVATE FN mIRLowering__lower_method_call(MUTABLE self: MIRLowering, MUTABLE nod
     END
     rtoc_ternary_value_369? };
     MUTABLE ast_args = ([node.object] + node.args);
-    MUTABLE mir_args = ([obj_mir] + args_mir);
+    MUTABLE mir_args = ([COPY obj_mir] + args_mir);
     MUTABLE runtime_args = TRY (mIRLowering__inject_protocol_map_allocator_args(&self, callee_sig, ast_args, mir_args));
     MUTABLE all_args = ((type_args + rt_args) + runtime_args);
     MUTABLE fn_zig = "${mod_prefix}${mIRLowering__zig_safe_name(self, node.name)}";
     MUTABLE owned_return = TRY (mIRLowering__call_owned_return?(&self, Node{ MethodCall: COPY node }));
-    RETURN mIRLowering__finalize_call_result(&self, CallNode{ MethodCall: COPY node }, fn_zig, all_args, can_fail, owned_return, mIRLowering__callable_contract_for_lowered_args(&self, callee_sig, ([node.object] + node.args), ([obj_mir] + args_mir), ( { MUTABLE rtoc_transform_keys_result_370: {Int64}CallEdgeOwnershipPlan = {}; FOR rtoc_key IN ((node.kept_edge_plans OR_ELSE {})).keys() DO rtoc_transform_keys_result_370[{ MUTABLE rtoc_value_block_marker = 0;
+    RETURN mIRLowering__finalize_call_result(&self, CallNode{ MethodCall: COPY node }, fn_zig, all_args, can_fail, owned_return, mIRLowering__callable_contract_for_lowered_args(&self, callee_sig, ([node.object] + node.args), ([COPY obj_mir] + args_mir), ( { MUTABLE rtoc_transform_keys_result_370: {Int64}CallEdgeOwnershipPlan = {}; FOR rtoc_key IN ((node.kept_edge_plans OR_ELSE {})).keys() DO rtoc_transform_keys_result_370[{ MUTABLE rtoc_value_block_marker = 0;
     MUTABLE k: Int64 = rtoc_key;
     (k + 1)
-    }] = COPY UNWRAP (((node.kept_edge_plans OR_ELSE {}))[rtoc_key]); END rtoc_transform_keys_result_370 } )), ([node.object] + node.args), ([obj_mir] + args_mir));
+    }] = COPY UNWRAP (((node.kept_edge_plans OR_ELSE {}))[rtoc_key]); END rtoc_transform_keys_result_370 } )), ([node.object] + node.args), ([COPY obj_mir] + args_mir));
 END
 PRIVATE FN mIRLowering__lower_tense_navigation_method(MUTABLE self: MIRLowering, MUTABLE node: MethodCall, navigation: TenseNavigation) RETURNS !Emittable ->
     RETURN mIRLowering__lower_tense_navigation(&self, Locatable{ MethodCall: COPY node }, navigation, %(receiver: String) USE(MUTABLE navigation, node, MUTABLE self) -> {
@@ -9061,7 +9060,7 @@ PRIVATE FN mIRLowering__protocol_map_allocator_for(MUTABLE self: MIRLowering, MU
     END
     RETURN Emittable{ AllocatorRef: COPY AllocatorRef{ kind: COPY TRY (mIRLowering__placement_for_node(&self, node)), lowered_node_id: NIL, ownership_consumption: NIL } };
 END
-PRIVATE FN mIRLowering__lower_protocol_map_put_call(MUTABLE self: MIRLowering, MUTABLE receiver_node: Locatable, key_node: Locatable, MUTABLE value_node: Locatable) RETURNS !Emittable ->
+PRIVATE FN mIRLowering__lower_protocol_map_put_call(MUTABLE self: MIRLowering, receiver_node: Locatable, key_node: Locatable, MUTABLE value_node: Locatable) RETURNS !Emittable ->
     MUTABLE receiver: Emittable = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(receiver_node))) AS Emittable);
     IF !(mIRLowering__collection_param_receiver?(&self, receiver_node)) THEN
       receiver = Emittable{ AddressOf: COPY AddressOf{ expr: COPY receiver, lowered_node_id: NIL, ownership_consumption: NIL } };
