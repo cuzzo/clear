@@ -19683,14 +19683,6 @@ FN castOptionalAssignmentNameToOptionalGetField(value: ?AssignmentName) RETURNS 
   END
   RETURN NIL;
 END
-FN castOptionalAstReturnSearchNodeToAnyMultiowned(value: ?AstReturnSearchNode) RETURNS Any@multiowned ->
-  IF value != NIL THEN
-    IF value IS_A Any@multiowned AS cast_payload THEN
-      RETURN cast_payload;
-    END
-  END
-  RETURN panic("Invalid cast to Any@multiowned");
-END
 FN castOptionalEmittableToLet(value: ?Emittable) RETURNS Let ->
   IF value != NIL THEN
     IF value IS_A Let AS cast_payload THEN
