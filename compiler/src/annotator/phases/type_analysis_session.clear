@@ -2569,7 +2569,7 @@ PRIVATE FN typeAnalysisSession__with_routine_analysis_scope(MUTABLE self: TypeAn
     typeAnalysisSession__og_push_scope(&self);
     DEFER (typeAnalysisSession__og_pop_scope(&self, TRUE));
     blk();
-    TRY (typeAnalysisSession__finalize_scope(&self, castRoutineNodeToLocatable(node)))
+    TRY (typeAnalysisSession__finalize_scope(&self, castRoutineNodeToLocatable__type_analysis_session(node)))
     });
 END
 PRIVATE FN typeAnalysisSession__collect_routine_returns(MUTABLE self: TypeAnalysisSession, blk: FN() -> Void) RETURNS ![]ReturnFact ->
@@ -3835,7 +3835,7 @@ PRIVATE FN typeAnalysisSession__declare_and_verify_params(MUTABLE self: TypeAnal
           MUTABLE param_type_sym = type__resolved(_.type);
           MUTABLE schema: ?SchemaValue = TRY (typeAnalysisSession__lookup_type_schema(&self, param_type_sym));
           IF !(schemas__struct?(schema)) THEN
-            TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_NEEDS_STRUCT_PARAM }, [], CAST({:type: _.type} AS {String@symbol}Any)));
+            TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_NEEDS_STRUCT_PARAM }, [], CAST({:type: _.type} AS {String@symbol}Any)));
           END
           MUTABLE field_names = schemaValue__fields(UNWRAP (schema)).keys();
           IF !(field_names.empty?()) THEN
@@ -3843,7 +3843,7 @@ PRIVATE FN typeAnalysisSession__declare_and_verify_params(MUTABLE self: TypeAnal
             TRY (structSchema__field_defaults(rtoc_local_receiver_86)) };
             MUTABLE missing = field_names |> WHERE !(field_defaults.contains?(_));
             IF (missing).any?() THEN
-              TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_STRUCT_MISSING_DEFAULTS }, [], CAST({:name: DiagnosticKwValue{ StringValue: COPY _.name }, :type: _.type, :missing: missing.join(", ")} AS {String@symbol}Any)));
+              TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_STRUCT_MISSING_DEFAULTS }, [], CAST({:name: DiagnosticKwValue{ StringValue: COPY _.name }, :type: _.type, :missing: missing.join(", ")} AS {String@symbol}Any)));
             END
           END
           MUTABLE rtoc_default_slot = UNWRAP (param_default);
@@ -3853,7 +3853,7 @@ PRIVATE FN typeAnalysisSession__declare_and_verify_params(MUTABLE self: TypeAnal
           MUTABLE def_type = TRY (aST__full_type_mut(UNWRAP (param_default)));
           MUTABLE param_type = _.type;
           IF !(TRY (typeAnalysisSession__is_safe_autocast?(self, SourceType{ Type: COPY def_type }, TypeTypeInput{ Type: COPY param_type }))) THEN
-            TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_VALUE_TYPE_MISMATCH }, [], CAST({:name: _.name, :expected: param_type, :got: def_type} AS {String@symbol}Any)));
+            TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :DEFAULT_VALUE_TYPE_MISMATCH }, [], CAST({:name: _.name, :expected: param_type, :got: def_type} AS {String@symbol}Any)));
           END
         END
     END
@@ -3938,14 +3938,14 @@ PRIVATE FN typeAnalysisSession__verify_captures_mut(MUTABLE self: TypeAnalysisSe
     WHILE rtoc_idx < captures.length() DO
       MUTABLE cap_name = UNWRAP (captures[rtoc_idx]).name;
       IF capture__default(UNWRAP (captures[rtoc_idx])) THEN
-          TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :CAPTURE_NO_DEFAULT }, [], CAST({:name: cap_name} AS {String@symbol}Any)));
+          TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :CAPTURE_NO_DEFAULT }, [], CAST({:name: cap_name} AS {String@symbol}Any)));
       END
       MUTABLE owner_scope: ?Scope@multiowned = NIL;
       IF !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_96 = TRY (typeAnalysisSession__current_scope(&self));
       scope__entry?(&rtoc_local_receiver_96, cap_name) }) THEN
           owner_scope = TRY (typeAnalysisSession__lookup_scope_for(&self, cap_name));
           IF (owner_scope == NIL) THEN
-            TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :CAPTURE_UNDEFINED_VAR }, [], CAST({:name: cap_name} AS {String@symbol}Any)));
+            TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castRoutineNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :CAPTURE_UNDEFINED_VAR }, [], CAST({:name: cap_name} AS {String@symbol}Any)));
             rtoc_idx = rtoc_idx + 1;
     CONTINUE;
           END
@@ -7026,10 +7026,10 @@ PRIVATE FN typeAnalysisSession__validate_stream_type_mut(MUTABLE self: TypeAnaly
       RETURN;
     END
     IF (MATCH node START DeclarationNode.VarDecl AS item -> type__multiowned?(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__multiowned?(UNWRAP (item.type)) END) THEN
-      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :RC_PROMISE_NEEDS_SHARED }));
+      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :RC_PROMISE_NEEDS_SHARED }));
     END
     IF ((MATCH node START DeclarationNode.VarDecl AS item -> type__split?(UNWRAP (item.type)), DeclarationNode.BindExpr AS item -> type__split?(UNWRAP (item.type)) END) AND !((MATCH node START DeclarationNode.VarDecl AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))), DeclarationNode.BindExpr AS item -> TRY (type__split_open_stream?(UNWRAP (item.type))) END))) THEN
-      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :ATSPLIT_NEEDS_OPEN_STREAM }));
+      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :ATSPLIT_NEEDS_OPEN_STREAM }));
     END
 END
 PRIVATE FN typeAnalysisSession__propagate_declared_type_to_value_mut(MUTABLE self: TypeAnalysisSession, node: DeclarationNode, final_type: AnnotationTypeShape) RETURNS !Void ->
@@ -7125,7 +7125,7 @@ PRIVATE FN typeAnalysisSession__propagate_collection_metadata_mut(MUTABLE self: 
       DeclarationNode.BindExpr AS item ->
         decl_type = COPY item.type;,
     END
-    MUTABLE node_type = TRY (aST__full_type_mut( castDeclarationNodeToLocatable(node)));
+    MUTABLE node_type = TRY (aST__full_type_mut( castDeclarationNodeToLocatable__type_analysis_session(node)));
     MUTABLE value_type = (MATCH node START DeclarationNode.VarDecl AS item -> TRY (aST__full_type_mut(item.value)), DeclarationNode.BindExpr AS item -> TRY (aST__full_type_mut(item.value)) END);
     MUTABLE coll_src_branch_value: ?Type = NIL;
     IF type__rank?( UNWRAP (decl_type)) THEN
@@ -12092,7 +12092,7 @@ PRIVATE FN typeAnalysisSession__promote_pipe_to_observable_dest_mut(MUTABLE self
       END
       MUTABLE rtoc_target_tv: Type = UNWRAP (target_t);
       IF ((type__observable_terminal(rtoc_target_tv) != NIL) AND (type__observable_terminal(rtoc_target_tv) != pipe_terminal)) THEN
-        TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :OBSERVABLE_TERMINAL_MISMATCH }, [], CAST({:lhs: compilerInspectValue(), :pipe: compilerInspectValue()} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :OBSERVABLE_TERMINAL_MISMATCH }, [], CAST({:lhs: compilerInspectValue(), :pipe: compilerInspectValue()} AS {String@symbol}Any)));
       END
       TRY (type__stamp_observable_terminal_mut(&rtoc_target_tv, UNWRAP (pipe_terminal)));
       MATCH node START
@@ -12105,7 +12105,7 @@ PRIVATE FN typeAnalysisSession__promote_pipe_to_observable_dest_mut(MUTABLE self
           item_mutable.type = COPY rtoc_target_tv;
           MUTABLE node = DeclarationNode{ BindExpr: item_mutable };,
       END
-      TRY (typeAnalysisSession__stamp_type_mut(&self, castDeclarationNodeToLocatable(node), COPY rtoc_target_tv));
+      TRY (typeAnalysisSession__stamp_type_mut(&self, castDeclarationNodeToLocatable__type_analysis_session(node), COPY rtoc_target_tv));
     END
     RETURN TRY (typeAnalysisSession__stamp_type_mut(&self, &rtoc_pipe_v, declarationNode__type(node)));
 END
@@ -12138,14 +12138,14 @@ PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysi
     MUTABLE final_type: ?Type = COPY rtoc_coerced.type;
     MUTABLE error: ?String = COPY rtoc_coerced.error;
     IF error != NIL THEN
-      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_COERCION_FAILED }, [], CAST({:detail: error} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :TYPE_COERCION_FAILED }, [], CAST({:detail: error} AS {String@symbol}Any)));
     END
     IF (value IS_A CapabilityWrap AND (((locatable__ownership(value) OR locatable__sync(value)) OR locatable__layout(value)))) THEN
       MUTABLE capability_target_branch_value: ?Type = NIL;
       IF declarationNode__type(node) THEN
         capability_target_branch_value = TRY (type__new(castTypeToTypeConstructionInput__type_analysis_session(UNWRAP (declarationNode__type(node)))));
       ELSE
-        capability_target_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(castDeclarationNodeToLocatable(UNWRAP (castLocatableToDeclarationNode(value))))) }));
+        capability_target_branch_value = TRY (type__new(TypeConstructionInput{ Type: COPY TRY (aST__full_type_mut(castDeclarationNodeToLocatable__type_analysis_session(UNWRAP (castLocatableToDeclarationNode(value))))) }));
       END
       MUTABLE capability_target: Type = capability_target_branch_value?;
       TRY (type__merge_capabilities_from_mut(&capability_target, TRY (aST__full_type_mut(value))));
@@ -12162,7 +12162,7 @@ PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysi
     TRY (typeAnalysisSession__propagate_collection_metadata_mut(&self, &node, castTypeToAnnotationTypeShape(COPY rtoc_final)));
     typeAnalysisSession__propagate_call_flags_mut(&self, castDeclarationNodeToAnnotationNode(node));
     TRY (typeAnalysisSession__set_cleanup_alloc_mut(&self, castDeclarationNodeToNode__type_analysis_session(node)));
-    MUTABLE resource_result = TRY (typeAnalysisSession__resolve_resource_close(&self, castDeclarationNodeToLocatable(node)));
+    MUTABLE resource_result = TRY (typeAnalysisSession__resolve_resource_close(&self, castDeclarationNodeToLocatable__type_analysis_session(node)));
     MATCH node START
       DeclarationNode.VarDecl AS item ->
         MUTABLE item_mutable = COPY item;
@@ -12173,11 +12173,11 @@ PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysi
         item_mutable.resource_close_plan = COPY resource_result.close_plan;
         MUTABLE node = DeclarationNode{ BindExpr: item_mutable };,
     END
-    MUTABLE node_type = TRY (aST__full_type_mut(castDeclarationNodeToLocatable(node)));
+    MUTABLE node_type = TRY (aST__full_type_mut(castDeclarationNodeToLocatable__type_analysis_session(node)));
     IF (resource_result.is_resource AND TRUE) THEN
       node_type.is_resource = TRUE;
     END
-    TRY (capabilities__validate_mut(castDeclarationNodeToLocatable(node), node_type, %(n, msg) USE(MUTABLE self, MUTABLE storage, MUTABLE node_type) -> {
+    TRY (capabilities__validate_mut(castDeclarationNodeToLocatable__type_analysis_session(node), node_type, %(n, msg) USE(MUTABLE self, MUTABLE storage, MUTABLE node_type) -> {
     TRY (typeAnalysisSession__error_mut(&self, n, TypeAnalysisCodeOrMessage{ SymbolValue: :CAPABILITY_INVALID }, [], CAST({:detail: msg} AS {String@symbol}Any)));
     rubyToClearVoid__type_analysis_session()
     }));
@@ -12233,9 +12233,9 @@ PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysi
         END
       END
       IF (fixes.length() > 0) THEN
-        TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :lint, fixes, NIL, :BARE_VERSIONED_UNSHARED, :warning, FALSE, CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any)));
+        TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), :lint, fixes, NIL, :BARE_VERSIONED_UNSHARED, :warning, FALSE, CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any)));
       ELSE
-        typeAnalysisSession__note_mut(&self, castDeclarationNodeToLocatable(node), TRY (typeAnalysisSession__diagnostic_message(self, :BARE_VERSIONED_UNSHARED, [], CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any))));
+        typeAnalysisSession__note_mut(&self, castDeclarationNodeToLocatable__type_analysis_session(node), TRY (typeAnalysisSession__diagnostic_message(self, :BARE_VERSIONED_UNSHARED, [], CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any))));
       END
     END
     TRY (typeAnalysisSession__classify_ownership_mut(&self, &sym));
@@ -12250,7 +12250,7 @@ PRIVATE FN typeAnalysisSession__finalize_decl_node_mut(MUTABLE self: TypeAnalysi
     END
     typeAnalysisSession__accumulate_stack_bytes(&self, storage, node);
     TRY (typeAnalysisSession__track_union_alias(&self, UNWRAP (declarationNode__name(node)), value));
-    TRY (typeAnalysisSession__record_capability_binding(&self, UNWRAP (declarationNode__name(node)), castDeclarationNodeToLocatable(node), castTypeToFinalType(COPY rtoc_final), storage));
+    TRY (typeAnalysisSession__record_capability_binding(&self, UNWRAP (declarationNode__name(node)), castDeclarationNodeToLocatable__type_analysis_session(node), castTypeToFinalType(COPY rtoc_final), storage));
     NIL;
 END
 PRIVATE FN typeAnalysisSession__materialize_inferred_wrapper_annotation_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode) RETURNS !Void ->
@@ -12414,7 +12414,7 @@ PRIVATE FN typeAnalysisSession__emit_inferred_async_binding_mut(MUTABLE self: Ty
         "future"
       END }} AS {String@symbol}DiagnosticKwValue)), [edit__new(span__new(NIL, bind_expr.token.line, (bind_expr.token.column + (bind_expr.name).length()), 0), ":${wrapper}")], :auto)));
     END
-    TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :type, fixes, NIL, :INFERRED_ASYNC_BINDING, :error, TRUE, CAST({:name: UNWRAP (declarationNode__name(node)), :expected_action: action} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), :type, fixes, NIL, :INFERRED_ASYNC_BINDING, :error, TRUE, CAST({:name: UNWRAP (declarationNode__name(node)), :expected_action: action} AS {String@symbol}Any)));
 END
 PRIVATE FN typeAnalysisSession__emit_inferred_wrapper_binding_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode, code: String@symbol, prefix: String, wrapper: String) RETURNS !Void ->
     MUTABLE value_range: ?SourceRange = (MATCH node START DeclarationNode.VarDecl AS item -> locatable__source_range(item.value), DeclarationNode.BindExpr AS item -> locatable__source_range(item.value) END);
@@ -12437,7 +12437,7 @@ PRIVATE FN typeAnalysisSession__emit_inferred_wrapper_binding_mut(MUTABLE self: 
         "optional"
       END }} AS {String@symbol}DiagnosticKwValue)), [edit__new(span__new(NIL, bind_expr.token.line, (bind_expr.token.column + (bind_expr.name).length()), 0), ":${wrapper}")], :auto)));
     END
-    TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :type, fixes, NIL, code, :error, TRUE, CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any)));
+    TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), :type, fixes, NIL, code, :error, TRUE, CAST({:name: UNWRAP (declarationNode__name(node))} AS {String@symbol}Any)));
 END
 PRIVATE FN typeAnalysisSession__validate_rank_initializer_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode, declared_type: Type) RETURNS !Void ->
     IF !(type__rank?(declared_type)) THEN
@@ -12448,10 +12448,10 @@ PRIVATE FN typeAnalysisSession__validate_rank_initializer_mut(MUTABLE self: Type
     END
     MUTABLE item_count = (MATCH node START DeclarationNode.VarDecl AS item -> (locatable__items(item.value) OR_ELSE List[]).length(), DeclarationNode.BindExpr AS item -> (locatable__items(item.value) OR_ELSE List[]).length() END);
     IF (TRY (type__fixed_rank?(declared_type)) AND (item_count.toString() != type__capacity_text(type__capacity(declared_type)))) THEN
-      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_LITERAL_SIZE }, [], CAST({:expected: UNWRAP (type__capacity(declared_type)), :got: item_count} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_LITERAL_SIZE }, [], CAST({:expected: UNWRAP (type__capacity(declared_type)), :got: item_count} AS {String@symbol}Any)));
     END
     IF (TRY (type__dynamic_rank?(declared_type)) AND (item_count != 0)) THEN
-      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_DYNAMIC_LITERAL_NEEDS_SHAPE }));
+      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :RANK_DYNAMIC_LITERAL_NEEDS_SHAPE }));
     END
 END
 PRIVATE FN typeAnalysisSession__validate_observable_binding_initializer_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode) RETURNS !Bool ->
@@ -12471,10 +12471,10 @@ PRIVATE FN typeAnalysisSession__validate_observable_binding_initializer_mut(MUTA
     END
     MUTABLE fixes: []Fix@multiowned = TRY (typeAnalysisSession__observable_binding_drop_fixes(&self, node));
     IF (fixes.length() == 0) THEN
-      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :OBSERVABLE_BINDING_NEEDS_FOLD_PIPE }));
+      TRY (typeAnalysisSession__error_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), TypeAnalysisCodeOrMessage{ SymbolValue: :OBSERVABLE_BINDING_NEEDS_FOLD_PIPE }));
       RETURN FALSE;
     END
-    TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :type, fixes, NIL, :OBSERVABLE_BINDING_NEEDS_FOLD_PIPE, :error, FALSE));
+    TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), :type, fixes, NIL, :OBSERVABLE_BINDING_NEEDS_FOLD_PIPE, :error, FALSE));
     RETURN TRUE;
 END
 PRIVATE FN typeAnalysisSession__observable_binding_drop_fixes(MUTABLE self: TypeAnalysisSession, node: DeclarationNode) RETURNS ![]Fix ->
@@ -12635,7 +12635,7 @@ PRIVATE FN typeAnalysisSession__prepare_implicit_ownership_transport_mut(MUTABLE
       ELSE
         "deep copy"
       END}. Write `${plan.destination} = ${keyword} ${plan.source}` explicitly, or shorten the lifetime so this is a move/borrow.";
-      TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable(node)), :ownership, [TRY (fix__new(TRY (typeAnalysisSession__fix_description(self, :PREFIX_EXPLICIT_OWNERSHIP_COST, CAST({:keyword: DiagnosticKwValue{ StringValue: COPY keyword }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (locatable__token(UNWRAP (source))).line, UNWRAP (locatable__token(UNWRAP (source))).column, 0), "${keyword} ")], :auto))], NIL, :STRICT_IMPLICIT_OWNERSHIP_COST, :error, TRUE, CAST({:detail: detail} AS {String@symbol}Any)));
+      TRY (typeAnalysisSession__fixable_mut(&self, diagnosticAnchor__of(castDeclarationNodeToLocatable__type_analysis_session(node)), :ownership, [TRY (fix__new(TRY (typeAnalysisSession__fix_description(self, :PREFIX_EXPLICIT_OWNERSHIP_COST, CAST({:keyword: DiagnosticKwValue{ StringValue: COPY keyword }} AS {String@symbol}DiagnosticKwValue))), [edit__new(span__new(NIL, UNWRAP (locatable__token(UNWRAP (source))).line, UNWRAP (locatable__token(UNWRAP (source))).column, 0), "${keyword} ")], :auto))], NIL, :STRICT_IMPLICIT_OWNERSHIP_COST, :error, TRUE, CAST({:detail: detail} AS {String@symbol}Any)));
     END
     MUTABLE wrapper: Locatable = Locatable{ KeepNode: COPY KeepNode{ token: COPY UNWRAP (locatable__token(UNWRAP (source))), value: COPY UNWRAP (source), can_fail: NIL, coerced_type_object: NIL, collection_return: NIL, container_borrow: NIL, error_kind: NIL, error_type: NIL, implicit_layout_cost: NIL, kept_edge_plan: NIL, kept_edge_plans: NIL, layout_transport: NIL, matched_signature: NIL, matched_stdlib_def: NIL, mutates_receiver: NIL, needs_heap_create: NIL, needs_mut_ref: NIL, resource_close_plan: NIL, slot_size: NIL, source_range: NIL, stdlib_allocates: NIL, storage_override: NIL, symbol: NIL, tense_plan: NIL, type_object: NIL, var_mutated: NIL, var_used: NIL, was_moved: NIL, zig_pattern: NIL, carrier_op: NIL } };
     IF !((keyword == "KEEP")) THEN
@@ -12808,10 +12808,10 @@ PRIVATE FN typeAnalysisSession__propagate_carrier_polymorphic_mut(MUTABLE self: 
 END
 PRIVATE FN typeAnalysisSession__promote_declaration_value_mut(MUTABLE self: TypeAnalysisSession, MUTABLE node: DeclarationNode) RETURNS !Void ->
     IF (MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A IfStatement, DeclarationNode.BindExpr AS item -> item.value IS_A IfStatement END) THEN
-      TRY (typeAnalysisSession__promote_to_expr_if_mut(&self, castDeclarationNodeToLocatable(node), UNWRAP (castLocatableToIfStatement(UNWRAP (declarationNode__value(node))))));
+      TRY (typeAnalysisSession__promote_to_expr_if_mut(&self, castDeclarationNodeToLocatable__type_analysis_session(node), UNWRAP (castLocatableToIfStatement(UNWRAP (declarationNode__value(node))))));
     END
     IF (MATCH node START DeclarationNode.VarDecl AS item -> item.value IS_A MatchStatement, DeclarationNode.BindExpr AS item -> item.value IS_A MatchStatement END) THEN
-      TRY (typeAnalysisSession__promote_to_expr_match_mut(&self, castDeclarationNodeToLocatable(node), castLocatableToMatchStatement__type_analysis_session(UNWRAP (declarationNode__value(node)))));
+      TRY (typeAnalysisSession__promote_to_expr_match_mut(&self, castDeclarationNodeToLocatable__type_analysis_session(node), castLocatableToMatchStatement__type_analysis_session(UNWRAP (declarationNode__value(node)))));
     END
 END
 PRIVATE FN typeAnalysisSession__bind_declares_new_symbol?(MUTABLE self: TypeAnalysisSession, node: BindExpr, MUTABLE scope: Scope) RETURNS Bool ->
@@ -18146,7 +18146,7 @@ FN castDeclarationNodeToAnnotationNode(value: DeclarationNode) RETURNS Annotatio
   END
   panic("Invalid cast to AnnotationNode");
 END
-FN castDeclarationNodeToLocatable(value: DeclarationNode) RETURNS Locatable ->
+FN castDeclarationNodeToLocatable__type_analysis_session(value: DeclarationNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     DeclarationNode.VarDecl AS cast_payload -> RETURN Locatable{ VarDecl: COPY cast_payload };,
     DeclarationNode.BindExpr AS cast_payload -> RETURN Locatable{ BindExpr: COPY cast_payload };,
@@ -19359,7 +19359,7 @@ FN castRoutineBodyToOptionalLocatable(value: RoutineBody) RETURNS ?Locatable ->
   END
   panic("Invalid cast to ?Locatable");
 END
-FN castRoutineNodeToLocatable(value: RoutineNode) RETURNS Locatable ->
+FN castRoutineNodeToLocatable__type_analysis_session(value: RoutineNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     RoutineNode.LambdaLit AS cast_payload -> RETURN Locatable{ LambdaLit: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to Locatable");

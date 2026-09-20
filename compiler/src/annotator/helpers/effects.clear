@@ -233,7 +233,7 @@ END
 
 # The cast helper belongs with the union it builds; rtoc emitted it into
 # body_analysis.clear, which cannot see a type declared here.
-FN castAsyncBodyNodeToAsyncSpawnNode(value: AsyncBodyNode) RETURNS AsyncSpawnNode ->
+FN castAsyncBodyNodeToAsyncSpawnNode__effects(value: AsyncBodyNode) RETURNS AsyncSpawnNode ->
   PARTIAL MATCH value START
     AsyncBodyNode.BgBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgBlock: COPY cast_payload };,
     AsyncBodyNode.BgStreamBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgStreamBlock: COPY cast_payload };,

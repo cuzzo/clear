@@ -1141,9 +1141,9 @@ PRIVATE FN capabilityAuditSession__emit_can_smash_unsupported_error_mut(MUTABLE 
       fix = TRY (fix__new(TRY (capabilityAuditSession__fix_description(self, :REPLACE_CAN_SMASH_WITH_SERVICE)), [edit__new(span__new(NIL, tok.line, tok.column, (CAST(tok.value AS String)).codepointCount()), "@service")], :auto));
     END
     IF !(fix) THEN
-      RETURN TRY (capabilityAuditSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :CAN_SMASH_NOT_SUPPORTED }));
+      RETURN TRY (capabilityAuditSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable__capability_audit_session(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :CAN_SMASH_NOT_SUPPORTED }));
     END
-    TRY (capabilityAuditSession__fixable_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), :reentrance, [fix], NIL, :CAN_SMASH_NOT_SUPPORTED, :error));
+    TRY (capabilityAuditSession__fixable_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable__capability_audit_session(node)), :reentrance, [fix], NIL, :CAN_SMASH_NOT_SUPPORTED, :error));
 END
 PRIVATE FN capabilityAuditSession__emit_type_mismatch_assign_error_mut(MUTABLE self: CapabilityAuditSession, node: Node, target_type: TypeTypeInput, value_type: String@symbol) RETURNS !Void ->
     MUTABLE kw = CAST({:got: value_type, :expected: target_type} AS {String@symbol}Any);
@@ -2634,16 +2634,16 @@ PRIVATE FN capabilityAuditSession__validate_fiber_stack_mut(MUTABLE self: Capabi
     IF ((raw == :unbounded) AND (user_size != :service)) THEN
       MUTABLE mutual_md_callee: ?String = TRY (capabilityAuditSession__find_mutual_max_depth_callee(&self, call_names));
       IF mutual_md_callee EXISTS AS mutual_md_callee_value THEN
-        TRY (capabilityAuditSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :STACK_SAFETY_MUTUAL_RECURSION }, [], CAST({:callee: mutual_md_callee_value} AS {String@symbol}Any)));
+        TRY (capabilityAuditSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable__capability_audit_session(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :STACK_SAFETY_MUTUAL_RECURSION }, [], CAST({:callee: mutual_md_callee_value} AS {String@symbol}Any)));
         RETURN;
       END
     END
     IF (user_size == :stack) THEN
-      capabilityAuditSession__warning_mut(&self, castAsyncValidationNodeToLocatable(node), UNWRAP (TRY (diagnosticRegistry__format(:STACK_SAFETY_STACK_ALIAS, List[], CAST({:computed: UNWRAP (castDiagnosticKwValueToString(DiagnosticKwValue{ SymbolValue: COPY computed }))} AS {String@symbol}String)))));
+      capabilityAuditSession__warning_mut(&self, castAsyncValidationNodeToLocatable__capability_audit_session(node), UNWRAP (TRY (diagnosticRegistry__format(:STACK_SAFETY_STACK_ALIAS, List[], CAST({:computed: UNWRAP (castDiagnosticKwValueToString(DiagnosticKwValue{ SymbolValue: COPY computed }))} AS {String@symbol}String)))));
       RETURN;
     END
     IF ((user_size != NIL) AND ((effectTracker__tier_order()[user_size] OR_ELSE 0) < (effectTracker__tier_order()[computed] OR_ELSE 0))) THEN
-      TRY (capabilityAuditSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :STACK_SAFETY_USER_SIZE_TOO_SMALL }, [], CAST({:size: user_size, :budget: symbol("STACK_TIER_BUDGET")[user_size], :computed: computed} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable__capability_audit_session(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :STACK_SAFETY_USER_SIZE_TOO_SMALL }, [], CAST({:size: user_size, :budget: symbol("STACK_TIER_BUDGET")[user_size], :computed: computed} AS {String@symbol}Any)));
     END
 END
 PRIVATE FN capabilityAuditSession__find_plain_reentrant_callee(MUTABLE self: CapabilityAuditSession, call_names: [Set]String) RETURNS !?String ->
@@ -2687,9 +2687,9 @@ END
 PRIVATE FN capabilityAuditSession__emit_service_required_error_mut(MUTABLE self: CapabilityAuditSession, node: AsyncValidationNode, reentrant_fn: String, user_size: ?String@symbol) RETURNS !Void ->
     MUTABLE fix: ?Fix@multiowned = TRY (capabilityAuditSession__service_required_fix(self, node, user_size));
     IF fix EXISTS AS fix_value THEN
-      TRY (capabilityAuditSession__fixable_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), :reentrance, [fix_value], NIL, :STACK_NEEDS_SERVICE_FIXABLE, :error, FALSE, CAST({:reentrant_fn: reentrant_fn} AS {String@symbol}Any)));
+      TRY (capabilityAuditSession__fixable_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable__capability_audit_session(node)), :reentrance, [fix_value], NIL, :STACK_NEEDS_SERVICE_FIXABLE, :error, FALSE, CAST({:reentrant_fn: reentrant_fn} AS {String@symbol}Any)));
     ELSE
-      RETURN TRY (capabilityAuditSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :STACK_NEEDS_SERVICE_FIXABLE }, [], CAST({:reentrant_fn: reentrant_fn} AS {String@symbol}Any)));
+      RETURN TRY (capabilityAuditSession__error_mut(&self, diagnosticAnchor__of(castAsyncValidationNodeToLocatable__capability_audit_session(node)), CapabilityAuditCodeOrMessage{ SymbolValue: :STACK_NEEDS_SERVICE_FIXABLE }, [], CAST({:reentrant_fn: reentrant_fn} AS {String@symbol}Any)));
     END
 END
 PRIVATE FN capabilityAuditSession__service_required_fix(self: CapabilityAuditSession, node: AsyncValidationNode, user_size: ?String@symbol) RETURNS !?Fix ->
@@ -3628,7 +3628,7 @@ PUB FN capabilityAuditSession__new(typed_program: TypedProgramFacts, inputs: Cap
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
-FN castAsyncValidationNodeToLocatable(value: AsyncValidationNode) RETURNS Locatable ->
+FN castAsyncValidationNodeToLocatable__capability_audit_session(value: AsyncValidationNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     AsyncValidationNode.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
     DEFAULT -> panic("Invalid cast to Locatable");
