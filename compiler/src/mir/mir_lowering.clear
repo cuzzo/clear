@@ -14786,7 +14786,7 @@ PRIVATE FN mIRLowering__lower_cap_wrap(MUTABLE self: MIRLowering, MUTABLE node: 
       RETURN Emittable{ MIRMethodCall: COPY TRY (mIRLowering__node_create_mir(&self, CAST(node_value AS Emittable), TRY (aST__full_type_mut(Locatable{ CapabilityWrap: COPY node })), &node.value)) };
     END
     MUTABLE inner_type = TRY (aST__full_type_mut(node.value));
-    MUTABLE inner = mIRLowering__with_decl_alloc(&self, :heap, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
+    MUTABLE inner: ?Emittable = mIRLowering__with_decl_alloc(&self, :heap, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_621: ?Emittable = mIRLowering__with_sink_type(&self, inner_type, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_620: ?Emittable = mIRLowering__with_expected_type(&self, inner_type, %() USE(inner_type, MUTABLE node, MUTABLE self) -> {
     MUTABLE value: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
@@ -14797,27 +14797,22 @@ PRIVATE FN mIRLowering__lower_cap_wrap(MUTABLE self: MIRLowering, MUTABLE node: 
     rtoc_lambda_result_621
     });
     IF ((TRY (type__string?(inner_type)) AND type__rodata?(inner_type)) AND !((TRY (ownershipEffect__of(inner))).produces_owned)) THEN
-      inner = DupeSlice{ source: COPY inner, alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL };
+      inner = DupeSlice{ source: COPY UNWRAP (inner), alloc: :heap, lowered_node_id: NIL, ownership_consumption: NIL };
     END
-    MUTABLE base_type = COPY CAST(aST__node_value( Locatable{ CapabilityWrap: COPY node }).resolved_type AS String);
+    MUTABLE base_type = COPY CAST(UNWRAP (locatable__resolved_type(node.value)) AS String);
     MUTABLE zig_base = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ StringValue: COPY base_type }));
     MUTABLE alloc = :heap;
     MUTABLE is_atomic_ptr = capabilityWrap__atomic_ptr?(node);
     MUTABLE sync_fn: ?String = mIRLowering__sync_wrap_constructor(self, node.sync, is_atomic_ptr);
     MUTABLE sync_type: ?String = mIRLowering__sync_wrap_type(self, node.sync, zig_base, is_atomic_ptr);
-    MUTABLE own_fn = PARTIAL MATCH node.ownership START
-      :shared -> (IF capabilityWrap__atomic?(node) THEN
-          NIL
-        ELSE
-          "arcCreate"
-        END),
-      :multiowned -> (IF capabilityWrap__atomic?(node) THEN
-          NIL
-        ELSE
-          "rcCreate"
-        END),
-      DEFAULT -> NIL
-    END;
+    MUTABLE own_fn: ?String = NIL;
+    IF !(capabilityWrap__atomic?(node)) THEN
+      IF (node.ownership == :shared) THEN
+        own_fn = "arcCreate";
+      ELSE_IF (node.ownership == :multiowned) THEN
+        own_fn = "rcCreate";
+      END
+    END
     MUTABLE strategy =   IF capabilityWrap__local_storage_wrap?(node) THEN
       :local
     ELSE_IF ((sync_fn != NIL) AND own_fn) THEN
@@ -14829,7 +14824,7 @@ PRIVATE FN mIRLowering__lower_cap_wrap(MUTABLE self: MIRLowering, MUTABLE node: 
     ELSE
       :passthrough
     END;
-    RETURN Emittable{ CapWrap: COPY castEmittableToCapWrap(TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ CapWrap: COPY CapWrap{ inner: COPY inner, zig_base: COPY zig_base, strategy: COPY strategy, sync_fn: COPY sync_fn, sync_type: COPY sync_type, own_fn: COPY own_fn, alloc: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, TRY (mIRLowering__mir_ident_names(self, inner)), "MIR::CapWrap", :owned_sink, alloc))) };
+    RETURN Emittable{ CapWrap: COPY castEmittableToCapWrap(TRY (mIRLowering__with_ownership_consumption(&self, Emittable{ CapWrap: COPY CapWrap{ inner: COPY UNWRAP (inner), zig_base: COPY zig_base, strategy: COPY strategy, sync_fn: COPY sync_fn, sync_type: COPY sync_type, own_fn: COPY own_fn, alloc: COPY alloc, lowered_node_id: NIL, ownership_consumption: NIL } }, TRY (mIRLowering__mir_ident_names(self, inner)), "MIR::CapWrap", :owned_sink, alloc))) };
 END
 PRIVATE FN mIRLowering__lower_link(MUTABLE self: MIRLowering, node: LinkNode) RETURNS !RcDowngrade ->
     MUTABLE inner: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt(node.value)));
