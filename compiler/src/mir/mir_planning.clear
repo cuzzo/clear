@@ -27,13 +27,11 @@ PUB FN mIRPlanner__plan_all_mut(fn_nodes: {String}FunctionDef, schema_lookup: FN
   cleanup_plans[rtoc_key] = TRY (cleanupClassifier__classify_plan(function, schema_lookup, lifecycle_registry));
   END
   TRY (loopFrameAnalysis__analyze_mut(fn_nodes, schema_lookup));
-  MUTABLE fallible = fn_nodes.each_with_object(Set[], %(tuple_param_0: Tuple<String,FunctionDef>, names) -> {
-  MUTABLE name = tuple_param_0._0;
-  MUTABLE function = tuple_param_0._1;
-  IF functionSignature__can_fail( CAST(function AS FunctionSignature)) THEN
-    RETURN &names.append(COPY name);
+  MUTABLE fallible: [Set]String = Set[];
+  FOR rtoc_fn_key IN fn_nodes.keys() DO
+    IF functionSignature__can_fail( CAST(UNWRAP (fn_nodes[rtoc_fn_key]) AS FunctionSignature)) THEN
+      &fallible.insert(COPY rtoc_fn_key);
+    END
   END
-  NIL
-  });
-  RETURN MIRPlanningResult{ cleanup_plans: COPY cleanup_plans, escape_placements: COPY escape_result.placements(), can_fail_functions: COPY fallible };
+  RETURN MIRPlanningResult{ cleanup_plans: COPY cleanup_plans, escape_placements: COPY escape_result.placements, can_fail_functions: COPY fallible };
 END
