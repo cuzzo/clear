@@ -3628,6 +3628,14 @@ PUB FN capabilityAuditSession__new(typed_program: TypedProgramFacts, inputs: Cap
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
+FN castPredicateCallToCapabilityAuditCall(value: PredicateCall) RETURNS ?CapabilityAuditCall ->
+  PARTIAL MATCH value START
+    PredicateCall.FuncCall AS item -> RETURN CapabilityAuditCall{ FuncCall: COPY item };,
+    PredicateCall.MethodCall AS item -> RETURN CapabilityAuditCall{ MethodCall: COPY item };,
+    DEFAULT -> RETURN NIL;
+  END
+  RETURN NIL;
+END
 FN castAsyncBodyNodeToAsyncSpawnNode__capability_audit_session(value: AsyncBodyNode) RETURNS AsyncSpawnNode ->
   PARTIAL MATCH value START
     AsyncBodyNode.BgBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgBlock: COPY cast_payload };,

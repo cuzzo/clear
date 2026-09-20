@@ -267,6 +267,14 @@ PRIVATE FN pipelineSetIndexLowerer__index_item_value(self: PipelineSetIndexLower
     RETURN Emittable{ Ident: COPY Ident{ name: COPY item_var, lowered_node_id: NIL, ownership_consumption: NIL } };
   END
 END
+FN castPipelineLazyRangePrefixReturnValueToEmittable__pipeline_range_lowerer(value: PipelineLazyRangePrefixReturnValue) RETURNS Emittable ->
+  PARTIAL MATCH value START
+    PipelineLazyRangePrefixReturnValue.ForStmt AS item -> RETURN Emittable{ ForStmt: COPY item };,
+    PipelineLazyRangePrefixReturnValue.WhileStmt AS item -> RETURN Emittable{ WhileStmt: COPY item };,
+    DEFAULT -> RETURN panic("unreachable loop statement variant");
+  END
+  RETURN panic("unreachable loop statement variant");
+END
 FN castEmittableToLocatable__pipeline_set_index_lowerer(value: Emittable) RETURNS Locatable ->
   PARTIAL MATCH value START
     DEFAULT -> panic("Invalid cast to Locatable");

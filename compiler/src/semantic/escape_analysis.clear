@@ -2210,6 +2210,12 @@ PUB FN escapeAnalysis__symbol_heap?(sym: ?SymbolEntry) RETURNS Bool ->
   symbolEntry__heap_storage?(rtoc_local_receiver_37) } == TRUE));
 END
 # End Ruby module EscapeAnalysis
+FN castOptionalTypeToOptionalTypeTypeInput(value: ?Type) RETURNS ?TypeTypeInput ->
+  IF value EXISTS AS cast_payload THEN
+    RETURN TypeTypeInput{ Type: COPY cast_payload };
+  END
+  RETURN NIL;
+END
 FN castAssignmentNameToAssignmentTarget(value: AssignmentName) RETURNS AssignmentTarget ->
   PARTIAL MATCH value START
     AssignmentName.StringValue AS cast_payload -> RETURN AssignmentTarget{ StringValue: COPY cast_payload };,
