@@ -2310,10 +2310,10 @@ PRIVATE FN capabilityAuditSession__finalize_async_execution_shapes_mut(MUTABLE s
     MUTABLE node: AsyncBodyNode = COPY _.node;
     MUTABLE body_scan: BodyScanSummary = COPY _.summary;
     IF (node IS_A BgBlock) THEN
-        TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&self, castAsyncBodyNodeToAsyncSpawnNode(node), body_scan));
+        TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&self, castAsyncBodyNodeToAsyncSpawnNode__capability_audit_session(node), body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&self, &node, body_scan.callees, asyncBodyNode__stack_size(node), UNWRAP (asyncBodyNode__can_smash(node)), UNWRAP (castAsyncBodyNodeToAsyncValidationNode(node))));
     ELSE_IF (node IS_A BgStreamBlock) THEN
-        MUTABLE rtoc_open_0 = castAsyncBodyNodeToAsyncSpawnNode(node);
+        MUTABLE rtoc_open_0 = castAsyncBodyNodeToAsyncSpawnNode__capability_audit_session(node);
         TRY (capabilityAuditSession__assign_bg_spawn_shape_mut(&self, &rtoc_open_0, body_scan));
         TRY (capabilityAuditSession__assign_async_stack_tier_mut(&self, &node, body_scan.callees, asyncBodyNode__stack_size(node), FALSE, UNWRAP (castAsyncBodyNodeToAsyncValidationNode(node))));
     ELSE_IF (node IS_A DoBranch) THEN
@@ -3628,6 +3628,14 @@ PUB FN capabilityAuditSession__new(typed_program: TypedProgramFacts, inputs: Cap
 END
 # End Ruby module Annotator::Phases
 # End Ruby module Annotator
+FN castAsyncBodyNodeToAsyncSpawnNode__capability_audit_session(value: AsyncBodyNode) RETURNS AsyncSpawnNode ->
+  PARTIAL MATCH value START
+    AsyncBodyNode.BgBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgBlock: COPY cast_payload };,
+    AsyncBodyNode.BgStreamBlock AS cast_payload -> RETURN AsyncSpawnNode{ BgStreamBlock: COPY cast_payload };,
+    DEFAULT -> panic("Invalid cast to AsyncSpawnNode");
+  END
+  panic("Invalid cast to AsyncSpawnNode");
+END
 FN castAsyncValidationNodeToLocatable__capability_audit_session(value: AsyncValidationNode) RETURNS Locatable ->
   PARTIAL MATCH value START
     AsyncValidationNode.BgStreamBlock AS cast_payload -> RETURN Locatable{ BgStreamBlock: COPY cast_payload };,
