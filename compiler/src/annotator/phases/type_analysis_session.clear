@@ -10984,7 +10984,7 @@ PRIVATE FN typeAnalysisSession__annotate_runtime_is_a_mut(MUTABLE self: TypeAnal
     END
     MUTABLE raw_payload: ?MatchPayload = typeAnalysisSession__runtime_union_payload(&self, union_schema, variant_name);
     IF raw_payload EXISTS AS raw_payload_value THEN
-      MUTABLE match_case = MatchCase{ kind: :eq, value: COPY castIsARightToLocatable(node.right), binding: COPY binding, body: COPY List[], destructure: NIL, extra_values: List[], indirect_payload_as: FALSE };
+      MUTABLE match_case = MatchCase{ kind: :eq, binding_mutable: NIL, value: COPY castIsARightToLocatable(node.right), binding: COPY binding, body: COPY List[], destructure: NIL, extra_values: List[], indirect_payload_as: FALSE };
       node.runtime_payload_type = TRY (typeAnalysisSession__match_payload_binding_type(&self, MatchSubjectPlan{ expr_type: COPY subject_type, type_name: COPY type_name, schema: MatchSchema{ UnionSchemaMultiowned: COPY union_schema }, enum_subject: FALSE, union_subject: TRUE, union_subst: COPY subst }, variant_name, raw_payload_value, &match_case));
       node.runtime_indirect_payload_as = match_case.indirect_payload_as;
     ELSE

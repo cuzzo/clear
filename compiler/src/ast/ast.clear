@@ -110,6 +110,7 @@ PUB STRUCT MatchCase {
   value: Locatable@boxed,
   body: []Locatable,
   binding: ?String,
+  binding_mutable: ?Bool,
   destructure: ?StructPattern,
   extra_values: []Locatable,
   indirect_payload_as: Bool

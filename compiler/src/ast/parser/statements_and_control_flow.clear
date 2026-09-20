@@ -638,12 +638,12 @@ PRIVATE FN clearParser__parse_match_arm(MUTABLE self: ClearParser) RETURNS !Pars
     IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&self, :KEYWORD, "WHEN"))) THEN
       MUTABLE condition = TRY (clearParser__parse_expression(&self));
       TRY (clearParser__consume(&self, :ARROW));
-      RETURN ParsedMatchArm{ kind: :when, value: COPY condition, extra_values: List[], binding: NIL, destructure: NIL };
+      RETURN ParsedMatchArm{ kind: :when, value: COPY condition, extra_values: List[], binding: NIL, binding_mutable: NIL, destructure: NIL };
     END
     IF TRY (clearParser__match?(&self, :CHAR, "{")) THEN
       MUTABLE pattern = TRY (clearParser__parse_struct_pattern(&self));
       TRY (clearParser__consume(&self, :ARROW));
-      RETURN ParsedMatchArm{ kind: :struct_pattern, value: Locatable{ StructPattern: COPY pattern }, extra_values: List[], binding: NIL, destructure: NIL };
+      RETURN ParsedMatchArm{ kind: :struct_pattern, value: Locatable{ StructPattern: COPY pattern }, extra_values: List[], binding: NIL, binding_mutable: NIL, destructure: NIL };
     END
     MUTABLE first_pattern = TRY (clearParser__parse_expression(&self));
     MUTABLE extra_patterns: []Locatable = List[];
@@ -652,17 +652,21 @@ PRIVATE FN clearParser__parse_match_arm(MUTABLE self: ClearParser) RETURNS !Pars
       &extra_patterns.append(TRY (clearParser__parse_expression(&self)));
     END
     MUTABLE binding: ?String = NIL;
+    MUTABLE binding_mutable = FALSE;
     MUTABLE destructure: ?StructPattern = NIL;
     IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&self, :KEYWORD, "AS"))) THEN
+      IF castClearParserReturnValueToBool(TRY (clearParser__match_mut(&self, :KEYWORD, "MUTABLE"))) THEN
+        binding_mutable = TRUE;
+      END
       binding = TRY (token__text_mut(TRY (clearParser__consume(&self, :VAR_ID))));
     ELSE_IF TRY (clearParser__match?(&self, :CHAR, "{")) THEN
       destructure = TRY (clearParser__parse_struct_pattern(&self));
     END
     TRY (clearParser__consume(&self, :ARROW));
-    RETURN ParsedMatchArm{ kind: :eq, value: COPY first_pattern, extra_values: COPY extra_patterns, binding: COPY binding, destructure: COPY destructure };
+    RETURN ParsedMatchArm{ kind: :eq, value: COPY first_pattern, extra_values: COPY extra_patterns, binding: COPY binding, binding_mutable: binding_mutable, destructure: COPY destructure };
 END
 PRIVATE FN clearParser__build_match_case(self: ClearParser, arm: ParsedMatchArm, body: []Locatable) RETURNS MatchCase ->
-    RETURN MatchCase{ kind: COPY arm.kind, value: COPY arm.value, body: COPY body, binding: COPY arm.binding, destructure: COPY arm.destructure, extra_values: COPY arm.extra_values, indirect_payload_as: FALSE };
+    RETURN MatchCase{ kind: COPY arm.kind, value: COPY arm.value, body: COPY body, binding: COPY arm.binding, binding_mutable: COPY arm.binding_mutable, destructure: COPY arm.destructure, extra_values: COPY arm.extra_values, indirect_payload_as: FALSE };
 END
 PRIVATE FN clearParser__parse_struct_pattern(MUTABLE self: ClearParser) RETURNS !StructPattern
   EFFECTS REENTRANT ->

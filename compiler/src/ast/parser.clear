@@ -115,6 +115,7 @@ PUB STRUCT ParsedMatchArm {
   value: Locatable,
   extra_values: []Locatable,
   binding: ?String,
+  binding_mutable: ?Bool,
   destructure: ?StructPattern
 }
 UNION ClearParserArgumentType { SymbolValue: String@symbol, TypeMultiowned: Type@multiowned, Type: Type }
