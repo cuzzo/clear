@@ -14500,21 +14500,21 @@ PRIVATE FN mIRLowering__lower_copy(MUTABLE self: MIRLowering, MUTABLE node: Copy
     END
     MUTABLE source: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge( CAST(castLocatableToMIRLoweringLowerableStmt__pipeline_lowering_bridge(node.value) AS Locatable))));
     IF mIRLowering__fresh_copy_constructor?(self, node.value) THEN
-      RETURN source;
+      RETURN UNWRAP (source);
     END
     IF hoist__noreturn_value?(node.value) THEN
-      RETURN source;
+      RETURN UNWRAP (source);
     END
     IF TRY (mIRLowering__unit_union_variant_constructor?(&self, node.value)) THEN
-      RETURN source;
+      RETURN UNWRAP (source);
     END
     MUTABLE source_ti = TRY (mIRLowering__copy_source_type_info(self, node.value));
-    MUTABLE ti: Type = source_ti;
+    MUTABLE ti: Type = COPY source_ti;
     IF locatable__coerced_type_info(Locatable{ CopyNode: COPY node }) EXISTS THEN
       ti = COPY TRY (type__new(TypeConstructionInput{ Type: COPY UNWRAP (locatable__coerced_type_info(Locatable{ CopyNode: COPY node })) }));
     END
     IF (TRY (type__any_rc?(ti)) AND !(TRY (type__any_rc?(source_ti)))) THEN
-      ti = KEEP source_ti;
+      ti = COPY source_ti;
     END
     MUTABLE lifecycle = COPY TRY (lifecycleRegistry__fetch(mIRLowering__lifecycle_registry(&self), ti));
     MUTABLE sink_type: ?Type = (IF mIRLowering__function_state(&self).current_sink_type != NIL THEN mIRLowering__function_state(&self).current_sink_type ELSE mIRLowering__function_state(&self).current_expected_type END);
@@ -14522,10 +14522,15 @@ PRIVATE FN mIRLowering__lower_copy(MUTABLE self: MIRLowering, MUTABLE node: Copy
     IF sink_type EXISTS AS sink_type_value THEN
       dst_ti_branch_value = (sink_type_value);
     ELSE
-      dst_ti_branch_value = ti;
+      dst_ti_branch_value = COPY ti;
     END
-    MUTABLE dst_ti: Type@multiowned = dst_ti_branch_value?;
-    MUTABLE alloc = ((IF mIRLowering__function_state(&self).current_decl_alloc != NIL THEN mIRLowering__function_state(&self).current_decl_alloc ELSE node.alloc END) OR_ELSE :heap);
+    MUTABLE dst_ti: Type@multiowned = KEEP UNWRAP (dst_ti_branch_value);
+    MUTABLE alloc: String@symbol = :heap;
+    IF mIRLowering__function_state(&self).current_decl_alloc EXISTS AS rtoc_decl_alloc THEN
+      alloc = COPY rtoc_decl_alloc;
+    ELSE_IF node.alloc EXISTS AS rtoc_node_alloc THEN
+      alloc = COPY rtoc_node_alloc;
+    END
     IF (IF source IS_A Orelse AS orelse THEN lifecyclePlan__needs_drop?(lifecycle) ELSE FALSE END) THEN
       source = TRY (mIRLowering__place_owned_orelse_for_destination(&self, castEmittableToOrelse(UNWRAP (source)), CAST(source_ti AS Type), alloc));
       source = TRY (mIRLowering__hoist_alloc(&self, UNWRAP (source), &node.value, FALSE, FALSE, FALSE));
@@ -14542,53 +14547,44 @@ PRIVATE FN mIRLowering__lower_copy(MUTABLE self: MIRLowering, MUTABLE node: Copy
         MUTABLE capture = "__copy_rc_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_609 = mIRLowering__lowering_counters(&self);
         mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_609)) }}";
         MUTABLE func: String = "";
-        IF type__shared?(wrapped) THEN
-          func = "arcRetain";
-        ELSE
-          func = "rcRetain";
-        END
-        MUTABLE retained = RcRetain{ source: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_base: TRY (mIRLowering__rc_payload_zig_type(self, wrapped)), func: COPY func, lowered_node_id: NIL, ownership_consumption: NIL };
-        MUTABLE copied = IfOptional{ optional: COPY source, capture: COPY capture, then_expr: Emittable{ RcRetain: COPY retained }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+        MUTABLE retained = RcRetain{ source: Emittable{ Ident: COPY Ident{ name: COPY capture, lowered_node_id: NIL, ownership_consumption: NIL } }, zig_base: TRY (mIRLowering__rc_payload_zig_type(self, wrapped)), func: COPY (IF type__shared?(wrapped) THEN "arcRetain" ELSE "rcRetain" END), lowered_node_id: NIL, ownership_consumption: NIL };
+        MUTABLE copied: IfOptional = IfOptional{ optional: COPY UNWRAP (source), capture: COPY capture, then_expr: Emittable{ RcRetain: COPY retained }, else_expr: Emittable{ Lit: COPY Lit{ value: "null", lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
         copied.result_type = TRY (type__new(TypeConstructionInput{ Type: COPY ti }));
         RETURN Emittable{ IfOptional: COPY copied };
       ELSE
-        IF type__shared?(ti) THEN
-          func = "arcRetain";
-        ELSE
-          func = "rcRetain";
-        END
-        RETURN Emittable{ RcRetain: COPY RcRetain{ source: COPY source, zig_base: TRY (mIRLowering__rc_payload_zig_type(self, CAST(ti AS Type))), func: COPY func, lowered_node_id: NIL, ownership_consumption: NIL } };
+        RETURN Emittable{ RcRetain: COPY RcRetain{ source: COPY UNWRAP (source), zig_base: TRY (mIRLowering__rc_payload_zig_type(self, CAST(ti AS Type))), func: COPY (IF type__shared?(ti) THEN "arcRetain" ELSE "rcRetain" END), lowered_node_id: NIL, ownership_consumption: NIL } };
       END
     ELSE_IF (lifecycle.copy_strategy == :deep_clone) OR (lifecycle.copy_strategy == :generic) THEN
       MUTABLE copy_ti_branch_value: ?Type@multiowned = NIL;
       IF ((type__optional?(ti) OR type__error_union?(ti))) THEN
-        copy_ti_branch_value = ti;
+        copy_ti_branch_value = COPY ti;
       ELSE
-        copy_ti_branch_value = dst_ti;
+        copy_ti_branch_value = KEEP dst_ti;
       END
       MUTABLE copy_ti: Type@multiowned = copy_ti_branch_value?;
       MUTABLE dst_payload = TRY (type__non_optional_type(dst_ti));
       MUTABLE source_payload = TRY (type__non_optional_type(ti));
       IF (TRY (type__any_rc?(dst_payload)) AND !(TRY (type__any_rc?(source_payload)))) THEN
-        RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY source, zig_type: COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY source_payload })), elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: COPY deepCopy__copy_shape_for_zig_type(TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY source_payload }))), type_info: COPY source_payload, lowered_node_id: NIL, ownership_consumption: NIL } };
+        RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY UNWRAP (source), zig_type: COPY TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY source_payload })), elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: COPY deepCopy__copy_shape_for_zig_type(TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY source_payload }))), type_info: COPY source_payload, lowered_node_id: NIL, ownership_consumption: NIL } };
       END
-      MUTABLE copy_zig: ?String =     IF (lifecycle.copy_strategy == :generic) THEN
-        NIL
+      MUTABLE copy_zig: ?String = NIL;
+      IF (lifecycle.copy_strategy == :generic) THEN
+        copy_zig = NIL;
       ELSE_IF (type__optional?(ti) OR type__error_union?(ti)) THEN
-        TRY (mIRLowering__bare_zig_type(self, CAST(ti AS Type)))
+        copy_zig = TRY (mIRLowering__bare_zig_type(self, CAST(ti AS Type)));
       ELSE_IF TRY (type__string?(ti)) THEN
-        "[]const u8"
+        copy_zig = "[]const u8";
       ELSE_IF ((TRY (type__direct_indexable_collection?(ti)) AND TRY (type__direct_indexable_collection?(dst_ti))) AND !(TRY (type__string?(dst_ti)))) THEN
-        TRY (mIRLowering__copy_source_zig_type(self, node.value, CAST(ti AS Type), CAST(dst_ti AS Type)))
+        copy_zig = TRY (mIRLowering__copy_source_zig_type(self, node.value, CAST(ti AS Type), CAST(dst_ti AS Type)));
       ELSE_IF (type__borrowed_reference?(ti) OR (type__ownership(ti) == :borrow)) THEN
-        TRY (mIRLowering__bare_zig_type(self, CAST(dst_ti AS Type)))
+        copy_zig = TRY (mIRLowering__bare_zig_type(self, CAST(dst_ti AS Type)));
       ELSE_IF (type__indirect?(dst_ti) AND !(type__indirect?(ti))) THEN
-        TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY ti }))
+        copy_zig = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY ti }));
       ELSE_IF (TRY (type__any_rc?(dst_ti)) AND !(TRY (type__any_rc?(ti)))) THEN
-        TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY ti }))
+        copy_zig = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY ti }));
       ELSE
-        TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY dst_ti }))
-      END;
+        copy_zig = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY dst_ti }));
+      END
       RETURN Emittable{ DeepCopy: COPY DeepCopy{ source: COPY UNWRAP (source), zig_type: COPY copy_zig, elem_type: NIL, strategy: :full_value, alloc: COPY alloc, copy_shape: COPY deepCopy__copy_shape_for_zig_type(copy_zig), type_info: CAST(COPY copy_ti AS ?Type), lowered_node_id: NIL, ownership_consumption: NIL } };
     ELSE
       panic("unknown lifecycle copy strategy {} for {}");
