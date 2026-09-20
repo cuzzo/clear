@@ -10629,13 +10629,19 @@ PRIVATE FN mIRLowering__polymorphic_flow_required?(self: MIRLowering, MUTABLE no
     RETURN mIRLowering__ast_contains_return?(self, AstReturnSearchNode{ ArrayValue: node.body |> SELECT castLocatableToNode__mir_lowering(_) });
 END
 PRIVATE FN mIRLowering__ast_contains_return?(self: MIRLowering, node: ?AstReturnSearchNode) RETURNS Bool ->
-    MUTABLE root: ?AstReturnSearchNode = COPY node;
     MUTABLE found: Bool = FALSE;
-    aST__each_locatable_list(castOptionalAstReturnSearchNodeToAnyMultiowned(root), FALSE, %(candidate: Locatable) -> {
-    IF candidate IS_A ReturnNode AS return_node THEN
-        found = TRUE;
+    MUTABLE rtoc_items: []Node = List[];
+    IF node EXISTS AS rtoc_root THEN
+      PARTIAL MATCH rtoc_root START
+        AstReturnSearchNode.ArrayValue AS rtoc_arr -> rtoc_items = COPY rtoc_arr;,
+        DEFAULT -> PASS;
+      END
     END
-    rubyToClearVoid__mir_lowering()
+    aST__each_locatable_list(rtoc_items |> SELECT castNodeToLocatable__mir_lowering(_), FALSE, %(candidate: Locatable) USE(MUTABLE found) -> {
+      IF candidate IS_A ReturnNode THEN
+        found = TRUE;
+      END
+      rubyToClearVoid__mir_lowering()
     });
     RETURN found;
 END
