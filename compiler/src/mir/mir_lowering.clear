@@ -17251,12 +17251,12 @@ WITH POLYMORPHIC self AS MUTABLE rtoc_self_view {
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE alias_name = COPY (node.bindings[rtoc_idx]?.name);
-      alias_owner_map[alias_name] = owner;
-      alias_alloc_map[alias_name] = TRY (mIRLowering__placement_for_node(&rtoc_self_view, UNWRAP (node.bindings[rtoc_idx]?.expr)));
-      &if_bind_aliases.insert(alias_name);
+      MUTABLE alias_name: String = COPY UNWRAP (node.bindings[rtoc_idx]).name;
+      alias_owner_map[COPY alias_name] = owner;
+      alias_alloc_map[COPY alias_name] = TRY (mIRLowering__placement_for_node(&rtoc_self_view, UNWRAP (node.bindings[rtoc_idx]?.expr)));
+      &if_bind_aliases.insert(COPY alias_name);
       IF TRY (mIRLowering__if_bind_pointer_alias?(&rtoc_self_view, UNWRAP (node.bindings[rtoc_idx]?.expr))) THEN
-          RETURN &pointer_aliases.insert(alias_name);
+          &pointer_aliases.insert(COPY alias_name);
       END
     rtoc_idx = rtoc_idx + 1;
   END
