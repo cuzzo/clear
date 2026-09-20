@@ -16875,7 +16875,12 @@ PRIVATE FN mIRLowering__lower_auto_lock_assignment(MUTABLE self: MIRLowering, MU
       acquire_method = "acquire";
     END
     MUTABLE prev_locked: ?{String}LockedUnwrapMapValue = COPY mIRLowering__capability_state(&self).locked_unwrap_map;
-    self.state.capabilities.locked_unwrap_map = ((prev_locked OR_ELSE {})).merge({facts.alias_var: TRUE, facts.var_name: facts.alias_var});
+    MUTABLE rtoc_locked_map: {String}LockedUnwrapMapValue = {};
+    IF prev_locked EXISTS AS rtoc_prev_locked THEN
+      rtoc_locked_map = COPY rtoc_prev_locked;
+    END
+    &rtoc_locked_map.merge_mut({facts.alias_var: LockedUnwrapMapValue{ BoolValue: TRUE }, facts.var_name: LockedUnwrapMapValue{ StringValue: COPY facts.alias_var }});
+    self.state.capabilities.locked_unwrap_map = COPY rtoc_locked_map;
     MUTABLE value = TRY (mIRLowering__auto_lock_assignment_value(&self, &node, facts.alloc_sym));
     value_pending = TRY (mIRLowering__flush_pending(&self));
     self.state.capabilities.locked_unwrap_map = prev_locked;
