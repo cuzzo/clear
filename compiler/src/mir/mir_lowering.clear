@@ -18329,7 +18329,7 @@ END
 PRIVATE FN mIRLowering__call_union_return_needs_hoist?(MUTABLE self: MIRLowering, expr: Emittable, ast_node: Locatable) RETURNS !Bool ->
     IF expr IS_A Call AS call THEN
       MUTABLE ti = TRY (aST__full_type_mut(ast_node));
-      ti = (TRY (type__success_type(ti)) OR ti);
+      ti = TRY (type__success_type(ti));
       MUTABLE is_heap = (((TRUE AND aST__node_heap_storage?(ast_node))) OR type__heap?(ti));
       IF is_heap THEN
         RETURN FALSE;
