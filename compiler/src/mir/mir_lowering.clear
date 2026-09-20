@@ -1916,8 +1916,14 @@ FN mIRLowering__materialize_statement_discard(MUTABLE self: MIRLowering, stmt: M
         MUTABLE entry_value_mutable = COPY entry_value;
         MUTABLE discard_name = "__discard_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_40 = mIRLowering__lowering_counters(&self);
         mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_40)) }}";
-        MUTABLE alloc = cleanupEntry__alloc(entry_value_mutable);
-        MUTABLE materialized = BindingMaterialization{ name: COPY discard_name, expr: castNodeRootToEmittable(COPY mir), alloc: COPY alloc, type_info: UNWRAP (COPY discard_type), mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY TRY (mIRLowering__discard_owned_zig_type(self, locatable_mutable, entry_value_mutable)) })), suppression: "_ = &${discard_name};", cleanup_entry: entry_value_mutable, cleanup_mode: :normal, scope: NIL, ownership_tracked: TRUE };
+        MUTABLE alloc: ?String@symbol = cleanupEntry__alloc(entry_value_mutable);
+        IF alloc == NIL THEN
+          alloc = TRY (mIRLowering__mir_owned_alloc(&self, castNodeRootToEmittable(COPY mir)));
+        END
+        IF alloc == NIL THEN
+          alloc = :heap;
+        END
+        MUTABLE materialized = BindingMaterialization{ name: COPY discard_name, expr: castNodeRootToEmittable(COPY mir), alloc: COPY UNWRAP (alloc), type_info: UNWRAP (COPY discard_type), mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY TRY (mIRLowering__discard_owned_zig_type(self, locatable_mutable, entry_value_mutable)) })), suppression: "_ = &${discard_name};", cleanup_entry: entry_value_mutable, cleanup_mode: :normal, scope: NIL, ownership_tracked: TRUE };
         TRY (mIRLowering__stamp_allocating_result_target_mut(&self, castNodeRootToEmittable(mir), discard_name, alloc));
         RETURN CAST(Tuple{ScopeBlock{ body: CAST(Body{ Emittable: COPY CAST(COPY TRY (bindingMaterialization__statements(materialized)) AS Emittable) } AS []Emittable), lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL }, TRUE} AS Tuple<NodeRoot, Bool>);
       ELSE
@@ -16926,7 +16932,7 @@ PRIVATE FN mIRLowering__auto_lock_assignment_value(MUTABLE self: MIRLowering, MU
     TRY (mIRLowering__materialize_owned_sink_value(&self, placed, node.value, alloc_sym, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(castAssignmentNameToLocatable__ast(node.name))) }))
     });
     IF (TRUE AND TRY (mIRLowering__mir_allocates?(&self, value))) THEN
-      RETURN TRY (mIRLowering__hoist_alloc(&self, &value, &node.value, TRUE));
+      RETURN TRY (mIRLowering__hoist_alloc(&self, UNWRAP (value), &node.value, TRUE));
     ELSE
       RETURN value;
     END
