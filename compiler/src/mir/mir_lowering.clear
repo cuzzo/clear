@@ -16622,9 +16622,9 @@ PRIVATE FN mIRLowering__lower_indexed_assignment(MUTABLE self: MIRLowering, MUTA
     END
     MUTABLE op_value_mutable = COPY op;
     IF ((kind == :string_map) OR (kind == :numeric_map)) THEN
-      RETURN Emittable{ ShardedMapPut: COPY TRY (mIRLowering__lower_map_indexed_assignment(&self, &node, &target_node, receiver_type, Emittable{ AddressOf: COPY AddressOf{ expr: COPY target, lowered_node_id: NIL, ownership_consumption: NIL } }, UNWRAP (idx), kind, &op_value_mutable)) };
+      RETURN Emittable{ ShardedMapPut: COPY TRY (mIRLowering__lower_map_indexed_assignment(&self, &node, &target_node, receiver_type, Emittable{ AddressOf: COPY AddressOf{ expr: COPY target, lowered_node_id: NIL, ownership_consumption: NIL } }, UNWRAP (idx), UNWRAP (kind), &op_value_mutable)) };
     END
-    RETURN TRY (mIRLowering__lower_template_indexed_assignment(&self, &node, &target_node, receiver_type, Emittable{ AddressOf: COPY target }, UNWRAP (idx), kind, &op_value_mutable));
+    RETURN TRY (mIRLowering__lower_template_indexed_assignment(&self, &node, &target_node, receiver_type, Emittable{ AddressOf: COPY AddressOf{ expr: COPY target, lowered_node_id: NIL, ownership_consumption: NIL } }, UNWRAP (idx), UNWRAP (kind), &op_value_mutable));
 END
 PRIVATE FN mIRLowering__lower_direct_indexed_set(MUTABLE self: MIRLowering, node: Assignment, cast_index: Bool) RETURNS !Set ->
     MUTABLE target: ?Emittable = TRY (mIRLowering__lower(&self, assignmentName__name( CAST(node AS AssignmentName)).target));
