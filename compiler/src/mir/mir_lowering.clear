@@ -17661,10 +17661,34 @@ PRIVATE FN mIRLowering__equality_match_condition(MUTABLE self: MIRLowering, subj
     RETURN mIRLowering__disjoin_match_conditions(self, conditions);
 END
 PRIVATE FN mIRLowering__disjoin_match_conditions(self: MIRLowering, conditions: []Emittable) RETURNS Emittable ->
-    RETURN ((conditions |> REDUCE(0) MIRBinOp{ op: "or", left: CAST(COPY acc AS Emittable), right: COPY _, lowered_node_id: NIL, ownership_consumption: NIL }) OR Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL });
+    IF (conditions.length() == 0) THEN
+      RETURN Emittable{ Lit: COPY Lit{ value: "false", lowered_node_id: NIL, ownership_consumption: NIL } };
+    END
+    MUTABLE rtoc_acc: Emittable = COPY UNWRAP (conditions[0]);
+    MUTABLE rtoc_first = TRUE;
+    FOR _ IN conditions DO
+      IF rtoc_first THEN
+        rtoc_first = FALSE;
+      ELSE
+        rtoc_acc = Emittable{ MIRBinOp: COPY MIRBinOp{ op: "or", left: COPY rtoc_acc, right: COPY _, lowered_node_id: NIL, ownership_consumption: NIL } };
+      END
+    END
+    RETURN rtoc_acc;
 END
 PRIVATE FN mIRLowering__conjoin_match_conditions(self: MIRLowering, conditions: []Emittable) RETURNS Emittable ->
-    RETURN ((conditions |> REDUCE(0) MIRBinOp{ op: "and", left: CAST(COPY acc AS Emittable), right: COPY _, lowered_node_id: NIL, ownership_consumption: NIL }) OR Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL });
+    IF (conditions.length() == 0) THEN
+      RETURN Emittable{ Lit: COPY Lit{ value: "true", lowered_node_id: NIL, ownership_consumption: NIL } };
+    END
+    MUTABLE rtoc_acc: Emittable = COPY UNWRAP (conditions[0]);
+    MUTABLE rtoc_first = TRUE;
+    FOR _ IN conditions DO
+      IF rtoc_first THEN
+        rtoc_first = FALSE;
+      ELSE
+        rtoc_acc = Emittable{ MIRBinOp: COPY MIRBinOp{ op: "and", left: COPY rtoc_acc, right: COPY _, lowered_node_id: NIL, ownership_consumption: NIL } };
+      END
+    END
+    RETURN rtoc_acc;
 END
 PRIVATE FN mIRLowering__lower_match_default_body(MUTABLE self: MIRLowering, default_case: ?[]Locatable, expr_label: ?String) RETURNS !?[]Emittable ->
     IF default_case EXISTS AS default_case_value THEN
