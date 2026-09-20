@@ -394,6 +394,8 @@ PUB FN mIREmitter__emit(MUTABLE self: MIREmitter, node: ?Emittable) RETURNS !Str
       RETURN TRY (mIREmitter__emit_items_access(&self, rtoc_items_access));
     ELSE_IF node IS_A OwnedSlice AS rtoc_owned_slice THEN
       RETURN TRY (mIREmitter__emit_owned_slice(&self, rtoc_owned_slice));
+    ELSE_IF node IS_A CaptureEnv AS rtoc_capture_env THEN
+      RETURN TRY (mIREmitter__emit_capture_env(&self, rtoc_capture_env));
     ELSE_IF node IS_A LambdaExpr AS rtoc_lambda_expr THEN
       RETURN TRY (mIREmitter__emit_lambda(&self, rtoc_lambda_expr));
     ELSE_IF node IS_A RegistryCall AS rtoc_registry_call THEN
@@ -3538,6 +3540,18 @@ END
 PRIVATE FN mIREmitter__emit_has_field(MUTABLE self: MIREmitter, node: HasField) RETURNS !String
   EFFECTS REENTRANT ->
     RETURN "@hasField(@TypeOf(${TRY (mIREmitter__emit(&self, node.expr))}), \"${node.field}\")";
+END
+PRIVATE FN mIREmitter__emit_capture_env(MUTABLE self: MIREmitter, node: CaptureEnv) RETURNS !String
+  EFFECTS REENTRANT ->
+    MUTABLE slots: []String = List[];
+    FOR _ IN node.names DO
+      MUTABLE rtoc_slot_name: String = COPY _;
+      IF self.ident_overrides[_] EXISTS AS rtoc_override THEN
+        rtoc_slot_name = COPY rtoc_override;
+      END
+      &slots.append("@ptrCast(&${rtoc_slot_name})");
+    END
+    RETURN "[${node.names.length().toString()}]?*const anyopaque{ ${slots.join(", ")} }";
 END
 PRIVATE FN mIREmitter__emit_lambda(MUTABLE self: MIREmitter, node: LambdaExpr) RETURNS !String
   EFFECTS REENTRANT ->
