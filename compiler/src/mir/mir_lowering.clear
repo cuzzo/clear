@@ -17882,36 +17882,39 @@ END
 PRIVATE FN mIRLowering__hoist_unhoisted_return_allocs(MUTABLE self: MIRLowering, body: []Emittable, ast_stmts: []Locatable) RETURNS ![]Emittable ->
     MUTABLE returns: []Locatable = List[];
     FOR _ IN ast_stmts DO
-    IF (IF _ IS_A ReturnNode AS return_node THEN return_node.value ELSE FALSE END) THEN
+    IF (IF _ IS_A ReturnNode AS return_node THEN (return_node.value != NIL) ELSE FALSE END) THEN
       &returns.append(aST__node_value(_));
     END
     END
     MUTABLE ret_i: Int64 = 0;
     RETURN body |> UNNEST {
-    IF !(((IF _ IS_A ReturnStmt AS return_stmt THEN emittable__value(Emittable{ ReturnStmt: COPY return_stmt }) ELSE FALSE END) AND TRY (mIRLowering__mir_allocates?(&self, emittable__value( Emittable{ ReturnStmt: COPY _ }))))) THEN
+    MUTABLE rtoc_unnest_result: []Emittable = List[];
+    IF !((IF _ IS_A ReturnStmt AS return_stmt THEN ((return_stmt.value != NIL) AND TRY (mIRLowering__mir_allocates?(&self, return_stmt.value))) ELSE FALSE END)) THEN
         IF _ IS_A ReturnStmt AS return_stmt THEN
           ret_i = (ret_i + 1);
         END
-        CONTINUE;
+        rtoc_unnest_result = [COPY _];
+    ELSE
+      MUTABLE ast_value: ?Locatable = COPY returns[ret_i];
+      ret_i = (ret_i + 1);
+      MUTABLE name = "__tmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_766 = mIRLowering__lowering_counters(&self);
+      mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_766)) }}";
+      MUTABLE return_value: Emittable = COPY UNWRAP (emittable__value(COPY _));
+      MUTABLE entry: ?CleanupEntry@multiowned = TRY (mIRLowering__hoist_cleanup_entry(&self, return_value, ast_value));
+      MUTABLE materialized = BindingMaterialization{ name: COPY name, expr: COPY return_value, alloc: :heap, type_info: CAST(COPY TRY (mIRLowering__mir_alloc_mark_type_info(&self, return_value, ast_value, "unhoisted return allocation")) AS Type), mutable: FALSE, cleanup_entry: entry, cleanup_mode: IF entry != NIL THEN
+          :err
+        ELSE
+          :normal
+        END, scope: :heap, annotation: NIL, suppression: NIL, ownership_tracked: TRUE };
+      MUTABLE out: []Emittable = TRY (bindingMaterialization__statements(materialized));
+      IF entry EXISTS AS entry_value THEN
+          MUTABLE plan = mIRLowering__synthetic_return_ownership_plan(&self, name);
+          out = ruby_array_concat_Stmt(out, TRY (returnOwnershipPlan__transfer_marks_for(plan, [name] |> DISTINCT _, mIRLowering__function_state(&self).lowered_guarded_cleanup_names)));
+      END
+      &out.append(CAST(ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
+      rtoc_unnest_result = COPY out;
     END
-    MUTABLE ast_value: ?Locatable = COPY returns[ret_i];
-    ret_i = (ret_i + 1);
-    MUTABLE name = "__tmp_${{ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_mutable_receiver_766 = mIRLowering__lowering_counters(&self);
-    mIRLoweringGeneratedId__to_s(mIRLoweringCounters__next_tmp_id(&rtoc_mutable_receiver_766)) }}";
-    MUTABLE return_value = _.value;
-    MUTABLE entry: ?CleanupEntry@multiowned = TRY (mIRLowering__hoist_cleanup_entry(&self, return_value, ast_value));
-    MUTABLE materialized = BindingMaterialization{ name: COPY name, expr: COPY return_value, alloc: :heap, type_info: CAST(COPY TRY (mIRLowering__mir_alloc_mark_type_info(&self, return_value, ast_value, "unhoisted return allocation")) AS Type), mutable: FALSE, cleanup_entry: entry, cleanup_mode: IF entry != NIL THEN
-        :err
-      ELSE
-        :normal
-      END, scope: :heap, annotation: NIL, suppression: NIL, ownership_tracked: TRUE };
-    MUTABLE out: []Emittable = TRY (bindingMaterialization__statements(materialized));
-    IF entry EXISTS AS entry_value THEN
-        MUTABLE plan = mIRLowering__synthetic_return_ownership_plan(&self, name);
-        out = ruby_array_concat_Stmt(out, TRY (returnOwnershipPlan__transfer_marks_for(plan, [name] |> DISTINCT _, mIRLowering__function_state(&self).lowered_guarded_cleanup_names)));
-    END
-    &out.append(CAST(ReturnStmt{ value: Emittable{ Ident: COPY Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL } }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } AS Emittable));
-    out
+    rtoc_unnest_result
     };
 END
 PRIVATE FN mIRLowering__lower_return(MUTABLE self: MIRLowering, MUTABLE node: ReturnNode) RETURNS !NodeRoot ->
