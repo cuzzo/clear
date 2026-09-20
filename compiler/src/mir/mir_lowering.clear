@@ -10451,14 +10451,14 @@ END
 PRIVATE FN mIRLowering__view_capability_binding(self: MIRLowering, context: WithCapabilityBindingContext) RETURNS ![]Emittable ->
     MUTABLE source_mir = TRY (mIRLowering__with_capability_source_mir(self, context.var_node));
     MUTABLE safe_alias = mIRLowering__safe_with_capability_alias(self, context.alias_name);
-    MUTABLE rt = (context.resolved_type OR_ELSE TRY (type__new(TypeConstructionInput{ SymbolValue: :Any })));
-    MUTABLE inner_t_branch_value: ?Type = NIL;
-    IF type__future?(rt) THEN
-      inner_t_branch_value = TRY (type__tense_type(rt));
-    ELSE
-      inner_t_branch_value = rt;
+    MUTABLE rt: Type = TRY (type__new(TypeConstructionInput{ SymbolValue: :Any }));
+    IF context.resolved_type EXISTS AS rtoc_resolved THEN
+      rt = COPY rtoc_resolved;
     END
-    MUTABLE inner_t: Type = inner_t_branch_value?;
+    MUTABLE inner_t: Type = COPY rt;
+    IF type__future?(rt) THEN
+      inner_t = TRY (type__tense_type(rt));
+    END
     MUTABLE wrapped_inner: ?Type = TRY (type__wrapped_type(inner_t));
     MUTABLE is_value_shape = ((type__primitive?(inner_t) OR TRY (type__string?(inner_t))) OR (((type__optional?(inner_t) AND (wrapped_inner != NIL)) AND ((type__primitive?(wrapped_inner) OR TRY (type__string?(wrapped_inner)))))));
     MUTABLE wants_release = (!(is_value_shape) AND ((TRY (type__collection_value?(inner_t)) OR !(type__primitive?(inner_t)))));
