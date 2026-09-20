@@ -5002,9 +5002,10 @@ PRIVATE FN mIRLowering__owned_sink_source_entry(MUTABLE self: MIRLowering, sourc
 END
 PRIVATE FN mIRLowering__owned_parameter_source_node?(self: MIRLowering, source_node: Locatable) RETURNS Bool ->
     IF source_node IS_A Identifier AS identifier THEN
-      MUTABLE symbol: ?SymbolEntry = identifier.symbol;
-      MUTABLE rtoc_param_symbol = UNWRAP (symbol);
-      RETURN !(!(((((symbol != NIL) AND symbolEntry__is_param(rtoc_param_symbol)) AND symbolEntry__takes(symbol)))));
+    IF identifier.symbol EXISTS AS rtoc_param_symbol THEN
+      RETURN (symbolEntry__is_param(rtoc_param_symbol) AND symbolEntry__takes(rtoc_param_symbol));
+    END
+    RETURN FALSE;
     ELSE
       RETURN FALSE;
     END
