@@ -1297,15 +1297,19 @@ FN mIRLowering__heap_owned_result?(MUTABLE self: MIRLowering, mir: Emittable, as
     IF (effect.produces_owned AND placement__heap?(effect.alloc)) THEN
       RETURN TRUE;
     END
-    MUTABLE node = COPY ast_node;
+    MUTABLE node: Locatable = COPY ast_node;
     IF node IS_A MoveNode AS move_node THEN
-      node = CAST(move_node.value AS Locatable);
+      node = COPY CAST(move_node.value AS Locatable);
     END
-    IF (IF node IS_A Identifier AS identifier THEN aST__moved?(ast_node) ELSE FALSE END) THEN
+    IF (IF node IS_A Identifier AS identifier THEN aST__moved?(COPY ast_node) ELSE FALSE END) THEN
       RETURN (TRY (mIRLowering__placement_for_node(&self, node)) == :heap);
     END
-    RETURN !(!(((IF node IS_A Identifier AS identifier THEN ((identifier.symbol != NIL) AND ({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_27 = ((identifier.symbol)?);
-    symbolEntry__heap_storage?(rtoc_local_receiver_27) } == TRUE)) ELSE FALSE END))));
+    IF node IS_A Identifier AS identifier THEN
+      IF identifier.symbol EXISTS AS rtoc_id_symbol THEN
+        RETURN (symbolEntry__heap_storage?(rtoc_id_symbol) == TRUE);
+      END
+    END
+    RETURN FALSE;
 END
 # Ruby's `lower` hands back either a node or an ARRAY of nodes, which the body
 # builder splices. CLEAR's `lower` returns one node, so a multi-node lowering
