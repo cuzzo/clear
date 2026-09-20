@@ -5989,7 +5989,7 @@ PRIVATE FN mIRLowering__lower_stub_decl(MUTABLE self: MIRLowering, MUTABLE node:
     ELSE_IF (node.kind == :captures) THEN
       MUTABLE cap_name: ?StubValue@boxed = COPY node.value;
       MUTABLE rtoc_index_receiver_236 = COPY mIRLowering__test_state(&self).active_stubs;
-      rtoc_index_receiver_236[fn_name] = StubInfo{ kind: :captures, var: CAST(cap_name AS String) };
+      rtoc_index_receiver_236[fn_name] = StubInfo{ kind: :captures, var: CAST(COPY cap_name AS String) };
       RETURN NodeRoot{ Emittable: COPY CAST(Let{ name: CAST(COPY cap_name AS String), init: Emittable{ Lit: COPY Lit{ value: "0", lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: TRUE, annotation: COPY TRY (type__new(TypeConstructionInput{ StringValue: COPY "i64" })), suppression: "_ = &${CAST(cap_name AS String)};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } AS Emittable) };
     ELSE_IF (node.kind == :sequence) THEN
       MUTABLE values_locatable: Locatable = UNWRAP (castStubValueToLocatable(UNWRAP (node.value)));
