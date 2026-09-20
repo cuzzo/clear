@@ -16963,7 +16963,7 @@ END
 PRIVATE FN mIRLowering__lower_if(MUTABLE self: MIRLowering, MUTABLE node: IfStatement) RETURNS !Emittable ->
     MUTABLE else_body: ?[]Emittable = NIL;
     MUTABLE then_body: []Emittable = List[];
-    IF (UNWRAP (locatable__condition(Locatable{ IfStatement: COPY node })) IS_A IsA AND UNWRAP (locatable__condition( Locatable{ IfStatement: COPY node })).runtime_variant_name) THEN
+    IF (IF node.condition IS_A IsA AS rtoc_isa_cond THEN (rtoc_isa_cond.runtime_variant_name != NIL) ELSE FALSE END) THEN
       RETURN TRY (mIRLowering__lower_runtime_is_a_if(&self, node, castLocatableToIsA__mir_lowering(node.condition)));
     END
     MUTABLE cond, cond_pending = mIRLowering__lower_head(&self, %() USE(MUTABLE node, MUTABLE self) -> TRY (mIRLowering__lower_control_condition(self, &node.condition)));
@@ -16977,9 +16977,9 @@ PRIVATE FN mIRLowering__lower_if(MUTABLE self: MIRLowering, MUTABLE node: IfStat
       MUTABLE block = MIRBlockExpr{ label: COPY label, body: [Emittable{ IfStmt: COPY if_stmt }], lowered_node_id: NIL, ownership_consumption: NIL, borrowed_view: NIL, lazy_boundary: NIL, result_type: NIL };
       RETURN mIRLowering__with_pending(self, cond_pending, Emittable{ MIRBlockExpr: COPY block });
     END
-    then_body = TRY (mIRLowering__lower_body(&self, node.then_branch));
+    then_body = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(node.then_branch)));
     IF (((node.else_branch != NIL) AND !(((node.else_branch)?).empty?()))) THEN
-      else_body = TRY (mIRLowering__lower_body(&self, (node.else_branch OR_ELSE List[])));
+      else_body = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList((node.else_branch OR_ELSE List[]))));
     ELSE
       else_body = NIL;
     END
