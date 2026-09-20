@@ -12873,10 +12873,10 @@ PRIVATE FN mIRLowering__lower_or_else(MUTABLE self: MIRLowering, MUTABLE node: B
     END
     IF node.right IS_A OrElseExit THEN
       IF (facts.left_is_error AND (facts.target == :bc)) THEN
-        MUTABLE ex = COPY node.right;
-        MUTABLE exit_facts = TRY (mIRLowering__or_else_exit_facts(self, CAST(ex AS OrElseExit), facts.line));
-        IF ex.message THEN
-          msg_mir = CAST(TRY (mIRLowering__lower(&self, ex.message)) AS Emittable);
+        MUTABLE ex: OrElseExit = COPY CAST(node.right AS OrElseExit);
+        MUTABLE exit_facts = TRY (mIRLowering__or_else_exit_facts(self, ex, facts.line));
+        IF ex.message EXISTS AS rtoc_exit_msg THEN
+          msg_mir = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY rtoc_exit_msg))) AS Emittable);
         ELSE
           msg_mir = NIL;
         END
@@ -12884,10 +12884,10 @@ PRIVATE FN mIRLowering__lower_or_else(MUTABLE self: MIRLowering, MUTABLE node: B
         RETURN Emittable{ TryCatch: COPY TRY (mIRLowering__try_catch_with_provenance(self, left, Emittable{ ScopeBlock: COPY catch_block }, "__exit_err")) };
       END
       IF facts.left_is_error THEN
-        MUTABLE ex = COPY node.right;
-        MUTABLE exit_facts = TRY (mIRLowering__or_else_exit_facts(self, CAST(ex AS OrElseExit), facts.line));
-        IF ex.message THEN
-          msg_mir = CAST(TRY (mIRLowering__lower(&self, ex.message)) AS Emittable);
+        MUTABLE ex: OrElseExit = COPY CAST(node.right AS OrElseExit);
+        MUTABLE exit_facts = TRY (mIRLowering__or_else_exit_facts(self, ex, facts.line));
+        IF ex.message EXISTS AS rtoc_exit_msg THEN
+          msg_mir = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY rtoc_exit_msg))) AS Emittable);
         ELSE
           msg_mir = NIL;
         END
@@ -12919,19 +12919,19 @@ PRIVATE FN mIRLowering__lower_or_else(MUTABLE self: MIRLowering, MUTABLE node: B
       RETURN left;
     END
     MUTABLE fallback_type = TRY (mIRLowering__or_fallback_expected_type(&self, node));
-    MUTABLE right = mIRLowering__lower_scoped(&self, %() USE(fallback_type, MUTABLE node, MUTABLE self) -> {
+    MUTABLE right = TRY (mIRLowering__lower_scoped(&self, %() USE(fallback_type, MUTABLE node, MUTABLE self) -> {
     MUTABLE rtoc_lambda_result_556: ?Emittable = mIRLowering__with_expected_type(&self, CAST(fallback_type AS ?Type), %() USE(MUTABLE node, MUTABLE self) -> {
     MUTABLE fallback_mir: Emittable = CAST(TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(node.right))) AS Emittable);
     MUTABLE merge_type: ?Type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY node }, "OR_ELSE merge type"));
     IF TRY (type__byte_string?( UNWRAP (merge_type))) THEN
         fallback_mir = TRY (mIRLowering__widen_symbol_to_bytes(&self, fallback_mir, node.right));
     ELSE_IF ((type__symbol?( UNWRAP (merge_type)) AND node.right IS_A Literal) AND (castLocatableToLiteral__mir_lowering(node.right).type == :STRING)) THEN
-        fallback_mir = Emittable{ Call: COPY Call{ callee: "CheatLib.symbolOf", args: [fallback_mir], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
+        fallback_mir = Emittable{ Call: COPY Call{ callee: "CheatLib.symbolOf", args: [COPY fallback_mir], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL } };
     END
     TRY (mIRLowering__materialize_or_fallback_value(&self, &fallback_mir, &node.right))
     });
-    rtoc_lambda_result_556
-    });
+    UNWRAP (rtoc_lambda_result_556)
+    }));
     IF facts.left_is_error THEN
       MUTABLE caught = TRY (mIRLowering__try_catch_with_provenance(self, left, right, NIL, castEmittableToOptionalMIRLoweringFallback(right)));
       IF facts.left_success_optional THEN
@@ -12944,9 +12944,12 @@ PRIVATE FN mIRLowering__lower_or_else(MUTABLE self: MIRLowering, MUTABLE node: B
     MUTABLE out = Orelse{ expr: COPY left, fallback: COPY right, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
     MUTABLE result_type: ?Type = TRY (type__from_node_mut(Locatable{ BinaryOp: COPY node }, "optional OR_ELSE result"));
     out.result_type = result_type;
-    MUTABLE left_named_owner = (((node.left IS_A Identifier AND locatable__symbol(node.left)) AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_557 = node.left.symbol;
-    symbolEntry__rodata_provenance?(rtoc_local_receiver_557) })) AND !({ MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_558 = node.left.symbol;
-    symbolEntry__borrow_provenance?(rtoc_local_receiver_558) }));
+    MUTABLE left_named_owner = FALSE;
+    IF node.left IS_A Identifier AS rtoc_left_ident THEN
+      IF rtoc_left_ident.symbol EXISTS AS rtoc_left_sym THEN
+        left_named_owner = (!(symbolEntry__rodata_provenance?(rtoc_left_sym)) AND !(symbolEntry__borrow_provenance?(rtoc_left_sym)));
+      END
+    END
     IF (TRY (mIRLowering__ownership_bearing_type?(&self, UNWRAP (result_type))) AND left_named_owner) THEN
       RETURN TRY (mIRLowering__place_owned_orelse_for_destination(&self, &out, UNWRAP (result_type), (mIRLowering__function_state(&self).current_decl_alloc OR_ELSE :heap)));
     END
