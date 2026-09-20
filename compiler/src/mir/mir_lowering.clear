@@ -3869,7 +3869,7 @@ PRIVATE FN mIRLowering__lower_struct_def(MUTABLE self: MIRLowering, MUTABLE node
       MUTABLE fields_mir = node.field_decls.keys() |> SELECT {
     MUTABLE zig_t = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY structField__type((COPY UNWRAP (node.field_decls[_]))) }, FALSE, TRUE));
     MUTABLE default_mir: ?Emittable = TRY (mIRLowering__lower_struct_field_default(&self, CAST(COPY UNWRAP (node.field_decls[_]) AS StructField)));
-    FieldDef{ name: COPY _, zig_type: COPY zig_t, default: default_mir, lowered_node_id: NIL, ownership_consumption: NIL, boxed_capture: NIL }
+    FieldDef{ name: COPY _, zig_type: COPY zig_t, default: COPY default_mir, lowered_node_id: NIL, ownership_consumption: NIL, boxed_capture: NIL }
       };
       MUTABLE metadata: []Emittable = [Emittable{ PubConst: COPY PubConst{ name: "__clear_nominal_${mIRLowering__zig_safe_name(self, node.name)}", value: "true", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ PubConst: COPY PubConst{ name: "__clear_type_args", value: ".{ ${node.type_params.join(", ")} }", lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }];
       metadata = ruby_array_concat_Emittable__mir_lowering(metadata, CAST(TRY (mIRLowering__lower_struct_lifecycle_methods(&self, node)) AS []Emittable));
@@ -3880,7 +3880,7 @@ PRIVATE FN mIRLowering__lower_struct_def(MUTABLE self: MIRLowering, MUTABLE node
       MUTABLE fields = node.field_decls.keys() |> SELECT {
     MUTABLE zig_t = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY structField__type((COPY UNWRAP (node.field_decls[_]))) }, FALSE, TRUE));
     MUTABLE default_mir: ?Emittable = TRY (mIRLowering__lower_struct_field_default(&self, CAST(COPY UNWRAP (node.field_decls[_]) AS StructField)));
-    FieldDef{ name: COPY _, zig_type: COPY zig_t, default: default_mir, lowered_node_id: NIL, ownership_consumption: NIL, boxed_capture: NIL }
+    FieldDef{ name: COPY _, zig_type: COPY zig_t, default: COPY default_mir, lowered_node_id: NIL, ownership_consumption: NIL, boxed_capture: NIL }
       };
       MUTABLE lifecycle_methods = TRY (mIRLowering__lower_struct_lifecycle_methods(&self, node));
       MUTABLE methods_branch_value: ?[]FnDef = NIL;
