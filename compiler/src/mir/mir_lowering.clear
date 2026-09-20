@@ -7451,11 +7451,11 @@ PRIVATE FN mIRLowering__lower_function_def(MUTABLE self: MIRLowering, MUTABLE no
     MUTABLE sig: ?FunctionSignature@multiowned = NIL;
     self.kept_liveness_fn = COPY node;
     self.kept_liveness = NIL;
-    MUTABLE ret_type: !Type = functionDef__lowering_return_type(node);
-    IF ((TRUE AND type__frame?( TRY (ret_type))) AND TRY (type__struct?( TRY (ret_type)))) THEN
-      ret_type = TRY (type__new(TypeConstructionInput{ StringValue: CAST(type__resolved( TRY (ret_type)) AS String) }));
+    MUTABLE ret_type: Type = TRY (functionDef__lowering_return_type(node));
+    IF (type__frame?(ret_type) AND TRY (type__struct?( ret_type))) THEN
+      ret_type = TRY (type__new(TypeConstructionInput{ StringValue: CAST(type__resolved( ret_type) AS String) }));
     END
-    MUTABLE final_type = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: TRY (COPY ret_type)}));
+    MUTABLE final_type = TRY (mIRLowering__transpile_type(self, MIRLoweringType{ Type: COPY ret_type}));
     MUTABLE fn_needs_rt = (((TRY (mIRLowering__finalized_needs_rt_mut(&self, node)) OR_ELSE FALSE) OR TRY (mIRLowering__function_return_retains_shared_handle?(&self, node))) OR TRY (mIRLowering__function_uses_node_store?(&self, node)));
     IF fn_needs_rt THEN
       sig = (IF (TRY (mIRLowering__fn_sigs(self)))[symbol(CAST(node.name AS String))] != NIL THEN (TRY (mIRLowering__fn_sigs(self)))[symbol(CAST(node.name AS String))] ELSE (TRY (mIRLowering__fn_sigs(self)))[symbol(node.name)] END);
@@ -7471,15 +7471,15 @@ PRIVATE FN mIRLowering__lower_function_def(MUTABLE self: MIRLowering, MUTABLE no
       node.can_fail
     END;
     MUTABLE param_facts = TRY (mIRLowering__function_param_facts(&self, node.params, node.generic_params));
-    MUTABLE context = TRY (mIRLowering__function_lowering_context(&self, &node, final_type, ReturnTypeNode{ Type: TRY (COPY ret_type)}, fn_needs_rt, param_facts));
+    MUTABLE context = TRY (mIRLowering__function_lowering_context(&self, &node, final_type, ReturnTypeNode{ Type: COPY ret_type}, fn_needs_rt, param_facts));
     mIRLowering__activate_function_context(&self, context);
-    MUTABLE params_mir: []MIRParam = param_facts |> UNNEST {
-    MUTABLE params = [functionParamFact__to_mir_param(_)];
-    IF _.protocol_map THEN
-        &params.append(MIRParam{ name: COPY mIRLowering__protocol_map_allocator_name(self, _.name), zig_type: "std.mem.Allocator", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL });
+    MUTABLE params_mir: []MIRParam = List[];
+    FOR _ IN param_facts DO
+      &params_mir.append(functionParamFact__to_mir_param(_));
+      IF _.protocol_map THEN
+        &params_mir.append(MIRParam{ name: COPY mIRLowering__protocol_map_allocator_name(self, _.name), zig_type: "std.mem.Allocator", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL });
+      END
     END
-    params
-    };
     IF fn_needs_rt THEN
       params_mir = ([MIRParam{ name: "rt", zig_type: "*Runtime", pointer_passed: FALSE, lowered_node_id: NIL, ownership_consumption: NIL }] + params_mir);
     END
@@ -7512,12 +7512,15 @@ PRIVATE FN mIRLowering__lower_function_def(MUTABLE self: MIRLowering, MUTABLE no
     ELSE
       MUTABLE pre_checks = TRY (mIRLowering__lower_pre_clauses(&self, node));
       MUTABLE lowered_body = TRY (mIRLowering__lower_body(&self, castLocatableListToMIRLoweringLowerableStmtList(node.body)));
-      MUTABLE node_stores = ((mIRLowering__function_state(&self).node_store_types |> SELECT COPY _) |> ORDER_BY _) |> UNNEST {
-    MUTABLE bind_call = MIRMethodCall{ receiver: Emittable{ Call: COPY TRY (mIRLowering__node_store_type_mir(&self, _)) }, method: "bind", args: [CAST(Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-    MUTABLE binding = Ident{ name: mIRLowering__node_store_binding_name(self, _), lowered_node_id: NIL, ownership_consumption: NIL };
-    MUTABLE release_call = MIRMethodCall{ receiver: Emittable{ Call: COPY TRY (mIRLowering__node_store_type_mir(&self, _)) }, method: "releaseBound", args: [CAST(binding AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
-    [Emittable{ Let: COPY Let{ name: COPY mIRLowering__node_store_binding_name(self, _), init: Emittable{ MIRMethodCall: COPY bind_call }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY release_call AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }]
-      };
+      MUTABLE node_stores: []Emittable = List[];
+      FOR _ IN ((mIRLowering__function_state(&self).node_store_types |> SELECT COPY _) |> ORDER_BY _) DO
+      MUTABLE bind_call = MIRMethodCall{ receiver: Emittable{ Call: COPY TRY (mIRLowering__node_store_type_mir(&self, _)) }, method: "bind", args: [CAST(Ident{ name: mIRLowering__runtime_binding_name(&self), lowered_node_id: NIL, ownership_consumption: NIL } AS Any)], try_wrap: TRUE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+      MUTABLE binding = Ident{ name: mIRLowering__node_store_binding_name(self, _), lowered_node_id: NIL, ownership_consumption: NIL };
+      MUTABLE release_call = MIRMethodCall{ receiver: Emittable{ Call: COPY TRY (mIRLowering__node_store_type_mir(&self, _)) }, method: "releaseBound", args: [CAST(binding AS Any)], try_wrap: FALSE, callable_contract: TRY (callableContract__no_ownership(1)), owned_result_alloc: NIL, lowered_node_id: NIL, ownership_consumption: NIL, result_type: NIL };
+        FOR rtoc_ns IN [Emittable{ Let: COPY Let{ name: COPY mIRLowering__node_store_binding_name(self, _), init: Emittable{ MIRMethodCall: COPY bind_call }, mutable: FALSE, annotation: NIL, suppression: NIL, alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }, Emittable{ MIRDeferStmt: COPY MIRDeferStmt{ body: DeferBody{ Emittable: COPY CAST(COPY release_call AS Emittable) }, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }] DO
+          &node_stores.append(COPY rtoc_ns);
+        END
+      END
       body_mir = ((((takes_mir + pointer_param_mir) + pre_checks) + node_stores) + lowered_body);
     END
     body_mir = TRY (mIRLowering__append_ownership_transfers_for_mir_body(&self, body_mir));
