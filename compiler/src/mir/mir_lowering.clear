@@ -20622,8 +20622,8 @@ END
 # way Ruby renders it.
 PUB FN mIRLoweringBackgroundDispatch__to_s(value: MIRLoweringBackgroundDispatch) RETURNS String ->
   PARTIAL MATCH value START
-    MIRLoweringBackgroundDispatch.SymbolValue AS item -> RETURN COPY item;,
-    MIRLoweringBackgroundDispatch.BoolValue AS item -> RETURN item.toString();,
+    MIRLoweringBackgroundDispatch.SymbolValue AS item -> RETURN item.toString();,
+    MIRLoweringBackgroundDispatch.BoolValue AS item -> RETURN (IF item THEN "true" ELSE "false" END);,
   END
   RETURN "";
 END
