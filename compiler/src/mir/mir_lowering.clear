@@ -17810,18 +17810,18 @@ PRIVATE FN mIRLowering__union_match_variant_name(self: MIRLowering, value: Locat
     END
 END
 PRIVATE FN mIRLowering__union_match_payload_bindings(MUTABLE self: MIRLowering, c: MatchCase, payload_name: String, node: MatchStatement) RETURNS ![]Emittable ->
-    MUTABLE is_mutable = (((UNWRAP (locatable__expr(Locatable{ MatchStatement: COPY node })) IS_A Identifier AND (locatable__was_moved(UNWRAP (locatable__expr( Locatable{ MatchStatement: COPY node }))) == TRUE))) OR (c.binding_mutable == TRUE));
-    MUTABLE payload = Ident{ name: COPY payload_name, lowered_node_id: NIL, ownership_consumption: NIL };
+    MUTABLE is_mutable = ((IF node.expr IS_A Identifier AS rtoc_expr_ident THEN (rtoc_expr_ident.was_moved == TRUE) ELSE FALSE END) OR (c.binding_mutable == TRUE));
+    MUTABLE payload: Emittable = Emittable{ Ident: COPY Ident{ name: COPY payload_name, lowered_node_id: NIL, ownership_consumption: NIL } };
     IF c.indirect_payload_as THEN
-      payload = Deref{ expr: Emittable{ Ident: COPY payload }, lowered_node_id: NIL, ownership_consumption: NIL };
+      payload = Emittable{ Deref: COPY Deref{ expr: COPY payload, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
     IF c.binding EXISTS AS binding_value THEN
       MUTABLE binding = COPY binding_value;
-      RETURN CAST([Emittable{ Let: COPY Let{ name: COPY binding, init: Emittable{ Ident: COPY payload }, mutable: is_mutable, annotation: NIL, suppression: "_ = &${binding};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
+      RETURN CAST([Emittable{ Let: COPY Let{ name: COPY binding, init: COPY payload, mutable: is_mutable, annotation: NIL, suppression: "_ = &${binding};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } }] AS []Emittable);
     END
     MUTABLE destructure: ?StructPattern = COPY c.destructure;
     IF destructure EXISTS AS destructure_value THEN
-      RETURN destructure_value.fields |> SELECT:? (IF patternField__wildcard?(_) THEN NIL ELSE (IF !(patternField__bind?(_)) THEN NIL ELSE Let{ name: COPY _.name, init: Emittable{ FieldGet: COPY FieldGet{ object: Emittable{ Ident: COPY payload }, field: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: "_ = &${_.name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } END) END) |> WHERE _ != NIL;
+      RETURN destructure_value.fields |> SELECT:? (IF patternField__wildcard?(_) THEN NIL ELSE (IF !(patternField__bind?(_)) THEN NIL ELSE Emittable{ Let: COPY Let{ name: COPY _.name, init: Emittable{ FieldGet: COPY FieldGet{ object: COPY payload, field: COPY _.name, lowered_node_id: NIL, ownership_consumption: NIL } }, mutable: FALSE, annotation: NIL, suppression: "_ = &${_.name};", alias_safe: NIL, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL, const_visibility: NIL, module_const: NIL } } END) END) |> WHERE _ != NIL |> SELECT UNWRAP _;
     ELSE
       RETURN CAST(List[] AS []Emittable);
     END
