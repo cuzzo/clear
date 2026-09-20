@@ -1593,7 +1593,10 @@ FN mIRLowering__mir_union_payload_matches?(MUTABLE self: MIRLowering, payload_ty
 END
 FN mIRLowering__union_payload_coercion_value(MUTABLE self: MIRLowering, mir: Emittable, node: Locatable, union_type: Type, variant_name: String, payload_type: Type) RETURNS !Emittable ->
     MUTABLE ast_node = COPY node;
-    MUTABLE target_alloc: String@symbol = (mIRLowering__function_state(&self).current_decl_alloc OR_ELSE TRY (mIRLowering__alloc_for_node(&self, ast_node)));
+    MUTABLE target_alloc: String@symbol = TRY (mIRLowering__alloc_for_node(&self, ast_node));
+    IF mIRLowering__function_state(&self).current_decl_alloc EXISTS AS rtoc_decl_alloc THEN
+      target_alloc = COPY rtoc_decl_alloc;
+    END
     MUTABLE payload = TRY (mIRLowering__materialize_owned_sink_value(&self, mir, ast_node, target_alloc, TypeTypeInput{ Type: COPY payload_type }));
     IF TRY (mIRLowering__mir_allocates?(&self, payload)) THEN
       payload = TRY (mIRLowering__hoist_alloc(&self, &payload, &ast_node, TRUE));
