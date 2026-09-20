@@ -4123,18 +4123,12 @@ PRIVATE FN typeAnalysisSession__return_is_borrow?(MUTABLE self: TypeAnalysisSess
       END
       MUTABLE scope: ?Scope@multiowned = TRY (typeAnalysisSession__lookup_scope_for(&self, identifier__name(identifier)));
       MUTABLE reg: ?SymbolEntryRegInput = NIL;
-      IF (IF scope != NIL THEN
-        scope__resolve_entry(scope, identifier__name(identifier))
-      ELSE
-        NIL
-      END) != NIL THEN
-        reg = UNWRAP (COPY (((IF scope != NIL THEN
-        scope__resolve_entry(scope, identifier__name(identifier))
-      ELSE
-        NIL
-      END)))).reg;
+      IF scope EXISTS AS rtoc_scope THEN
+        IF scope__resolve_entry(rtoc_scope, identifier__name(identifier)) EXISTS AS rtoc_scope_entry THEN
+          reg = COPY rtoc_scope_entry.reg;
+        END
       END
-      RETURN !(!(((TRUE AND (aST__node__container_borrow(castSymbolEntryRegInputToLocatable(UNWRAP (reg))) == TRUE)))));
+      RETURN (IF reg EXISTS AS rtoc_reg THEN (aST__node__container_borrow(castSymbolEntryRegInputToLocatable(rtoc_reg)) == TRUE) ELSE FALSE END);
     END
     IF node IS_A GetIndex AS get_index THEN
       RETURN TRUE;
