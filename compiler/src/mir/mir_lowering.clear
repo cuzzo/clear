@@ -16797,30 +16797,45 @@ PRIVATE FN mIRLowering__indexed_assignment_registry_alloc(self: MIRLowering, MUT
     RETURN TRY (functionSignature__intrinsic_alloc(&op, alloc_key));
 END
 PRIVATE FN mIRLowering__lower_field_assignment_with_cleanup(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !ScopeBlock ->
-    MUTABLE lifecycle: ?PassStateValue = COPY node.field_lifecycle_plan;
+    MUTABLE lifecycle: ?LifecyclePlan = COPY node.field_lifecycle_plan;
     IF !((IF lifecycle != NIL THEN
-      lifecyclePlan__needs_drop?(CAST(lifecycle AS LifecyclePlan))
+      lifecyclePlan__needs_drop?(lifecycle)
     ELSE
       NIL
     END)) THEN
       panic("field cleanup lacks annotation lifecycle plan");
     END
-    MUTABLE alloc_sym = TRY (mIRLowering__placement_for_node(&self, (mIRLowering__root_receiver_node(self, castAssignmentNameToOptionalLocatable__mir_lowering(node.name)) OR_ELSE node.name)));
-    MUTABLE receiver_type: ?Type = TRY (type__from_node_mut(assignmentName__name( CAST(node AS AssignmentName)).target, "field assignment receiver"));
+    MUTABLE alloc_sym = TRY (mIRLowering__placement_for_node(&self, (IF mIRLowering__root_receiver_node(self, castAssignmentNameToOptionalLocatable__mir_lowering(node.name)) EXISTS AS rtoc_root THEN Locatable{ Identifier: COPY rtoc_root } ELSE UNWRAP (castAssignmentNameToOptionalLocatable__mir_lowering(node.name)) END)));
+    MUTABLE rtoc_field_name: ?GetField = NIL;
+    PARTIAL MATCH node.name START
+      AssignmentName.GetField AS rtoc_gf -> rtoc_field_name = COPY rtoc_gf;,
+      DEFAULT -> PASS;
+    END
+    MUTABLE receiver_type: ?Type = TRY (type__from_node_mut(COPY UNWRAP (rtoc_field_name).target, "field assignment receiver"));
     IF TRY (type__node_reference?( UNWRAP (receiver_type))) THEN
       alloc_sym = :heap;
     END
-    MUTABLE kept_value = mIRLowering__with_decl_alloc(&self, alloc_sym, %() USE(node, MUTABLE self) -> TRY (mIRLowering__kept_assignment_field_value(&self, node)));
-    IF (TRUE AND TRY (mIRLowering__mir_allocates?(&self, kept_value))) THEN
-      kept_value = TRY (mIRLowering__hoist_alloc(&self, &kept_value, node.value, TRUE));
+    MUTABLE kept_value: ?Emittable = mIRLowering__with_decl_alloc(&self, alloc_sym, %() USE(MUTABLE node, MUTABLE self) -> TRY (mIRLowering__kept_assignment_field_value(&self, node)));
+    IF (kept_value != NIL AND TRY (mIRLowering__mir_allocates?(&self, kept_value))) THEN
+      kept_value = TRY (mIRLowering__hoist_alloc(&self, &kept_value, &node.value, TRUE));
     END
-    MUTABLE value = kept_value;
+    MUTABLE value: ?Emittable = COPY kept_value;
+    IF kept_value == NIL THEN
+      value = mIRLowering__with_decl_alloc(&self, alloc_sym, %() USE(MUTABLE node, MUTABLE self, alloc_sym) -> {
+        MUTABLE rtoc_lowered: ?Emittable = TRY (mIRLowering__lower(&self, castLocatableToMIRLoweringLowerableStmt__mir_lowering(COPY node.value)));
+        TRY (mIRLowering__place_value_for_destination(&self, UNWRAP (rtoc_lowered), &node.value, alloc_sym, TypeTypeInput{ Type: COPY TRY (aST__full_type_mut(castAssignmentNameToLocatable__mir_lowering(node.name))) }))
+      });
+      value = TRY (mIRLowering__materialize_owned_sink_value(&self, UNWRAP (value), node.value, alloc_sym, NIL));
+      IF TRY (mIRLowering__mir_allocates?(&self, value)) THEN
+        value = TRY (mIRLowering__hoist_alloc(&self, UNWRAP (value), &node.value, TRUE));
+      END
+    END
     MUTABLE alloc = AllocatorRef{ kind: COPY alloc_sym, lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE field_get: Emittable = CAST(TRY (mIRLowering__lower(&self, castAssignmentNameToMIRLoweringLowerableStmt(node.name))) AS Emittable);
     MUTABLE type_expr = TypeOf{ expr: COPY field_get, lowered_node_id: NIL, ownership_consumption: NIL };
     MUTABLE cleanup_call = Call{ callee: "CheatLib.cleanup", args: [Emittable{ TypeOf: COPY type_expr }, Emittable{ AllocatorRef: COPY alloc }, Emittable{ AddressOf: COPY AddressOf{ expr: COPY field_get, lowered_node_id: NIL, ownership_consumption: NIL } }], try_wrap: FALSE, owned_return: FALSE, callable_contract: TRY (callableContract__no_ownership(3)), lowered_node_id: NIL, ownership_consumption: NIL, never_success: FALSE, result_type: NIL };
-    MUTABLE assign = Set{ target: COPY field_get, value: COPY value, needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
-    TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ Set: COPY assign }, &value, node.value, "MIR::Set", :owned_sink, alloc_sym));
+    MUTABLE assign = Set{ target: COPY field_get, value: COPY UNWRAP (value), needs_field_cleanup: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
+    TRY (mIRLowering__with_ownership_consumption_for_value(&self, Emittable{ Set: COPY assign }, UNWRAP (value), &node.value, "MIR::Set", :owned_sink, alloc_sym));
     RETURN ScopeBlock{ body: COPY [Emittable{ ExprStmt: COPY ExprStmt{ expr: Emittable{ Call: COPY cleanup_call }, discard: FALSE, lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL } }, Emittable{ Set: COPY assign }], lowered_node_id: NIL, ownership_consumption: NIL, source_column: NIL, source_line: NIL };
 END
 PRIVATE FN mIRLowering__lower_auto_lock_assignment(MUTABLE self: MIRLowering, MUTABLE node: Assignment) RETURNS !Emittable ->
@@ -16828,9 +16843,9 @@ PRIVATE FN mIRLowering__lower_auto_lock_assignment(MUTABLE self: MIRLowering, MU
     MUTABLE value_pending: []Emittable = List[];
     MUTABLE facts = TRY (mIRLowering__auto_lock_assignment_facts(&self, node));
     IF facts.cleanup_alloc EXISTS AS cleanup_alloc_value THEN
-      MUTABLE lifecycle: ?PassStateValue = COPY node.field_lifecycle_plan;
+      MUTABLE lifecycle: ?LifecyclePlan = COPY node.field_lifecycle_plan;
       IF !((IF lifecycle != NIL THEN
-        lifecyclePlan__needs_drop?(CAST(lifecycle AS LifecyclePlan))
+        lifecyclePlan__needs_drop?(lifecycle)
       ELSE
         NIL
       END)) THEN
