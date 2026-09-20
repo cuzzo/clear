@@ -7883,31 +7883,32 @@ PRIVATE FN mIRLowering__kept_store_liveness(MUTABLE self: MIRLowering) RETURNS ?
 END
 PRIVATE FN mIRLowering__takes_param_ownership_mir(MUTABLE self: MIRLowering, node: FunctionDef) RETURNS ![]Emittable ->
     MUTABLE out: []Emittable = List[];
-    MUTABLE rtoc_each_items_316 = (node.params |> WHERE ((_.takes OR_ELSE FALSE) OR (IF _.symbol != NIL THEN
-      { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_315 = CAST(_.symbol AS SymbolEntry);
-    symbolEntry__kept_identity(rtoc_local_receiver_315) }
-    ELSE
-      NIL
-    END)));
+    MUTABLE rtoc_each_items_316: []Param = List[];
+    FOR rtoc_p IN node.params DO
+      MUTABLE rtoc_keep: Bool = (rtoc_p.takes OR_ELSE FALSE);
+      IF rtoc_p.symbol EXISTS AS rtoc_p_symbol THEN
+        IF (symbolEntry__kept_identity(rtoc_p_symbol) != NIL) THEN
+          rtoc_keep = TRUE;
+        END
+      END
+      IF rtoc_keep THEN
+        &rtoc_each_items_316.append(COPY rtoc_p);
+      END
+    END
     MUTABLE rtoc_idx = 0;
     WHILE rtoc_idx < rtoc_each_items_316.length() DO
-      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST((rtoc_each_items_316[rtoc_idx].name) AS String)] OR_ELSE cleanupEntry__none());
-      MUTABLE ti = COPY rtoc_each_items_316[rtoc_idx].type;
-      IF !(((((IF rtoc_each_items_316[rtoc_idx].symbol != NIL THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_317 = CAST((rtoc_each_items_316[rtoc_idx].symbol) AS SymbolEntry);
-      symbolEntry__kept_identity(rtoc_local_receiver_317) }
-        ELSE
-          NIL
-        END) != NIL) OR TRY (mIRLowering__ownership_tracked_transfer_type?(&self, ti))) OR ((cleanupEntry__present?(entry) AND cleanupEntry__heap?(entry))))) THEN
+      MUTABLE rtoc_take_param: Param = COPY UNWRAP (rtoc_each_items_316[rtoc_idx]);
+      MUTABLE entry = ((TRY (functionState__bindings(mIRLowering__function_state(&self))))[CAST(COPY rtoc_take_param.name AS String)] OR_ELSE cleanupEntry__none());
+      MUTABLE ti = COPY rtoc_take_param.type;
+      MUTABLE rtoc_kept_identity: Bool = FALSE;
+      IF rtoc_take_param.symbol EXISTS AS rtoc_take_symbol THEN
+        rtoc_kept_identity = (symbolEntry__kept_identity(rtoc_take_symbol) != NIL);
+      END
+      IF !(((rtoc_kept_identity OR TRY (mIRLowering__ownership_tracked_transfer_type?(&self, ti))) OR ((cleanupEntry__present?(entry) AND cleanupEntry__heap?(entry))))) THEN
           rtoc_idx = rtoc_idx + 1;
     CONTINUE;
       END
-      MUTABLE kept = (!(rtoc_each_items_316[rtoc_idx].takes) AND !(((IF rtoc_each_items_316[rtoc_idx].symbol != NIL THEN
-          { MUTABLE rtoc_value_block_marker = 0; MUTABLE rtoc_local_receiver_318 = CAST((rtoc_each_items_316[rtoc_idx].symbol) AS SymbolEntry);
-      symbolEntry__kept_identity(rtoc_local_receiver_318) }
-        ELSE
-          NIL
-        END) == NIL)));
+      MUTABLE kept = (!((rtoc_take_param.takes OR_ELSE FALSE)) AND rtoc_kept_identity);
       IF kept THEN
           ti = TRY (type__new(TypeConstructionInput{ StringValue: COPY CAST(type__resolved(ti) AS String) }, :multiowned, NIL, NIL, :heap));
       END
