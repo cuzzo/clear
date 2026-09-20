@@ -8220,7 +8220,7 @@ PRIVATE FN mIRLowering__cross_boundary_arg(MUTABLE self: MIRLowering, arg_input:
     IF TRY (mIRLowering__owned_slice_argument_required?(self, callee_param, moved_arg, UNWRAP (ti), callee_param_type)) THEN
       MUTABLE sink_alloc = TRY (mIRLowering__allocator_for_takes_param_mut(&self, callee_param));
       MUTABLE owned_slice = OwnedSlice{ expr: COPY arg, alloc: COPY sink_alloc, lowered_node_id: NIL, ownership_consumption: NIL };
-      MUTABLE owns_slice_input = (TRY (mIRLowering__ownership_tracked_transfer_type?(&self, ti)) OR (TRY (mIRLowering__mir_ident_names(self, arg)) |> ANY mIRLowering__function_state(&self).lowered_alloc_names.contains?(_)));
+      MUTABLE owns_slice_input = (TRY (mIRLowering__ownership_tracked_transfer_type?(&self, UNWRAP (ti))) OR (TRY (mIRLowering__mir_ident_names(self, arg)) |> ANY mIRLowering__function_state(&self).lowered_alloc_names.contains?(_)));
       IF !(owns_slice_input) THEN
         RETURN Emittable{ OwnedSlice: COPY owned_slice };
       END
@@ -8611,12 +8611,12 @@ PRIVATE FN mIRLowering__lower_kept_identity_arg(MUTABLE self: MIRLowering, facts
         IF (plan_value_mutable.op == :copy_wrap) THEN
           MUTABLE source_ti: Type = TRY (type__from_node_mut(source, "kept edge copy override"));
           IF TRY (type__any_rc?(source_ti)) THEN
-            lowered = CapabilityLockTarget{ source: COPY lowered, arc_wrapped: TRUE, comptime_arc_unwrap: FALSE, lowered_node_id: NIL, ownership_consumption: NIL };
+            lowered = CapabilityLockTarget{ source: COPY UNWRAP (lowered), arc_wrapped: TRUE, comptime_arc_unwrap: FALSE, lowered_node_id: NIL, ownership_consumption: NIL };
           END
-          lowered = DeepCopy{ source: COPY lowered, zig_type: COPY TRY (type__zig_type(payload_ft)), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(payload_ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
+          lowered = DeepCopy{ source: COPY UNWRAP (lowered), zig_type: COPY TRY (type__zig_type(payload_ft)), elem_type: NIL, strategy: :full_value, alloc: :heap, copy_shape: deepCopy__copy_shape_for_zig_type(COPY TRY (type__zig_type(payload_ft))), type_info: NIL, lowered_node_id: NIL, ownership_consumption: NIL };
         END
         MUTABLE handle_ft = TRY (type__new(TypeConstructionInput{ StringValue: COPY CAST(type__resolved(payload_ft) AS String) }, :multiowned, NIL, NIL, :heap));
-        RETURN mIRLowering__compose_capability_wrap(self, lowered, TRY (type__zig_type(payload_ft)), handle_ft, :heap);
+        RETURN mIRLowering__compose_capability_wrap(self, UNWRAP (lowered), TRY (type__zig_type(payload_ft)), handle_ft, :heap);
       ELSE
         panic("unhandled CallEdgeOwnershipPlan op {}");
       END
@@ -8673,9 +8673,14 @@ PRIVATE FN mIRLowering__lower_call_arg_from_facts(MUTABLE self: MIRLowering, fac
         # frame is read back, appended to, and written into place.
         MUTABLE stack_top = self.kept_edge_temp_stack.length();
         IF stack_top > 0 THEN
-          MUTABLE top_frame = UNWRAP (self.kept_edge_temp_stack[stack_top - 1]);
-          &top_frame.moved_sources.append(mIRLowering__zig_safe_name(self, CAST(aST__node_name(inner) AS String)));
-          self.kept_edge_temp_stack[stack_top - 1] = COPY top_frame;
+          MUTABLE rtoc_frame_i = (stack_top - 1);
+          MUTABLE rtoc_moved_name = mIRLowering__zig_safe_name(self, CAST(aST__node_name(inner) AS String));
+          MUTABLE rtoc_frame_slot: ?KeptEdgeCallFrame = COPY self.kept_edge_temp_stack[rtoc_frame_i];
+          IF rtoc_frame_slot EXISTS AS rtoc_top_frame THEN
+            MUTABLE rtoc_frame_copy: KeptEdgeCallFrame = COPY rtoc_top_frame;
+            &rtoc_frame_copy.moved_sources.append(COPY rtoc_moved_name);
+            self.kept_edge_temp_stack[rtoc_frame_i] = COPY rtoc_frame_copy;
+          END
         END
       END
     END
@@ -8691,9 +8696,13 @@ PRIVATE FN mIRLowering__lower_call_arg_from_facts(MUTABLE self: MIRLowering, fac
       self.state.function_state.guarded_cleanup_names[COPY name] = TRUE;
       MUTABLE temp_stack_top = self.kept_edge_temp_stack.length();
       IF temp_stack_top > 0 THEN
-        MUTABLE temp_frame = UNWRAP (self.kept_edge_temp_stack[temp_stack_top - 1]);
-        &temp_frame.temps.append(COPY name);
-        self.kept_edge_temp_stack[temp_stack_top - 1] = COPY temp_frame;
+        MUTABLE rtoc_temp_i = (temp_stack_top - 1);
+        MUTABLE rtoc_temp_slot: ?KeptEdgeCallFrame = COPY self.kept_edge_temp_stack[rtoc_temp_i];
+        IF rtoc_temp_slot EXISTS AS rtoc_temp_frame THEN
+          MUTABLE rtoc_temp_copy: KeptEdgeCallFrame = COPY rtoc_temp_frame;
+          &rtoc_temp_copy.temps.append(COPY name);
+          self.kept_edge_temp_stack[rtoc_temp_i] = COPY rtoc_temp_copy;
+        END
       END
       RETURN Emittable{ Ident: COPY Ident{ name: COPY name, lowered_node_id: NIL, ownership_consumption: NIL } };
     END
@@ -8719,7 +8728,7 @@ PRIVATE FN mIRLowering__lower_call_arg_from_facts(MUTABLE self: MIRLowering, fac
       NIL
     END));
     MUTABLE boundary_ast_node = COPY facts.ast_arg;
-    MUTABLE boundary_arg = TRY (mIRLowering__cross_boundary_arg(&self, arg, &boundary_ast_node, facts.callee_param, facts.callee_param_type, COPY facts.callee_sig, facts.param_index));
+    MUTABLE boundary_arg = TRY (mIRLowering__cross_boundary_arg(&self, arg, &boundary_ast_node, facts.callee_param, facts.callee_param_type, facts.callee_sig, facts.param_index));
     IF TRY (mIRLowering__mir_allocates?(&self, boundary_arg)) THEN
       RETURN TRY (mIRLowering__hoist_alloc(&self, &boundary_arg, &boundary_ast_node, facts.takes));
     END
