@@ -79,9 +79,15 @@ RSpec.describe FmtVerifier do
         expect(result.path).to eq("a.clear")
       end
 
+      # File.expand_path resolves a relative path against Dir.pwd, and Dir.pwd
+      # reports the SYMLINK-RESOLVED cwd. On macOS Dir.mktmpdir hands back
+      # /var/folders/... while /var is a symlink to /private/var, so the
+      # derived dir is the realpath. On Linux the two are already the same,
+      # which is why comparing against @tmp passed there.
+      expected_dir = File.realpath(@tmp)
       expect(calls).to eq([
-        ["source", @tmp],
-        ["formatted", @tmp],
+        ["source", expected_dir],
+        ["formatted", expected_dir],
       ])
     end
 
