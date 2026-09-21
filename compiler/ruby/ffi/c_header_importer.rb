@@ -2,6 +2,7 @@
 
 require "open3"
 require "set"
+require "tmpdir"
 require "sorbet-runtime"
 
 # Expands the deliberately small, target-aware C header directive into the
@@ -59,15 +60,27 @@ class CHeaderImporter
   # Ruby shells out through Open3. The self-hosted compiler maps this adapter
   # onto compilerZigTranslateC in the compiler native support module.
   # ruby-to-clear: skip
+  # Captured through FILES, not pipes. On macOS `zig translate-c` spins at
+  # 100% CPU forever when its stdout is a pipe; the identical command finishes
+  # in 0.06s when stdout is a file or /dev/null. Measured both ways on the
+  # same fixture and the same tmpdir, so it is the pipe and nothing else.
+  # Process.spawn (not system) so a missing zig still raises Errno::ENOENT for
+  # the caller's rescue to turn into "Zig is required to import C headers".
   sig { params(zig: String, source_dir: String, header_path: String).returns(String) }
   def self.compiler_zig_translate_c(zig, source_dir, header_path)
-    stdout, stderr, status = Open3.capture3(zig, "translate-c", "-I#{source_dir}", header_path)
-    unless status.success?
-      detail = stderr.split("\n").take(8).join("\n").strip
-      raise Error, "Zig could not import C header #{header_path.inspect}: #{detail}"
-    end
+    Dir.mktmpdir("clear-translate-c") do |dir|
+      out_path = File.join(dir, "stdout")
+      err_path = File.join(dir, "stderr")
+      pid = Process.spawn(zig, "translate-c", "-I#{source_dir}", header_path,
+                          out: out_path, err: err_path)
+      _, status = Process.wait2(pid)
+      unless status.success?
+        detail = File.read(err_path).split("\n").take(8).join("\n").strip
+        raise Error, "Zig could not import C header #{header_path.inspect}: #{detail}"
+      end
 
-    stdout
+      File.read(out_path)
+    end
   end
 
   # ruby-to-clear: skip
