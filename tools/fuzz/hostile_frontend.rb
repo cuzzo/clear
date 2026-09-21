@@ -26,16 +26,38 @@ class HostileFrontend
     @memory_bytes = memory_mb * 1024 * 1024
   end
 
-  def run(source)
-    reader, writer = IO.pipe
-    pid = Process.spawn(
-      { "HOSTILE_FRONTEND_PARSE_TIMEOUT" => @timeout.to_s },
-      RbConfig.ruby, __FILE__, "--worker",
+  # Darwin accepts RLIMIT_AS as a constant but setrlimit REJECTS it with
+  # EINVAL -- the address-space cap is simply not enforced there, which is the
+  # same reason `ulimit -v` is rejected on that platform. Learn it once by
+  # trying, rather than hardcoding a platform list that would go stale.
+  @rlimit_as_usable = true
+
+  class << self
+    attr_accessor :rlimit_as_usable
+  end
+
+  def spawn_worker(reader)
+    env = { "HOSTILE_FRONTEND_PARSE_TIMEOUT" => @timeout.to_s }
+    opts = {
       in: reader, out: File::NULL, err: File::NULL,
-      rlimit_as: @memory_bytes,
       # CPU time, not wall time, so a contended runner does not spend it.
       rlimit_cpu: [@timeout.ceil + 2, @timeout.ceil + 2],
-    )
+    }
+    if self.class.rlimit_as_usable
+      begin
+        return Process.spawn(env, RbConfig.ruby, __FILE__, "--worker", **opts, rlimit_as: @memory_bytes)
+      rescue Errno::EINVAL
+        # Without the memory ceiling the CPU-time limit and the wall timeout
+        # still bound a hostile input; losing the spawn entirely does not.
+        self.class.rlimit_as_usable = false
+      end
+    end
+    Process.spawn(env, RbConfig.ruby, __FILE__, "--worker", **opts)
+  end
+
+  def run(source)
+    reader, writer = IO.pipe
+    pid = spawn_worker(reader)
     reader.close
     writer.binmode
     writer.write(source)

@@ -1,0 +1,38 @@
+#!/bin/sh
+# Run zig under a hard resident-memory cap (see tools/mem-guard for the why:
+# a single zig process reached 77 GB here and forced two physical resets, and
+# Darwin does not enforce RLIMIT_AS).
+#
+# Every zig spawn in ./clear goes through the single ZIG constant, so pointing
+# that one value at this wrapper caps them all -- argv arrays and interpolated
+# command strings alike. CLEAR_ZIG_MAX_RSS_MB tunes the cap; 0 disables it.
+set -u
+
+REAL_ZIG="${CLEAR_REAL_ZIG:-}"
+if [ -z "$REAL_ZIG" ] || [ ! -x "$REAL_ZIG" ]; then
+  # Invoked outside ./clear: take the first zig on PATH that is not this file.
+  # PATH is walked by hand because `command -v -a` is a bashism -- POSIX sh
+  # rejects it outright ("command: -a: invalid option"), so the whole fallback
+  # silently found nothing and exited 127.
+  self=$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")
+  _old_ifs=$IFS
+  IFS=:
+  for _dir in $PATH; do
+    [ -n "$_dir" ] || _dir=.
+    _cand="$_dir/zig"
+    # -f as well as -x: a DIRECTORY carries the execute bit, and an empty PATH
+    # element means the current directory -- so running from the repo root,
+    # whose `zig/` is a directory, would otherwise select it as the compiler.
+    [ -f "$_cand" ] && [ -x "$_cand" ] || continue
+    [ "$_cand" = "$self" ] && continue
+    REAL_ZIG="$_cand"
+    break
+  done
+  IFS=$_old_ifs
+fi
+[ -n "$REAL_ZIG" ] || { echo "zig-guard: no real zig found (set CLEAR_REAL_ZIG)" >&2; exit 127; }
+
+MEM_GUARD_CAP_MB="${CLEAR_ZIG_MAX_RSS_MB:-}" \
+MEM_GUARD_LABEL=zig \
+MEM_GUARD_REPORT="${CLEAR_ZIG_GUARD_REPORT:-}" \
+  exec "$(dirname "$0")/mem-guard" "$REAL_ZIG" "$@"

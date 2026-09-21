@@ -190,6 +190,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "batch-window-test.zig", .tsan = true },
         .{ .path = "bounded-channel-test.zig", .tsan = true },
         .{ .path = "bounded-stream-test.zig", .tsan = true },
+        .{ .path = "io-backend-test.zig" },
         .{ .path = "cleanup-test.zig", .tsan = true },
         .{ .path = "control-plane-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "control-plane-test.zig", .tsan = true },

@@ -360,11 +360,33 @@ module PprofConverter
   # code where CLR markers don't exist, and we'd misattribute by
   # walking back through transpiled.zig anyway. (Repro: `pprof -list
   # entryWrapper` showed it pointing at random source.clear lines.)
+  # binutils spellings, in preference order. The resolver is OPTIONAL: macOS
+  # ships `atos` instead of binutils, so none of these exists there, and a
+  # profile converted on such a host must still emit its mappings with
+  # unresolved symbols rather than dying on ENOENT halfway through.
+  ADDR2LINE_CANDIDATES = %w[addr2line llvm-addr2line gaddr2line eu-addr2line].freeze
+
+  # Try each spelling and take the first that runs. Spawning and rescuing is
+  # better than probing PATH first: it is one code path instead of two, and it
+  # cannot disagree with what exec would actually have found.
+  sig { params(addrs: Array, binary: String).returns(String) }
+  def self.addr2line_output(addrs, binary)
+    ADDR2LINE_CANDIDATES.each do |tool|
+      return IO.popen([tool, '-e', binary, '-f'] + addrs, err: '/dev/null', &:read)
+    rescue SystemCallError
+      next
+    end
+    ''
+  end
+
   sig { params(addrs: Array, binary: T.nilable(String), profile_dir: String).returns(Hash) }
   def self.resolve_addrs(addrs, binary, profile_dir)
     return {} if addrs.empty? || binary.nil?
-    raw = IO.popen(['addr2line', '-e', binary, '-f'] + addrs, err: '/dev/null', &:read)
-    lines_out = raw.split("\n")
+
+    # With no resolver at all, the empty output feeds the loop below, which
+    # already yields '?' for every field. Unresolved symbols are a degraded
+    # profile; a raised ENOENT is no profile at all.
+    lines_out = addr2line_output(addrs, binary).split("\n")
     zig_path = File.join(profile_dir, 'transpiled.zig')
     zig_lines = File.exist?(zig_path) ? File.readlines(zig_path) : nil
 

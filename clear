@@ -53,12 +53,25 @@ TRANSPILER = File.join(SRC_DIR, 'backends', 'transpiler.rb')
 TRANSPILER_CACHE_DIR = File.join(ZIG_DIR, '.clear-transpile-cache')
 
 # Find Zig compiler
-ZIG = [
+REAL_ZIG = [
   File.join(File.expand_path('~'), 'zig-x86_64-linux-0.16.0', 'zig'),
   File.join(ZIG_DIR, 'zig-new', 'zig'),
   File.join(ZIG_DIR, 'zig', 'zig'),
   `which zig 2>/dev/null`.strip
 ].find { |p| !p.empty? && File.exist?(p) } || 'zig'
+
+# ...and cap its memory. A runaway zig reached 77 GB on a 96 GB machine and
+# forced two physical resets; Darwin does not enforce RLIMIT_AS, so the cap has
+# to be an external watchdog. Every zig spawn below goes through ZIG -- argv
+# arrays and interpolated command strings alike -- so routing this one constant
+# through the wrapper caps all of them. CLEAR_ZIG_MAX_RSS_MB tunes it.
+ZIG_GUARD = File.join(CLEAR_ROOT, 'tools', 'zig-guard')
+ZIG = if File.executable?(ZIG_GUARD)
+        ENV['CLEAR_REAL_ZIG'] = REAL_ZIG
+        ZIG_GUARD
+      else
+        REAL_ZIG
+      end
 
 BUILD_SUPPORT_CONFIG = ClearBuildSupport::Config.new(
   src_dir: SRC_DIR,
