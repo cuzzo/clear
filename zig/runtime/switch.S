@@ -253,20 +253,27 @@ switch_context_asm:
 .align 2
 
 SYM(switch_context_asm):
-    // x0 = from, x1 = to
+    // x0 = from, x1 = to. Offsets follow fiber-core.zig's aarch64 Context
+    // EXACTLY: sp 0x00, then x19..x28 packed from 0x08, fp 0x58, lr 0x60.
+    //
+    // x29/x30 must be saved and restored. On aarch64 `ret` branches to x30,
+    // where x86's `ret` pops the return address off the stack -- so a switch
+    // that leaves x30 alone returns to whatever the previous frame left there.
     mov x9, sp
     str x9, [x0, #0x00]
-    stp x19, x20, [x0, #0x10]
-    stp x21, x22, [x0, #0x20]
-    stp x23, x24, [x0, #0x30]
-    stp x25, x26, [x0, #0x40]
-    stp x27, x28, [x0, #0x50]
+    stp x19, x20, [x0, #0x08]
+    stp x21, x22, [x0, #0x18]
+    stp x23, x24, [x0, #0x28]
+    stp x25, x26, [x0, #0x38]
+    stp x27, x28, [x0, #0x48]
+    stp x29, x30, [x0, #0x58]
 
-    ldp x27, x28, [x1, #0x50]
-    ldp x25, x26, [x1, #0x40]
-    ldp x23, x24, [x1, #0x30]
-    ldp x21, x22, [x1, #0x20]
-    ldp x19, x20, [x1, #0x10]
+    ldp x29, x30, [x1, #0x58]
+    ldp x27, x28, [x1, #0x48]
+    ldp x25, x26, [x1, #0x38]
+    ldp x23, x24, [x1, #0x28]
+    ldp x21, x22, [x1, #0x18]
+    ldp x19, x20, [x1, #0x08]
     ldr x9, [x1, #0x00]
     mov sp, x9
     ret

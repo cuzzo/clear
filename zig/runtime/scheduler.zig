@@ -99,8 +99,11 @@ pub fn ensureSignalAltStack() void {
 }
 
 const linux = std.os.linux;
+// Platform selection for the completion ring. On Linux every alias in here IS
+// the std.os.linux type, picked at comptime, so Linux codegen is unchanged.
+const iob = @import("io-backend.zig");
 const posix = std.posix;
-const IoUring = linux.IoUring;
+const IoUring = iob.DefaultRing;
 
 // Comptime io_uring type selection: SimRing in Loom mode, real IoUring otherwise.
 // When the root module exports SimRing (vopr-loom.zig), all io_uring submissions
@@ -155,7 +158,10 @@ pub const SmartEventFd = struct {
     const WakeParked: u32 = 1;
     const WakeNotified: u32 = 2;
 
-    fd: i32,
+    // One fd on Linux (the eventfd is both ends); two on platforms without
+    // eventfd, where the wake channel is a pipe.
+    read_fd: i32,
+    write_fd: i32,
 
     // Parker state for cross-scheduler wake coalescing:
     //   Empty    -- scheduler is awake or no wake token is pending
@@ -171,13 +177,13 @@ pub const SmartEventFd = struct {
     pub fn init() !SmartEventFd {
         // EFD_SEMAPHORE: Reads decrement counter by 1.
         // We use this so we can consume exactly one wake-up if needed.
-        const flags = std.os.linux.EFD.CLOEXEC | std.os.linux.EFD.NONBLOCK | std.os.linux.EFD.SEMAPHORE;
-        const fd = try compat.eventFd(0, flags);
-        return SmartEventFd{ .fd = fd };
+        const wake = try iob.WakeFd.open();
+        return SmartEventFd{ .read_fd = wake.read_fd, .write_fd = wake.write_fd };
     }
 
     pub fn deinit(self: *SmartEventFd) void {
-        compat.closeFd(self.fd);
+        var wake = iob.WakeFd{ .read_fd = self.read_fd, .write_fd = self.write_fd };
+        wake.close();
     }
 
     /// Record a wake token. Returns true only when the target scheduler
@@ -198,7 +204,7 @@ pub const SmartEventFd = struct {
     fn writeWake(self: *SmartEventFd) void {
         const val: u64 = 1;
         const bytes = std.mem.asBytes(&val);
-        _ = std.c.write(self.fd, bytes.ptr, bytes.len);
+        _ = std.c.write(self.write_fd, bytes.ptr, bytes.len);
     }
 
     /// Cold-path wake used by shutdown/watchdog code. This deliberately
@@ -214,7 +220,7 @@ pub const SmartEventFd = struct {
         var val: u64 = 0;
         const buf = std.mem.asBytes(&val);
         // Drain the eventfd buffer
-        _ = std.posix.read(self.fd, buf) catch {};
+        _ = std.posix.read(self.read_fd, buf) catch {};
     }
 
     /// Prepare to block in io_uring. Returns false when a producer already
@@ -339,7 +345,7 @@ pub const Scheduler = struct {
     // I/O, and eventfd wakeups. In Loom mode, this is SimRing.
     ring: RingType,
     ring_dirty: bool = false,
-    uring_cqes: [128]linux.io_uring_cqe = undefined,
+    uring_cqes: [128]iob.Cqe = undefined,
     // Dedicated stack for non-yielding io_uring calls made from run().
     // This keeps helper frames off the scheduler's suspended switch slot.
     io_helper_stack: []u8,
@@ -427,9 +433,9 @@ pub const Scheduler = struct {
         // Multishot means each eventfd write produces a new CQE without
         // re-submitting. user_data = EVENTFD_SENTINEL (0).
         if (RingType != @import("vopr-ring.zig").SimRing) {
-            const sqe = try ring.poll_add(EVENTFD_SENTINEL, efd.fd, linux.POLL.IN);
+            const sqe = try ring.poll_add(EVENTFD_SENTINEL, efd.read_fd, @intCast(iob.POLL_IN));
             // Set POLL_ADD_MULTI so this poll persists across multiple fires.
-            sqe.len = linux.IORING_POLL_ADD_MULTI;
+            sqe.len = iob.POLL_ADD_MULTI;
             _ = try ring.submit();
         }
 
@@ -1383,7 +1389,7 @@ pub const Scheduler = struct {
             }
 
             if (timeout_ns > 0) {
-                const ts = linux.kernel_timespec{
+                const ts = iob.KernelTimespec{
                     .sec = @intCast(timeout_ns / 1_000_000_000),
                     .nsec = @intCast(timeout_ns % 1_000_000_000),
                 };
@@ -2167,10 +2173,10 @@ pub const Scheduler = struct {
         return earliest;
     }
 
-    fn queueTimeoutOnIoStack(self: *Scheduler, ts: *const linux.kernel_timespec) void {
+    fn queueTimeoutOnIoStack(self: *Scheduler, ts: *const iob.KernelTimespec) void {
         const Ctx = struct {
             self: *Scheduler,
-            ts: *const linux.kernel_timespec,
+            ts: *const iob.KernelTimespec,
             fn run(raw: ?*anyopaque) callconv(.c) void {
                 const ctx: *@This() = @ptrCast(@alignCast(raw.?));
                 _ = ctx.self.ring.timeout(TIMEOUT_SENTINEL, ctx.ts, 0, 0) catch {};
@@ -2215,7 +2221,7 @@ pub const Scheduler = struct {
     /// - File I/O completions (READ/WRITE) -> write result to IoWaiter, wake task
     /// - Eventfd wakeup (sentinel 0) -> consume eventfd
     /// - Timeout (sentinel 1) -> ignore
-    pub fn processCqes(self: *Scheduler, cqes: []const linux.io_uring_cqe) void {
+    pub fn processCqes(self: *Scheduler, cqes: []const iob.Cqe) void {
         for (cqes) |cqe| {
             const ud = cqe.user_data;
             if (ud == EVENTFD_SENTINEL) {

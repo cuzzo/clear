@@ -254,7 +254,14 @@ pub const Fiber = struct {
             .stack = stack,
             // Point SP to the address we just wrote.
             // When 'ret' runs, it pops the value AT this pointer.
-            .ctx = Context{ .sp = initial_sp },
+            // x86 starts a fiber by `ret`-ing off the stack slot written
+            // above; aarch64's `ret` branches to the link register instead, so
+            // the entry point has to be seeded there or the first switch
+            // returns into the 0xCC stack fill.
+            .ctx = if (builtin.cpu.arch == .aarch64)
+                Context{ .sp = initial_sp, .lr = entry_fn }
+            else
+                Context{ .sp = initial_sp },
             .stack_limit = limit,
             .parent_ctx = undefined,
             .size_class = size,
