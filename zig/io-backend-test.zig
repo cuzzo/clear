@@ -209,6 +209,50 @@ test "descriptor 0 is a real descriptor, not an 'unset' sentinel" {
     try std.testing.expectEqual(@as(std.posix.fd_t, -1), wake.read_fd);
 }
 
+test "park treats descriptor 0 as pollable, not as 'no wake fd'" {
+    // park()'s emptiness test is `< 0` too. With `<= 0` a wake fd of 0 falls
+    // to the usleep path and burns the whole interval instead of returning the
+    // moment the channel is readable -- observable purely as elapsed time.
+    const libc = struct {
+        extern "c" fn dup(fd: i32) i32;
+        extern "c" fn dup2(o: i32, n: i32) i32;
+        extern "c" fn close(fd: i32) i32;
+        extern "c" fn pipe(f: *[2]i32) i32;
+        extern "c" fn write(fd: i32, buf: [*]const u8, n: usize) isize;
+    };
+    const saved_stdin = libc.dup(0);
+    if (saved_stdin < 0) return error.SkipZigTest;
+    defer {
+        _ = libc.dup2(saved_stdin, 0);
+        _ = libc.close(saved_stdin);
+    }
+    var fds: [2]i32 = .{ -1, -1 };
+    if (libc.pipe(&fds) != 0) return error.SkipZigTest;
+    defer _ = libc.close(fds[1]);
+    if (libc.dup2(fds[0], 0) < 0) {
+        _ = libc.close(fds[0]);
+        return error.SkipZigTest;
+    }
+    _ = libc.close(fds[0]);
+
+    // Make descriptor 0 readable, so a real poll() returns at once.
+    const val: u64 = 1;
+    _ = libc.write(fds[1], std.mem.asBytes(&val), @sizeOf(u64));
+
+    var ring = try iob.PollRing.init(256, 0);
+    defer ring.deinit();
+    _ = try ring.poll_add(0, 0, @intCast(iob.POLL_IN));
+    _ = try ring.timeout(0, &.{ .sec = 0, .nsec = 50_000_000 }, 0, 0);
+
+    var cqes: [4]iob.Cqe = undefined;
+    const t0 = compat.milliTimestamp();
+    try std.testing.expectEqual(@as(u32, 0), try ring.copy_cqes(&cqes, 1));
+    const waited = compat.milliTimestamp() - t0;
+    // poll() on a readable fd returns immediately; the usleep path would burn
+    // the full 50ms interval.
+    try std.testing.expect(waited < 25);
+}
+
 test "PollRing init and deinit round-trip" {
     var ring = try iob.PollRing.init(256, 0);
     try std.testing.expectEqual(@as(std.posix.fd_t, -1), ring.wake_fd);
