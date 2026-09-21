@@ -171,6 +171,44 @@ test "WakeFd.open reports failure when descriptors are exhausted" {
     try std.testing.expectError(error.Unexpected, iob.WakeFd.open());
 }
 
+test "descriptor 0 is a real descriptor, not an 'unset' sentinel" {
+    // Both emptiness tests are `< 0`, never `<= 0`: descriptor 0 is a valid
+    // descriptor. With `<= 0`, close() would skip a WakeFd sitting on fd 0 and
+    // leak it. Proving that needs fd 0 to actually BE the channel, so stdin is
+    // temporarily redirected and restored.
+    const libc = struct {
+        extern "c" fn dup(fd: i32) i32;
+        extern "c" fn dup2(o: i32, n: i32) i32;
+        extern "c" fn close(fd: i32) i32;
+        extern "c" fn pipe(f: *[2]i32) i32;
+        extern "c" fn fcntl(fd: i32, cmd: i32, ...) i32;
+    };
+    const saved_stdin = libc.dup(0);
+    if (saved_stdin < 0) return error.SkipZigTest;
+    defer {
+        _ = libc.dup2(saved_stdin, 0); // put stdin back before anything else runs
+        _ = libc.close(saved_stdin);
+    }
+
+    var fds: [2]i32 = .{ -1, -1 };
+    if (libc.pipe(&fds) != 0) return error.SkipZigTest;
+    if (libc.dup2(fds[0], 0) < 0) {
+        _ = libc.close(fds[0]);
+        _ = libc.close(fds[1]);
+        return error.SkipZigTest;
+    }
+    _ = libc.close(fds[0]); // the read end now lives on descriptor 0
+
+    var wake = iob.WakeFd{ .read_fd = 0, .write_fd = fds[1] };
+    wake.close();
+
+    const F_GETFD = 1;
+    // fd 0 must have been CLOSED, not skipped as "already closed".
+    try std.testing.expect(libc.fcntl(0, F_GETFD) < 0);
+    try std.testing.expect(libc.fcntl(fds[1], F_GETFD) < 0);
+    try std.testing.expectEqual(@as(std.posix.fd_t, -1), wake.read_fd);
+}
+
 test "PollRing init and deinit round-trip" {
     var ring = try iob.PollRing.init(256, 0);
     try std.testing.expectEqual(@as(std.posix.fd_t, -1), ring.wake_fd);
