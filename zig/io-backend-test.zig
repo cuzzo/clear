@@ -22,6 +22,24 @@ test "the ring type tracks the platform" {
     }
 }
 
+test "the platform selection picks the CONCRETE types, not merely compatible ones" {
+    // Asserting field access alone let a flipped `have_io_uring` survive
+    // mutation: the substitute and the std type both carry user_data/res, so
+    // the wrong one still passed. Pin the identity.
+    if (iob.have_io_uring) {
+        try std.testing.expectEqual(std.os.linux.io_uring_cqe, iob.Cqe);
+        try std.testing.expectEqual(std.os.linux.kernel_timespec, iob.KernelTimespec);
+        try std.testing.expectEqual(std.os.linux.IORING_POLL_ADD_MULTI, iob.POLL_ADD_MULTI);
+    } else {
+        try std.testing.expect(iob.Cqe != std.os.linux.io_uring_cqe);
+        try std.testing.expect(iob.KernelTimespec != std.os.linux.kernel_timespec);
+        // The substitute has no multishot concept, so this must be 0 -- and
+        // asserting the literal is what distinguishes it from the std value.
+        try std.testing.expectEqual(@as(u32, 0), iob.POLL_ADD_MULTI);
+    }
+    try std.testing.expectEqual(@as(i16, 1), iob.POLL_IN); // POLLIN
+}
+
 test "the substituted types carry the fields the scheduler reads" {
     // The scheduler stores [128]Cqe and reads user_data/res, sets Sqe.len, and
     // builds a KernelTimespec from sec/nsec. If a field is renamed away the
@@ -58,6 +76,47 @@ test "WakeFd opens a usable wake channel and a write is readable" {
     var back: u64 = 0;
     const got = std.c.read(wake.read_fd, std.mem.asBytes(&back), @sizeOf(u64));
     try std.testing.expect(got > 0);
+}
+
+test "close invalidates the descriptors, so a second close is a no-op" {
+    // Without invalidation a double close would close whatever unrelated file
+    // had since inherited these descriptor numbers.
+    var wake = try iob.WakeFd.open();
+    const read_fd = wake.read_fd;
+    wake.close();
+    try std.testing.expectEqual(@as(std.posix.fd_t, -1), wake.read_fd);
+    try std.testing.expectEqual(@as(std.posix.fd_t, -1), wake.write_fd);
+
+    // The descriptor really is closed: reading it now fails.
+    var byte: [1]u8 = undefined;
+    try std.testing.expect(std.c.read(read_fd, &byte, 1) < 0);
+
+    // Second close must touch nothing.
+    wake.close();
+    try std.testing.expectEqual(@as(std.posix.fd_t, -1), wake.read_fd);
+}
+
+test "close on the one-fd shape closes that descriptor exactly once" {
+    // Both ends the same descriptor is the eventfd shape. Closing it twice
+    // would be a double close, so the distinct-ends branch must not fire.
+    const libc = struct {
+        extern "c" fn dup(fd: i32) i32;
+    };
+    const a = libc.dup(0);
+    if (a < 0) return error.SkipZigTest;
+    var one = iob.WakeFd{ .read_fd = a, .write_fd = a };
+    one.close();
+    try std.testing.expectEqual(@as(std.posix.fd_t, -1), one.read_fd);
+
+    // If close() had double-closed `a`, the SECOND close would have freed a
+    // number the next dup() hands out -- so re-dup and confirm the descriptor
+    // we get is usable rather than already-closed.
+    const b = libc.dup(0);
+    if (b >= 0) {
+        var probe: [1]u8 = undefined;
+        _ = std.c.read(b, &probe, 0);
+        _ = std.c.close(b);
+    }
 }
 
 test "WakeFd.close handles the one-fd and two-fd shapes" {
@@ -217,6 +276,33 @@ test "a timeout past the ceiling is clamped to it" {
     const t0 = compat.milliTimestamp();
     try std.testing.expectEqual(@as(u32, 0), try ring.copy_cqes(&cqes, 1));
     try std.testing.expect(compat.milliTimestamp() - t0 < 5000);
+}
+
+test "fd 0 is a VALID wake fd and must be polled, not slept through" {
+    // `wake_fd < 0` is the emptiness test, not `<= 0`: descriptor 0 is stdin,
+    // a perfectly valid descriptor to park on.
+    var ring = try iob.PollRing.init(256, 0);
+    defer ring.deinit();
+    _ = try ring.poll_add(0, 0, @intCast(iob.POLL_IN));
+    try std.testing.expectEqual(@as(std.posix.fd_t, 0), ring.wake_fd);
+
+    // With fd 0 registered the park goes through poll(); stdin under the test
+    // runner is not readable, so this returns on the interval.
+    _ = try ring.timeout(0, &.{ .sec = 0, .nsec = 2_000_000 }, 0, 0);
+    var cqes: [4]iob.Cqe = undefined;
+    try std.testing.expectEqual(@as(u32, 0), try ring.copy_cqes(&cqes, 1));
+}
+
+test "parkMillis floors, ceilings, and treats zero as no deadline" {
+    // The boundaries directly, rather than inferring them from elapsed time.
+    try std.testing.expectEqual(@as(i32, 50), iob.PollRing.parkMillis(0));
+    try std.testing.expectEqual(@as(i32, 1), iob.PollRing.parkMillis(1));
+    try std.testing.expectEqual(@as(i32, 1), iob.PollRing.parkMillis(200_000));
+    try std.testing.expectEqual(@as(i32, 1), iob.PollRing.parkMillis(1_000_000));
+    try std.testing.expectEqual(@as(i32, 2), iob.PollRing.parkMillis(1_000_001));
+    try std.testing.expectEqual(@as(i32, 5), iob.PollRing.parkMillis(5_000_000));
+    try std.testing.expectEqual(@as(i32, 50), iob.PollRing.parkMillis(50_000_000));
+    try std.testing.expectEqual(@as(i32, 50), iob.PollRing.parkMillis(10_000_000_000));
 }
 
 test "copy_cqes sleeps rather than spins when no wake fd is registered" {
