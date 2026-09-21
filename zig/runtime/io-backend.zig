@@ -33,6 +33,8 @@ pub const Sqe = if (have_io_uring) std.os.linux.io_uring_sqe else struct {
     len: u32 = 0,
 };
 
+// Both arms are 1 (Linux POLL.IN and the Darwin POLLIN literal), so mutating
+// this selection is an equivalent mutant -- no test can distinguish it.
 pub const POLL_IN: i16 = if (have_io_uring) @intCast(std.os.linux.POLL.IN) else 1;
 pub const POLL_ADD_MULTI: u32 = if (have_io_uring) std.os.linux.IORING_POLL_ADD_MULTI else 0;
 
@@ -134,6 +136,9 @@ pub const PollRing = struct {
         _ = user_data;
         _ = count;
         _ = flags;
+        // `<= 0` and `< 0` are equivalent here: at secs == 0 the else arm also
+        // yields 0. The <= spelling states the intent -- non-positive means
+        // "no deadline" -- rather than leaning on that coincidence.
         const secs: i128 = @as(i128, ts.sec) * 1_000_000_000 + @as(i128, ts.nsec);
         self.pending_timeout_ns = if (secs <= 0) 0 else @intCast(secs);
         return self.sqeSlot();
