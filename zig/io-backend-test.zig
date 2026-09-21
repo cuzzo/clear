@@ -83,13 +83,18 @@ test "close invalidates the descriptors, so a second close is a no-op" {
     // had since inherited these descriptor numbers.
     var wake = try iob.WakeFd.open();
     const read_fd = wake.read_fd;
+    const write_fd = wake.write_fd;
     wake.close();
     try std.testing.expectEqual(@as(std.posix.fd_t, -1), wake.read_fd);
     try std.testing.expectEqual(@as(std.posix.fd_t, -1), wake.write_fd);
 
-    // The descriptor really is closed: reading it now fails.
+    // BOTH descriptors are really closed, not just the read end: checking
+    // only the read end let a flipped `write_fd != read_fd` survive mutation
+    // by silently leaking the write end of every pipe.
     var byte: [1]u8 = undefined;
     try std.testing.expect(std.c.read(read_fd, &byte, 1) < 0);
+    const val: u64 = 1;
+    try std.testing.expect(std.c.write(write_fd, std.mem.asBytes(&val), @sizeOf(u64)) < 0);
 
     // Second close must touch nothing.
     wake.close();
