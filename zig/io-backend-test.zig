@@ -88,13 +88,18 @@ test "close invalidates the descriptors, so a second close is a no-op" {
     try std.testing.expectEqual(@as(std.posix.fd_t, -1), wake.read_fd);
     try std.testing.expectEqual(@as(std.posix.fd_t, -1), wake.write_fd);
 
-    // BOTH descriptors are really closed, not just the read end: checking
-    // only the read end let a flipped `write_fd != read_fd` survive mutation
-    // by silently leaking the write end of every pipe.
-    var byte: [1]u8 = undefined;
-    try std.testing.expect(std.c.read(read_fd, &byte, 1) < 0);
-    const val: u64 = 1;
-    try std.testing.expect(std.c.write(write_fd, std.mem.asBytes(&val), @sizeOf(u64)) < 0);
+    // BOTH descriptors are really closed, not just the read end. Ask about the
+    // DESCRIPTOR with fcntl(F_GETFD), not about I/O: once the read end is
+    // closed, writing to the write end fails with EPIPE whether or not that
+    // descriptor was closed, so an I/O check cannot tell a leaked write end
+    // from a closed one -- and a flipped `write_fd != read_fd`, which leaks
+    // the write end of every pipe, survived exactly that way.
+    const fcntl = struct {
+        extern "c" fn fcntl(fd: i32, cmd: i32, ...) i32;
+    };
+    const F_GETFD = 1;
+    try std.testing.expect(fcntl.fcntl(read_fd, F_GETFD) < 0);
+    try std.testing.expect(fcntl.fcntl(write_fd, F_GETFD) < 0);
 
     // Second close must touch nothing.
     wake.close();
