@@ -29,49 +29,42 @@ x86_64-linux is provably unaffected: `switch.S` and `onRoot.S` assembled for it
 are instruction-for-instruction identical to before, with identical symbol
 tables.
 
-## Known defect: stack-trace capture on a fiber stack wedges
+## Two macOS defects, both fixed
 
-`compiler/spec/semantic_equivalence_integration_spec.rb` HANGS on macOS, hard:
-the generated `zig test semantic-mutant.zig` binary sits at **0.0% CPU
-forever**. `sample` shows why -- a `Stream.spawnNew` allocation reaches Zig's
-DebugAllocator, which captures a stack trace on every allocation, and the
-Mach-O self-unwinder faults partway up:
+**A fiber with a null frame pointer sent the stack walker to address 0x8.**
+aarch64 walkers follow the frame-pointer chain, reading the saved FP at [fp]
+and the saved LR at [fp + 8], so a frame with fp = 0 dereferences 0x8. Fibers
+seeded exactly that. Nothing hit it until the walk actually happened, which is
+whenever something captures a stack trace -- and Zig's DebugAllocator, which
+`zig test` uses as std.testing.allocator, does so on EVERY allocation. The
+binary segfaulted and then wedged at 0% CPU in its own signal handler. A fiber
+now parks a null frame record { saved_fp = 0, saved_lr = 0 } above its initial
+SP and points fp at it, so the walk reads lr = 0 and stops.
+
+Note the misleading part: the same CLEAR source runs clean through
+`./clear run --safe`, and ordinary fiber, stream and nested-BG programs all
+pass. Only the debug allocator's stack capture triggered it.
+
+**`zig translate-c` spins at 100% CPU forever when its stdout is a PIPE.** Not
+the input and not the directory -- the identical command on the identical
+fixture in the identical tmpdir finishes in 0.087s from a shell. Measured from
+Ruby on the same inputs:
 
 ```
-Stream.spawnNew -> Allocator.create -> DebugAllocator.alloc
-  -> collectStackTrace -> captureCurrentStackTrace -> StackIterator.next
-  -> SelfInfo.MachO.unwindFrameInner -> Dwarf.SelfUnwinder.nextInner
-  -> _sigtramp -> debug.handleSegfaultPosix
+system(..., out: File::NULL)   0.06s
+system(..., out: <file>)       0.06s, 17675 bytes of correct output
+IO.popen(...)  (stdout = pipe) never returns, 99% CPU
 ```
 
-The unwinder segfaults, the segfault handler re-enters the unwinder, and the
-process wedges.
+`c_header_importer` and the semantic-equivalence spec now capture zig's output
+through files. If you add a new zig invocation, do the same.
 
-Adding `.cfi_startproc`/`.cfi_endproc` to the aarch64 bodies -- which had none,
-unlike their x86-64 siblings -- does **NOT** fix it: the hang reproduces with
-the identical stack. That CFI is in the tree as correctness hygiene, not as a
-fix. A simple allocating program under `--debug-allocator` does NOT reproduce
-it either way, so the trigger is narrower than "any allocation": the walk has
-to cross a fiber frame.
+## Adding CFI did not fix the unwinder hang
 
-Until this is understood, macOS is usable for building and running ordinary
-programs but NOT for the debug allocator or anything that captures a stack
-trace from a fiber.
-
-## Known defect: `zig translate-c` spins
-
-Four `zig translate-c` processes ran at 100% CPU with a flat 32 MB RSS for 72
-minutes under parallel specs, though one alone finishes in ~3m19s. This makes
-the c-ffi specs unrunnable on macOS.
-
-## Running the Ruby suite on macOS
-
-Exclude both, or it will not finish:
-
-```bash
-bundle exec prspec $(ls compiler/spec/*_spec.rb \
-  | grep -v c_ffi_ | grep -v semantic_equivalence_integration)
-```
+Worth recording because it looked obvious: the aarch64 assembly had no
+`.cfi_startproc`/`.cfi_endproc` while every x86-64 body had them. Adding it did
+NOT fix the crash -- it reproduced with an identical stack. The CFI is in the
+tree as correctness hygiene; the actual cause was the null frame pointer above.
 
 ## zig can take the machine down; it is capped
 
