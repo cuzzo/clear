@@ -1,6 +1,7 @@
 require 'fileutils'
 require 'open3'
 require 'tmpdir'
+require 'timeout'
 
 require_relative '../ruby/backends/transpiler' unless defined?(ZigTranspiler)
 require_relative '../../tools/fuzz/semantic_equivalence'
@@ -11,6 +12,33 @@ RSpec.describe 'semantic equivalence compiler integration', mutant_expression: [
   'MIRLowering',
   'ZigTranspiler'
 ] do
+  ZIG_RUN_TIMEOUT = Integer(ENV.fetch('SEMANTIC_ZIG_TIMEOUT', '300'))
+
+  # Captured through a FILE, not a pipe. macOS zig spins or wedges when its
+  # output is a pipe -- `zig translate-c` burns 100% CPU forever, and a `zig
+  # test` binary that panics blocks at 0% CPU writing its trace. Redirecting
+  # to a file costs nothing and sidesteps both.
+  def run_zig_to_file(*args, chdir: nil)
+    Dir.mktmpdir('semantic-zig-out') do |out_dir|
+      out_path = File.join(out_dir, 'combined')
+      opts = { out: out_path, err: %i[child out] }
+      opts[:chdir] = chdir if chdir
+      pid = Process.spawn(*args, **opts)
+      # A zig test binary that crashes can wedge in its own signal handler and
+      # sit at 0% CPU forever. Bound it: a visible failure with the captured
+      # output beats a suite that never finishes.
+      status = nil
+      begin
+        Timeout.timeout(ZIG_RUN_TIMEOUT) { _, status = Process.wait2(pid) }
+      rescue Timeout::Error
+        Process.kill('KILL', pid)
+        Process.wait(pid)
+        return [File.read(out_path) + "\n[timed out after #{ZIG_RUN_TIMEOUT}s]", nil]
+      end
+      [File.read(out_path), status]
+    end
+  end
+
   def semantic_zig
     candidates = [
       File.join(File.expand_path('~'), 'zig-x86_64-linux-0.16.0', 'zig'),
@@ -58,10 +86,10 @@ RSpec.describe 'semantic equivalence compiler integration', mutant_expression: [
       end
       File.write(zig_path, ([header] + blocks).join("\n"))
 
-      format_output, format_status = Open3.capture2e(semantic_zig, 'fmt', zig_path)
+      format_output, format_status = run_zig_to_file(semantic_zig, 'fmt', zig_path)
       expect(format_status).to be_success, format_output
 
-      output, status = Open3.capture2e(
+      output, status = run_zig_to_file(
         semantic_zig,
         'test', 'semantic-mutant.zig', 'runtime/switch.S', 'runtime/onRoot.S', '-lc',
         chdir: build_dir
