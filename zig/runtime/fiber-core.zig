@@ -258,10 +258,26 @@ pub const Fiber = struct {
             // above; aarch64's `ret` branches to the link register instead, so
             // the entry point has to be seeded there or the first switch
             // returns into the 0xCC stack fill.
-            .ctx = if (builtin.cpu.arch == .aarch64)
-                Context{ .sp = initial_sp, .lr = entry_fn }
-            else
-                Context{ .sp = initial_sp },
+            // x86 starts a fiber by `ret`-ing off the stack slot written
+            // above; aarch64's `ret` branches to the link register instead, so
+            // the entry point has to be seeded there or the first switch
+            // returns into the 0xCC stack fill.
+            //
+            // aarch64 stack walkers also follow the frame-pointer chain,
+            // reading the saved FP at [fp] and the saved LR at [fp + 8]. A
+            // fiber whose outermost frame has fp = 0 makes the walker
+            // dereference address 0x8 -- exactly the fault Zig's
+            // DebugAllocator produced here, since it captures a stack trace on
+            // every allocation. So park a null frame record { fp = 0, lr = 0 }
+            // above the initial SP, where the fiber's own stack (growing down
+            // from initial_sp) never reaches, and point fp at it: the walk
+            // reads lr = 0 and stops cleanly.
+            .ctx = if (builtin.cpu.arch == .aarch64) blk: {
+                const frame_record = aligned_top - 16;
+                @as(*usize, @ptrFromInt(frame_record)).* = 0;
+                @as(*usize, @ptrFromInt(frame_record + 8)).* = 0;
+                break :blk Context{ .sp = initial_sp, .lr = entry_fn, .fp = frame_record };
+            } else Context{ .sp = initial_sp },
             .stack_limit = limit,
             .parent_ctx = undefined,
             .size_class = size,
