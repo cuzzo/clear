@@ -249,10 +249,18 @@ switch_context_asm:
 #if defined(__aarch64__)
 
 .text
+.cfi_sections .eh_frame
 .global SYM(switch_context_asm)
 .align 2
 
 SYM(switch_context_asm):
+    // Unwind info is NOT optional here. Zig's DebugAllocator captures a stack
+    // trace on every allocation, and a frame with no CFI sends the Mach-O
+    // unwinder off a cliff: it segfaults, the segfault handler re-enters the
+    // unwinder, and the process wedges at 0% CPU forever. The x86-64 bodies
+    // above have carried .cfi_startproc since the beginning; these did not,
+    // because they had never been assembled.
+    .cfi_startproc
     // x0 = from, x1 = to. Offsets follow fiber-core.zig's aarch64 Context
     // EXACTLY: sp 0x00, then x19..x28 packed from 0x08, fp 0x58, lr 0x60.
     //
@@ -277,6 +285,7 @@ SYM(switch_context_asm):
     ldr x9, [x1, #0x00]
     mov sp, x9
     ret
+    .cfi_endproc
 
 #endif
 

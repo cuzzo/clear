@@ -60,11 +60,15 @@ call_on_stack_asm:
 #if defined(__aarch64__)
 
 .text
+.cfi_sections .eh_frame
 .global SYM(call_on_stack_asm)
 .align 2
 
 // x0 = new_stack_ptr, x1 = func_ptr, x2 = arg_ptr
 SYM(call_on_stack_asm):
+    // See switch.S: a frame with no CFI wedges the Mach-O unwinder, which
+    // Zig's DebugAllocator walks on every allocation.
+    .cfi_startproc
     // 1. Push FP, LR and the current SP to the Fiber stack
     mov x9, sp
     stp x29, x30, [sp, #-48]!  // Allocate 48 bytes (16-byte aligned)
@@ -91,6 +95,7 @@ SYM(call_on_stack_asm):
     ldp x29, x30, [sp], #48    // Pop and Clean up
     mov sp, x9
     ret
+    .cfi_endproc
 
 #endif
 
