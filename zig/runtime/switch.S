@@ -1,4 +1,14 @@
-# switch.s
+// switch.s
+
+// Mach-O prefixes C symbols with an underscore and ELF does not, so every
+// global that Zig links against goes through SYM() and one spelling serves
+// both. Plain `.text` is used rather than `.section .text`, which Mach-O's
+// assembler rejects.
+#if defined(__APPLE__)
+# define SYM(name) _##name
+#else
+# define SYM(name) name
+#endif
 
 .data
 .global breadcrumb_counter
@@ -6,7 +16,7 @@
 .global abi_error_code
 abi_error_code: .quad 0
 breadcrumb_counter: .quad 0
-breadcrumbs: .space 512  # 64 breadcrumbs
+breadcrumbs: .space 512  // 64 breadcrumbs
 
 .data
 .balign 8
@@ -23,7 +33,7 @@ test_saved_rsp: .quad 0
 .global entry_r15
 .global fake_stack
 
-fake_stack: .space 2048  # 2KB fake stack
+fake_stack: .space 2048  // 2KB fake stack
 entry_rsp: .quad 0
 entry_rbx: .quad 0
 entry_rbp: .quad 0
@@ -32,6 +42,7 @@ entry_r13: .quad 0
 entry_r14: .quad 0
 entry_r15: .quad 0
 
+#if defined(__ELF__)
 .weak test_stack_limit
 .weak test_parent_ctx
 .weak capture_pivot
@@ -40,7 +51,10 @@ test_stack_limit: .quad 0
 test_paretn_ctx: .space 0
 capture_pivot: .space 0
 capture_restore: .space 0
+#endif
 
+
+#if defined(__x86_64__)
 
 .text
 .cfi_sections .eh_frame
@@ -198,6 +212,8 @@ abi_panic:
 
 
 
+#endif  // __x86_64__ (macros, breadcrumbs, abi_panic)
+
 # Check for x86_64 (Linux/Intel)
 #if defined(__x86_64__)
 
@@ -232,12 +248,12 @@ switch_context_asm:
 # Check for ARM64 (Apple Silicon/Linux ARM)
 #if defined(__aarch64__)
 
-.section .text
-.global switch_context_asm
+.text
+.global SYM(switch_context_asm)
 .align 2
 
-switch_context_asm:
-    # x0 = from, x1 = to
+SYM(switch_context_asm):
+    // x0 = from, x1 = to
     mov x9, sp
     str x9, [x0, #0x00]
     stp x19, x20, [x0, #0x10]
@@ -257,6 +273,8 @@ switch_context_asm:
 
 #endif
 
+
+#if defined(__x86_64__)
 
 .weak __zig_stack_overflow_handler
 __zig_stack_overflow_handler:
@@ -603,3 +621,4 @@ run_stack_stitch_harness:
     ret
     .cfi_endproc
 
+#endif  // __x86_64__ (morestack/lessstack and the asm test harness)

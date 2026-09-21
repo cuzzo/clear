@@ -1,3 +1,12 @@
+// Mach-O prefixes C symbols with an underscore and ELF does not, so the
+// global below goes through SYM() and one spelling serves both. Plain `.text`
+// is used rather than `.section .text`, which Mach-O's assembler rejects.
+#if defined(__APPLE__)
+# define SYM(name) _##name
+#else
+# define SYM(name) name
+#endif
+
 #if defined(__x86_64__)
 
 .section .text
@@ -50,36 +59,36 @@ call_on_stack_asm:
 
 #if defined(__aarch64__)
 
-.section .text
-.global call_on_stack_asm
+.text
+.global SYM(call_on_stack_asm)
 .align 2
 
-# x0 = new_stack_ptr, x1 = func_ptr, x2 = arg_ptr
-call_on_stack_asm:
-    # 1. Push FP, LR and the current SP to the Fiber stack
+// x0 = new_stack_ptr, x1 = func_ptr, x2 = arg_ptr
+SYM(call_on_stack_asm):
+    // 1. Push FP, LR and the current SP to the Fiber stack
     mov x9, sp
-    stp x29, x30, [sp, #-48]!  # Allocate 48 bytes (16-byte aligned)
+    stp x29, x30, [sp, #-48]!  // Allocate 48 bytes (16-byte aligned)
     mov x29, sp
-    str x9, [sp, #16]          # Save Fiber SP
+    str x9, [sp, #16]          // Save Fiber SP
 
-    # 2. Save Floating Point status
+    // 2. Save Floating Point status
     mrs x10, fpcr
     str x10, [sp, #24]
 
-    # 3. Switch to G0
-    and x0, x0, #~0xf          # Ensure 16-byte align
+    // 3. Switch to G0
+    and x0, x0, #~0xf          // Ensure 16-byte align
     mov sp, x0
 
-    # 4. Execute
-    mov x0, x2                 # arg_ptr -> x0
+    // 4. Execute
+    mov x0, x2                 // arg_ptr -> x0
     blr x1
 
-    # 5. Restore
-    mov sp, x29                # Switch back to Fiber stack frame
-    ldr x10, [sp, #24]         # Restore FP Control
+    // 5. Restore
+    mov sp, x29                // Switch back to Fiber stack frame
+    ldr x10, [sp, #24]         // Restore FP Control
     msr fpcr, x10
-    ldr x9, [sp, #16]          # Load Fiber SP
-    ldp x29, x30, [sp], #48    # Pop and Clean up
+    ldr x9, [sp, #16]          // Load Fiber SP
+    ldp x29, x30, [sp], #48    // Pop and Clean up
     mov sp, x9
     ret
 
