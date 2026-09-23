@@ -1,0 +1,25 @@
+FN heavy?(n: Int64) RETURNS !Bool ->
+  IF n < 0 THEN
+    RAISE "negative";
+  END
+  RETURN n > 2;
+END
+
+FN all_heavy(items: []Int64) RETURNS !Bool ->
+  RETURN items |> ALL TRY (heavy?(_));
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE a: Bool = TRY (all_heavy([3, 4, 5]));
+  IF a THEN
+    print("all-heavy");
+  ELSE
+    print("not-all");
+  END
+  MUTABLE b: Bool = TRY (all_heavy([1, 4, 5]));
+  IF b THEN
+    print("all-heavy");
+  ELSE
+    print("not-all");
+  END
+END

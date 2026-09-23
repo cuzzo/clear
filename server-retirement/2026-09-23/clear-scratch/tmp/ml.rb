@@ -1,0 +1,5778 @@
+# typed: strict
+# src/mir_lowering.rb - Lowers annotated AST (post-MIRPass) into MIR tree
+#
+# Pipeline: Parse -> Annotate -> MIRPass -> Lower -> Emit
+#
+# The lowering reads the annotated AST with marker nodes (Drop, AllocMark,
+# SuppressCleanup, etc.) already inserted by MIRPass, and produces a
+# complete MIR tree that the MIREmitter can emit to Zig.
+#
+# This pass subsumes the transpiler's visit_node dispatch. All type
+# introspection and allocator resolution happens HERE, not in the emitter.
+
+require "sorbet-runtime"
+require "set"
+
+require_relative "mir"
+require_relative "cleanup_entry"
+require_relative "../semantic/pass_state"
+require_relative "placement"
+require_relative "materialization"
+require_relative "../semantic/capture_strategy"
+require_relative "../semantic/ownership_transport"
+require_relative "../semantic/tense_operation_plan"
+require_relative "fiber_ctx_builder"
+require_relative "../ast/ast"
+require_relative "../ast/type"
+require_relative "../compiler/entrypoint"
+require_relative "../ast/async_result_shape"
+require_relative "../ast/error_registry"
+require_relative "../compiler/module_importer"
+require_relative "../backends/zig_type_mapper"
+require_relative "lower/pipeline/pipeline_host"
+require_relative "lowering/counters"
+require_relative "lowering/schema_registry"
+require_relative "fsm_lowering"
+require_relative "fsm_transform"
+require_relative "thunk_transform"
+require_relative "test_lowering"
+require_relative "hoist"
+require_relative "lowering/functions"
+require_relative "lowering/capabilities"
+require_relative "lowering/state"
+require_relative "lowering/ownership_scanner"
+require_relative "lowering/concurrency"
+require_relative "lowering/expressions"
+require_relative "lowering/literals"
+require_relative "lowering/variables"
+require_relative "lowering/control_flow"
+
+class MIRLowering
+    extend T::Sig
+    include ThunkTransform::LoweringProtocol
+
+  # Zig rejects a function-local binding that shadows any declaration in the
+  # containing file. Keep imported/inlined module namespaces in a reserved
+  # backend namespace so ordinary CLEAR parameters such as `path` remain legal.
+  sig { params(name: String).returns(String) }
+  def zig_module_alias(name)
+    # Only the OWNING package of a multi-file group is built, so every
+    # reference -- the import, the type aliases, and a cross-package call's
+    # qualifier -- has to name the owner. Otherwise the same CLEAR type
+    # reaches Zig as two distinct types.
+    importer = program_state.importer
+    canonical = importer && importer.respond_to?(:owning_package_name) ? importer.owning_package_name(name) : name
+    "__clear_module_#{canonical.gsub('.', '_')}"
+  end
+
+  OwnershipFact = T.type_alias do
+    T.any(
+      MIR::OwnedCreate,
+      MIR::OwnedDestroy,
+      MIR::OwnedTransfer,
+      MIR::OwnedBorrow,
+      MIR::OwnedStore,
+      MIR::OwnedReturn,
+    )
+  end
+  TransferMark = T.type_alias { T.any(MIR::TransferMark, MIR::MoveMark) }
+  FnSigMap = T.type_alias { T::Hash[T.any(String, Symbol), FunctionSignature] }
+  LoweredMir = T.type_alias { T.any(MIR::Node, T::Array[MIR::Node]) }
+  LowerableMarker = T.type_alias do
+    T.any(
+      MIR::Drop,
+      MIR::AllocMark,
+      MIR::SuppressCleanup,
+      MIR::Return,
+      MIR::ReassignCleanup,
+      MIR::FieldCleanup,
+    )
+  end
+  LowerableStmt = T.type_alias { T.any(AST::Node, LowerableMarker) }
+  BackgroundDispatch = T.type_alias { T.any(Symbol, T::Boolean) }
+  UnionVariantPayload = T.type_alias { T.nilable(T.any(Type::TypeInput, Schemas::InlineStructVariant)) }
+
+  class AllocatingResultFact < T::Struct
+    extend T::Sig
+
+    const :name, String
+    const :ownership_effect, MIR::OwnershipEffect
+    const :type_info, Type
+    const :scope, Symbol
+
+    sig { returns(Symbol) }
+    def alloc
+      ownership_effect.alloc || :heap
+    end
+
+    sig { returns(MIR::AllocMark) }
+    def alloc_mark
+      MIR::AllocMark.new(name, alloc, type_info, scope)
+    end
+  end
+
+  class DestinationPlacementPlan < T::Struct
+    extend T::Sig
+
+    const :action, Symbol
+    const :type_info, T.nilable(Type)
+    const :dest_alloc, T.nilable(Symbol)
+    const :source_alloc, T.nilable(Symbol), default: nil
+
+    sig { returns(T::Boolean) }
+    def keep?
+      action == :keep
+    end
+
+    sig { returns(T::Boolean) }
+    def heap?
+      dest_alloc == :heap
+    end
+
+    sig { params(lowering: MIRLowering, mir: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
+    def place(lowering, mir, ast_node)
+      return mir if keep?
+
+      case action
+      when :heap_indirect
+        lowering.place_indirect_value_for_heap_destination(mir, T.must(type_info))
+      when :cast_wrapped_or
+        cast = T.cast(mir, MIR::Cast)
+        placed = lowering.place_value_for_destination(cast.expr, ast_node, dest_alloc, type_info)
+        MIR::Cast.new(placed, cast.target_type, cast.method)
+      when :owned_orelse
+        lowering.place_owned_orelse_for_destination(T.cast(mir, MIR::Orelse), T.must(type_info), T.must(dest_alloc))
+      when :owned_try_catch
+        lowering.place_owned_try_catch_for_destination(T.cast(mir, MIR::TryCatch), T.must(type_info), T.must(dest_alloc))
+      when :owned_alloc_mismatch
+        lowering.place_owned_alloc_mismatch_for_destination(mir, T.must(type_info), T.must(dest_alloc), T.must(source_alloc))
+      when :owned_copy
+        lowering.place_owned_branch_value_for_destination(mir, T.must(type_info), T.must(dest_alloc))
+      when :string_or
+        lowering.place_string_or_for_heap_destination(mir, T.cast(ast_node, AST::BinaryOp))
+      when :string
+        lowering.place_string_value_for_destination(mir, ast_node, T.must(dest_alloc))
+      else
+        raise "unknown destination placement action #{action.inspect}"
+      end
+    end
+  end
+
+  class DestinationSourceFact < T::Struct
+    extend T::Sig
+
+    const :borrowed, T::Boolean
+    const :owner_transfer, T::Boolean
+    const :heap_owned_result, T::Boolean
+
+    sig { params(type_info: Type).returns(T::Boolean) }
+    def needs_owned_copy?(type_info)
+      type_info.ownership_bearing? && borrowed && !owner_transfer && !heap_owned_result
+    end
+  end
+
+  class PipelineAllocMarkFact < T::Struct
+    extend T::Sig
+
+    const :alloc, Symbol
+    const :mark, MIR::AllocMark
+    const :cleanup_entry, T.nilable(CleanupEntry), default: nil
+  end
+
+  class OwnedSinkPlan < T::Struct
+    extend T::Sig
+
+    const :action, Symbol
+    const :target_alloc, Symbol
+    const :zig_type, T.nilable(String)
+    const :copy_mode, T.nilable(Symbol)
+    const :rc_func, T.nilable(String), default: nil
+    const :source_slice_view, T::Boolean, default: false
+
+    sig { returns(T::Boolean) }
+    def keep?
+      action == :keep
+    end
+  end
+
+  class OwnedSinkSourceFact < T::Struct
+    extend T::Sig
+
+    const :source_alloc, T.nilable(Symbol)
+    const :moved_without_copy, T::Boolean
+    const :owned_parameter, T::Boolean
+    const :needs_heap_create, T::Boolean
+    const :same_alloc_verifiable, T::Boolean
+    const :same_alloc_transfer_source, T::Boolean
+    const :transfer_without_local_cleanup, T::Boolean
+    const :already_owned_value, T::Boolean
+    const :existing_owned_source, T::Boolean
+    const :borrowed_union_sink, T::Boolean
+
+	    sig { params(sink_alloc: Symbol, ti: Type).returns(T::Boolean) }
+	    def satisfies_sink?(sink_alloc, ti)
+      same_alloc = source_alloc == sink_alloc
+      same_alloc_satisfies = same_alloc &&
+                             ((moved_without_copy && (!ti.string? || !ti.rodata?)) ||
+                              same_alloc_verifiable ||
+                              same_alloc_transfer_source)
+      owned_value_matches_sink = already_owned_value && (source_alloc.nil? || same_alloc)
+      same_alloc_satisfies || owned_parameter || needs_heap_create ||
+	        (transfer_without_local_cleanup && same_alloc) || owned_value_matches_sink
+	    end
+
+	    sig { returns(T::Boolean) }
+	    def satisfies_rc_sink?
+	      moved_without_copy || owned_parameter || needs_heap_create || already_owned_value
+	    end
+	  end
+
+  class LoweredStmtPacket < T::Struct
+    const :mir, LoweredMir
+    const :pending, T::Array[MIR::Node]
+    const :stmt_transfer_marks, T::Array[MIR::Stmt]
+    const :source_line, T.nilable(Integer)
+    const :source_column, T.nilable(Integer)
+  end
+
+  class LoweredItemTarget < T::Struct
+    const :items, T::Array[MIR::Node]
+    const :line, T.nilable(Integer)
+  end
+
+  class LoweredModuleItems < T::Struct
+    extend T::Sig
+
+    const :items, T::Array[MIR::Emittable]
+    const :type_items, T::Array[MIR::Emittable]
+
+    sig { params(key: Symbol).returns(T::Array[MIR::Emittable]) }
+    def [](key)
+      case key
+      when :items then items
+      when :type_items then type_items
+      else []
+      end
+    end
+  end
+
+  class UnionVariantLoweringFact < T::Struct
+    extend T::Sig
+
+    const :owner_name, String
+    const :name, String
+    const :data, UnionVariantPayload
+    const :inline_struct, T::Boolean
+    const :zig_type, String
+
+    sig { returns(String) }
+    def helper_name
+      "#{owner_name}_#{name}"
+    end
+  end
+
+  class OwnershipFinalizationContext < T::Struct
+    const :inherited_alloc_names, T::Set[String]
+    const :parent, T.nilable(OwnershipFinalizationContext), default: nil
+    const :out, T::Array[MIR::Node]
+    const :guarded_cleanup_names, T::Set[String]
+    const :alloc_marks, T::Hash[String, MIR::AllocMark]
+    const :body_alloc_mark_names, T::Set[String]
+    const :transfer_mark_names, T::Set[String]
+    const :body_transfer_mark_names, T::Set[String]
+    const :move_mark_names, T::Set[String]
+    const :cleanup_by_name, T::Hash[String, T.any(MIR::Cleanup, MIR::ErrCleanup)]
+  end
+
+  class LoweredBodyConstruction < T::Struct
+    const :packets, T::Array[LoweredStmtPacket]
+    const :finalization_context, OwnershipFinalizationContext
+  end
+
+  class OwnershipFactTarget < T::Struct
+    const :name, String
+    const :expr, MIR::Node
+    const :type_info, T.nilable(Type)
+    const :include_owned_result, T::Boolean
+    const :include_transfer_contract, T::Boolean
+  end
+
+  class OwnershipTransferTarget < T::Struct
+    const :name, String
+    const :target, Symbol
+    const :target_alloc, T.nilable(Symbol)
+  end
+
+  class OwnershipSurfaceScan < T::Struct
+    extend T::Sig
+
+    const :facts, T::Array[OwnershipFact]
+    const :transfer_targets, T::Array[OwnershipTransferTarget]
+  end
+
+  include ZigTypeMapper
+  include FsmLowering
+  include TestLowering
+  include MIRHoistLowering
+  include MIRLoweringFunctions
+  include MIRLoweringCapabilities
+  include MIRLoweringConcurrency
+  include MIRLoweringExpressions
+  include MIRLoweringLiterals
+  include MIRLoweringVariables
+  include MIRLoweringControlFlow
+
+  sig { returns(MIRLoweringProgramState::FnSigMap) }
+  def fn_sigs
+    program_state.fn_sigs
+  end
+
+  sig { returns(MIRLoweringProgramState::ShardContext) }
+  def shard_context
+    program_state.shard_context
+  end
+
+  sig { params(context: MIRLoweringProgramState::ShardContext).returns(MIRLoweringProgramState::ShardContext) }
+  def shard_context=(context)
+    program_state.shard_context = context
+  end
+
+  sig { params(type_info: T.nilable(Type::TypeInput)).returns(T::Boolean) }
+  def ast_void_type?(type_info)
+    return true if type_info.nil? || type_info == :Void
+    ti = Type.from_node(type_info)
+    ti ? ti.void? : false
+  end
+
+  sig { returns(T.nilable(MIRLoweringFunctions::FunctionLoweringContext)) }
+  def current_function_context
+    function_state.current_function_context
+  end
+
+  sig { returns(T::Boolean) }
+  def current_function_has_rt?
+    current_function_context&.has_rt == true
+  end
+
+  sig { returns(T::Boolean) }
+  def current_function_has_catch?
+    current_function_context&.has_catch == true
+  end
+
+  sig { returns(T::Boolean) }
+  def current_function_heap_carry_return?
+    current_function_context&.heap_carry_return == true
+  end
+
+  sig { returns(T::Boolean) }
+  def current_function_tail_call?
+    current_function_context&.tail_call == true
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_param_name?(name)
+    current_function_context&.param_names&.include?(name) == true
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_takes_param_name?(name)
+    current_function_context&.takes_param_names&.include?(name) == true
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_collection_param?(name)
+    current_function_context&.collection_params&.include?(name) == true
+  end
+
+  sig { params(name: String).returns(T.nilable(String)) }
+  def current_function_protocol_map_allocator(name)
+    current_function_context&.protocol_map_allocators&.[](name)
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_mutable_scalar_param?(name)
+    current_function_context&.mutable_scalar_params&.include?(name) == true
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def current_function_heap_carry_return_var?(name)
+    current_function_context&.heap_carry_return_vars&.include?(name) == true
+  end
+
+  sig { returns(T.nilable(String)) }
+  def current_function_return_payload_zig
+    current_function_context&.return_payload_zig
+  end
+
+  sig { returns(T.nilable(Type)) }
+  def current_function_return_type
+    current_function_context&.return_type
+  end
+
+  sig { returns(MIRLoweringFunctions::NameSet) }
+  def current_function_snapshot_types
+    current_function_context&.snapshot_types || Set.new
+  end
+
+  sig { returns(T.nilable(String)) }
+  def current_function_zig_name
+    current_function_context&.zig_name
+  end
+
+  sig { params(name: T.any(String, Symbol)).returns(T.nilable(FunctionSignature)) }
+  def fn_sig_for(name)
+    sigs = fn_sigs
+    sig = sigs.dig(name) || sigs.dig(name.to_sym) || sigs.dig(name.to_s)
+    FunctionSignature.unwrap(sig)
+  end
+
+  sig { params(input: MIRLoweringInput).void }
+  def initialize(input: MIRLoweringInput.new)
+    schemas = MIRLoweringSchemas.new(
+      struct_schemas: input.struct_schemas,
+      enum_schemas: input.enum_schemas,
+      union_schemas: input.union_schemas,
+    )
+    if input.schema_lookup
+      external_lookup = T.must(input.schema_lookup)
+      schemas.replace_lookup_proc!(->(name) { schemas.lookup(name) || external_lookup.call(name) })
+    end
+    @state = T.let(
+      MIRLoweringState.new(
+        input: input,
+        schemas: schemas,
+        counters: MIRLoweringCounters.new,
+        function_state: MIRLoweringFunctions::FunctionState.new,
+        runtime: MIRLoweringRuntimeState.new,
+        program: MIRLoweringProgramState.new(
+          fn_sigs: input.fn_sigs.dup,
+          importer: input.importer,
+          source_dir: input.source_dir,
+          debug_mode: input.debug_mode,
+          target: input.target,
+        ),
+        capture: MIRLoweringCaptureState.new,
+        capabilities: MIRLoweringCapabilityState.new,
+        ownership: MIRLoweringOwnershipState.new,
+        test: MIRLoweringTestState.new,
+      ),
+      MIRLoweringState,
+    )
+    @active_lifecycle_registry = T.let(input.lifecycle_registry, Semantic::LifecycleRegistry)
+  end
+
+  sig { returns(MIRLoweringState) }
+  def lowering_state
+    @state
+  end
+
+  sig { returns(MIRLoweringInput) }
+  def lowering_input
+    lowering_state.input
+  end
+
+  sig { returns(MIRLoweringProgramState) }
+  def program_state
+    lowering_state.program
+  end
+
+  sig { returns(MIRLoweringRuntimeState) }
+  def runtime_state
+    lowering_state.runtime
+  end
+
+  sig { returns(MIRLoweringCaptureState) }
+  def capture_state
+    lowering_state.capture
+  end
+
+  sig { returns(MIRLoweringCapabilityState) }
+  def capability_state
+    lowering_state.capabilities
+  end
+
+  sig { returns(MIRLoweringOwnershipState) }
+  def ownership_state
+    lowering_state.ownership
+  end
+
+  sig { returns(MIRLoweringTestState) }
+  def test_state
+    lowering_state.test
+  end
+
+  sig { returns(MIRLoweringSchemas::SchemaLookup) }
+  def mir_schema_lookup
+    lowering_schemas.lookup_proc
+  end
+
+  sig { returns(Semantic::LifecycleRegistry) }
+  def lifecycle_registry
+    @active_lifecycle_registry
+  end
+
+  sig do
+    type_parameters(:Result)
+      .params(
+        registry: T.nilable(Semantic::LifecycleRegistry),
+        block: T.proc.returns(T.type_parameter(:Result)),
+      )
+      .returns(T.type_parameter(:Result))
+  end
+  def with_lifecycle_registry(registry, &block)
+    return yield unless registry
+
+    previous = @active_lifecycle_registry
+    @active_lifecycle_registry = registry
+    yield
+  ensure
+    restore_lifecycle_registry!(T.must(previous)) if registry
+  end
+
+  sig { params(registry: Semantic::LifecycleRegistry).void }
+  def restore_lifecycle_registry!(registry)
+    @active_lifecycle_registry = registry
+    nil
+  end
+  private :restore_lifecycle_registry!
+
+  sig { params(lookup_proc: MIRLoweringSchemas::SchemaLookup).void }
+  def replace_mir_schema_lookup!(lookup_proc)
+    lowering_schemas.replace_lookup_proc!(lookup_proc)
+  end
+
+  sig { returns(MIRLoweringSchemas) }
+  def lowering_schemas
+    lowering_state.schemas
+  end
+
+  sig { returns(T::Hash[Symbol, Schemas::StructSchema]) }
+  def struct_schemas
+    lowering_schemas.struct_schemas
+  end
+
+  sig { returns(T::Hash[Symbol, MIRLoweringSchemas::EnumVariants]) }
+  def enum_schemas
+    lowering_schemas.enum_schemas
+  end
+
+  sig { returns(T::Hash[Symbol, Schemas::UnionSchema]) }
+  def union_schemas
+    lowering_schemas.union_schemas
+  end
+
+  sig { returns(MIRLoweringCounters) }
+  def lowering_counters
+    lowering_state.counters
+  end
+
+  sig { returns(T::Hash[String, MIRLoweringCounterSnapshot]) }
+  def function_counter_snapshots
+    program_state.function_counter_snapshots
+  end
+
+  # Stable source identity for generated local names. Ruby object_id is useful
+  # for in-memory identity maps, but embedding it in Zig makes clean builds
+  # nondeterministic and prevents checked incremental artifact reuse.
+  sig { params(node: AST::Locatable).returns(String) }
+  def stable_node_suffix(node)
+    range = node.source_range
+    "#{function_relative_line(range.start_line)}_#{range.start_column}_#{function_relative_line(range.end_line)}_#{range.end_column}"
+  end
+
+  sig { params(line: Integer).returns(Integer) }
+  def function_relative_line(line)
+    function_start = current_function_context&.source_start_line
+    function_start ? line - function_start + 1 : line
+  end
+
+  sig { returns(MIRLoweringFunctions::FunctionState) }
+  def function_state
+    lowering_state.function_state
+  end
+
+  sig { returns(Symbol) }
+  def lowering_target
+    program_state.target
+  end
+
+  sig { returns(T::Boolean) }
+  def bc_target?
+    lowering_target == :bc
+  end
+
+  sig { returns(String) }
+  def runtime_binding_name
+    runtime_state.rt_name
+  end
+
+  sig { returns(Integer) }
+  def next_pipeline_observable_id
+    lowering_counters.next_background_block_id.value
+  end
+
+  sig { returns(Symbol) }
+  def pipeline_result_alloc
+    function_state.current_decl_or_frame_alloc
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def pipeline_guarded_cleanup_name?(name)
+    function_state.guarded_cleanup_names[name] == true
+  end
+
+  sig { params(kind: Symbol, dispatch: Symbol, analysis: T.nilable(CapabilityHelper::CaptureAnalysis)).returns(MIR::ExecutionBoundaryFact) }
+  def pipeline_execution_boundary_fact(kind, dispatch, analysis)
+    execution_boundary_fact(kind, dispatch, analysis)
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def lowered_guarded_cleanup_name?(name)
+    function_state.lowered_guarded_cleanup_names.include?(name)
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(rt_name: String, blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_runtime_binding_name(rt_name, &blk)
+    runtime_state.with_rt_name(rt_name, &blk)
+  end
+
+  sig { returns(MIRLoweringGeneratedId) }
+  def next_stream_literal_id
+    lowering_counters.next_stream_literal_id
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: T.nilable(Symbol), dest_type: T.nilable(Type::TypeInput)).returns(MIR::Node) }
+  def place_value_for_destination(mir, ast_node, dest_alloc, dest_type = nil)
+    plan = destination_placement_plan(mir, ast_node, dest_alloc, dest_type)
+    placed = plan.place(self, mir, ast_node)
+    # A symbol reaching a String destination widens to its bytes. Placement
+    # decides HOW the value is stored; this decides WHAT is stored, and only
+    # the source type can answer it.
+    dst = dest_type.is_a?(Type) ? dest_type : (dest_type ? Type.new(dest_type) : nil)
+    return placed unless dst&.byte_string?
+
+    widen_symbol_to_bytes(placed, ast_node)
+  end
+
+  sig { params(value: MIR::Node, shape: AsyncResultShape).returns(MIR::Node) }
+  def async_payload_storage_value(value, shape)
+    return value unless shape.boxes_fallible_payload?
+
+    MIR::StructInit.new(nil, [MIR::StructInitField.new(name: "value", value: value)])
+  end
+
+  sig { params(value: MIR::Node, destination: Type, source_node: AST::Node).returns(MIR::MethodCall) }
+  def node_create_mir(value, destination, source_node)
+    payload = T.must(destination.node_payload_type)
+    zig_type = transpile_type(payload.resolved.to_s)
+    shared = destination.shared_node?
+    function_state.node_store_types << zig_type unless shared
+    store = node_store_type_mir(zig_type, shared: shared)
+    call = MIR::MethodCall.new(
+      store,
+      "createBound",
+      [MIR::Ident.new(node_store_binding_name(zig_type, shared: shared)), value],
+      true,
+      MIR::CallableContract.no_ownership(2),
+    )
+    call.result_type = Type.new(destination)
+    T.cast(with_ownership_consumption_for_value(
+      call,
+      value,
+      source_node,
+      shared ? "SharedNodeStore.createBound" : "NodeStore.createBound",
+      target_alloc: :heap,
+    ), MIR::MethodCall)
+  end
+
+  # NodeStore is a comptime Zig type factory. Keep the application structural
+  # in MIR so identifiers remain identifiers rather than encoded expressions.
+  sig { params(zig_type: String, shared: T::Boolean).returns(MIR::Call) }
+  def node_store_type_mir(zig_type, shared: false)
+    MIR::Call.new(
+      shared ? "CheatLib.SharedNodeStore" : "CheatLib.NodeStore",
+      [MIR::Ident.new(zig_type)],
+      false,
+      false,
+      MIR::CallableContract.no_ownership(1),
+    )
+  end
+
+  sig { params(nodes: T::Array[MIR::Node], include_bodies: T::Boolean).returns(T::Array[String]) }
+  def shared_node_store_types_in_mir(nodes, include_bodies: true)
+    found = T.let(Set.new, T::Set[String])
+    pending = T.let(nodes.dup, T::Array[MIR::Node])
+    until pending.empty?
+      node = T.must(pending.pop)
+      if node.is_a?(MIR::MethodCall) && node.receiver.is_a?(MIR::Call) &&
+          T.cast(node.receiver, MIR::Call).callee == "CheatLib.SharedNodeStore"
+        arg = T.cast(node.receiver, MIR::Call).args.first
+        found << arg.name if arg.is_a?(MIR::Ident)
+      end
+      if node.is_a?(MIR::Emittable)
+        node.child_exprs.each { |child| pending << child if child.is_a?(MIR::Emittable) }
+        # ScopeBlock/BlockExpr bodies are the current statement's inline
+        # evaluation, not nested control-flow statements. Traverse those so a
+        # field assignment's cleanup+set pair shares one guard. Do not descend
+        # into While/If/etc.; their bodies are guarded when lowered.
+        if include_bodies || node.is_a?(MIR::ScopeBlock) || node.is_a?(MIR::BlockExpr)
+          node.body_slots.each { |slot| slot.body.each { |child| pending << child } }
+        end
+      end
+    end
+    found.to_a.sort
+  end
+
+  sig { params(stmt: LowerableStmt, nodes: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
+  def guard_shared_node_statement(stmt, nodes)
+    # Nested bodies are lowered and guarded statement-by-statement. Looking
+    # through them here would hold an outer guard across an entire loop/branch
+    # and then emit a second same-named guard inside the body.
+    types = shared_node_store_types_in_mir(nodes, include_bodies: false)
+    return nodes if types.empty?
+
+    write = stmt.is_a?(AST::Assignment) || stmt.is_a?(AST::MethodCall) ||
+      nodes.any? { |node| shared_node_write_mir?(node) }
+    lock_method = write ? "lockWrite" : "lockRead"
+    unlock_method = write ? "unlockWrite" : "unlockRead"
+    prefix = T.let([], T::Array[MIR::Node])
+    types.each do |zig_type|
+      store = node_store_type_mir(zig_type, shared: true)
+      binding = node_store_binding_name(zig_type, shared: true)
+      prefix << MIR::Let.new(
+        binding,
+        MIR::MethodCall.new(
+          store,
+          lock_method,
+          [MIR::Ident.new(runtime_binding_name)],
+          true,
+          MIR::CallableContract.no_ownership(1),
+        ),
+        false,
+        nil,
+        nil,
+      )
+      prefix << MIR::DeferStmt.new(MIR::MethodCall.new(
+        store,
+        unlock_method,
+        [MIR::Ident.new(binding)],
+        false,
+        MIR::CallableContract.no_ownership(1),
+      ))
+    end
+
+    access_nodes = nodes.select do |node|
+      !shared_node_store_types_in_mir([node], include_bodies: false).empty?
+    end
+    if access_nodes.length == 1 && access_nodes.first.is_a?(MIR::Let)
+      binding = T.cast(access_nodes.first, MIR::Let)
+      label = "__shared_node_access_#{lowering_counters.next_tmp_id}"
+      original_init = binding.init
+      body = T.let(prefix, T::Array[MIR::Node])
+      if mir_allocates?(original_init)
+        value_name = "__shared_node_value_#{lowering_counters.next_tmp_id}"
+        value_type = if original_init.respond_to?(:result_type) && T.unsafe(original_init).result_type
+          Type.new(T.unsafe(original_init).result_type)
+        else
+          binding.annotation || Type.new(:Any)
+        end
+        value_alloc = mir_owned_alloc(original_init) || :heap
+        materialized = MIR::BindingMaterialization.new(
+          name: value_name,
+          expr: original_init,
+          alloc: value_alloc,
+          type_info: value_type,
+          mutable: false,
+        )
+        body.concat(materialized.statements)
+        body.concat(ownership_transfer_marks(value_name, :block_result, target_alloc: value_alloc))
+        body << MIR::BreakStmt.new(label, MIR::Ident.new(value_name))
+      else
+        body << MIR::BreakStmt.new(label, original_init)
+      end
+      block = MIR::BlockExpr.new(label, body)
+      block.result_type = T.unsafe(original_init).result_type if original_init.respond_to?(:result_type)
+      binding.init = block
+      return nodes
+    end
+
+    [MIR::ScopeBlock.new(prefix + nodes)]
+  end
+
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def shared_node_write_mir?(node)
+    if node.is_a?(MIR::MethodCall) && node.receiver.is_a?(MIR::Call) &&
+        T.cast(node.receiver, MIR::Call).callee == "CheatLib.SharedNodeStore"
+      return true if ["createBound", "removeBound"].include?(node.method)
+    end
+    return false unless node.is_a?(MIR::Emittable)
+
+    node.child_exprs.any? { |child| child.is_a?(MIR::Emittable) && shared_node_write_mir?(child) } ||
+      node.body_slots.any? { |slot| slot.body.any? { |child| shared_node_write_mir?(child) } }
+  end
+
+  # Optional @node values use NodeRef's zero handle as NIL so they remain a
+  # compact four-byte value. Every other optional uses Zig's native null.
+  sig { params(type: Type).returns(MIR::Node) }
+  def optional_nil_mir(type)
+    if type.node_reference?
+      MIR::StructInit.new(type.zig_type, [])
+    else
+      # Zig peer-type resolution does not infer a typed optional from a bare
+      # `else null` when the success arm yields slices and other pointer-like
+      # values. Preserve the annotated CLEAR optional type explicitly.
+      optional_type = type.optional? ? type : Type.optional_of(type)
+      MIR::Cast.new(MIR::Lit.new("null"), optional_type.zig_type, :as)
+    end
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: T.nilable(Symbol), dest_type: T.nilable(Type::TypeInput)).returns(DestinationPlacementPlan) }
+  def destination_placement_plan(mir, ast_node, dest_alloc, dest_type)
+    return destination_keep_plan(dest_alloc) unless dest_alloc
+
+    ti = destination_type(ast_node, dest_type)
+    # Symbols are interned rodata whatever placement stamped elsewhere:
+    # never dupe them into owned storage. The value node's own type is
+    # authoritative when a promoted destination type erased the capability.
+    if ti.symbol? || (ast_node.respond_to?(:typed?) && T.unsafe(ast_node).typed? &&
+        (Type.from_node!(ast_node, context: "placement symbol probe").symbol? rescue false))
+      return destination_keep_plan(dest_alloc)
+    end
+    return DestinationPlacementPlan.new(action: :heap_indirect, type_info: ti, dest_alloc: dest_alloc) if MIR::Placement.heap?(dest_alloc) && heap_indirect_destination?(mir, ast_node, ti)
+    return DestinationPlacementPlan.new(action: :cast_wrapped_or, type_info: ti, dest_alloc: dest_alloc) if cast_wrapped_or?(mir, ast_node)
+    # A binding whose authoritative annotated type remains rodata is only a
+    # borrowed slice into static program storage. Materializing it into the
+    # frame would manufacture an owner that the lifecycle registry correctly
+    # has no reason to drop. Fiber capture lowering performs its own explicit
+    # heap copy when that borrowed value crosses the execution boundary.
+    return destination_keep_plan(dest_alloc) if ti.string? && ti.rodata?
+    return destination_keep_plan(dest_alloc) if borrowed_string_destination?(ast_node, ti, dest_alloc)
+    return DestinationPlacementPlan.new(action: :owned_orelse, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, :orelse)
+    return DestinationPlacementPlan.new(action: :owned_try_catch, type_info: ti, dest_alloc: dest_alloc) if owned_or_destination?(mir, ast_node, ti, :try_catch)
+    source_alloc = mir_owned_alloc(mir)
+    return destination_keep_plan(dest_alloc) if heap_owned_future_handle_destination?(mir, ast_node, dest_alloc, ti)
+    if source_alloc && source_alloc != dest_alloc && ownership_bearing_type?(ti)
+      return DestinationPlacementPlan.new(action: :owned_alloc_mismatch, type_info: ti, dest_alloc: dest_alloc, source_alloc: source_alloc)
+    end
+    source = destination_source_fact(mir, ast_node)
+    needs_recursive_copy = ownership_bearing_type?(ti) && source.borrowed && !source.owner_transfer && !source.heap_owned_result
+    return DestinationPlacementPlan.new(action: :owned_copy, type_info: ti, dest_alloc: dest_alloc) if source.needs_owned_copy?(ti) || needs_recursive_copy
+    return DestinationPlacementPlan.new(action: :string_or, type_info: ti, dest_alloc: dest_alloc) if ti.string? && or_binary?(ast_node)
+    return destination_keep_plan(dest_alloc) if ti.symbol?
+    return DestinationPlacementPlan.new(action: :string, type_info: ti, dest_alloc: dest_alloc) if ti.string?
+
+    destination_keep_plan(dest_alloc)
+  end
+
+  sig { params(dest_alloc: T.nilable(Symbol)).returns(DestinationPlacementPlan) }
+  def destination_keep_plan(dest_alloc)
+    DestinationPlacementPlan.new(action: :keep, type_info: nil, dest_alloc: dest_alloc)
+  end
+
+  sig { params(ast_node: AST::Node, dest_type: T.nilable(Type::TypeInput)).returns(Type) }
+  def destination_type(ast_node, dest_type)
+    ti = dest_type || Type.from_node!(ast_node, context: "destination placement type")
+    ti.is_a?(Type) ? ti : Type.new(ti)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def or_binary?(node)
+    node.is_a?(AST::BinaryOp) && (node.op == :OR_ELSE || node.op == :OR)
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(DestinationSourceFact) }
+  def destination_source_fact(mir, ast_node)
+    node = destination_source_node(ast_node)
+    DestinationSourceFact.new(
+      borrowed: borrowed_destination_node?(node),
+      owner_transfer: owner_transfer_node?(node),
+      heap_owned_result: heap_owned_result?(mir, node),
+    )
+  end
+
+  sig { params(node: AST::Node).returns(AST::Node) }
+  def destination_source_node(node)
+    node.is_a?(AST::BinaryOp) && or_binary?(node) ? node.left : node
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def borrowed_destination_node?(node)
+    return false if unit_union_variant_constructor?(node)
+
+    node.is_a?(AST::GetField) || node.is_a?(AST::GetIndex)
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def owner_transfer_node?(node)
+    return false if AST.container_borrow?(node)
+    return true if AST.moved?(node)
+    return true if node.is_a?(AST::GetField) && node.indirect_field == true
+    return Type.indirect_type?(node.full_type!(context: "owner transfer source")) if node.is_a?(AST::GetField)
+
+    false
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
+  def cast_wrapped_or?(mir, ast_node)
+    !!(mir.is_a?(MIR::Cast) && or_binary?(ast_node))
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node, ti: Type).returns(T::Boolean) }
+  def heap_indirect_destination?(mir, ast_node, ti)
+    return false unless ti.indirect? && !ti.any_sync? && ti.ownership == :affine
+    return false if mir.is_a?(MIR::HeapCreate)
+
+    source_t = Type.from_node!(ast_node, context: "heap indirect destination source")
+    !Type.indirect_type?(source_t)
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node, ti: Type, kind: Symbol).returns(T::Boolean) }
+  def owned_or_destination?(mir, ast_node, ti, kind)
+    return false unless or_binary?(ast_node) && ownership_bearing_type?(ti)
+
+    case kind
+    when :orelse then mir.is_a?(MIR::Orelse)
+    when :try_catch then mir.is_a?(MIR::TryCatch)
+    else false
+    end
+  end
+
+  sig { params(ast_node: AST::Node, ti: Type, dest_alloc: T.nilable(Symbol)).returns(T::Boolean) }
+  def borrowed_string_destination?(ast_node, ti, dest_alloc)
+    ti.string? && !MIR::Placement.heap?(dest_alloc) && AST.container_borrow?(ast_node)
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: Symbol, type_info: Type).returns(T::Boolean) }
+  def heap_owned_future_handle_destination?(mir, ast_node, dest_alloc, type_info)
+    return false unless MIR::Placement.frame?(dest_alloc)
+
+    source_type = Type.from_node!(ast_node, context: "async boundary destination")
+    return false unless type_info.single_future? || source_type.single_future?
+
+    effect = MIR::OwnershipEffect.of(mir)
+    (effect.produces_owned && MIR::Placement.heap?(effect.alloc)) == true
+  end
+
+  sig { params(mir: MIR::Node, ti: Type).returns(MIR::Node) }
+  def place_indirect_value_for_heap_destination(mir, ti)
+    # The box takes ownership of what it boxes, but an un-materialised operand
+    # has no name to record the transfer against -- the enclosing hoist gives
+    # it one only afterwards, leaving that temp with an ErrCleanup and no
+    # TransferMark. Name it here, the way the owned-copy placement does, so
+    # the box's operand provenance exists at the moment the box is built.
+    return place_indirect_named_value(mir, ti) if mir_produces_owned_result?(mir) && !mir.is_a?(MIR::Ident)
+
+    with_ownership_consumption(
+      MIR::HeapCreate.new(transpile_type(ti.resolved.to_s), mir, :heap, "blk"),
+      mir_ident_names(mir),
+      "MIR::HeapCreate",
+      target_alloc: :heap,
+    )
+  end
+
+  sig { params(mir: MIR::Node, ti: Type).returns(MIR::BlockExpr) }
+  def place_indirect_named_value(mir, ti)
+    tmp_id = lowering_counters.next_tmp_id
+    label = "__boxed_indirect_#{tmp_id}"
+    inner_name = "__boxed_indirect_val_#{tmp_id}"
+    inner_alloc = mir_owned_alloc(mir) || MIR::OwnershipEffect.alloc_of(mir) || :heap
+    # The value going into the cell is the payload; only the cell itself is
+    # indirect. Typing both the same makes the block yield a pointer where the
+    # destination wants a value.
+    payload_ti = ti.dup
+    payload_ti.strip_layout!
+    inner_cleanup = CleanupEntry.build(:uniform, alloc: inner_alloc, has_moved_guard: true,
+                                       zig_type: payload_ti.zig_type)
+    build_drop_entry!(inner_cleanup, payload_ti, nil)
+    inner = MIR::BindingMaterialization.new(
+      name: inner_name,
+      expr: mir,
+      alloc: inner_alloc,
+      type_info: payload_ti,
+      mutable: false,
+      cleanup_entry: inner_cleanup,
+      cleanup_mode: :err,
+    )
+    boxed = with_ownership_consumption(
+      MIR::HeapCreate.new(transpile_type(payload_ti.resolved.to_s), MIR::Ident.new(inner_name), :heap, "blk"),
+      [inner_name],
+      "MIR::HeapCreate",
+      target_alloc: :heap,
+      require_visible: false,
+    )
+    box_name = "__boxed_indirect_cell_#{tmp_id}"
+    box_cleanup = CleanupEntry.build(:uniform, alloc: :heap, has_moved_guard: true,
+                                     zig_type: ti.zig_type)
+    build_drop_entry!(box_cleanup, ti, nil)
+    box = MIR::BindingMaterialization.new(
+      name: box_name,
+      expr: boxed,
+      alloc: :heap,
+      type_info: ti,
+      mutable: false,
+      cleanup_entry: box_cleanup,
+      cleanup_mode: :err,
+    )
+    body = T.let(inner.statements + box.statements, T::Array[MIR::Stmt])
+    # The inner value's transfer records that the cell above took it, so it
+    # follows the statement that does the taking rather than preceding it.
+    body.concat(ownership_transfer_marks(inner_name, :owned_sink,
+                                         target_alloc: :heap, move_guarded: true))
+    body.concat(ownership_transfer_marks(box_name, :block_result,
+                                         target_alloc: :heap, move_guarded: true))
+    body << MIR::BreakStmt.new(label, MIR::Ident.new(box_name))
+    out = MIR::BlockExpr.new(label, body)
+    out.lazy_boundary = true
+    out.result_type = Type.new(ti)
+    out
+  end
+
+  sig { params(mir: MIR::Orelse, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
+  def place_owned_orelse_for_destination(mir, ti, dest_alloc)
+    tmp_id = lowering_counters.next_tmp_id
+    capture = "__or_val_#{tmp_id}"
+    left = place_owned_branch_value_for_destination(MIR::Ident.new(capture), ti, dest_alloc)
+    right = place_owned_branch_value_for_destination(mir.fallback, ti, dest_alloc)
+    out = MIR::IfOptional.new(mir.expr, capture, left, right)
+    out.result_type = Type.new(ti)
+    # `IfOptional` keeps its branches lexically scoped, so the generic hoister
+    # deliberately does not lift it out of a call/return/aggregate position.
+    # Materialize this owned merge here instead: both copied branches now have
+    # one allocator and the block transfers its single owned result outward.
+    owned_branch_result_value(out, ti, dest_alloc)
+  end
+
+  sig { params(mir: MIR::TryCatch, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
+  def place_owned_try_catch_for_destination(mir, ti, dest_alloc)
+    right = place_owned_branch_value_for_destination(mir.catch_body, ti, dest_alloc)
+    right = owned_branch_result_value(right, ti, dest_alloc) if mir_allocates?(right)
+    source_alloc = mir_owned_alloc(mir.expr) || mir_owned_alloc(mir)
+    if source_alloc && source_alloc != dest_alloc
+      tmp_id = lowering_counters.next_tmp_id
+      label = "__try_place_#{tmp_id}"
+      success = "__try_val_#{tmp_id}"
+      catch_break = MIR::BreakExpr.new(label, right)
+      success_try = MIR::TryCatch.new(mir.expr, catch_break, mir.capture)
+      success_try.result_type = Type.new(ti)
+      success_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
+      build_drop_entry!(success_cleanup, ti, nil)
+      materialized = MIR::BindingMaterialization.new(
+        name: success,
+        expr: success_try,
+        alloc: source_alloc,
+        type_info: ti,
+        mutable: false,
+        cleanup_entry: success_cleanup
+      )
+      body = materialized.statements
+      body << MIR::BreakStmt.new(label, place_owned_branch_value_for_destination(MIR::Ident.new(success), ti, dest_alloc))
+      out_block = MIR::BlockExpr.new(label, body)
+      out_block.result_type = Type.new(ti)
+      return out_block
+    end
+
+    out = MIR::TryCatch.new(mir.expr, right, mir.capture)
+    out.result_type = Type.new(ti)
+    out
+  end
+
+  sig { params(mir: MIR::Node, ti: Type, dest_alloc: Symbol).returns(MIR::BlockExpr) }
+  def owned_branch_result_value(mir, ti, dest_alloc)
+    tmp_id = lowering_counters.next_tmp_id
+    label = "__owned_branch_#{tmp_id}"
+    name = "__owned_branch_val_#{tmp_id}"
+    materialized = MIR::BindingMaterialization.new(
+      name: name,
+      expr: mir,
+      alloc: dest_alloc,
+      type_info: ti,
+      mutable: false
+    )
+    body = T.let(materialized.statements, T::Array[MIR::Stmt])
+    body.concat(ownership_transfer_marks(name, :block_result, target_alloc: dest_alloc))
+    body << MIR::BreakStmt.new(label, MIR::Ident.new(name))
+    out = MIR::BlockExpr.new(label, body)
+    out.result_type = Type.new(ti)
+    out
+  end
+
+  sig { params(mir: MIR::Node, ti: Type, dest_alloc: Symbol, source_alloc: Symbol).returns(MIR::Node) }
+  def place_owned_alloc_mismatch_for_destination(mir, ti, dest_alloc, source_alloc)
+    # A named owner already has an allocator-correct cleanup at its defining
+    # scope. Copy directly from that binding into the destination allocator;
+    # wrapping the identifier in a second owning binding would make two
+    # cleanups claim the same allocation.
+    if mir.is_a?(MIR::Ident) && owned_binding_visible?(mir.name.to_s)
+      return copy_owned_value_for_destination(mir, ti, dest_alloc)
+    end
+
+    tmp_id = lowering_counters.next_tmp_id
+    label = "__owned_place_#{tmp_id}"
+    name = "__owned_val_#{tmp_id}"
+    cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false)
+    build_drop_entry!(cleanup, ti, nil)
+    materialized = MIR::BindingMaterialization.new(
+      name: name,
+      expr: mir,
+      alloc: source_alloc,
+      type_info: ti,
+      mutable: false,
+      cleanup_entry: cleanup
+    )
+    body = materialized.statements
+    body << MIR::BreakStmt.new(label, place_owned_branch_value_for_destination(MIR::Ident.new(name), ti, dest_alloc))
+    out = MIR::BlockExpr.new(label, body)
+    out.result_type = Type.new(ti)
+    out
+  end
+
+  # Duplicating an Rc/Arc handle is a RETAIN, never a structural copy -- and an
+  # OPTIONAL handle retains inside the `if present` arm. Returns nil when the
+  # destination is not a handle.
+  sig { params(mir: MIR::Node, ti: Type).returns(T.nilable(MIR::Node)) }
+  def retain_handle_for_destination(mir, ti)
+    payload = ti.optional? ? ti.wrapped_type : ti
+    return nil unless payload&.any_rc?
+
+    # A retain bumps the refcount of a handle that already exists. A freshly
+    # constructed value is not a handle yet -- retaining it emits
+    # `rcRetain(T, T{...})`, which is a Zig type error and no CLEAR
+    # diagnostic. The destination alone cannot decide this; the source has to
+    # already be one. Construction goes through the carrier wrap instead.
+    return nil if mir.is_a?(MIR::StructInit)
+
+    fn = payload.shared? ? "arcRetain" : "rcRetain"
+    zig = rc_payload_zig_type(payload)
+    return MIR::RcRetain.new(mir, zig, fn) unless ti.optional?
+
+    capture = "__retain_rc_#{lowering_counters.next_tmp_id}"
+    retained = MIR::IfOptional.new(mir, capture, MIR::RcRetain.new(MIR::Ident.new(capture), zig, fn), MIR::Lit.new("null"))
+    retained.result_type = Type.new(ti)
+    retained
+  end
+
+  sig { params(mir: MIR::Node, ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
+  def copy_owned_value_for_destination(mir, ti, dest_alloc)
+    return MIR::DupeSlice.new(mir, dest_alloc) if ti.string?
+    retained = retain_handle_for_destination(mir, ti)
+    return retained if retained
+
+    MIR::DeepCopy.new(
+      mir,
+      ti.zig_type,
+      nil,
+      :full_value,
+      dest_alloc,
+      MIR::DeepCopy.copy_shape_for_zig_type(ti.zig_type),
+      ti,
+    )
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::BinaryOp).returns(MIR::Node) }
+  def place_string_or_for_heap_destination(mir, ast_node)
+    left_t = Type.from_node!(ast_node.left, context: "string OR destination left")
+    return place_string_value_for_heap_destination(mir, ast_node) if left_t.optional?
+
+    case mir
+    when MIR::TryCatch
+      return place_string_value_for_heap_destination(mir, ast_node) unless heap_owned_result?(mir.expr, ast_node.left)
+
+      left = place_or_branch_value_for_destination(mir.expr, ast_node.left)
+      right = place_or_branch_value_for_destination(mir.catch_body, ast_node.right)
+      out = MIR::TryCatch.new(left, right, mir.capture)
+      out.result_type = Type.from_node!(ast_node, context: "string OR destination result")
+      out
+    when MIR::Orelse
+      left = place_or_branch_value_for_destination(mir.expr, ast_node.left)
+      right = place_or_branch_value_for_destination(mir.fallback, ast_node.right)
+      out = MIR::Orelse.new(left, right)
+      out.result_type = Type.from_node!(ast_node, context: "string OR destination result")
+      out
+    else
+      place_string_value_for_heap_destination(mir, ast_node)
+    end
+  end
+
+  # Widen a `String@symbol` to the bytes behind it. A Symbol is an interned
+  # handle with its own Zig type, so copying one into an owned String has to
+  # read `.bytes` first -- this is the borrow that widening always was, made
+  # explicit now that the two types are distinct.
+  sig { params(mir: MIR::Node, source_node: T.nilable(AST::Node)).returns(MIR::Node) }
+  def widen_symbol_to_bytes(mir, source_node)
+    return mir unless source_node
+
+    ti = Type.from_node!(source_node, context: "symbol widening")
+    return mir unless ti.symbol?
+
+    MIR::FieldGet.new(mir, "bytes")
+  end
+
+  sig { params(mir: MIR::Node, dst_ti: Type, dest_alloc: Symbol).returns(MIR::Node) }
+  def place_owned_branch_value_for_destination(mir, dst_ti, dest_alloc)
+    # Nested optional merges have not yet received finalized ownership facts
+    # when destination placement runs. Preserve their branch structure now;
+    # treating the merge as a borrowed DeepCopy source leaves an allocating
+    # Orelse anonymously nested under that copy.
+    return place_owned_orelse_for_destination(mir, dst_ti, dest_alloc) if mir.is_a?(MIR::Orelse)
+    return copy_lazy_owned_branch_for_destination(mir, dst_ti, dest_alloc) if mir.is_a?(MIR::BlockExpr)
+
+    owned_alloc = mir_owned_alloc(mir)
+    if owned_alloc == dest_alloc
+      return transfer_owned_branch_binding(mir, dst_ti, dest_alloc) if mir.is_a?(MIR::Ident)
+      return owned_branch_result_value(mir, dst_ti, dest_alloc) if mir_allocates?(mir)
+    end
+    return place_owned_alloc_mismatch_for_destination(mir, dst_ti, dest_alloc, owned_alloc) if owned_alloc
+    return MIR::DupeSlice.new(mir, dest_alloc) if dst_ti.string?
+    retained = retain_handle_for_destination(mir, dst_ti)
+    return retained if retained
+
+    # Lazy branch blocks cannot be hoisted outside their branch, but a
+    # recursive owned result still needs a named source owner when it is
+    # cloned. Keep both materializations inside a new lazy block: the source
+    # receives normal cleanup and the clone is transferred as the result.
+    return copy_lazy_owned_branch_for_destination(mir, dst_ti, dest_alloc) if mir_allocates?(mir)
+
+    MIR::DeepCopy.new(
+      mir,
+      dst_ti.zig_type,
+      nil,
+      :full_value,
+      dest_alloc,
+      MIR::DeepCopy.copy_shape_for_zig_type(dst_ti.zig_type),
+      dst_ti,
+    )
+  end
+
+  # A value block that ends in `binding?` hands out the payload but keeps its
+  # own guarded cleanup. Only a consumer that TAKES the result can know the
+  # transfer is due, so claim it here rather than in the block.
+  # Returns whether the transfer was claimed. A claim MAKES the destination the
+  # owner, whatever the result expression looks like -- `slot?` reads as a view
+  # of the block's binding, but once the block hands its claim over, the value
+  # is the consumer's to drop.
+  sig { params(mir: MIR::Node).returns(T::Boolean) }
+  def claim_block_result_ownership!(mir)
+    return false unless mir.is_a?(MIR::BlockExpr)
+    return true if mir.body.any? { |stmt| stmt.is_a?(MIR::TransferMark) && stmt.target == :block_result }
+
+    break_index = mir.body.rindex { |stmt| stmt.is_a?(MIR::BreakStmt) }
+    return false unless break_index
+
+    owner = mir_ident_names(T.cast(mir.body[break_index], MIR::BreakStmt).value).first
+    return false unless owner
+
+    cleanup = mir.body.find do |stmt|
+      stmt.is_a?(MIR::Cleanup) && stmt.name.to_s == owner && stmt.cleanup_entry&.[](:has_moved_guard)
+    end
+    return false unless cleanup
+
+    mir.body[break_index, 0] = ownership_transfer_marks(owner, :block_result, move_guarded: true)
+    true
+  end
+
+  # Does the materialized source own what it yields, or is it a view of storage
+  # that outlives it? This path is reached for anything that must be named
+  # before it is copied, which `mir_allocates?` answers for the whole subtree --
+  # a lookup keyed by an allocating call "allocates" while still handing back a
+  # view, and cleaning that up frees storage the container still holds.
+  sig { params(mir: MIR::Node).returns(T::Boolean) }
+  def owned_branch_source_owns?(mir)
+    result = mir
+    if mir.is_a?(MIR::BlockExpr)
+      result = T.cast(mir.body.reverse.find { |stmt| stmt.is_a?(MIR::BreakStmt) }, T.nilable(MIR::BreakStmt))&.value
+      return true unless result
+    end
+    # An identifier's ownership is a fact about its BINDING, recorded when the
+    # binding was lowered; this predicate is not the authority on it.
+    return true if result.is_a?(MIR::Ident)
+    return true if MIR::OwnershipEffect.of(result).produces_owned
+
+    result.materializes_value?
+  end
+
+  sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::BlockExpr) }
+  def copy_lazy_owned_branch_for_destination(mir, type_info, dest_alloc)
+    tmp_id = lowering_counters.next_tmp_id
+    label = "__owned_branch_copy_#{tmp_id}"
+    source_name = "__owned_branch_src_#{tmp_id}"
+    copy_name = "__owned_branch_copy_val_#{tmp_id}"
+
+    # This path TAKES the block's result (the source binding below owns it and
+    # frees it). A block that yields `binding?` never released its own claim,
+    # so ask for the transfer here -- the block cannot know whether its
+    # consumer takes or merely borrows.
+    claimed = claim_block_result_ownership!(mir)
+    source_alloc = mir_owned_alloc(mir) || MIR::OwnershipEffect.alloc_of(mir) || dest_alloc
+    # ... but only when the block's result is genuinely owned. A block whose
+    # result is a BORROW -- a container lookup whose key needed a temp, so the
+    # lookup got wrapped in a block -- owns nothing, and cleaning it up frees
+    # storage still held by the container. The copy below is what the
+    # destination keeps either way.
+    source_owned = claimed || owned_branch_source_owns?(mir)
+    source_cleanup = nil
+    if source_owned
+      source_cleanup = CleanupEntry.build(:uniform, alloc: source_alloc, has_moved_guard: false,
+                                          zig_type: type_info.zig_type)
+      build_drop_entry!(source_cleanup, type_info, nil)
+    end
+    source = MIR::BindingMaterialization.new(
+      name: source_name,
+      expr: mir,
+      alloc: source_alloc,
+      type_info: type_info,
+      mutable: false,
+      cleanup_entry: source_cleanup,
+      ownership_tracked: source_owned,
+    )
+
+    copied_expr = retain_handle_for_destination(MIR::Ident.new(source_name), type_info) || MIR::DeepCopy.new(
+      MIR::Ident.new(source_name),
+      type_info.zig_type,
+      nil,
+      :full_value,
+      dest_alloc,
+      MIR::DeepCopy.copy_shape_for_zig_type(type_info.zig_type),
+      type_info,
+    )
+    copy_cleanup = CleanupEntry.build(:uniform, alloc: dest_alloc, has_moved_guard: true,
+                                      zig_type: type_info.zig_type)
+    build_drop_entry!(copy_cleanup, type_info, nil)
+    copied = MIR::BindingMaterialization.new(
+      name: copy_name,
+      expr: copied_expr,
+      alloc: dest_alloc,
+      type_info: type_info,
+      mutable: false,
+      cleanup_entry: copy_cleanup,
+      cleanup_mode: :err,
+    )
+
+    body = T.let(source.statements + copied.statements, T::Array[MIR::Stmt])
+    body.concat(ownership_transfer_marks(copy_name, :block_result,
+                                         target_alloc: dest_alloc, move_guarded: true))
+    body << MIR::BreakStmt.new(label, MIR::Ident.new(copy_name))
+    out = MIR::BlockExpr.new(label, body)
+    out.lazy_boundary = true
+    out.result_type = Type.new(type_info)
+    out
+  end
+
+  # An owned local selected by one branch of OR_ELSE/orelse becomes the
+  # destination's owner only on that branch. Keep the transfer marker inside
+  # the branch so the local is still cleaned when the other branch wins.
+  # Binding lifecycle metadata is authoritative here; physical MIR shape is
+  # not sufficient to decide whether an identifier owns cleanup.
+  sig { params(mir: MIR::Node, type_info: Type, dest_alloc: Symbol).returns(MIR::Node) }
+  def transfer_owned_branch_binding(mir, type_info, dest_alloc)
+    return mir unless mir.is_a?(MIR::Ident)
+
+    name = mir.name.to_s
+    return mir if function_state.current_reassignment_target == name
+
+    entry = function_state.bindings[name] || CleanupEntry::NONE
+    plan = entry.lifecycle_plan
+    return mir unless entry.present? && plan&.needs_drop?
+
+    entry.mark_moved_guard!
+    mark_guarded_cleanup_name!(name)
+    label = "__owned_branch_transfer_#{lowering_counters.next_tmp_id}"
+    body = ownership_transfer_marks(
+      name,
+      :block_result,
+      target_alloc: dest_alloc,
+      move_guarded: true,
+    )
+    body << MIR::BreakStmt.new(label, mir)
+    result = MIR::BlockExpr.new(label, body)
+    result.result_type = Type.new(type_info)
+    result
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
+  def place_or_branch_value_for_destination(mir, ast_node)
+    placed = place_string_value_for_heap_destination(mir, ast_node)
+    return placed unless mir_allocates?(placed)
+
+    scoped_owning_branch_value(placed, ast_node)
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(MIR::Node) }
+  def place_string_value_for_heap_destination(mir, ast_node)
+    return mir if heap_owned_result?(mir, ast_node)
+
+    mir = MIR::TryExpr.new(mir) if Type.from_node!(ast_node, context: "heap destination placement").error_union?
+    dupe_string_payload(mir, :heap)
+  end
+
+  # Widening a string to `?String` is a property of the DESTINATION, not of the
+  # bytes being copied: `dupe` takes a slice, never an optional one. Copy the
+  # payload and put the widening back around the copy.
+  sig { params(mir: MIR::Node, dest_alloc: Symbol).returns(MIR::Node) }
+  def dupe_string_payload(mir, dest_alloc)
+    if mir.is_a?(MIR::Cast) && mir.method == :as && mir.target_type.to_s.start_with?('?')
+      return MIR::Cast.new(MIR::DupeSlice.new(mir.expr, dest_alloc), mir.target_type, mir.method)
+    end
+
+    MIR::DupeSlice.new(mir, dest_alloc)
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node, dest_alloc: Symbol).returns(MIR::Node) }
+  def place_string_value_for_destination(mir, ast_node, dest_alloc)
+    effect = MIR::OwnershipEffect.of(mir)
+    if effect.produces_owned
+      source_alloc = effect.alloc
+      return mir if source_alloc == dest_alloc
+      return place_owned_alloc_mismatch_for_destination(mir, Type.from_node!(ast_node, context: "string destination placement"), dest_alloc, source_alloc) if source_alloc
+    end
+
+    return place_string_value_for_heap_destination(mir, ast_node) if MIR::Placement.heap?(dest_alloc)
+
+    mir = MIR::TryExpr.new(mir) if Type.from_node!(ast_node, context: "string destination placement").error_union?
+    dupe_string_payload(mir, dest_alloc)
+  end
+
+  sig { params(type_info: T.nilable(Type)).returns(T.nilable(Symbol)) }
+  def escaping_value_alloc(type_info)
+    ti = type_info&.success_type
+    return :heap if ti && ownership_bearing_type?(ti)
+    nil
+  end
+
+  sig { params(value: MIR::Node).returns(MIR::Call) }
+  def active_tag_call(value)
+    # Zig auto-derefs field access through a single-item pointer, so a
+    # pointer-captured union reads its payload fine -- but activeTag takes
+    # anytype and sees the pointer type, so this one call needs the deref.
+    tagged = pointer_shaped_ident?(value) ? MIR::Deref.new(value) : value
+    MIR::Call.new("std.meta.activeTag", [tagged], false, false, MIR::CallableContract.no_ownership(1))
+  end
+
+  sig { params(value: MIR::Node).returns(T::Boolean) }
+  def pointer_shaped_ident?(value)
+    value.is_a?(MIR::Ident) && capture_state.current_lambda_pointer_params.include?(value.name.to_s)
+  end
+
+  # Zig's `switch` does not auto-deref, so a pointer-captured union has to be
+  # dereferenced before it can be matched on. Field access through the same
+  # pointer needs nothing.
+  sig { params(value: MIR::Node).returns(MIR::Node) }
+  def deref_if_pointer_shaped(value)
+    pointer_shaped_ident?(value) ? MIR::Deref.new(value) : value
+  end
+
+  sig { params(expr: MIR::Node, ast_node: AST::Node, context: String).returns(Type) }
+  def alloc_mark_type_info(expr, ast_node, context)
+    ti = Type.from_node!(ast_node, context: context)
+    return ti unless expr.is_a?(MIR::DeepCopy) && expr.zig_type.to_s.start_with?("*")
+    return ti if ti.heap_ptr?
+
+    Type.new(ti, layout: :indirect)
+  end
+
+  sig { params(node: AST::ReturnNode).returns(T.nilable(Symbol)) }
+  def return_destination_alloc(node)
+    return nil unless node.value
+
+    value_type = Type.from_node!(node.value, context: "return destination allocation")
+    declared_type = return_value_destination_type(node)
+    if current_function_heap_carry_return?
+      return :heap if declared_type && ownership_bearing_type?(declared_type.success_type || declared_type)
+      return escaping_value_alloc(value_type)
+    end
+
+    borrowed_owned = ownership_bearing_type?(value_type.success_type || value_type) ||
+      (declared_type && ownership_bearing_type?(declared_type.success_type || declared_type))
+    return :heap if borrowed_destination_node?(node.value) && borrowed_owned
+
+    nil
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(MIR::BlockExpr) }
+  def scoped_owning_branch_value(mir, ast_node)
+    block_id = lowering_counters.next_block_expr_id
+    tmp_id = lowering_counters.next_tmp_id
+    label = "__own_branch_#{block_id}"
+    name = "__tmp_#{tmp_id}"
+    type_info = alloc_mark_type_info(mir, ast_node, "branch ownership placement")
+    entry = hoist_cleanup_entry(mir, ast_node)
+    if entry
+      entry.mark_moved_guard!
+    end
+    materialized = MIR::BindingMaterialization.new(
+      name: name,
+      expr: mir,
+      alloc: :heap,
+      type_info: type_info,
+      mutable: false,
+      cleanup_entry: entry,
+      cleanup_mode: entry ? :err : :normal,
+      scope: :heap
+    )
+    body = T.let(materialized.statements, T::Array[MIR::Stmt])
+    if entry
+      body.concat(ownership_transfer_marks(name, :block_result, move_guarded: true))
+    end
+    body << MIR::BreakStmt.new(label, MIR::Ident.new(name))
+    out = MIR::BlockExpr.new(label, body)
+    out.result_type = type_info
+    out
+  end
+
+  sig { params(mir: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
+  def heap_owned_result?(mir, ast_node)
+    effect = MIR::OwnershipEffect.of(mir)
+    return true if effect.produces_owned && MIR::Placement.heap?(effect.alloc)
+
+    node = ast_node
+    node = node.value if node.is_a?(AST::MoveNode)
+    if node.is_a?(AST::Identifier) && AST.moved?(ast_node)
+      return placement_for_node(node) == :heap
+    end
+    !!(node.is_a?(AST::Identifier) && node.symbol&.heap_storage? == true)
+  end
+
+  # Lower an AST node (or old MIR node) into a new MIR node.
+  sig { params(node: LowerableStmt).returns(T.untyped) }
+  def lower(node)
+    mir = case node
+
+    # --- Top-level ---
+    when AST::Program           then lower_program(node)
+    when AST::ImplementationDef, AST::ConformanceDef, AST::ProtocolDef then nil
+
+    # --- Marker nodes from MIRPass ---
+    when MIR::Drop              then lower_drop(node)
+    when MIR::AllocMark
+      function_state.lowered_alloc_names.add(node.name.to_s)
+      node
+    when MIR::SuppressCleanup
+      safe = zig_safe_name(node.name)
+      if pipeline_guarded_cleanup_name?(safe)
+        ownership_transfer_marks(safe, :owned_sink, target_alloc: :heap, move_guarded: true)
+      else
+        []
+      end
+    when MIR::Return
+      rename_map = function_state.rename_map
+      escaped = node.escaped_vars.map do |name|
+        escaped_safe_name = zig_safe_name(name)
+        rename_map[escaped_safe_name] || escaped_safe_name
+      end
+      MIR::ReturnMark.new(escaped)
+    when MIR::ReassignCleanup   then MIR::ReassignMark.new(node.name, node.alloc)
+    when MIR::FieldCleanup      then MIR::FieldCleanupMark.new(node.target_name, node.field, node.alloc)
+
+    # --- Type definitions ---
+    when AST::EnumDef           then lower_enum_def(node)
+    when AST::UnionDef          then lower_union_def(node)
+    when AST::StructDef         then lower_struct_def(node)
+    when AST::ExternFnDecl      then lower_extern_fn(node)
+    when AST::ExternStructDecl  then lower_extern_struct(node)
+
+    # --- Declarations & assignments ---
+    when AST::VarDecl           then lower_var_decl(node)
+    when AST::BindExpr          then lower_bind_expr(node)
+    when AST::Assignment        then lower_assignment(node)
+    when AST::DestructuringAssignment then lower_destructuring_assignment(node)
+
+    # --- Control flow ---
+    when AST::IfStatement       then lower_if(node)
+    when AST::IsA               then lower_is_a(node)
+    when AST::IfBind            then lower_if_bind(node)
+    when AST::WhileLoop         then lower_while(node)
+    when AST::WhileBindLoop     then lower_while_bind(node)
+    when AST::ForEach           then lower_for_each(node)
+    when AST::ForRange          then lower_for_range(node)
+    when AST::MatchStatement    then lower_match(node)
+    when AST::ReturnNode        then lower_return(node)
+    when AST::BreakNode, AST::OrElseBreak then MIR::BreakStmt.new(nil, nil)
+    when AST::ContinueNode      then MIR::ContinueStmt.new(nil)
+    when AST::PassStmt          then MIR::Noop.new("pass")
+    when AST::DeferStmt         then lower_defer_stmt(node)
+
+    # --- Functions & calls ---
+    when AST::FunctionDef       then lower_function_def(node)
+    when AST::FuncCall          then lower_func_call(node)
+    when AST::MethodCall        then lower_method_call(node)
+    when AST::LambdaLit         then lower_lambda(node)
+
+    # --- Collections ---
+    when AST::ListLit           then lower_list_lit(node)
+    when AST::TupleLit          then lower_tuple_lit(node)
+    when AST::DefaultArrayLit   then lower_default_array_lit(node)
+    when AST::HashLit           then lower_hash_lit(node)
+
+    # --- Expressions ---
+    when AST::Literal           then lower_literal(node)
+    when AST::DefaultLit        then MIR::DefaultValue.new(kind: :aggregate_empty)
+    when AST::Identifier        then lower_identifier(node)
+    when AST::BinaryOp          then lower_binary_op(node)
+    when AST::UnaryOp           then lower_unary_op(node)
+    when AST::GetField          then lower_get_field(node)
+    when AST::GetIndex          then lower_get_index(node)
+    when AST::StructLit         then lower_struct_lit(node)
+    when AST::UnionVariantLit   then lower_union_variant_lit(node)
+    when AST::StringConcat      then lower_string_concat(node)
+    when AST::BlockExpr         then lower_block_expr(node)
+    when AST::RangeLit          then lower_range_lit(node)
+    when AST::OptionalUnwrap    then lower_optional_unwrap(node)
+    when AST::Assert            then lower_assert(node)
+    when AST::Raise             then lower_raise(node)
+    when AST::Cast              then lower_cast(node)
+    when AST::ThrowNode         then MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
+    when AST::DieNode           then MIR::ExprStmt.new(MIR::Call.new("std.process.exit", [MIR::Lit.new((node.status || 1).to_s)], false), false)
+
+    # --- Memory / capability expressions ---
+    when AST::CopyNode          then lower_copy(node)
+    when AST::KeepNode         then lower_clone(node)
+    when AST::MoveNode          then lower_move(node)
+    when AST::ShareNode         then lower_share(node)
+    when AST::CapabilityWrap    then lower_cap_wrap(node)
+    when AST::LinkNode          then lower_link(node)
+    when AST::ResolveNode       then lower_resolve(node)
+    when AST::FreezeNode        then lower_freeze(node)
+    when AST::Copy              then lower(node.value) # Zig copies structs by value
+
+    # --- Slice ---
+    when AST::Slice             then lower_slice(node)
+
+    # --- Concurrent / capability blocks ---
+    when AST::BgBlock          then lower_bg_block(node)
+    when AST::BgStreamBlock    then lower_bg_stream_block(node)
+    when AST::WithBlock        then lower_with_block(node)
+    when AST::DoBlock          then lower_do_block(node)
+    when AST::TestBlock        then lower_test_block(node)
+    when AST::RequireNode      then lower_require(node)
+    when AST::YieldExpr        then lower_yield(node)
+    when AST::CloseStream      then lower_close_stream(node)
+    when AST::NextExpr         then lower_next_expr(node)
+    when AST::StaticCall       then lower_static_call(node)
+    when AST::OrElseRaise          then MIR::FieldGet.new(MIR::Ident.new("error"), "OrElseRaise")
+    when AST::OrElsePass, AST::OrElsePrune then MIR::DefaultValue.new(kind: :undefined)
+    when AST::OrElseExit           then lower_or_else_exit(node)
+    when AST::ThenChain        then raise "Internal: ThenChain should be flattened by BgBlock lowering"
+    when AST::AssertRaises     then lower_assert_raises(node)
+    when AST::StubDecl         then lower_stub_decl(node)
+    when AST::BenchmarkStmt    then lower_benchmark(node)
+    when AST::SmashStmt        then lower_smash(node)
+    when AST::ProfileStmt      then lower_profile(node)
+
+    else
+      raise "MIRLowering: unhandled node type #{node.class} at #{node.respond_to?(:token) && node.token ? "line #{node.token.line}" : 'unknown'}"
+    end
+    return mir unless node.is_a?(AST::Locatable)
+
+    apply_lowered_coercion(mir, node)
+  end
+
+  sig { params(mir: T.nilable(LoweredMir), node: AST::Locatable).returns(T.nilable(LoweredMir)) }
+  def apply_lowered_coercion(mir, node)
+    return mir unless mir && node.respond_to?(:coerced_type) && node.coerced_type
+    coerced_type = Type.new(T.unsafe(node.coerced_type_info || node.coerced_type))
+    return mir unless node.typed?
+    actual_type = node.full_type!
+    return mir if coerced_type.semantic_type_key == actual_type.semantic_type_key
+    return mir if stack_fixed_array_coercion?(node)
+    return mir unless mir.is_a?(MIR::Emittable)
+
+    # Optionality is encoded inside NodeRef's zero sentinel; T@node and
+    # ?T@node therefore have the same Zig representation and need no cast.
+    return mir if coerced_type.node_reference? && actual_type.node_reference?
+    return mir if carrier_only_coercion?(actual_type, coerced_type)
+
+    if coerced_type.node_reference? && !actual_type.node_reference?
+      if actual_type.resolved == :NIL
+        return MIR::StructInit.new(coerced_type.zig_type, [])
+      end
+      return node_create_mir(T.unsafe(mir), coerced_type, T.unsafe(node))
+    end
+
+    union_wrapped = lower_union_payload_coercion(mir, node, actual_type, coerced_type)
+    return union_wrapped if union_wrapped
+
+    mir_cast(mir, actual_type, coerced_type) || mir
+  end
+
+  # A coercion that only ADDS an ownership/sync carrier is performed
+  # structurally by the declaration's CapWrap. A Zig cast for it would claim a
+  # plain value already is an Rc/Arc handle.
+  sig { params(actual_type: Type, coerced_type: Type).returns(T::Boolean) }
+  def carrier_only_coercion?(actual_type, coerced_type)
+    coerced_payload = coerced_type.non_optional_type
+    actual_payload = actual_type.non_optional_type
+    return false unless coerced_payload.any_rc? || coerced_payload.any_sync?
+    return false if actual_payload.any_rc? || actual_payload.any_sync?
+
+    coerced_payload.resolved == actual_payload.resolved
+  end
+
+  sig { params(mir: MIR::Emittable, node: AST::Locatable, actual_type: Type, coerced_type: Type).returns(T.nilable(MIR::Emittable)) }
+  def lower_union_payload_coercion(mir, node, actual_type, coerced_type)
+    target_type = coerced_type.value_payload_type
+    schema = union_schemas[target_type.resolved]
+    schema ||= begin
+      looked_up = mir_schema_lookup.call(target_type.resolved)
+      looked_up.is_a?(Schemas::UnionSchema) ? looked_up : nil
+    end
+    return nil unless schema
+
+    compared_actual = actual_type.optional? ? T.must(actual_type.wrapped_type) : actual_type
+    variant_name, payload_type = unique_mir_union_payload_variant(schema, compared_actual)
+    return nil unless variant_name && payload_type
+
+    if actual_type.optional? && coerced_type.optional?
+      capture = "_union_payload_#{lowering_counters.next_tmp_id}"
+      wrapped = MIR::StructInit.new(transpile_type(target_type), [
+        { name: variant_name, value: MIR::Ident.new(capture) }
+      ])
+      result = MIR::IfOptional.new(mir, capture, wrapped, MIR::Lit.new("null"))
+      result.result_type = coerced_type
+      return result
+    end
+
+    union_payload_coercion_value(mir, node, target_type, variant_name, payload_type)
+  end
+
+  # `CAST(union AS PayloadType)` is the NARROWING direction of the coercion
+  # above: it names a variant by its payload type. Emitted as a plain `@as`
+  # it handed Zig a union where the payload was expected -- a cast the
+  # annotator accepts and the backend cannot honour.
+  sig { params(mir: MIR::Node, node: AST::Cast).returns(T.nilable(MIR::Node)) }
+  def lower_union_payload_narrowing(mir, node)
+    return nil unless mir.is_a?(MIR::Emittable)
+
+    source_type = Type.from_node!(node.value, context: "union payload narrowing source").value_payload_type
+    schema = union_schemas[source_type.resolved]
+    return nil unless schema.is_a?(Schemas::UnionSchema)
+
+    target_type = Type.new(node.target)
+    return nil if target_type.resolved == source_type.resolved
+
+    variant_name, _payload_type = unique_mir_union_payload_variant(schema, target_type)
+    return nil unless variant_name
+
+    MIR::UnionPayloadGet.new(deref_if_pointer_shaped(mir), variant_name)
+  end
+
+  sig { params(schema: Schemas::UnionSchema, actual_type: Type).returns([T.nilable(String), T.nilable(Type)]) }
+  def unique_mir_union_payload_variant(schema, actual_type)
+    matches = schema.variants.filter_map do |variant_name, payload|
+      next unless payload.is_a?(Type)
+      next unless mir_union_payload_matches?(payload, actual_type)
+
+      [variant_name.to_s, payload]
+    end
+    matches.one? ? T.cast(matches.first, [String, Type]) : [nil, nil]
+  end
+
+  sig { params(payload_type: Type, actual_type: Type).returns(T::Boolean) }
+  def mir_union_payload_matches?(payload_type, actual_type)
+    payload_surface = Type.coercion_surface_name(payload_type)
+    actual_surface = Type.coercion_surface_name(actual_type)
+    return true if payload_surface == actual_surface
+    return false if payload_type.string? || actual_type.string?
+
+    payload_type.accepts?(actual_type)
+  end
+
+  sig { params(mir: MIR::Emittable, node: AST::Locatable, union_type: Type, variant_name: String, payload_type: Type).returns(MIR::Emittable) }
+  def union_payload_coercion_value(mir, node, union_type, variant_name, payload_type)
+    ast_node = T.unsafe(node)
+    target_alloc = function_state.current_decl_alloc || alloc_for_node(ast_node)
+    payload = materialize_owned_sink_value(mir, ast_node, target_alloc, payload_type)
+    payload = hoist_alloc(payload, ast_node, err_cleanup: true) if mir_allocates?(payload)
+
+    T.cast(with_ownership_consumption(
+      MIR::StructInit.new(transpile_type(union_type), [
+        { name: variant_name, value: payload }
+      ]),
+      mir_ident_names(payload),
+      "MIR::StructInit",
+      target_alloc: target_alloc,
+    ), MIR::StructInit)
+  end
+
+  sig { params(node: AST::Locatable).returns(T::Boolean) }
+  def stack_fixed_array_coercion?(node)
+    return false unless node.is_a?(AST::ListLit) && node.storage == :stack
+    coerced_type = node.respond_to?(:coerced_type_info) ? node.coerced_type_info : node.full_type!
+    coerced_type&.fixed? == true
+  end
+
+  # Lower a body (array of statements) into an array of MIR nodes.
+  # Flushes function_state.pending_stmts before each statement so hoisted Lets (from
+  # hoist_alloc calls inside lower()) precede the statement that uses them.
+  sig { params(stmts: T::Array[LowerableStmt]).returns(T::Array[MIR::Emittable]) }
+  def lower_body(stmts)
+    finalize_lowered_body_construction!(construct_lowered_body(stmts))
+  end
+
+  sig { params(stmts: T::Array[LowerableStmt]).returns(LoweredBodyConstruction) }
+  def construct_lowered_body(stmts)
+    state = initial_ownership_finalization_context
+    packets = T.let([], T::Array[LoweredStmtPacket])
+    stmts.each do |stmt|
+      packet = lowered_stmt_packet(state, stmt)
+      packets << packet if packet
+    end
+    LoweredBodyConstruction.new(packets: packets, finalization_context: state)
+  end
+
+  sig { returns(OwnershipFinalizationContext) }
+  def initial_ownership_finalization_context
+    state = OwnershipFinalizationContext.new(
+      inherited_alloc_names: function_state.lowered_alloc_names.dup,
+      parent: nil,
+      out: [],
+      guarded_cleanup_names: function_state.lowered_guarded_cleanup_names.dup,
+      alloc_marks: {},
+      body_alloc_mark_names: Set.new,
+      transfer_mark_names: Set.new,
+      body_transfer_mark_names: Set.new,
+      move_mark_names: Set.new,
+      cleanup_by_name: {},
+    )
+    state
+  end
+
+  sig { params(construction: LoweredBodyConstruction).returns(T::Array[MIR::Node]) }
+  def finalize_lowered_body_construction!(construction)
+    state = construction.finalization_context
+    seed_cleanup_owner_index!(
+      state,
+      construction.packets.flat_map { |packet| packet.pending.compact + Array(packet.mir).compact },
+    )
+    construction.packets.each do |packet|
+      append_pending_packet_nodes!(state, packet)
+      append_lowered_statement_packet!(state, packet)
+    end
+    mark_ownership_finalized_body!(state.out)
+    state.out
+  end
+
+  sig { params(body: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
+  def mark_ownership_finalized_body!(body)
+    ownership_state.finalized_body_ids << lowered_body_id(body)
+    body
+  end
+
+  sig { params(body: T::Array[MIR::Node]).returns(T::Boolean) }
+  def ownership_finalized_body?(body)
+    ownership_state.finalized_body_ids.include?(lowered_body_id(body))
+  end
+
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def ownership_finalized_node?(node)
+    return false unless node.is_a?(MIR::Emittable)
+
+    node_id = node.lowered_node_id
+    !!(node_id && ownership_state.finalized_node_ids.include?(node_id))
+  end
+
+  sig { params(node: MIR::Node).void }
+  def mark_ownership_finalized_node!(node)
+    ownership_state.finalized_node_ids << ensure_lowered_node_id(node) if node.is_a?(MIR::Emittable)
+    nil
+  end
+
+  sig { params(node: MIR::Emittable).returns(MIR::LoweredNodeId) }
+  def ensure_lowered_node_id(node)
+    existing = node.lowered_node_id
+    return existing if existing
+
+    next_id = ownership_state.next_lowered_node_id
+    ownership_state.next_lowered_node_id = next_id + 1
+    assigned = MIR::LoweredNodeId.new(value: next_id)
+    node.lowered_node_id = assigned
+    assigned
+  end
+
+  sig { params(body: T::Array[MIR::Node]).returns(MIR::LoweredBodyId) }
+  def lowered_body_id(body)
+    node_ids = T.let([], T::Array[MIR::LoweredNodeId])
+    body.each do |node|
+      node_ids << ensure_lowered_node_id(node) if node.is_a?(MIR::Emittable)
+    end
+    MIR::LoweredBodyId.new(node_ids: node_ids)
+  end
+
+  sig { params(nodes: T::Array[MIR::Node]).void }
+  def mark_ownership_finalized_nodes!(nodes)
+    nodes.each { |node| mark_ownership_finalized_node!(node) }
+    nil
+  end
+
+  sig { params(state: OwnershipFinalizationContext, packet: LoweredStmtPacket).void }
+  def append_pending_packet_nodes!(state, packet)
+    packet.pending.compact.each do |node|
+      append_ownership_finalized_node!(state, node, [node], nil, nil)
+    end
+    nil
+  end
+
+  sig { params(state: OwnershipFinalizationContext, body: T::Array[MIR::Node]).void }
+  def seed_cleanup_owner_index!(state, body)
+    body.each do |node|
+      case node
+      when Array
+        seed_cleanup_owner_index!(state, node)
+      when Hash
+        nested_body = node[:body]
+        seed_cleanup_owner_index!(state, nested_body) if nested_body.is_a?(Array)
+      when MIR::Cleanup, MIR::ErrCleanup
+        name = node.name.to_s
+        state.cleanup_by_name[name] ||= node
+        state.guarded_cleanup_names << name if cleanup_entry_moved_guard?(node.cleanup_entry)
+      when MIR::Emittable
+        node.child_exprs.each do |child|
+          seed_cleanup_owner_index!(state, [child]) if child.is_a?(MIR::Emittable)
+        end
+        node.body_slots.each do |slot|
+          seed_cleanup_owner_index!(state, slot.body)
+        end
+      end
+    end
+    nil
+  end
+
+  sig { params(entry: CleanupEntry).returns(T::Boolean) }
+  def cleanup_entry_moved_guard?(entry)
+    entry.has_moved_guard?
+  end
+
+  sig { params(state: OwnershipFinalizationContext, packet: LoweredStmtPacket).void }
+  def append_lowered_statement_packet!(state, packet)
+    packet_mir = packet.mir
+    packet_nodes = packet_mir.is_a?(Array) ? packet_mir.compact : [packet_mir]
+    mir_nodes = normalize_allocating_mir_body(packet_nodes)
+    merge_body_mark_names!(state, mir_nodes)
+    line = packet.source_line
+    col = packet.source_column
+    state.out << MIR::Comment.new("CLR:#{line}") if line
+    append_transfer_marks_to_body!(state, packet.stmt_transfer_marks, line, col)
+    mir_nodes.each { |node| append_ownership_finalized_node!(state, node, mir_nodes, line, col) }
+    marks = mir_nodes.flat_map { |node| ownership_transfers_for_node(node, state) }
+    append_transfer_marks_to_body!(state, dedupe_transfer_marks(marks), line, col)
+    nil
+  end
+
+  sig { params(state: OwnershipFinalizationContext, node: MIR::Node).void }
+  def append_already_finalized_node!(state, node)
+    state.out << node
+    record_ownership_finalization_node!(state, node) if node.is_a?(MIR::Emittable)
+    # Normalization can replace an aggregate child with a newly hoisted owner
+    # after the aggregate itself received its stable lowering id. Re-scan
+    # transfer contracts on reuse so the refreshed consumption fact is not
+    # mistaken for already-emitted ownership state.
+    append_transfer_marks!(
+      ownership_transfers_for_targets(ownership_transfer_operands_for_node(node, state), state),
+      state,
+    )
+    nil
+  end
+
+  sig do
+    params(
+      state: OwnershipFinalizationContext,
+      node: MIR::Node,
+      body: T::Array[MIR::Node],
+      line: T.nilable(Integer),
+      col: T.nilable(Integer),
+    ).void
+  end
+  def append_ownership_finalized_node!(state, node, body, line, col)
+    if ownership_finalized_node?(node)
+      append_already_finalized_node!(state, node)
+      return
+    end
+
+    finalize_nested_mir_bodies!(node, state)
+    stamp_source_line!(node, line, col)
+    append_transfer_marks_to_body!(state, pre_terminator_transfer_marks(node, state.out, body), line, col)
+    node_index = state.out.length
+    state.out << node
+    append_move_guard_for_transfer_mark!(node, state)
+    surface = scan_ownership_surface!(
+      state,
+      node,
+      collect_facts: true,
+      collect_transfers: true,
+    )
+    state.out.concat(surface.facts)
+    mark_ownership_finalized_node!(node)
+    mark_ownership_finalized_nodes!(surface.facts)
+    transfer_index = state.out.length
+    append_transfer_marks_to_body!(
+      state,
+      ownership_transfers_for_targets(surface.transfer_targets, state),
+      line,
+      col,
+    )
+    # A MoveMark has to PRECEDE the move it guards. When the consuming node is
+    # a terminator -- `RETURN Wrapper{ field: owned }` -- appending after it
+    # both writes the guard too late and emits statements Zig rejects as
+    # unreachable.
+    if terminator_stmt?(node) && state.out.length > transfer_index
+      state.out[node_index, 0] = T.must(state.out.slice!(transfer_index..))
+    end
+    nil
+  end
+
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def terminator_stmt?(node)
+    node.is_a?(MIR::ReturnStmt) || node.is_a?(MIR::BreakStmt) || node.is_a?(MIR::ContinueStmt)
+  end
+
+  sig { params(state: OwnershipFinalizationContext, marks: T::Array[MIR::Stmt], line: T.nilable(Integer), col: T.nilable(Integer)).void }
+  def append_transfer_marks_to_body!(state, marks, line, col)
+    marks.each do |mark|
+      next if mark.is_a?(MIR::MoveMark) && state.move_mark_names.include?(mark.name.to_s)
+      next if mark.is_a?(MIR::TransferMark) && state.transfer_mark_names.include?(mark.name.to_s)
+      if ownership_finalized_node?(mark)
+        append_already_finalized_node!(state, mark)
+        next
+      end
+
+      stamp_source_line!(mark, line, col)
+      state.out << mark
+      facts = T.let([], T::Array[OwnershipFact])
+      if mark.is_a?(MIR::Emittable)
+        facts = ownership_facts_for_structural_node(mark)
+      end
+      state.out.concat(facts)
+      mark_ownership_finalized_node!(mark)
+      mark_ownership_finalized_nodes!(facts)
+      record_ownership_finalization_node!(state, mark)
+      next unless mark.is_a?(MIR::TransferMark)
+
+      before_guard = state.out.length
+      append_move_guard_for_transfer_mark!(mark, state)
+      T.must(state.out[before_guard..]).each { |node| stamp_source_line!(node, line, col) } if state.out.length > before_guard
+    end
+    nil
+  end
+
+  sig { params(nodes: T::Array[MIR::Node], name: String).returns(T::Boolean) }
+  def emitted_guarded_cleanup_for_name?(nodes, name)
+    nodes.any? do |node|
+      next false unless node.is_a?(MIR::Cleanup) || node.is_a?(MIR::ErrCleanup)
+      node.name.to_s == name && node.cleanup_entry.has_moved_guard?
+    end
+  end
+
+  sig { params(marks: T::Array[MIR::Stmt]).returns(T::Array[MIR::Stmt]) }
+  def dedupe_transfer_marks(marks)
+    marks.uniq do |mark|
+      [
+        mark.class,
+        mark.respond_to?(:name) ? T.unsafe(mark).name : nil,
+        mark.respond_to?(:target) ? T.unsafe(mark).target : nil,
+      ]
+    end
+  end
+
+  sig { params(state: OwnershipFinalizationContext, stmt: LowerableStmt).returns(T.nilable(LoweredStmtPacket)) }
+  def lowered_stmt_packet(state, stmt)
+    mir = lower(stmt)
+    return nil unless mir
+
+    mir, hoisted_discard = materialize_statement_discard(stmt, mir)
+    pending = flush_pending
+    mir = MIR::ExprStmt.new(mir, true) if discard_expr_stmt?(stmt, mir) && !hoisted_discard
+    token = stmt.is_a?(AST::Locatable) ? stmt.token : nil
+    transfer_only = stmt.is_a?(AST::MoveNode)
+    stmt_transfer_marks =
+      if transfer_only
+        ownership_marks_for_transferred_temp(T.cast(mir, MIR::Node))
+      else
+        dedupe_transfer_marks(ownership_transfers_for_stmt(stmt, state.guarded_cleanup_names))
+      end
+    statement_nodes = mir.is_a?(Array) ? mir.compact : [mir]
+    guarded_nodes = if transfer_only
+      []
+    else
+      guard_shared_node_statement(stmt, pending.compact + statement_nodes)
+    end
+    LoweredStmtPacket.new(
+      mir: transfer_only ? [] : T.unsafe(guarded_nodes),
+      pending: transfer_only ? pending : [],
+      stmt_transfer_marks: stmt_transfer_marks,
+      source_line: transfer_only ? nil : token&.line,
+      source_column: transfer_only ? nil : token&.column,
+    )
+  end
+
+  sig { params(stmt: LowerableStmt, mir: MIR::NodeRoot).returns([MIR::NodeRoot, T::Boolean]) }
+  def materialize_statement_discard(stmt, mir)
+    return [mir, false] unless stmt.is_a?(AST::Locatable)
+    return [mir, false] unless discard_expr_stmt?(stmt, mir)
+
+    discard_type = Type.from_node!(stmt, context: "discard allocation mark")
+    mir = place_discarded_owned_branch_value(T.cast(mir, MIR::Node), discard_type)
+    normalized_prefix = normalize_allocating_result_expr!(mir)
+    function_state.pending_stmts.concat(normalized_prefix) unless normalized_prefix.empty?
+    return [mir, false] unless mir_allocates?(mir) && !mutating_receiver_allocator_op?(mir)
+
+    entry = hoist_cleanup_entry(mir, stmt)
+    return [mir, false] unless entry
+
+    discard_name = "__discard_#{lowering_counters.next_tmp_id}"
+    alloc = entry.alloc || mir_owned_alloc(mir) || :heap
+    materialized = MIR::BindingMaterialization.new(
+      name: discard_name,
+      expr: mir,
+      alloc: alloc,
+      type_info: discard_type,
+      mutable: true,
+      annotation: Type.new(discard_owned_zig_type(stmt, entry)),
+      suppression: "_ = &#{discard_name};",
+      cleanup_entry: entry
+    )
+    stamp_allocating_result_target!(mir, discard_name, alloc: alloc)
+    [MIR::ScopeBlock.new(materialized.statements), true]
+  end
+
+  sig { params(mir: MIR::Node, type_info: Type).returns(MIR::Node) }
+  def place_discarded_owned_branch_value(mir, type_info)
+    return mir unless mir_allocates?(mir)
+
+    result_type = type_info.success_type || type_info
+    return mir unless ownership_bearing_type?(result_type)
+
+    dest_alloc = mir_owned_alloc(mir) || :heap
+    case mir
+    when MIR::TryCatch
+      place_owned_try_catch_for_destination(mir, result_type, dest_alloc)
+    when MIR::Orelse
+      place_owned_orelse_for_destination(mir, result_type, dest_alloc)
+    else
+      mir
+    end
+  end
+
+  sig { params(stmt: LowerableStmt, mir: T.untyped).returns(T::Boolean) }
+  def discard_expr_stmt?(stmt, mir)
+    return false unless stmt.is_a?(AST::Locatable)
+    return false unless mir.is_a?(MIR::Emittable) && mir.expr?
+
+    ast_stmt = T.let(stmt, AST::Node)
+    # A statement-position `TRY (call)` discards the success payload the
+    # same way the bare call would; Zig otherwise rejects the ignored value.
+    ast_stmt = T.unsafe(ast_stmt).right while ast_stmt.is_a?(AST::UnaryOp) && ast_stmt.op == :TRY
+
+    # Whether Zig ignores a value is a property of the value, not of the
+    # syntax that produced it: a bare `NIL;` is discarded exactly as a call's
+    # result is. Naming only calls and binary operators here left every other
+    # value-shaped statement emitting code Zig rejects. A statement that hands
+    # ownership somewhere is the exception -- its value is not dropped, it is
+    # given away, and wrapping it in `_ =` hides the transfer.
+    return false if stmt.is_a?(AST::MoveNode)
+
+    resolved = stmt.resolved_type
+    !!(resolved && resolved != :Void)
+  end
+
+  sig { params(state: OwnershipFinalizationContext, root: MIR::NodeRoot).void }
+  def record_ownership_finalization_node!(state, root)
+    MIR.each_surface_node(root) do |node|
+      record_ownership_finalization_surface_node!(state, node)
+    end
+    function_state.lowered_guarded_cleanup_names = state.guarded_cleanup_names
+    nil
+  end
+
+  sig { params(state: OwnershipFinalizationContext, node: MIR::Node).void }
+  def record_ownership_finalization_surface_node!(state, node)
+    case node
+    when MIR::AllocMark
+      state.alloc_marks[node.name.to_s] = node
+      state.body_alloc_mark_names << node.name.to_s
+    when MIR::TransferMark
+      state.transfer_mark_names << node.name.to_s
+      state.body_transfer_mark_names << node.name.to_s
+    when MIR::MoveMark
+      state.move_mark_names << node.name.to_s
+    when MIR::Cleanup, MIR::ErrCleanup
+      name = node.name.to_s
+      state.cleanup_by_name[name] = node
+      state.guarded_cleanup_names << name if cleanup_entry_moved_guard?(node.cleanup_entry)
+    end
+    nil
+  end
+
+  sig do
+    params(
+      state: OwnershipFinalizationContext,
+      root: MIR::NodeRoot,
+      collect_facts: T::Boolean,
+      collect_transfers: T::Boolean,
+    ).returns(OwnershipSurfaceScan)
+  end
+  def scan_ownership_surface!(state, root, collect_facts:, collect_transfers:)
+    facts = T.let([], T::Array[OwnershipFact])
+    transfer_targets = T.let([], T::Array[OwnershipTransferTarget])
+    MIR.each_surface_node(root) do |node|
+      record_ownership_finalization_surface_node!(state, node)
+      append_ownership_facts_for_mir_node!(facts, node) if collect_facts
+      append_ownership_transfer_targets_for_surface_node!(transfer_targets, node, state) if collect_transfers
+    end
+    function_state.lowered_guarded_cleanup_names = state.guarded_cleanup_names
+    OwnershipSurfaceScan.new(
+      facts: collect_facts ? dedupe_ownership_facts(facts) : facts,
+      transfer_targets: collect_transfers ? transfer_targets.uniq : transfer_targets,
+    )
+  end
+
+  sig { params(state: OwnershipFinalizationContext, body: MIR::NodeRoot).void }
+  def merge_body_mark_names!(state, body)
+    state.body_alloc_mark_names.merge(body_alloc_mark_names_in_body(body))
+    state.body_transfer_mark_names.merge(body_transfer_mark_names_in_body(body))
+    nil
+  end
+
+  sig { params(body: MIR::NodeRoot).returns(T::Set[String]) }
+  def body_alloc_mark_names_in_body(body)
+    names = T.let(Set.new, T::Set[String])
+    MIR.each_surface_node(body) do |node|
+      names << node.name.to_s if node.is_a?(MIR::AllocMark)
+    end
+    names
+  end
+
+  sig { params(body: MIR::NodeRoot).returns(T::Set[String]) }
+  def body_transfer_mark_names_in_body(body)
+    names = T.let(Set.new, T::Set[String])
+    MIR.each_surface_node(body) do |node|
+      names << node.name.to_s if node.is_a?(MIR::TransferMark)
+    end
+    names
+  end
+
+  sig do
+    params(
+      body: T::Array[MIR::Node],
+      inherited_alloc_names: T::Set[String],
+      inherited_guarded_names: T::Set[String]
+    ).returns(T::Array[MIR::Node])
+  end
+  def append_ownership_transfers_for_mir_body(body, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
+    normalized = normalize_allocating_mir_body(body)
+    state = OwnershipFinalizationContext.new(
+      inherited_alloc_names: inherited_alloc_names,
+      parent: nil,
+      out: [],
+      guarded_cleanup_names: inherited_guarded_names.dup,
+      alloc_marks: {},
+      body_alloc_mark_names: body_alloc_mark_names_in_body(normalized),
+      transfer_mark_names: Set.new,
+      body_transfer_mark_names: body_transfer_mark_names_in_body(normalized),
+      move_mark_names: Set.new,
+      cleanup_by_name: {},
+    )
+    seed_cleanup_owner_index!(state, normalized)
+    normalized.each do |node|
+      finalize_ownership_for_mir_node!(node, normalized, state)
+    end
+    mark_ownership_finalized_body!(state.out)
+  end
+
+  sig do
+    params(
+      body: T::Array[MIR::Node],
+      inherited_alloc_names: T::Set[String],
+      inherited_guarded_names: T::Set[String],
+      parent: OwnershipFinalizationContext,
+    ).returns(T::Array[MIR::Node])
+  end
+  def append_nested_ownership_transfers_for_mir_body(body, inherited_alloc_names, inherited_guarded_names, parent)
+    return body if ownership_finalized_body?(body)
+
+    normalized = normalize_allocating_mir_body(body)
+    state = OwnershipFinalizationContext.new(
+      inherited_alloc_names: inherited_alloc_names,
+      parent: parent,
+      out: [],
+      guarded_cleanup_names: inherited_guarded_names.dup,
+      alloc_marks: {},
+      body_alloc_mark_names: body_alloc_mark_names_in_body(normalized),
+      transfer_mark_names: Set.new,
+      body_transfer_mark_names: body_transfer_mark_names_in_body(normalized),
+      move_mark_names: Set.new,
+      cleanup_by_name: {},
+    )
+    seed_cleanup_owner_index!(state, normalized)
+    normalized.each do |node|
+      finalize_ownership_for_mir_node!(node, normalized, state)
+    end
+    mark_ownership_finalized_body!(state.out)
+  end
+
+  sig { params(node: MIR::Node, body: T::Array[MIR::Node], state: OwnershipFinalizationContext).void }
+  def finalize_ownership_for_mir_node!(node, body, state)
+    if ownership_finalized_node?(node)
+      append_already_finalized_node!(state, node)
+      return
+    end
+
+    finalize_nested_mir_bodies!(node, state, state.inherited_alloc_names, state.guarded_cleanup_names)
+    append_implicit_alloc_fact!(node, state)
+    append_block_result_transfer!(node, body, state)
+    append_transfer_marks!(pre_terminator_transfer_marks(node, state.out, body), state)
+    append_transfer_marks!(ownership_transfers_for_node(node, state), state) if node.is_a?(MIR::BreakStmt)
+    state.out << node
+    append_move_guard_for_transfer_mark!(node, state)
+    surface = T.let(nil, T.nilable(OwnershipSurfaceScan))
+    facts = if node.is_a?(MIR::BreakStmt)
+      ownership_facts_for_mir_surface(node)
+    else
+      surface = scan_ownership_surface!(
+        state,
+        node,
+        collect_facts: true,
+        collect_transfers: true,
+      )
+      surface.facts
+    end
+    state.out.concat(facts)
+    mark_ownership_finalized_node!(node)
+    mark_ownership_finalized_nodes!(facts)
+    record_ownership_finalization_node!(state, node) unless surface
+    unless node.is_a?(MIR::BreakStmt)
+      append_transfer_marks!(
+        ownership_transfers_for_targets(T.must(surface).transfer_targets, state),
+        state,
+      )
+    end
+    nil
+  end
+
+  sig { params(node: MIR::Node, state: OwnershipFinalizationContext).void }
+  def append_move_guard_for_transfer_mark!(node, state)
+    return unless node.is_a?(MIR::TransferMark)
+    return unless node.target == :owned_sink || node.target == :return
+    name = node.name.to_s
+    guarded = state.guarded_cleanup_names.include?(name)
+    unless guarded
+      owner_cleanup = owner_cleanup_for_transfer(state, name)
+      if owner_cleanup
+        owner_cleanup.cleanup_entry.mark_moved_guard!
+        state.guarded_cleanup_names << name
+        state.parent&.guarded_cleanup_names&.add(name)
+        guarded = true
+      elsif (entry = function_state.bindings[name]) && entry.needs_cleanup?
+        entry.mark_moved_guard!
+        state.guarded_cleanup_names << name
+        state.parent&.guarded_cleanup_names&.add(name)
+        guarded = true
+      end
+    end
+    return unless guarded
+    return if state.move_mark_names.include?(node.name.to_s)
+
+    move = T.must(MIR::OwnershipTransferPlan.new(
+      name: node.name.to_s,
+      target: node.target,
+      target_alloc: node.target_alloc,
+      move_guarded: true,
+    ).marks.last)
+
+    state.out << move
+    state.out.concat(ownership_facts_for_structural_node(T.must(state.out.last)))
+    record_ownership_finalization_node!(state, move)
+    nil
+  end
+
+  sig { params(state: OwnershipFinalizationContext, name: String).returns(T.nilable(T.any(MIR::Cleanup, MIR::ErrCleanup))) }
+  def owner_cleanup_for_transfer(state, name)
+    current = T.let(state, T.nilable(OwnershipFinalizationContext))
+    while current
+      found = current.cleanup_by_name[name]
+      return found if found
+
+      current = current.parent
+    end
+    nil
+  end
+
+  sig { params(node: MIR::Node, state: OwnershipFinalizationContext).void }
+  def append_implicit_alloc_fact!(node, state)
+    alloc_mark = implicit_alloc_mark_for_mir_node(node, state)
+    return unless alloc_mark
+
+    state.out << alloc_mark
+    fact = owned_create_fact_for_alloc_mark(alloc_mark, ownership_fact_source(alloc_mark))
+    state.out << fact
+    mark_ownership_finalized_node!(alloc_mark)
+    mark_ownership_finalized_node!(fact)
+    record_ownership_finalization_node!(state, alloc_mark)
+    nil
+  end
+
+  sig { params(node: MIR::Node, body: T::Array[MIR::Node], state: OwnershipFinalizationContext).void }
+  def append_block_result_transfer!(node, body, state)
+    return unless node.is_a?(MIR::BreakStmt)
+    value = node.value
+    return unless value.is_a?(MIR::Ident)
+
+    name = value.name.to_s
+    return if state.body_transfer_mark_names.include?(name)
+    return unless state.alloc_marks.key?(name) || state.body_alloc_mark_names.include?(name)
+
+    # A binding whose cleanup is `_moved`-guarded must have that flag set when
+    # the block hands its value out, or the value is both transferred out and
+    # cleaned up on the way.
+    guarded = state.guarded_cleanup_names.include?(name)
+    ownership_transfer_marks(name, :block_result, move_guarded: guarded).each do |mark|
+      state.out << mark
+      record_ownership_finalization_node!(state, mark)
+    end
+    nil
+  end
+
+  sig { params(nodes: T::Array[MIR::Node], name: String).returns(T::Boolean) }
+  def alloc_mark_present?(nodes, name)
+    nodes.any? { |node| node.is_a?(MIR::AllocMark) && node.name.to_s == name.to_s }
+  end
+
+  sig { params(marks: T::Array[MIR::Stmt], state: OwnershipFinalizationContext).void }
+  def append_transfer_marks!(marks, state)
+    marks.each do |mark|
+      next if mark.is_a?(MIR::MoveMark) && state.move_mark_names.include?(mark.name.to_s)
+      next if mark.is_a?(MIR::TransferMark) && state.transfer_mark_names.include?(mark.name.to_s)
+      if ownership_finalized_node?(mark)
+        append_already_finalized_node!(state, mark)
+        next
+      end
+
+      state.out << mark
+      facts = ownership_facts_for_structural_node(mark)
+      state.out.concat(facts)
+      mark_ownership_finalized_node!(mark)
+      mark_ownership_finalized_nodes!(facts)
+      record_ownership_finalization_node!(state, mark)
+      append_move_guard_for_transfer_mark!(mark, state)
+    end
+    nil
+  end
+
+  sig { params(node: MIR::Node).returns(T::Array[OwnershipFact]) }
+  def ownership_facts_for_mir_surface(node)
+    facts = T.let([], T::Array[OwnershipFact])
+    MIR.each_surface_node(node) do |surface_node|
+      append_ownership_facts_for_mir_node!(facts, surface_node)
+    end
+    dedupe_ownership_facts(facts)
+  end
+
+  sig { params(facts: T::Array[OwnershipFact]).returns(T::Array[OwnershipFact]) }
+  def dedupe_ownership_facts(facts)
+    seen = T.let(Set.new, T::Set[String])
+    facts.select do |fact|
+      key = ownership_fact_dedupe_key(fact)
+      next true unless key
+      next false if seen.include?(key)
+
+      seen << key
+      true
+    end
+  end
+
+  sig { params(fact: OwnershipFact).returns(T.nilable(String)) }
+  def ownership_fact_dedupe_key(fact)
+    case fact
+    when MIR::OwnedCreate
+      "OwnedCreate:#{fact.name}:#{fact.alloc}:#{fact.source}"
+    when MIR::OwnedDestroy
+      "OwnedDestroy:#{fact.name}:#{fact.alloc}:#{fact.source}"
+    when MIR::OwnedTransfer
+      "OwnedTransfer:#{fact.name}:#{fact.target}:#{fact.source}"
+    when MIR::OwnedBorrow
+      "OwnedBorrow:#{fact.name}:#{fact.source}"
+    when MIR::OwnedStore
+      "OwnedStore:#{fact.name}:#{fact.target}:#{fact.alloc}:#{fact.source}"
+    when MIR::OwnedReturn
+      "OwnedReturn:#{fact.name}:#{fact.source}"
+    else
+      nil
+    end
+  end
+
+  sig { params(facts: T::Array[OwnershipFact], node: MIR::Node).void }
+  def append_ownership_facts_for_mir_node!(facts, node)
+    append_ownership_facts_for_structural_node!(facts, node)
+    append_ownership_store_facts_for_consumption!(facts, node)
+    append_ownership_transfer_facts_for_consumption!(facts, node)
+    ownership_fact_targets_for_node(node).each do |target|
+      append_ownership_facts_for_owned_result!(facts, target.name, target.expr, T.must(target.type_info)) if target.include_owned_result
+      append_ownership_transfer_facts_for_contract!(facts, target.expr) if target.include_transfer_contract
+      facts << MIR::OwnedReturn.new(target.name, ownership_fact_source(target.expr)) if target.expr.is_a?(MIR::BgBlock)
+    end
+    nil
+  end
+
+  sig { params(node: MIR::Node).returns(T::Array[OwnershipFactTarget]) }
+  def ownership_fact_targets_for_node(node)
+    case node
+    when MIR::Let
+      ownership_fact_target_for_expr(node.name.to_s, node.init, node.annotation)
+    when MIR::ExprStmt
+      ownership_fact_target_for_expr(ownership_fact_source(node.expr), node.expr, nil)
+    when MIR::Set
+      [ownership_transfer_only_target(node.value)]
+    when MIR::IfBindStmt
+      if_bind_ownership_fact_targets(node)
+    when MIR::ReturnStmt, MIR::BreakStmt
+      value = node.value
+      value ? ownership_fact_target_for_expr(ownership_fact_source(value), value, nil) : []
+    when MIR::ReassignWithCleanup
+      ownership_fact_target_for_expr(node.name.to_s, node.value, nil)
+    when MIR::BgBlock
+      [OwnershipFactTarget.new(name: ownership_fact_source(node), expr: node, type_info: nil, include_owned_result: false, include_transfer_contract: false)]
+    else
+      ownership_fact_target_for_expr(ownership_fact_source(node), node, nil)
+    end
+  end
+
+  sig { params(name: String, expr: MIR::Node, type_info: T.nilable(Type)).returns(T::Array[OwnershipFactTarget]) }
+  def ownership_fact_target_for_expr(name, expr, type_info)
+    source_expr = ownership_contract_source_node(expr)
+    include_owned_result = ownership_owned_result_fact_relevant?(expr) && !source_expr.is_a?(MIR::BgBlock)
+    include_transfer_contract = ownership_transfer_contract_relevant?(expr)
+    return [] unless include_owned_result || include_transfer_contract
+    owned_result_type = if include_owned_result
+      type_info || mir_alloc_mark_type_info(source_expr, nil, context: "owned MIR result fact")
+    end
+
+    [OwnershipFactTarget.new(
+      name: name,
+      expr: expr,
+      type_info: owned_result_type,
+      include_owned_result: include_owned_result,
+      include_transfer_contract: include_transfer_contract,
+    )]
+  end
+
+  sig { params(expr: MIR::Node).returns(T::Boolean) }
+  def ownership_owned_result_fact_relevant?(expr)
+    source_expr = ownership_contract_source_node(expr)
+    return true if source_expr.is_a?(MIR::BgBlock)
+
+    effect = MIR::OwnershipEffect.of(source_expr)
+    return true if effect.produces_owned
+
+    if source_expr.respond_to?(:mutating_receiver_allocator_op?) &&
+       T.unsafe(source_expr).mutating_receiver_allocator_op?
+      return false
+    end
+
+    sig = source_expr.respond_to?(:stdlib_def) ? FunctionSignature.unwrap(T.unsafe(source_expr).stdlib_def) : nil
+    sig&.emits_allocating? == true
+  end
+
+  sig { params(expr: MIR::Node).returns(T::Boolean) }
+  def ownership_transfer_contract_relevant?(expr)
+    source_expr = ownership_contract_source_node(expr)
+    return false unless source_expr.is_a?(MIR::Emittable)
+
+    contract = source_expr.explicit_ownership_contract
+    contract.is_a?(MIR::OwnershipContract) && !contract.owned_operand_names.empty?
+  end
+
+  sig { params(expr: MIR::Node).returns(OwnershipFactTarget) }
+  def ownership_transfer_only_target(expr)
+    OwnershipFactTarget.new(name: ownership_fact_source(expr), expr: expr, type_info: nil, include_owned_result: false, include_transfer_contract: true)
+  end
+
+  sig { params(node: MIR::IfBindStmt).returns(T::Array[OwnershipFactTarget]) }
+  def if_bind_ownership_fact_targets(node)
+    targets = (node.bindings || []).flat_map do |binding|
+      next nil unless binding.is_a?(Hash)
+
+      capture = binding[:capture]
+      expr = binding[:expr]
+      next nil unless capture && expr
+
+      ownership_fact_target_for_expr(capture.to_s, T.cast(expr, MIR::Node), nil)
+    end
+    targets.compact
+  end
+
+  sig { params(facts: T::Array[OwnershipFact], node: MIR::Node).void }
+  def append_ownership_store_facts_for_consumption!(facts, node)
+    fact = node.ownership_consumption
+    return unless fact
+
+    source = ownership_fact_source(node)
+    fact.names.each { |name| facts << MIR::OwnedStore.new(name.to_s, fact.source, fact.target_alloc, source) }
+    nil
+  end
+
+  sig { params(facts: T::Array[OwnershipFact], node: MIR::Node).void }
+  def append_ownership_transfer_facts_for_consumption!(facts, node)
+    fact = node.ownership_consumption
+    return unless fact
+
+    source = ownership_fact_source(node)
+    fact.names.each { |name| facts << MIR::OwnedTransfer.new(name.to_s, fact.target, source) }
+    nil
+  end
+
+  sig { params(node: MIR::Node).returns(T::Array[OwnershipFact]) }
+  def ownership_facts_for_structural_node(node)
+    facts = T.let([], T::Array[OwnershipFact])
+    append_ownership_facts_for_structural_node!(facts, node)
+    facts
+  end
+
+  sig { params(facts: T::Array[OwnershipFact], node: MIR::Node).void }
+  def append_ownership_facts_for_structural_node!(facts, node)
+    case node
+    when MIR::AllocMark
+      facts << owned_create_fact_for_alloc_mark(node, ownership_fact_source(node))
+    when MIR::Cleanup, MIR::ErrCleanup
+      facts << MIR::OwnedDestroy.new(node.name.to_s, node.cleanup_entry.alloc, ownership_fact_source(node))
+    when MIR::TransferMark
+      facts << MIR::OwnedTransfer.new(node.name.to_s, node.target, ownership_fact_source(node))
+    end
+    nil
+  end
+
+  sig { params(mark: MIR::AllocMark, source: String).returns(MIR::OwnedCreate) }
+  def owned_create_fact_for_alloc_mark(mark, source)
+    MIR::OwnedCreate.new(mark.name.to_s, mark.alloc, mark.type_info, source)
+  end
+
+  sig { params(facts: T::Array[OwnershipFact], target_name: String, expr: MIR::Node, type_info: Type).void }
+  def append_ownership_facts_for_owned_result!(facts, target_name, expr, type_info)
+    source_expr = ownership_contract_source_node(expr)
+    if source_expr.is_a?(MIR::BgBlock)
+      facts << MIR::OwnedReturn.new(target_name, ownership_fact_source(source_expr))
+      return
+    end
+
+    effect = MIR::OwnershipEffect.of(source_expr)
+    unless effect.produces_owned
+      sig = source_expr.respond_to?(:stdlib_def) ? FunctionSignature.unwrap(T.unsafe(source_expr).stdlib_def) : nil
+      return unless sig&.emits_allocating?
+
+      facts << MIR::OwnedCreate.new(target_name, mir_owned_alloc(source_expr) || :heap, type_info, ownership_fact_source(source_expr))
+      return
+    end
+
+    facts << MIR::OwnedCreate.new(target_name, effect.alloc || mir_owned_alloc(source_expr) || :heap, type_info, ownership_fact_source(source_expr))
+    nil
+  end
+
+  sig { params(facts: T::Array[OwnershipFact], expr: MIR::Node).void }
+  def append_ownership_transfer_facts_for_contract!(facts, expr)
+    names = ownership_contract_consumes_unwrapped(expr)
+    return if names.empty?
+
+    source = ownership_fact_source(expr)
+    names.each { |name| facts << MIR::OwnedTransfer.new(name.to_s, :owned_sink, source) }
+    nil
+  end
+
+  sig { params(node: MIR::Node).returns(T::Array[String]) }
+  def ownership_contract_consumes_unwrapped(node)
+    unwrapped = ownership_contract_source_node(node)
+    return [] unless unwrapped.is_a?(MIR::Emittable)
+
+    ownership_contract_consumes(unwrapped)
+  end
+
+  sig { params(node: MIR::Node).returns(String) }
+  def ownership_fact_source(node)
+    source_node = ownership_contract_source_node(node)
+    return source_node.class.name.to_s if source_node.is_a?(MIR::ReassignWithCleanup) || source_node.is_a?(MIR::ShardedMapPut)
+    return T.unsafe(source_node).target_var.to_s if source_node.respond_to?(:target_var) && T.unsafe(source_node).target_var
+    return source_node.callee.to_s if source_node.is_a?(MIR::Call) || source_node.is_a?(MIR::TailCall)
+    return source_node.method.to_s if source_node.is_a?(MIR::MethodCall)
+    return "MIR::BgBlock" if source_node.is_a?(MIR::BgBlock)
+    return "MIR::StreamSpawn" if source_node.is_a?(MIR::StreamSpawn)
+    return T.unsafe(source_node).reason.to_s if source_node.respond_to?(:reason) && T.unsafe(source_node).reason
+    return T.unsafe(source_node).name.to_s if source_node.respond_to?(:name)
+
+    source_node.class.name || source_node.class.to_s
+  end
+
+  sig { params(node: MIR::Node).returns(MIR::Node) }
+  def ownership_contract_source_node(node)
+    current = T.let(node, MIR::Node)
+    while MIR.expr_wrapper?(current)
+      current = T.cast(T.unsafe(current).expr, MIR::Node)
+    end
+    current
+  end
+
+  sig { params(nodes: T::Array[MIR::Node], name: String).returns(T::Boolean) }
+  def transfer_mark_present?(nodes, name)
+    nodes.any? { |node| node.is_a?(MIR::TransferMark) && node.name.to_s == name.to_s }
+  end
+
+  sig { params(node: MIR::Node, emitted: T::Array[MIR::Node], remaining: T::Array[MIR::Node]).returns(T::Array[MIR::Stmt]) }
+  def pre_terminator_transfer_marks(node, emitted, remaining)
+    return [] unless node.is_a?(MIR::ReturnStmt)
+    value = node.value
+    return [] unless value.is_a?(MIR::Ident)
+
+    name = value.name.to_s
+    return [] if transfer_mark_present?(emitted, name) || transfer_mark_present?(remaining, name)
+
+    # Ordinary AST returns acquire their transfer plan in lower_return. Some
+    # compiler-synthesized function boundaries (for example CONCURRENT SELECT
+    # callbacks) are built directly in MIR. If normalization hoists their
+    # returned owned expression, the explicit ErrCleanup is the authoritative
+    # fact that success hands the value to the caller. Complete that existing
+    # lifecycle plan here instead of re-deriving ownership from the value type.
+    cleanup = emitted.reverse.find do |stmt|
+      stmt.is_a?(MIR::ErrCleanup) && stmt.name.to_s == name
+    end
+    return [] unless cleanup
+    return [] unless emitted.any? { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name }
+
+    T.cast(cleanup, MIR::ErrCleanup).cleanup_entry.mark_moved_guard!
+    MIR::OwnershipTransferPlan.new(
+      name: name,
+      target: :return,
+      target_alloc: nil,
+      move_guarded: true,
+    ).marks
+  end
+
+  sig do
+    params(
+      node: MIR::Node,
+      parent_state: OwnershipFinalizationContext,
+      inherited_alloc_names: T::Set[String],
+      inherited_guarded_names: T::Set[String],
+    ).void
+  end
+  def finalize_nested_mir_bodies!(node, parent_state, inherited_alloc_names = Set.new, inherited_guarded_names = Set.new)
+    node.child_exprs.each do |child|
+      finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names, parent_state)
+    end
+    node.body_slots.each do |slot|
+      slot.replace(append_nested_ownership_transfers_for_mir_body(
+        slot.body,
+        inherited_alloc_names,
+        inherited_guarded_names,
+        parent_state,
+      ))
+    end
+    nil
+  end
+
+  sig do
+    params(
+      expr: T.nilable(MIR::Node),
+      inherited_alloc_names: T::Set[String],
+      inherited_guarded_names: T::Set[String],
+      parent_state: OwnershipFinalizationContext,
+    ).void
+  end
+  def finalize_nested_mir_expr_bodies!(expr, inherited_alloc_names, inherited_guarded_names, parent_state)
+    return unless expr
+    return unless expr.expr?
+    expr.body_slots.each do |slot|
+      slot.replace(append_nested_ownership_transfers_for_mir_body(
+        slot.body,
+        inherited_alloc_names,
+        inherited_guarded_names,
+        parent_state,
+      ))
+    end
+    each_mir_expr_child(expr) do |child|
+      finalize_nested_mir_expr_bodies!(child, inherited_alloc_names, inherited_guarded_names, parent_state)
+    end
+    nil
+  end
+
+  sig { params(node: MIR::Node, state: OwnershipFinalizationContext).returns(T.nilable(MIR::AllocMark)) }
+  def implicit_alloc_mark_for_mir_node(node, state)
+    fact = implicit_allocating_result_fact(node, state)
+    fact&.alloc_mark
+  end
+
+  sig { params(node: MIR::Node, state: OwnershipFinalizationContext).returns(T.nilable(AllocatingResultFact)) }
+  def implicit_allocating_result_fact(node, state)
+    return nil unless node.is_a?(MIR::Let)
+    return nil if node.self_managed_alloc
+
+    init = node.init
+    return nil unless mir_allocates?(init)
+    return nil if mutating_receiver_allocator_op?(init)
+
+    name = node.name.to_s
+    existing_mark = state.alloc_marks[name]
+    if existing_mark
+      stamp_allocating_result_target!(init, name, alloc: existing_mark.alloc)
+      return nil
+    end
+
+    effect = MIR::OwnershipEffect.of(init)
+    alloc = effect.alloc || mir_owned_alloc(init) || :heap
+    stamp_allocating_result_target!(init, name, alloc: alloc)
+    type_info = node.annotation || mir_alloc_mark_type_info(init, nil, context: "implicit MIR allocation fact")
+    AllocatingResultFact.new(
+      name: name,
+      ownership_effect: effect.produces_owned ? effect.with_target(name) : MIR::OwnershipEffect.owned(alloc: alloc, target_var: name),
+      type_info: type_info,
+      scope: MIR::Placement.alloc_scope(alloc),
+    )
+  end
+
+  sig { params(stmt: LowerableStmt, guarded_cleanup_names: T::Set[String]).returns(T::Array[MIR::Stmt]) }
+  def ownership_transfers_for_stmt(stmt, guarded_cleanup_names)
+    return [] unless stmt.is_a?(AST::Locatable)
+    return [] if stmt.is_a?(AST::ReturnNode)
+    return [] if AST.ownership_transfer_stmt?(stmt)
+    marks = T.let([], T::Array[MIR::Stmt])
+    collect_bg_capture_transfer_roots(stmt).uniq.each do |name|
+      safe = zig_safe_name(name)
+      rename_map = function_state.rename_map
+      safe = rename_map[safe] if rename_map.key?(safe)
+      entry = function_state.bindings[name] || CleanupEntry::NONE
+      next unless entry.present?
+      marks.concat(ownership_transfer_plan(safe.to_s, :owned_sink, guarded_cleanup_names,
+        target_alloc: entry.alloc).marks)
+    end
+    marks
+  end
+
+  sig do
+    params(
+      node: MIR::Node,
+      state: OwnershipFinalizationContext,
+    ).returns(T::Array[MIR::Stmt])
+  end
+  def ownership_transfers_for_node(node, state)
+    return [] if node.is_a?(MIR::ReturnStmt)
+
+    ownership_transfers_for_targets(ownership_transfer_operands_for_node(node, state), state)
+  end
+
+  sig { params(operand_targets: T::Array[OwnershipTransferTarget], state: OwnershipFinalizationContext).returns(T::Array[MIR::Stmt]) }
+  def ownership_transfers_for_targets(operand_targets, state)
+    marks = T.let([], T::Array[MIR::Stmt])
+    generated_mark_names = T.let(Set.new, T::Set[String])
+    operand_targets.each do |operand_target|
+      name = operand_target.name
+      next if name.empty?
+      next if state.body_transfer_mark_names.include?(name) || generated_mark_names.include?(name)
+
+      marks.concat(ownership_transfer_plan(name, operand_target.target, state.guarded_cleanup_names,
+        target_alloc: operand_target.target_alloc).marks)
+      generated_mark_names << name
+    end
+    marks
+  end
+
+  sig { params(node: MIR::Node, state: OwnershipFinalizationContext).returns(T::Array[OwnershipTransferTarget]) }
+  def ownership_transfer_operands_for_node(node, state)
+    operands = T.let([], T::Array[OwnershipTransferTarget])
+    MIR.each_surface_node(node) do |surface_node|
+      append_ownership_transfer_targets_for_surface_node!(operands, surface_node, state)
+    end
+    operands.uniq { |operand| [operand.name, operand.target, operand.target_alloc] }
+  end
+
+  sig { params(operands: T::Array[OwnershipTransferTarget], surface_node: MIR::Node, state: OwnershipFinalizationContext).void }
+  def append_ownership_transfer_targets_for_surface_node!(operands, surface_node, state)
+    fact = ownership_consumption_for_node(surface_node)
+    if fact.is_a?(MIR::OwnershipConsumptionFact)
+      fact.operands.each do |operand|
+        next if operand.borrowed || operand.name.nil?
+        operands << OwnershipTransferTarget.new(
+          name: T.must(operand.name),
+          target: fact.target,
+          target_alloc: operand.target_alloc || fact.target_alloc,
+        )
+      end
+    elsif surface_node.is_a?(MIR::CapWrap)
+      mir_ident_names(surface_node.inner).each do |name|
+        next unless state.body_alloc_mark_names.include?(name.to_s) || owned_binding_visible?(name.to_s)
+        operands << OwnershipTransferTarget.new(
+          name: name.to_s,
+          target: :owned_sink,
+          target_alloc: surface_node.alloc,
+        )
+      end
+    end
+
+    contract = ownership_contract_for_node(surface_node)
+    if contract
+      contract.operands.each do |operand|
+        next if operand.borrowed || operand.name.nil?
+        operands << OwnershipTransferTarget.new(
+          name: T.must(operand.name),
+          target: :owned_sink,
+          target_alloc: operand.target_alloc,
+        )
+      end
+    end
+    nil
+  end
+
+	  sig { params(node: MIR::Node).returns(T.nilable(MIR::OwnershipConsumptionFact)) }
+	  def ownership_consumption_for_node(node)
+	    fact = node.respond_to?(:ownership_consumption) ? node.ownership_consumption : nil
+	    return fact if fact.is_a?(MIR::OwnershipConsumptionFact)
+    return node.init.ownership_consumption if node.is_a?(MIR::Let) &&
+      node.init.respond_to?(:ownership_consumption) &&
+      node.init.ownership_consumption.is_a?(MIR::OwnershipConsumptionFact)
+    return node.expr.ownership_consumption if node.is_a?(MIR::ExprStmt) &&
+      node.expr.respond_to?(:ownership_consumption) &&
+      node.expr.ownership_consumption.is_a?(MIR::OwnershipConsumptionFact)
+
+    nil
+  end
+
+  sig { params(node: T.nilable(MIR::Node)).returns(T.nilable(MIR::OwnershipContract)) }
+  def ownership_contract_for_node(node)
+    node.is_a?(MIR::Emittable) ? node.explicit_ownership_contract : nil
+  end
+
+  sig do
+    params(
+      name: String,
+      target: Symbol,
+      guarded_cleanup_names: T::Set[String],
+      target_alloc: T.nilable(Symbol),
+    ).returns(MIR::OwnershipTransferPlan)
+  end
+  def ownership_transfer_plan(name, target, guarded_cleanup_names, target_alloc: nil)
+    MIR::OwnershipTransferPlan.new(
+      name: name,
+      target: target,
+      target_alloc: target_alloc,
+      move_guarded: guarded_cleanup_names.include?(name),
+    )
+  end
+
+  sig { params(name: String, target: Symbol, target_alloc: T.nilable(Symbol), move_guarded: T::Boolean).returns(T::Array[MIR::Stmt]) }
+  def ownership_transfer_marks(name, target, target_alloc: nil, move_guarded: false)
+    MIR::OwnershipTransferPlan.new(
+      name: name,
+      target: target,
+      target_alloc: target_alloc,
+      move_guarded: move_guarded,
+    ).marks
+  end
+
+  sig { params(node: MIR::Node).returns(T::Array[String]) }
+  def ownership_contract_consumes(node)
+    contract = node.explicit_ownership_contract
+    return [] unless contract
+    contract.owned_operand_names.map(&:to_s)
+  end
+
+  sig do
+    params(
+      node: MIR::Node,
+      names: T::Array[String],
+      source: String,
+      target: Symbol,
+      target_alloc: T.nilable(Symbol),
+      require_visible: T::Boolean,
+    ).returns(MIR::Node)
+  end
+  def with_ownership_consumption(node, names, source, target = :owned_sink, target_alloc: nil, require_visible: true)
+    operands = ownership_consumed_name_operands(names, source, target_alloc, require_visible: require_visible)
+    return node if operands.empty? && !ownership_consumer_requires_fact?(node)
+
+    node.ownership_consumption = MIR::OwnershipConsumptionFact.new(
+      operands: operands,
+      target: target,
+      target_alloc: target_alloc,
+      source: source,
+      covers_consuming_params: true,
+    )
+    node
+  end
+
+  sig { params(node: MIR::Node).returns(T::Boolean) }
+  def ownership_consumer_requires_fact?(node)
+    return true if node.is_a?(MIR::ReassignWithCleanup)
+    return false unless node.respond_to?(:stdlib_def)
+
+    sig = T.unsafe(node).stdlib_def
+    return false unless sig
+    params = sig.respond_to?(:params) ? sig.params : nil
+    return true if params.respond_to?(:any?) && params.any? { |param| param.respond_to?(:takes) && param.takes }
+
+    sig.respond_to?(:takes_ownership?) && sig.takes_ownership?
+  end
+
+  sig { params(names: T::Array[String], source: String, target_alloc: T.nilable(Symbol), require_visible: T::Boolean).returns(T::Array[MIR::OwnershipOperandFact]) }
+  def ownership_consumed_name_operands(names, source, target_alloc, require_visible: true)
+    names.map(&:to_s).reject(&:empty?).uniq.filter_map do |name|
+      entry = function_state.bindings[name] || CleanupEntry::NONE
+      has_alloc_mark = function_state.lowered_alloc_names.include?(name)
+      # `present?` only says the classifier produced a recipe -- and it
+      # produces one saying "needs no cleanup" for a bit-copy binding such as
+      # a symbol. Such a name owns nothing to hand over, so claiming it here
+      # emitted a TransferMark with no AllocMark behind it.
+      next nil if require_visible && !(has_alloc_mark || entry.needs_cleanup?)
+
+      MIR::OwnershipOperandFact.owned_binding(name, Type.new(:Any), source, target_alloc)
+    end
+  end
+
+  sig do
+    params(
+      node: MIR::Node,
+      value_mir: MIR::Node,
+      ast_value: AST::Node,
+      source: String,
+      target: Symbol,
+      target_alloc: T.nilable(Symbol),
+	      value_type: T.nilable(Type),
+    ).returns(MIR::Node)
+  end
+  def with_ownership_consumption_for_value(node, value_mir, ast_value, source, target = :owned_sink, target_alloc: nil, value_type: nil)
+    operands = if value_type
+      ownership_operands_for_sink_value(
+        value_mir,
+        ast_value,
+        value_type,
+        source,
+        target_alloc,
+        require_visible_owned: false,
+      )
+    else
+      ownership_operands_for_value(value_mir, ast_value, source, target_alloc)
+    end
+    return node if operands.empty? && !ownership_consumer_requires_fact?(node)
+
+    node.ownership_consumption = MIR::OwnershipConsumptionFact.new(
+      operands: operands,
+      target: target,
+      target_alloc: target_alloc,
+      source: source,
+      covers_consuming_params: true,
+    )
+    node
+  end
+
+	  sig { params(value_mir: MIR::Node, ast_value: AST::Node, source: String, target_alloc: T.nilable(Symbol)).returns(T::Array[MIR::OwnershipOperandFact]) }
+	  def ownership_operands_for_value(value_mir, ast_value, source, target_alloc = nil)
+	    ti = ownership_operand_type(ast_value, "ownership operand")
+	    ownership_operands_for_sink_value(value_mir, ast_value, ti, source, target_alloc, require_visible_owned: false)
+	  end
+
+	  sig do
+	    params(
+	      value_mir: MIR::Node,
+	      ast_value: AST::Node,
+	      source: String,
+	      target_alloc: T.nilable(Symbol),
+	      sink_type: T.nilable(Type),
+	    ).returns(T::Array[MIR::OwnershipOperandFact])
+	  end
+	  def ownership_operands_for_lowered_takes_arg(value_mir, ast_value, source, target_alloc, sink_type: nil)
+	    ti = sink_type || ownership_operand_type(ast_value, "ownership sink argument")
+	    ownership_operands_for_sink_value(value_mir, ast_value, ti, source, target_alloc, require_visible_owned: true)
+	  end
+
+	  sig { params(ast_value: AST::Node, context: String).returns(Type) }
+	  def ownership_operand_type(ast_value, context)
+    coerced = ast_value.respond_to?(:coerced_type_info) ? ast_value.coerced_type_info : nil
+    Type.new(coerced || ast_value.full_type!(context: context))
+  end
+
+	  sig do
+	    params(
+	      value_mir: MIR::Node,
+	      ast_value: AST::Node,
+	      ti: Type,
+	      source: String,
+	      target_alloc: T.nilable(Symbol),
+      require_visible_owned: T::Boolean,
+    ).returns(T::Array[MIR::OwnershipOperandFact])
+  end
+  def ownership_operands_for_sink_value(value_mir, ast_value, ti, source, target_alloc, require_visible_owned:)
+    # A CAST reinterprets a value; it does not change who owns it. Ask the
+    # question of what it wraps, so a `x = CAST(owned AS T)` reassignment
+    # records the same provenance the bare value would.
+    if ast_value.is_a?(AST::Cast) && value_mir.is_a?(MIR::Cast)
+      inner = ownership_operands_for_sink_value(value_mir.expr, ast_value.value, ti, source,
+        target_alloc, require_visible_owned: require_visible_owned)
+      # Casting does not make a borrow an owner. A name the function does not
+      # own -- a union payload view, for one -- stays a borrow through the cast.
+      return inner.map do |operand|
+        next operand if operand.borrowed || operand.name.nil?
+        next operand if owned_binding_visible?(T.must(operand.name))
+        MIR::OwnershipOperandFact.borrowed_access(operand.name, operand.type_info, operand.source, target_alloc)
+      end
+    end
+    # NodeRef is a copyable generation handle. The store owns and moves the
+    # payload; assigning or capturing the handle never transfers that payload.
+    return [MIR::OwnershipOperandFact.non_owning(ti, source)] if ti.node_reference?
+
+    # A named MIR owner is stronger evidence than the pre-materialization AST
+    # type. Destination placement may have converted a rodata/borrowed source
+    # into a fresh owned temporary, and that AllocMark must be transferred even
+    # when the source expression itself was bit-copy or non-owning.
+    # Fallible wrappers do not change what the inner call consumed: a callee
+    # receives (and on failure releases) its consuming args whether or not
+    # the result propagates, so look through TRY/catch/cast shells.
+    fact_holder = T.let(value_mir, MIR::Node)
+    while fact_holder.is_a?(MIR::Cast) || fact_holder.is_a?(MIR::TryExpr) ||
+          fact_holder.is_a?(MIR::TryOptional) || fact_holder.is_a?(MIR::TryCatch)
+      fact_holder = fact_holder.expr
+    end
+    explicit_fact = fact_holder.respond_to?(:ownership_consumption) ? fact_holder.ownership_consumption : nil
+    if explicit_fact.is_a?(MIR::OwnershipConsumptionFact)
+      return retarget_ownership_operands(explicit_fact.operands, target_alloc)
+    end
+    if value_mir.is_a?(MIR::Ident) && materialized_owned_binding_visible?(value_mir.name.to_s)
+      return [MIR::OwnershipOperandFact.owned_binding(value_mir.name.to_s, ti, source, target_alloc)]
+    end
+    if mir_produces_owned_result?(value_mir)
+      return [MIR::OwnershipOperandFact.owned_result(ti, source, target_alloc)]
+    end
+
+    # Type/lifecycle facts are authoritative over name-keyed binding metadata.
+    # Inferred wrapper bindings can retain a conservative cleanup entry, but a
+    # bit-copy payload such as `?String@symbol` still cannot transfer ownership.
+    return [MIR::OwnershipOperandFact.non_owning(ti, source)] unless ownership_tracked_transfer_type?(ti)
+    visible_name = mir_ident_names(value_mir).find { |name| owned_binding_visible?(name.to_s) }
+    if visible_name
+      return [MIR::OwnershipOperandFact.owned_binding(visible_name.to_s, ti, source, target_alloc)]
+    end
+
+    return [MIR::OwnershipOperandFact.non_owning(ti, source)] if rodata_ownership_ast?(ast_value)
+    return [MIR::OwnershipOperandFact.non_owning(ti, source)] if non_consuming_owned_value_expr?(value_mir)
+
+    if borrowed_ownership_ast?(ast_value)
+      return [MIR::OwnershipOperandFact.borrowed_access(ownership_root_name(ast_value), ti, source, target_alloc)]
+    end
+
+    root = ownership_root_name(ast_value)
+    if root
+      mapped = transfer_binding_name(root)
+      if owned_binding_visible?(mapped) || (!require_visible_owned && (function_state.bindings[root] || CleanupEntry::NONE).present?)
+        return [MIR::OwnershipOperandFact.owned_binding(mapped, ti, source, target_alloc)]
+      end
+      if visible_owned_operand_value?(ast_value, value_mir, mapped)
+        return [MIR::OwnershipOperandFact.owned_binding(mapped, ti, source, target_alloc)]
+      end
+    end
+
+    return [] unless require_visible_owned
+
+    [MIR::OwnershipOperandFact.borrowed_access(ownership_root_name(ast_value), ti, "#{source} missing owned binding", target_alloc)]
+  end
+
+  sig { params(ast_value: AST::Node, value_mir: MIR::Node, mapped: String).returns(T::Boolean) }
+  def visible_owned_operand_value?(ast_value, value_mir, mapped)
+    ast_value = ast_value.value if ast_value.is_a?(AST::MoveNode)
+    !!(ast_value.is_a?(AST::Identifier) && value_mir.is_a?(MIR::Ident) &&
+      value_mir.name.to_s == mapped && !borrowed_ownership_ast?(ast_value))
+  end
+
+  sig { params(operands: T::Array[MIR::OwnershipOperandFact], target_alloc: T.nilable(Symbol)).returns(T::Array[MIR::OwnershipOperandFact]) }
+  def retarget_ownership_operands(operands, target_alloc)
+    operands.map do |operand|
+      alloc = target_alloc || operand.target_alloc
+      if operand.borrowed
+        MIR::OwnershipOperandFact.borrowed_access(operand.name, operand.type_info, operand.source, alloc)
+      elsif operand.name
+        MIR::OwnershipOperandFact.owned_binding(T.must(operand.name), operand.type_info, operand.source, alloc)
+      elsif operand.kind == :owned_result
+        MIR::OwnershipOperandFact.owned_result(operand.type_info, operand.source, alloc)
+      else
+        MIR::OwnershipOperandFact.non_owning(operand.type_info, operand.source)
+      end
+    end
+  end
+
+	  sig { params(value_mir: MIR::Node).returns(T::Boolean) }
+	  def non_consuming_owned_value_expr?(value_mir)
+    source = T.let(value_mir, MIR::Node)
+    source = source.expr while source.is_a?(MIR::Cast)
+    source.is_a?(MIR::Lit) ||
+      source.is_a?(MIR::StructInit) ||
+      source.is_a?(MIR::ArrayInit) ||
+      source.is_a?(MIR::DeepCopy) ||
+      source.is_a?(MIR::RcRetain) ||
+      source.is_a?(MIR::RcDowngrade) ||
+      source.is_a?(MIR::WeakUpgrade)
+  end
+
+  sig { params(node: AST::Node).returns(T::Boolean) }
+  def rodata_ownership_ast?(node)
+    ast_node = node.is_a?(AST::MoveNode) ? node.value : node
+    return true if ast_node.is_a?(AST::Literal) && ast_node.type == :STRING
+    !!(ast_node.respond_to?(:rodata_provenance?) && ast_node.rodata_provenance?)
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def owned_binding_visible?(name)
+    return true if (function_state.bindings[name] || CleanupEntry::NONE).present?
+    return true if function_state.pending_stmts.any? { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name.to_s }
+    return true if capture_state.current_fsm_inherited_alloc_names.include?(name)
+
+    function_state.lowered_alloc_names.include?(name)
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def materialized_owned_binding_visible?(name)
+    return true if function_state.pending_stmts.any? { |stmt| stmt.is_a?(MIR::AllocMark) && stmt.name.to_s == name }
+    return true if capture_state.current_fsm_inherited_alloc_names.include?(name)
+
+    function_state.lowered_alloc_names.include?(name)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Boolean) }
+  def borrowed_ownership_ast?(node)
+    return false unless node
+    return false if owner_transfer_node?(node)
+
+    AST.borrowed_ownership_view?(node)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T.nilable(String)) }
+  def ownership_root_name(node)
+    current = T.let(node, T.nilable(AST::Node))
+    current = current.value if current.is_a?(AST::MoveNode) || current.is_a?(AST::CopyNode) || current.is_a?(AST::KeepNode)
+    # A CAST reinterprets the value; it does not change who owns it. The MIR
+    # side already looks through MIR::Cast for the same reason, and without
+    # this the root of `x = CAST(owned AS T)` was invisible, so a reassignment
+    # with cleanup recorded no operand provenance at all.
+    current = current.value while current.is_a?(AST::Cast)
+    current = current.target while current.is_a?(AST::GetField) || current.is_a?(AST::GetIndex)
+    return current.name.to_s if current.is_a?(AST::Identifier)
+    nil
+  end
+
+  sig { returns(MIRLoweringOwnershipScanner) }
+  def ownership_scanner
+    MIRLoweringOwnershipScanner.new(
+      schema_lookup: mir_schema_lookup,
+      bindings: function_state.bindings,
+      capture_map: capture_state.do_capture_map || {},
+      rename_map: function_state.rename_map,
+      safe_name: ->(name) { zig_safe_name(name) },
+    )
+  end
+
+  sig { params(stmt: T.nilable(AST::Node)).returns(T::Array[String]) }
+  def collect_bg_capture_transfer_roots(stmt)
+    return [] unless stmt.is_a?(AST::Locatable)
+
+    ownership_scanner.collect_bg_capture_transfer_roots(stmt)
+  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T::Array[String]) }
+  def collect_explicit_move_roots(node)
+    return [] unless node.is_a?(AST::Locatable)
+
+    ownership_scanner.collect_explicit_move_roots(node)
+  end
+
+  sig { params(stmt: T.nilable(AST::Node)).returns(T::Boolean) }
+  def bg_stream_boundary_stmt?(stmt)
+    found = T.let(false, T::Boolean)
+    AST.each_bg_block_in_stmt(stmt) { |bg| found = true if bg.is_a?(AST::BgStreamBlock) }
+    found
+  end
+
+  sig { params(stmt: T.nilable(AST::Node)).returns(T::Array[String]) }
+  def collect_stdlib_consumed_roots(stmt)
+    names = T.let([], T::Array[String])
+    walk_ast_calls(stmt) do |call|
+      stdlib_call_ownership_facts(call).consumed_names.each { |name| names << name }
+    end
+    names.uniq
+  end
+
+  sig { params(node: T.nilable(AST::Node), blk: T.proc.params(arg0: AST::Node).void).void }
+  def walk_ast_calls(node, &blk)
+    return unless node.is_a?(AST::Locatable)
+    yield node if AST.call?(node)
+    AST.each_child_node(node) { |child| walk_ast_calls(child, &blk) }
+  end
+
+  sig { params(stmt: T.nilable(AST::Node)).returns(T::Array[String]) }
+  def collect_moved_arg_roots(stmt)
+    return [] unless stmt.is_a?(AST::Locatable)
+
+    ownership_scanner.collect_moved_arg_roots(stmt)
+  end
+
+  sig { params(ti: Type).returns(T::Boolean) }
+  def ownership_tracked_transfer_type?(ti)
+    return false if ti.primitive? || ti.void? || ti.any? || ti.id_handle?
+
+    lifecycle_registry.fetch(ti).needs_drop?
+  end
+
+  sig { params(node: AST::Node, blk: T.proc.params(arg0: AST::Node).void).void }
+  def walk_ast_for_moved_args(node, &blk)
+    return unless node.is_a?(AST::Locatable)
+
+    ownership_scanner.walk_ast_for_moved_args(node, &blk)
+  end
+
+  sig { params(arg: AST::Node).returns(T.nilable(String)) }
+  def moved_arg_root(arg)
+    return nil unless arg.is_a?(AST::Locatable)
+
+    ownership_scanner.moved_arg_root(arg)
+  end
+
+  sig { params(name: String).returns(String) }
+  def transfer_binding_name(name)
+    # An IF-bind alias that BORROWS from a named owner is that owner for
+    # ownership purposes: the AllocMark lives on the source binding, so a
+    # transfer recorded under the alias has no allocation to match. An alias
+    # that owns its own capture already has a visible AllocMark and keeps it.
+    owner = capability_state.with_alias_owner_map&.[](name.to_s)
+    if owner && !owned_binding_visible?(name.to_s)
+      return ownership_scanner.transfer_binding_name(owner)
+    end
+
+    ownership_scanner.transfer_binding_name(name)
+  end
+
+  sig { params(call: AST::Node).returns(MIRLoweringFunctions::CallOwnershipFacts) }
+  def stdlib_call_ownership_facts(call)
+    stdlib_call_facts(T.cast(call, T.any(AST::FuncCall, AST::MethodCall))).ownership
+  end
+
+  sig { params(type_info: Type).returns(T::Boolean) }
+  def ownership_bearing_type?(type_info)
+    type_info.ownership_bearing?(T.unsafe(mir_schema_lookup))
+  end
+
+  sig { params(arg: T.nilable(AST::Node)).returns(T.nilable(String)) }
+  def consumed_binding_root(arg)
+    return nil if arg.is_a?(AST::CopyNode) || arg.is_a?(AST::KeepNode)
+    node = arg.is_a?(AST::MoveNode) ? arg.value : arg
+    return node.name.to_s if node.is_a?(AST::Identifier)
+    root = AST.root_identifier(node) rescue nil
+    root&.name&.to_s
+  end
+
+  sig { params(node: AST::Node, entry: CleanupEntry).returns(String) }
+  def discard_owned_zig_type(node, entry)
+    return entry[:zig_type] if entry[:zig_type]
+    ti = Type.from_node!(node, context: "discard owned type")
+    ti = ti.success_type || ti
+    return "[]const u8" if ti.string?
+    ti.zig_type || Type.new(ti.resolved).zig_type
+  end
+
+  # Stamps `MIR::Stmt#source_line` (and `source_column`) from the
+  # originating AST node's token. Used by the register VM emitter for
+  # per-statement crash-message attribution and per-instruction
+  # debugger position lookup. Lifting this from the per-stmt comment
+  # injection in lower_body keeps it as the single source of truth so
+  # cleanup defers, hoist temps, and other synthesized statements all
+  # inherit their parent statement's position. No-op when `line` is
+  # nil (synthesized fragments may have no AST origin).
+  sig { params(node: MIR::Node, line: T.nilable(Integer), column: T.nilable(Integer)).void }
+  def stamp_source_line!(node, line, column = nil)
+    return unless line
+    return unless node.respond_to?(:source_line=)
+    T.unsafe(node).source_line ||= line
+    T.unsafe(node).source_column ||= column if node.respond_to?(:source_column=) && column
+  end
+
+  # Like lower_body, but the last user-visible statement becomes break :label expr
+  # instead of a regular statement. Used for IF/MATCH expression branches.
+  # A NoReturn tail expression (`DEFAULT -> panic("...")`) has no value.
+  sig { params(node: T.untyped).returns(T::Boolean) }
+  def noreturn_result_expr?(node)
+    resolved = node.respond_to?(:resolved_type) ? T.unsafe(node).resolved_type : nil
+    resolved = resolved.resolved if resolved.is_a?(Type)
+    resolved == :NoReturn
+  end
+
+  sig { params(stmts: T::Array[LowerableStmt], label: String).returns(T::Array[MIR::Emittable]) }
+  def lower_body_with_break(stmts, label)
+    return [] if stmts.empty?
+
+    # Find the last non-old-MIR-verification node (the result expression)
+    last_user_idx = stmts.rindex { |s|
+      !s.is_a?(MIR::Drop) && !s.is_a?(MIR::AllocMark) &&
+      !s.is_a?(MIR::Return) && !s.is_a?(MIR::SuppressCleanup) &&
+      !s.is_a?(MIR::ReassignCleanup) && !s.is_a?(MIR::FieldCleanup)
+    }
+    return lower_body(stmts) unless last_user_idx
+
+    prefix_lowered = lower_body(stmts[0...last_user_idx] || [])
+    # Capture only the pending produced by THIS branch's result expression.
+    # Draining the ambient list wholesale scooped hoists that belong to the
+    # ENCLOSING expression (an earlier concat part's owned temp) into this
+    # branch's scope — emitted Zig then referenced them outside the branch.
+    result_stmt = T.must(stmts[last_user_idx])
+    result_mir, pending = lower_head { lower(result_stmt) }
+    suffix_lowered = lower_body(stmts.drop(last_user_idx + 1))
+
+    # A NoReturn tail yields no value to break with: Zig reads
+    # `break :blk @panic(...)` as unreachable code.
+    terminator = noreturn_result_expr?(result_stmt) ?
+      T.cast(result_mir, MIR::Emittable) :
+      MIR::BreakStmt.new(label, T.cast(result_mir, MIR::Node))
+    tail = pending + suffix_lowered + [terminator]
+    prefix_lowered + normalize_allocating_mir_body(tail)
+  end
+
+  # Lower a full program into MIR::Program with standard imports + footer.
+  sig { params(node: AST::Program, use_c_allocator: T::Boolean, needs_safety: T::Boolean, use_debug_allocator: T::Boolean).returns(T.nilable(MIR::Program)) }
+  def lower_program(node, use_c_allocator: false, needs_safety: false, use_debug_allocator: false)
+    MIRPassState.require!(node, :mir_pass_complete, consumer: "MIRLowering")
+    reset_unit_import_dedup!
+    program_state.use_debug_allocator = use_debug_allocator
+    program_state.fn_nodes = node.statements.each_with_object({}) do |stmt, acc|
+      acc[stmt.name.to_s] = stmt if stmt.is_a?(AST::FunctionDef)
+    end
+    items = []
+
+    # Auto-detect safety runtime needs from guarded reentrance variants.
+    needs_safety ||= node.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.reentrance_guard_required? }
+
+    # Standard imports
+    items << MIR::Import.new("std", "std", nil)
+    items << MIR::Import.new("CheatHeader", "runtime/runtime-header.zig", nil)
+    items << MIR::TypeAlias.new("CheatLib", "CheatHeader.CheatLib")
+    items << MIR::TypeAlias.new("Runtime", "CheatHeader.Runtime")
+    items << MIR::TypeAlias.new("EbrContext", "CheatHeader.EbrContext")
+    items << MIR::Import.new("safety", "runtime/../lib/safety.zig", nil) if needs_safety
+    items.concat(lower_protocol_adapters(node))
+
+    if use_c_allocator || program_state.used_sharded_map
+      items << MIR::PubConst.new("USE_C_ALLOCATOR", "true")
+    end
+    if program_state.use_debug_allocator
+      items << MIR::PubConst.new("USE_DEBUG_ALLOCATOR", "true")
+    end
+
+    # Lower each statement, adding source line comments
+    node.statements.each do |stmt|
+      if stmt.is_a?(AST::FunctionDef)
+        seed = lowering_input.function_counter_seeds[stmt.name]
+        lowering_counters.restore!(seed) if seed
+        program_state.function_counter_snapshots[stmt.name] = lowering_counters.snapshot
+      end
+      lowered = lower_top_level(stmt)
+      reject_module_scope_cleanup!(stmt, lowered)
+      append_lowered_items!(LoweredItemTarget.new(items: items, line: stmt.token&.line), lowered)
+    end
+
+    inject_const_init!(items)
+
+    state = MIRPassState.for!(node).copy
+    state.mark!(:mir_lowered)
+    MIR::Program.new(items, state)
+  end
+
+  # Assemble the runtime-init CONST prologue: build a `__clear_init_consts(rt)`
+  # that constructs each value (in declaration order - already a valid init
+  # order, since forward references are rejected) with a real runtime and
+  # transfers it into its program-lifetime global (owned sink, no per-scope
+  # cleanup), and call that at the very top of clearMain so every container-scope
+  # read borrows an initialized value.
+  CONST_INIT_FN = "__clear_init_consts"
+  CONST_INIT_GUARD = "__clear_consts_ready"
+
+  sig { params(items: T::Array[MIR::Node], module_scope: T::Boolean).void }
+  def inject_const_init!(items, module_scope: false)
+    entries = program_state.runtime_init_consts
+    module_inits = program_state.module_const_inits.to_a
+    return if entries.empty? && module_inits.empty?
+
+    raw = T.let([], T::Array[MIR::Node])
+    # Two importers of the same package both call its initializer, so the
+    # second call has to be a no-op or the first build leaks.
+    if module_scope
+      items << MIR::Let.new(CONST_INIT_GUARD, MIR::Lit.new("false"), true, Type.new(:Bool), nil)
+      raw << MIR::IfStmt.new(MIR::Ident.new(CONST_INIT_GUARD), [MIR::ReturnStmt.new(nil)], nil)
+      raw << MIR::Set.new(MIR::Ident.new(CONST_INIT_GUARD), MIR::Lit.new("true"))
+    end
+    # An imported module's consts must exist before this program's own
+    # initializers -- or its own body -- can read them.
+    module_inits.each do |alias_name|
+      raw << MIR::Call.new(
+        "#{alias_name}.#{CONST_INIT_FN}", [MIR::Ident.new("rt")], true, false,
+        MIR::CallableContract.no_ownership(1)
+      )
+    end
+    entries.each do |entry|
+      tmp = "__ci_#{entry.name}"
+      # Construct the value into a heap temp, copy it into the program-lifetime
+      # global, then transfer the temp's ownership to the sink (the global now
+      # owns it program-lifetime; no per-scope cleanup). The store must precede
+      # the transfer so the read is not use-after-transfer.
+      raw.concat(entry.prelude)
+      raw << MIR::AllocMark.new(tmp, :heap, entry.type_info, :heap)
+      raw << MIR::Let.new(tmp, entry.init, false, nil, nil)
+      raw << MIR::Set.new(MIR::Ident.new(entry.name), MIR::Ident.new(tmp))
+      raw.concat(ownership_transfer_marks(tmp, :owned_sink, target_alloc: :heap))
+    end
+    body = finalize_synthetic_const_init_body!(raw)
+    items << MIR::FnDef.new(
+      CONST_INIT_FN,
+      [MIR::Param.new("rt", "*Runtime", false)],
+      "void",
+      body,
+      # The root calls an imported module's initializer across the Zig module
+      # boundary, so a module's copy cannot be private.
+      module_scope ? :pub : :private,
+      true,
+      []
+    )
+
+    main_fn = items.find do |n|
+      n.is_a?(MIR::FnDef) &&
+        (n.name.to_s == Compiler::Entrypoint::ZIG_NAME || n.name.to_s == Compiler::Entrypoint::NAME)
+    end
+    if main_fn.is_a?(MIR::FnDef)
+      # Free each const's program-lifetime storage at program exit (defers run
+      # in reverse, after every use), then run the ordered init first.
+      entries.reverse_each { |entry| main_fn.body.unshift(MIR::ModuleConstFree.new(entry.name)) }
+      main_fn.body.unshift(MIR::Call.new(
+        CONST_INIT_FN, [MIR::Ident.new("rt")], true, false, MIR::CallableContract.no_ownership(1)
+      ))
+    end
+  end
+
+  # Run the ownership-finalization pass over the synthesized const-init body so
+  # its AllocMark/TransferMark surfaces become Owned* facts (OwnedCreate /
+  # OwnedTransfer) - the same finalization every lowered function body gets -
+  # and the owned-return constructor calls are covered.
+  sig { params(nodes: T::Array[MIR::Node]).returns(T::Array[MIR::Node]) }
+  def finalize_synthetic_const_init_body!(nodes)
+    state = initial_ownership_finalization_context
+    seed_cleanup_owner_index!(state, nodes)
+    nodes.each { |node| finalize_ownership_for_mir_node!(node, nodes, state) }
+    state.out
+  end
+
+  # CLEAR has no module initialization/termination lifetime, so a top-level
+  # binding that owns heap memory has no place to run its cleanup: Zig rejects
+  # a top-level defer, and silently leaking is not an option. Fail closed with
+  # a source diagnostic instead of letting the checker trip on MIR internals.
+  # This applies to root programs and REQUIRE'd modules alike: every top-level
+  # binding is emitted at Zig container scope, where only comptime-pure
+  # constants are representable.
+  sig { params(stmt: AST::Node, lowered: T.nilable(LoweredMir)).void }
+  def reject_module_scope_cleanup!(stmt, lowered)
+    return unless stmt.is_a?(AST::VarDecl) || stmt.is_a?(AST::BindExpr)
+
+    nodes = T.unsafe([lowered]).flatten.compact
+    return unless nodes.any? { |n| n.is_a?(MIR::Cleanup) || n.is_a?(MIR::ErrCleanup) }
+
+    name = stmt.respond_to?(:name) ? T.unsafe(stmt).name : "value"
+    raise CompilerError.new(
+      stmt.token,
+      "[MODULE_SCOPE_OWNED_VALUE] Top-level binding '#{name}' owns heap memory that needs cleanup, " \
+      "but CLEAR has no module initialization/termination lifetime. " \
+      "Use a fixed-size comptime value, or construct it inside a function.",
+      nil,
+      code: :MODULE_SCOPE_OWNED_VALUE
+    )
+  end
+
+  # Package-import dedup is scoped to one emitted Zig unit. Each top-level
+  # lowering entry (root program or package module) starts a fresh unit.
+  sig { void }
+  def reset_unit_import_dedup!
+    program_state.emitted_require_modules.delete_if { |key| key.start_with?("pkg-import:") }
+    program_state.emitted_import_type_aliases.clear
+  end
+
+  sig { params(target: LoweredItemTarget, lowered: T.nilable(LoweredMir)).void }
+  def append_lowered_items!(target, lowered)
+    return unless lowered
+
+    nodes = lowered.is_a?(::Array) ? lowered : [lowered]
+    nodes.each_with_index do |node, index|
+      target.items << MIR::Comment.new("CLR:#{target.line}") if index.zero? && target.line
+      target.items << node
+    end
+    nil
+  end
+
+  sig { params(program: AST::Program).returns(T::Array[MIR::ProtocolAdapterDef]) }
+  def lower_protocol_adapters(program)
+    protocols = program.statements.grep(AST::ProtocolDef).to_h { |protocol| [protocol.name, protocol] }
+    conformances = program.statements.grep(AST::ConformanceDef).group_by do |declaration|
+      protocol_base_name_for_lowering(declaration.protocol_type)
+    end
+    protocols.values.map do |protocol|
+      cases = (conformances[protocol.name] || []).map do |declaration|
+        lower_protocol_conformance_case(protocol, declaration)
+      end
+      requirements = protocol.requirements.map do |requirement|
+        MIR::ProtocolRequirementAdapter.new(
+          name: requirement.name,
+          argument_count: requirement.params.length,
+          return_type: protocol_requirement_return_type(protocol, requirement),
+        )
+      end
+      MIR::ProtocolAdapterDef.new(
+        protocol: protocol.name,
+        associated_types: protocol.associated_types.map(&:name),
+        requirements: requirements,
+        conformances: cases,
+      )
+    end
+  end
+  private :lower_protocol_adapters
+
+  sig do
+    params(protocol: AST::ProtocolDef, declaration: AST::ConformanceDef)
+      .returns(MIR::ProtocolConformanceCase)
+  end
+  def lower_protocol_conformance_case(protocol, declaration)
+    generic = declaration.binders.any?
+    associated = protocol.associated_types.each_with_index.to_h do |type, index|
+      binding = T.must(declaration.protocol_type.generic_args[index])
+      [type.name, transpile_type(binding)]
+    end
+    operations = declaration.members.to_h do |member|
+      [member.source_name || member.name, zig_safe_name(member.name)]
+    end
+    owner_name = protocol_base_name_for_lowering(declaration.owner_type)
+    MIR::ProtocolConformanceCase.new(
+      owner_type: generic ? nil : transpile_type(declaration.owner_type),
+      owner_marker: generic ? "__clear_nominal_#{zig_safe_name(owner_name)}" : nil,
+      type_params: declaration.binders.map(&:name),
+      associated_types: associated,
+      operations: operations,
+    )
+  end
+  private :lower_protocol_conformance_case
+
+  sig { params(protocol: AST::ProtocolDef, requirement: AST::ProtocolRequirement).returns(String) }
+  def protocol_requirement_return_type(protocol, requirement)
+    replacements = T.let({}, T::Hash[Symbol, TypeExpression])
+    protocol.associated_types.each do |associated|
+      replacements[associated.name.to_sym] = TypeExpression.of(TypeProjectionExpression.new(
+        owner: :T,
+        member: associated.name.to_sym,
+        protocol: protocol.name.to_sym,
+      ))
+    end
+    replacements[:Self] = TypeExpression.of(NamedTypeExpression.new(name: :T))
+    expression = TypeExpressionTree.transform(requirement.return_type.shape.expression) do |candidate|
+      candidate_kind = candidate.kind
+      if candidate_kind.is_a?(NamedTypeExpression) && candidate_kind.arguments.empty? && replacements.key?(candidate_kind.name)
+        T.must(replacements[candidate_kind.name])
+      else
+        candidate
+      end
+    end
+    result = Type.new(expression)
+    if result.error_union?
+      payload = result.success_type || Type.new(:Void)
+      return "anyerror!#{transpile_type(payload)}"
+    end
+    transpile_type(result)
+  end
+  private :protocol_requirement_return_type
+
+  sig { params(type: Type).returns(String) }
+  def protocol_base_name_for_lowering(type)
+    (type.generic_instance? ? type.generic_base : type.resolved).to_s
+  end
+  private :protocol_base_name_for_lowering
+
+  # Lower a module AST into MIR items for inlining via REQUIRE.
+  # Emits every declaration needed to implement the module. Visibility is
+  # enforced by the imported semantic scope and by namespace placement; private
+  # helpers must remain available to public functions that call them.
+  # No standard imports or runtime footer -- the importing file provides those.
+  #
+  # Returns { items: [MIR nodes], type_items: [MIR type nodes] }
+  sig { params(node: AST::Program).returns(LoweredModuleItems) }
+  def lower_module(node)
+    MIRPassState.require!(node, :mir_pass_complete, consumer: "MIRLowering.lower_module")
+    reset_unit_import_dedup!
+    type_items = T.let([], T::Array[MIR::Emittable])
+    fn_items = T.let([], T::Array[MIR::Emittable])
+
+    node.statements.each do |stmt|
+      case stmt
+      when AST::FunctionDef
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower_top_level(stmt))
+      when AST::StructDef, AST::EnumDef, AST::UnionDef
+        append_lowered_items!(LoweredItemTarget.new(items: type_items, line: stmt.token.line), lower_top_level(stmt))
+      when AST::RequireNode
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: nil), lower_top_level(stmt))
+      when AST::ExternFnDecl, AST::ExternStructDecl
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lower_top_level(stmt))
+      when AST::VarDecl, AST::BindExpr
+        # Module-scope immutable bindings (e.g. frozen membership tables)
+        # become file-scope consts, exactly as lower_program emits them.
+        lowered = lower_top_level(stmt)
+        reject_module_scope_cleanup!(stmt, lowered)
+        append_lowered_items!(LoweredItemTarget.new(items: fn_items, line: stmt.token.line), lowered)
+      end
+    end
+
+    inject_const_init!(fn_items, module_scope: true)
+    LoweredModuleItems.new(items: fn_items, type_items: type_items)
+  end
+
+  private
+
+  # pending_stmts is hoist scratch for the statement being lowered, but
+  # FunctionState is per-MIRLowering, not per-function. Anything a previous
+  # top-level statement failed to drain surfaces inside the NEXT function's
+  # body -- carrying its AllocMark/ErrCleanup groups without the TransferMarks
+  # that were emitted with the body it actually belongs to. Every top-level
+  # entry point (program and module) starts a statement with empty scratch.
+  sig { params(stmt: AST::Node).returns(T.nilable(LoweredMir)) }
+  def lower_top_level(stmt)
+    function_state.pending_stmts = []
+    # A module-level MUTABLE binding lives for the whole program. Record it
+    # before lowering so an assignment inside a function knows its destination
+    # is the heap and that nothing drops it.
+    program_state.module_global_names.add(stmt.name.to_s) if stmt.is_a?(AST::VarDecl) && !stmt.module_const
+    lowered = lower(stmt)
+    # A container-scope declaration cannot carry a statement suffix: Zig reads
+    # `var x: i64 = 11; _ = &x;` at module scope as a malformed field list.
+    # The unused-binding suppression only belongs inside a function body.
+    items = lowered.is_a?(Array) ? lowered : [lowered]
+    items.each { |item| item.suppression = nil if item.is_a?(MIR::Let) }
+    lowered
+  end
+
+  # ================================================================
+  # Name and type helpers
+  # ================================================================
+
+  # Zig identifiers carry no `?`/`!`, but CLEAR (like Ruby) distinguishes
+  # `raw` from `raw?` and `check` from `check!`. Stripping the mark collapsed
+  # the pair onto one Zig name -- a duplicate declaration, or worse, a silent
+  # call to the wrong one. Encode the mark instead.
+  PREDICATE_SUFFIX = "_p"
+  BANG_SUFFIX = "_bang"
+
+  sig { params(name: String).returns(String) }
+  def zig_safe_name(name)
+    cleaned = if name.end_with?('?')
+      "#{name[0..-2]}#{PREDICATE_SUFFIX}"
+    elsif name.end_with?('!')
+      "#{name[0..-2]}#{BANG_SUFFIX}"
+    else
+      name
+    end
+    cleaned = Compiler::Entrypoint::ZIG_NAME if cleaned == Compiler::Entrypoint::NAME
+    cleaned = cleaned
+    ZigType.reserved_identifier?(cleaned) ? "@\"#{cleaned}\"" : cleaned
+  end
+
+  # Stable Zig identifier for a hidden per-type @node store. Avoid text/regex
+  # rewriting in MIR: this is a character-wise identifier encoding, not a
+  # rewrite of generated Zig expressions.
+  sig { params(zig_type: String, shared: T::Boolean).returns(String) }
+  def node_store_binding_name(zig_type, shared: false)
+    encoded = zig_type.each_char.map do |char|
+      alpha = (char >= "A" && char <= "Z") || (char >= "a" && char <= "z")
+      digit = char >= "0" && char <= "9"
+      alpha || digit || char == "_" ? char : "_"
+    end.join
+    shared ? "__shared_node_guard_#{encoded}" : "__node_store_#{encoded}"
+  end
+
+  sig { params(node: AST::Node).returns(Symbol) }
+  def alloc_for_node(node)
+    placement_for_node(node)
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(alloc: T.nilable(Symbol), blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_decl_alloc(alloc, &blk)
+    prev = function_state.current_decl_alloc
+    function_state.current_decl_alloc = alloc
+    blk.call
+  ensure
+    function_state.current_decl_alloc = prev
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(name: String, blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_reassignment_target(name, &blk)
+    previous = function_state.current_reassignment_target
+    function_state.current_reassignment_target = name
+    blk.call
+  ensure
+    function_state.current_reassignment_target = previous
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(type_info: T.nilable(Type), blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_expected_type(type_info, &blk)
+    prev = function_state.current_expected_type
+    function_state.current_expected_type = type_info
+    blk.call
+  ensure
+    function_state.current_expected_type = prev
+  end
+
+  sig do
+    type_parameters(:U)
+      .params(type_info: T.nilable(Type), blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def with_sink_type(type_info, &blk)
+    prev = function_state.current_sink_type
+    function_state.current_sink_type = type_info
+    blk.call
+  ensure
+    function_state.current_sink_type = prev
+  end
+
+	  sig { params(callee_param: T.nilable(AST::Param)).returns(Symbol) }
+	  def allocator_for_takes_param!(callee_param)
+	    Kernel.raise "TAKES argument allocator requested without a callee parameter" unless callee_param
+	    :heap
+	  end
+
+	  sig { params(arg: AST::Node, callee_param: T.nilable(AST::Param)).returns(T::Boolean) }
+	  def call_arg_consumes_ownership?(arg, callee_param)
+	    !!(callee_param && callee_param.respond_to?(:takes) && callee_param.takes)
+	  end
+
+  sig { params(node: T.nilable(AST::Node)).returns(T.nilable(Symbol)) }
+  def symbol_storage_for_node(node)
+    return nil unless node
+    sym = node.respond_to?(:symbol) ? node.symbol : nil
+    return nil unless sym
+    decl = sym.respond_to?(:reg) ? sym.reg : nil
+    auth = (decl && decl.respond_to?(:symbol) && decl.symbol) || sym
+    storage = auth.storage
+    auth.heap_storage? ? :heap : :frame
+  end
+
+  sig { params(node: AST::Node).returns(Symbol) }
+  def placement_for_node(node)
+    node = node.value if node.is_a?(AST::MoveNode)
+    root = root_receiver_node(node) || node
+    if root.is_a?(AST::Identifier)
+      alias_alloc = capability_state.with_alias_alloc_map&.[](root.name.to_s)
+      return alias_alloc if alias_alloc
+      return :heap if current_function_collection_param?(root.name)
+      entry = function_state.bindings[root.name.to_s]
+      return entry.alloc if entry&.alloc
+    end
+    if root.is_a?(AST::Identifier)
+      sym = root.symbol
+      lifetime_sources = sym&.lifetime_sources || []
+      if !lifetime_sources.empty?
+        return :heap if lifetime_sources.any?(&:heap_storage?)
+        return :frame
+      end
+    end
+    symbol_storage_for_node(root) || function_state.current_decl_alloc || :frame
+  end
+
+
+  sig { params(kind: Symbol, _rt_name: T.nilable(T.any(String, Symbol, MIR::Emittable))).returns(Symbol) }
+  def alloc_expr(kind, _rt_name = nil)
+    MIR::Placement.alloc(kind, :frame)
+  end
+
+  sig { params(sym: Symbol).returns(Symbol) }
+  def alloc_from_sym(sym)
+    MIR::Placement.alloc(sym, :heap)
+  end
+
+  # Resolve a registry alloc symbol (:heap, :frame, :receiver_storage, :node_storage)
+  # to a concrete :heap/:frame symbol for structural allocator metadata.
+  sig { params(alloc_sym: Symbol, target_node: T.nilable(AST::Node), node: T.nilable(AST::Node)).returns(Symbol) }
+  def resolve_alloc_sym(alloc_sym, target_node = nil, node = nil)
+    case alloc_sym
+    when :frame then :frame
+    when :receiver_storage
+      receiver = target_node
+      receiver ||= node.object if node.is_a?(AST::MethodCall)
+      receiver ||= node.args.first if node.is_a?(AST::FuncCall) && node.mutates_receiver
+      root = root_receiver_node(receiver)
+      selected = T.cast(root || receiver || node, AST::Node)
+      selected_type = Type.from_node!(selected, context: "allocator receiver")
+      return :heap if selected_type.node_reference?
+
+      placement_for_node(selected)
+    when :node_storage
+      function_state.current_decl_alloc || placement_for_node(T.cast(target_node || node, AST::Node))
+    else :heap
+    end
+  end
+
+  # Shared root resolution for checker attribution and receiver allocator lookup.
+  sig { params(node: T.nilable(AST::Node)).returns(T.nilable(AST::Identifier)) }
+  def root_receiver_node(node)
+    return nil unless node.is_a?(AST::Locatable)
+
+    root = AST.root_identifier(node)
+    return root if root
+    case node
+    when AST::GetField, AST::GetIndex, AST::OptionalUnwrap, AST::Slice
+      root_receiver_node(node.target)
+    else
+      nil
+    end
+  end
+
+  # Extract root variable name from a potentially nested AST node (e.g., pool[id]?.vars).
+  sig { params(node: AST::Node).returns(T.nilable(String)) }
+  def extract_root_var_name(node)
+    root = root_receiver_node(node)
+    return nil unless root.is_a?(AST::Identifier)
+    owner = capability_state.with_alias_owner_map&.[](root.name.to_s)
+    return owner if owner
+
+    decl = root.symbol&.reg
+    (decl && function_state.decl_zig_names[decl.object_id]) || root.name.to_s
+  end
+
+  # Produce a MIR::Cast node for type coercion, or nil if no cast needed.
+  # Mirrors transpile_cast logic but returns MIR nodes instead of strings.
+  sig { params(mir_node: MIR::Node, from_type: Type, to_type: Type::TypeInput).returns(T.nilable(MIR::Node)) }
+  def mir_cast(mir_node, from_type, to_type)
+    # A NoReturn value (`panic(...)`) coerces to every type in Zig; wrapping it
+    # in `@as(T, ...)` only produces unreachable code at the use site.
+    from_t = from_type
+    return mir_node if from_t.resolved == :NoReturn
+    to_t   = to_type.is_a?(Type)   ? to_type   : Type.new(to_type)
+    return nil if from_t.semantic_type_key == to_t.semantic_type_key
+    # @boxed is constructed by destination placement (HeapCreate); it is
+    # not a Zig coercion. Emitting `@as(*T, value)` here wraps the payload in a
+    # pointer cast before HeapCreate, so the generated initializer tries to
+    # assign `*T` into a `T` cell. Keep numeric/shape coercions intact, but let
+    # the dedicated placement step perform this same-payload layout change.
+    if to_t.indirect? && !from_t.indirect? && from_t.resolved == to_t.resolved
+      return nil
+    end
+    # Placement and constraint metadata can differ while the emitted value
+    # representation is identical. Do not manufacture an @as cast in that
+    # case; capability-changing coercions still differ in zig_type and fall
+    # through to the real cast paths below.
+    return nil if from_t.zig_type == to_t.zig_type
+
+    # Keep the complete destination shape. Reducing this to `resolved` drops
+    # optionality and ownership, turning `?T@multiowned` into `?T` in Zig.
+    zig_to = transpile_type(to_t)
+
+    # fn_type: generic @as cast
+    return MIR::Cast.new(mir_node, zig_to, :as) if from_t.fn_type? || to_t.fn_type?
+
+    # Int -> Float
+    if from_t.integer? && to_t.float?
+      return MIR::Cast.new(MIR::Cast.new(mir_node, nil, :floatFromInt), zig_to, :as)
+    end
+
+    # Float -> Int
+    if from_t.float? && to_t.integer?
+      return MIR::Cast.new(MIR::Cast.new(mir_node, nil, :intFromFloat), zig_to, :as)
+    end
+
+    # Int -> Int
+    if from_t.integer? && to_t.integer?
+      return MIR::Cast.new(MIR::Cast.new(mir_node, nil, :intCast), zig_to, :as)
+    end
+
+    # Float -> Float
+    if from_t.float? && to_t.float?
+      return MIR::Cast.new(MIR::Cast.new(mir_node, nil, :floatCast), zig_to, :as)
+    end
+
+    # Array coercions, HashMap coercions, error union coercions -- no cast needed
+    return nil if from_t.dynamic? && to_t.dynamic?
+    return nil if from_t.fixed? && to_t.empty_list?
+    # Fixed-size array (`T[N]`) -> typed slice (`T[]`): no cast needed.
+    # The downstream argument-position `MIR::ItemsAccess` handles the
+    # slice coercion via `<expr>[0..]`. Without this skip, the
+    # `mir_cast` fallback below wraps the identifier with
+    # `@as(std.ArrayListUnmanaged(T), <fixed>)`, which Zig rejects
+    # because a `[N]T` does not coerce to an ArrayList.
+    if from_t.fixed? && to_t.dynamic?
+      from_elem = from_t.element_type
+      to_elem = to_t.element_type
+      return nil if from_elem && to_elem && Type.surface_name(from_elem) == Type.surface_name(to_elem)
+    end
+    return nil if from_t.map? && to_t.map?
+    if to_t.error_union?
+      payload_type = T.must(to_t.payload_type)
+      from_matches = Type.surface_name(from_t) == Type.surface_name(payload_type)
+      from_matches ||= from_t.string? && payload_type.string?
+      return nil if from_matches
+    end
+
+    # Fallback: @as cast
+    MIR::Cast.new(mir_node, zig_to, :as)
+  end
+
+  # ================================================================
+  # Cleanup entry helpers (moved from MIRPass/control_flow.rb)
+  # ================================================================
+
+  # Bind every source-language cleanup recipe to the annotation-owned
+  # lifecycle contract. Mechanical compiler temporaries use separate helpers;
+  # semantic bindings may not acquire cleanup by inspecting lowered Zig shape.
+  sig { params(entry: CleanupEntry, ti: Type, source_node: T.nilable(AST::VarDecl)).returns(T.nilable(T::Boolean)) }
+  def build_drop_entry!(entry, ti, source_node)
+    plan = entry.lifecycle_plan ||
+      (source_node ? lifecycle_registry.fetch_binding(source_node, ti) : lifecycle_registry.fetch(ti))
+    unless plan.needs_drop?
+      source = source_node ? " binding #{source_node.name} at line #{source_node.line}" : ""
+      raise "lowering attempted DROP for non-owning type #{plan.type_key}#{source}"
+    end
+
+    entry.set_lifecycle_plan!(plan)
+    true
+  end
+
+  # ================================================================
+  # Old MIR translation (MATCH AS bindings still use Drop/Alloc)
+  # ================================================================
+
+  sig { params(node: MIR::Drop).returns(MIR::Cleanup) }
+  def lower_drop(node)
+    safe = zig_safe_name(node.name)
+    entry = node.cleanup_entry
+    plan = entry.lifecycle_plan
+    raise "MIR::Drop lacks annotation lifecycle plan for #{node.name}" unless plan&.needs_drop?
+    has_guard = entry.respond_to?(:has_moved_guard?) ? entry.has_moved_guard? : !!(entry.respond_to?(:[]) && entry[:has_moved_guard])
+    function_state.guarded_cleanup_names[safe] = true if has_guard
+    MIR::Cleanup.new(safe, node.cleanup_entry)
+  end
+
+  # ================================================================
+  # Type definitions
+  # ================================================================
+
+  sig { params(node: AST::EnumDef).returns(MIR::EnumDef) }
+  def lower_enum_def(node)
+    lowering_schemas.register_enum(node.name, node.variants)
+    MIR::EnumDef.new(node.name, node.variants.map(&:to_s), node.visibility)
+  end
+
+  sig { params(node: AST::Node).returns(MIR::Emittable) }
+  def lower_field_default(node)
+    case node
+    when AST::DefaultLit then MIR::DefaultValue.new(kind: :aggregate_empty)
+    else T.cast(lower(node), MIR::Emittable)
+    end
+  end
+
+  sig { params(field: AST::StructField).returns(T.nilable(MIR::Emittable)) }
+  def lower_struct_field_default(field)
+    return nil if callsite_struct_field_default?(field)
+
+    if field.type.optional? && field.type.node_reference? &&
+       field.default.is_a?(AST::Literal) && field.default.value.nil?
+      return MIR::StructInit.new(field.type.zig_type(is_field: true), [])
+    end
+    return lower_field_default(T.must(field.default)) if field.default
+
+    type = field.type
+    if type.optional? && type.node_reference?
+      return MIR::StructInit.new(type.zig_type(is_field: true), [])
+    end
+    # A bare ArrayList has a comptime `.empty` value. Rc/Arc-wrapped lists do
+    # not: their wrapper requires allocator-backed construction at the
+    # struct-literal call site, and emitting `.empty` for the outer wrapper
+    # produces invalid Zig.
+    if type.list_collection? && !type.any_rc?
+      return MIR::ContainerInit.new(type.zig_type(is_field: true), :array_list_empty, nil, nil)
+    end
+
+    nil
+  end
+
+  # Allocator-backed collection literals cannot be Zig field defaults: their
+  # initialization needs the active CLEAR runtime allocator. They are lowered
+  # into each struct literal at its construction site instead.
+  sig { params(field: AST::StructField).returns(T::Boolean) }
+  def callsite_struct_field_default?(field)
+    field.default.is_a?(AST::HashLit) || field.default.is_a?(AST::ListLit)
+  end
+  private :callsite_struct_field_default?
+
+  sig { params(node: AST::StructDef).returns(MIR::Node) }
+  def lower_struct_def(node)
+    lowering_schemas.register_struct(node.name, Schemas::StructSchema.new(
+      fields: node.field_decls,
+      type_params: node.type_params.map(&:to_sym),
+    ))
+
+    if node.type_params.any?
+      # Generic struct: fn Name(comptime T: type) type { return struct { ... }; }
+      comptime_params = node.type_params.map { |p| "comptime #{p}: type" }
+      fields_mir = node.field_decls.map { |name, fd|
+        zig_t = transpile_type(fd.type, is_field: true)
+        default_mir = lower_struct_field_default(fd)
+        MIR::FieldDef.new(name.to_s, zig_t, default_mir)
+      }
+      metadata = [
+        MIR::PubConst.new("__clear_nominal_#{zig_safe_name(node.name)}", "true"),
+        MIR::PubConst.new("__clear_type_args", ".{ #{node.type_params.join(', ')} }"),
+      ]
+      metadata.concat(lower_struct_lifecycle_methods(node))
+      inner_struct = MIR::StructDef.new(nil, fields_mir, metadata, nil)
+      body = [MIR::ReturnStmt.new(inner_struct)]
+      MIR::FnDef.new(node.name, [], "type", body, nil, false, comptime_params)
+    else
+      fields = node.field_decls.map { |name, fd|
+        zig_t = transpile_type(fd.type, is_field: true)
+        default_mir = lower_struct_field_default(fd)
+        MIR::FieldDef.new(name.to_s, zig_t, default_mir)
+      }
+      lifecycle_methods = lower_struct_lifecycle_methods(node)
+      methods = lifecycle_methods.empty? ? nil : lifecycle_methods
+      MIR::StructDef.new(node.name, fields, methods, node.visibility)
+    end
+  end
+
+  sig { params(node: AST::StructDef).returns(T::Array[MIR::FnDef]) }
+  def lower_struct_lifecycle_methods(node)
+    self_ref = MIR::Ident.new("self")
+    alloc_ref = MIR::Ident.new("alloc")
+    drop_statements = T.let([], T::Array[MIR::Stmt])
+    clone_statements = T.let([
+      MIR::Let.new("result", self_ref, true, nil, nil, nil),
+    ], T::Array[MIR::Stmt])
+    clone_fields = T.let([], T::Array[String])
+    copy_forbidden = T.let(false, T::Boolean)
+
+    node.field_decls.each do |name, field|
+      next if field.borrowed
+
+      field_type = field.type
+      plan = lifecycle_registry.fetch(field_type)
+      field_ref = MIR::FieldGet.new(self_ref, name.to_s)
+      if plan.drop_strategy == :resource_close
+        drop_statements << MIR::ResourceClose.new(field_ref, T.must(plan.resource_close_plan))
+      elsif field_type.optional?
+        wrapped = T.must(field_type.wrapped_type)
+        wrapped_plan = lifecycle_registry.fetch(wrapped)
+        if wrapped_plan.drop_strategy == :resource_close
+          capture = "__close_#{zig_safe_name(name.to_s)}"
+          drop_statements << MIR::IfBindStmt.new(
+            [{ expr: field_ref, capture: capture, pointer_capture: true }],
+            [MIR::ResourceClose.new(MIR::Deref.new(MIR::Ident.new(capture)), T.must(wrapped_plan.resource_close_plan))],
+            nil,
+          )
+        elsif plan.needs_drop?
+          drop_statements << lifecycle_cleanup_statement(field_ref, field_type, alloc_ref)
+        end
+      elsif plan.needs_drop?
+        drop_statements << lifecycle_cleanup_statement(field_ref, field_type, alloc_ref)
+      end
+
+      if plan.copy_strategy == :forbidden
+        copy_forbidden = true
+      elsif plan.copy_strategy != :bit_copy
+        clone_fields << name.to_s
+        field_source = "self.#{zig_safe_name(name.to_s)}"
+        # The clone temp is a fresh identifier: a field name (always an
+        # identifier) prefixed with `__clone_` is never a Zig keyword, so it
+        # needs no `@"..."` quoting. Quoting it yields invalid Zig (`__clone_@"type"`).
+        tmp_name = "__clone_#{name}"
+        clone_statements << MIR::Let.new(
+          tmp_name,
+          MIR::Lit.new("try CheatLib.dupeValue(@TypeOf(#{field_source}), #{field_source}, alloc)"),
+          false,
+          nil,
+          nil,
+          nil,
+        )
+        clone_statements << MIR::ExprStmt.new(
+          MIR::Lit.new("errdefer CheatLib.cleanup(@TypeOf(#{tmp_name}), alloc, &#{tmp_name})"),
+          false,
+        )
+        clone_statements << MIR::Set.new(
+          MIR::FieldGet.new(MIR::Ident.new("result"), name.to_s),
+          MIR::Ident.new(tmp_name),
+          false,
+        )
+      end
+    end
+
+    methods = T.let([], T::Array[MIR::FnDef])
+    # Emitted even when no field owns anything. `__clear_drop` is the type's
+    # ownership contract, and cleanup consults it BEFORE falling back to
+    # representation-driven reflection -- which cannot tell an owned String from
+    # a `String@symbol`, a `@rodata` literal, or a borrow, since all four are
+    # []const u8, and frees the static behind the last three. A struct that owns
+    # nothing has to say so rather than say nothing.
+    drop_statements.unshift(MIR::Suppress.new("alloc"))
+    drop_statements.unshift(MIR::Suppress.new("self")) if drop_statements.length == 1
+    methods << MIR::FnDef.new(
+      "__clear_drop",
+      [MIR::Param.new("self", "*@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
+      "void",
+      drop_statements,
+      :pub,
+      false,
+      [],
+    )
+    # Drop and clone are ONE contract: the runtime reads drop-without-clone as
+    # "linear" and rejects the copy, so a copyable struct carries both.
+    unless copy_forbidden
+      # A struct with nothing to clone never writes to `result`, and Zig rejects
+      # a `var` that is never mutated.
+      clone_statements[0] = MIR::Let.new("result", self_ref, clone_fields.any?, nil, nil, nil)
+      clone_statements.unshift(MIR::Suppress.new("alloc"))
+      clone_statements << MIR::ReturnStmt.new(MIR::Ident.new("result"))
+      methods << MIR::FnDef.new(
+        "__clear_clone",
+        [MIR::Param.new("self", "@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
+        "@This()",
+        clone_statements,
+        :pub,
+        true,
+        [],
+      )
+    end
+    methods
+  end
+  private :lower_struct_lifecycle_methods
+
+  sig { params(field_ref: MIR::Expr, field_type: Type, alloc_ref: MIR::Expr).returns(MIR::Stmt) }
+  def lifecycle_cleanup_statement(field_ref, field_type, alloc_ref)
+    MIR::ExprStmt.new(
+      emit_builtin(:cleanup, [
+        MIR::Ident.new(transpile_type(field_type, is_field: true)),
+        alloc_ref,
+        MIR::AddressOf.new(field_ref),
+      ]),
+      false,
+    )
+  end
+  private :lifecycle_cleanup_statement
+
+  sig { params(node: AST::UnionDef).returns(LoweredMir) }
+  def lower_union_def(node)
+    lowering_schemas.register_union(node.name, Schemas::UnionSchema.new(variants: node.variants))
+    variant_facts = union_variant_lowering_facts(node)
+
+    # Emit helper structs for inline struct variants
+    helper_structs = variant_facts.filter_map { |fact| lower_inline_union_helper_struct(fact) }
+
+    # Build variant list
+    variants = variant_facts.map { |fact| MIR::UnionTypeVariant.new(name: fact.name, zig_type: fact.zig_type) }
+
+    if node.type_params.any?
+      # Generic union: fn Name(comptime T: type) type { return union(enum) { ... }; }
+      comptime_params = node.type_params.map { |p| "comptime #{p}: type" }
+      lifecycle_methods = lower_union_lifecycle_methods(node, variant_facts)
+      inner_union = MIR::UnionTypeDef.new(nil, variants, nil, lifecycle_methods.empty? ? nil : lifecycle_methods)
+      body = [MIR::ReturnStmt.new(inner_union)]
+      generic_fn = MIR::FnDef.new(node.name, [], "type", body, nil, false, comptime_params)
+      if helper_structs.any?
+        helper_structs + [generic_fn]
+      else
+        generic_fn
+      end
+    else
+      lifecycle_methods = lower_union_lifecycle_methods(node, variant_facts)
+      union_node = MIR::UnionTypeDef.new(node.name, variants, node.visibility, lifecycle_methods.empty? ? nil : lifecycle_methods)
+      if helper_structs.any?
+        helper_structs + [union_node]
+      else
+        union_node
+      end
+    end
+  end
+
+  sig { params(fact: UnionVariantLoweringFact).returns(T.nilable(MIR::StructDef)) }
+  def lower_inline_union_helper_struct(fact)
+    return unless fact.inline_struct
+
+    data = T.cast(fact.data, Schemas::InlineStructVariant)
+    fields = data.fields.map do |fname, ftype|
+      zig_t = transpile_type(T.unsafe(ftype), is_field: true)
+      MIR::FieldDef.new(fname.to_s, zig_t, nil)
+    end
+
+    alloc_ref = MIR::Ident.new("alloc")
+    self_ref = MIR::Ident.new("self")
+    deinit_entries = data.deinit_entries
+    deinit_stmts = deinit_entries.flat_map do |entry|
+      inline_union_deinit_statements(entry, self_ref, alloc_ref)
+    end
+
+    methods = T.let(nil, T.nilable(T::Array[MIR::FnDef]))
+    if deinit_stmts.any?
+      deinit_fn = MIR::FnDef.new(
+        "__clear_drop",
+        [MIR::Param.new("self", "*@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
+        "void",
+        deinit_stmts,
+        :pub
+      )
+
+      result_ref = MIR::Ident.new("result")
+      dupe_stmts = T.let([
+        MIR::Let.new("result", MIR::Ident.new("self"), true, nil, nil, nil)
+      ], T::Array[MIR::Stmt])
+
+      deinit_entries.each do |de|
+        tmp_name = "__dupe_#{de.field}"
+        field_source = "self.#{zig_safe_name(de.field.to_s)}"
+        dupe_stmts << MIR::Let.new(
+          tmp_name,
+          MIR::Lit.new("try CheatLib.dupeValue(@TypeOf(#{field_source}), #{field_source}, alloc)"),
+          false,
+          nil,
+          nil,
+          nil
+        )
+        dupe_stmts << MIR::ExprStmt.new(
+          MIR::Lit.new("errdefer CheatLib.cleanup(@TypeOf(#{tmp_name}), alloc, &#{tmp_name})"),
+          false
+        )
+        dupe_stmts << MIR::Set.new(
+          MIR::FieldGet.new(result_ref, de.field),
+          MIR::Ident.new(tmp_name),
+          false
+        )
+      end
+
+      dupe_stmts << MIR::ReturnStmt.new(result_ref)
+      dupe_fn = MIR::FnDef.new(
+        "__clear_clone",
+        [MIR::Param.new("self", "@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
+        "!@This()",
+        dupe_stmts,
+        :pub
+      )
+      methods = [deinit_fn, dupe_fn]
+    end
+
+    MIR::StructDef.new(fact.helper_name, fields, methods, nil)
+  end
+  private :lower_inline_union_helper_struct
+
+  sig do
+    params(
+      entry: Schemas::InlineStructDeinitEntry,
+      self_ref: MIR::Expr,
+      alloc_ref: MIR::Expr,
+    ).returns(T::Array[MIR::Stmt])
+  end
+  def inline_union_deinit_statements(entry, self_ref, alloc_ref)
+    self_field = MIR::FieldGet.new(self_ref, entry.field)
+    case entry.kind
+    when :indirect
+      [
+        MIR::ExprStmt.new(
+          emit_builtin(:cleanup, [MIR::Ident.new(T.must(entry.zig_type)), alloc_ref, self_field]),
+          false
+        ),
+        MIR::ExprStmt.new(MIR::DestroyPtr.new(self_field, alloc_ref), false),
+      ]
+    when :uniform
+      [
+        MIR::ExprStmt.new(
+          emit_builtin(:cleanup, [
+            MIR::Ident.new(T.must(entry.zig_type)),
+            alloc_ref,
+            MIR::AddressOf.new(self_field),
+          ]),
+          false
+        ),
+      ]
+    when :array
+      elem_zig = MIR::Ident.new(T.must(entry.elem_zig_type))
+      loop_body = [
+        MIR::ExprStmt.new(
+          emit_builtin(:cleanup, [elem_zig, alloc_ref, MIR::Ident.new("__e")]),
+          false
+        ),
+      ]
+      for_loop = MIR::ForStmt.new(self_field, "*__e", loop_body, nil, false, false)
+      cleanup_guard = MIR::IfStmt.new(
+        MIR::Comptime.new(emit_builtin(:needsCleanup, [elem_zig])),
+        [for_loop],
+        nil
+      )
+      len_guard = MIR::IfStmt.new(
+        MIR::BinOp.new(">", MIR::ListLength.new(self_field), MIR::Lit.new("0")),
+        [MIR::ExprStmt.new(MIR::FreeSlice.new(self_field, alloc_ref), false)],
+        nil
+      )
+      [cleanup_guard, len_guard]
+    else
+      []
+    end
+  end
+  private :inline_union_deinit_statements
+
+  sig { params(node: AST::UnionDef, facts: T::Array[UnionVariantLoweringFact]).returns(T::Array[MIR::FnDef]) }
+  def lower_union_lifecycle_methods(node, facts)
+    cleanup_arms = T.let([], T::Array[MIR::UnionMatchArm])
+    needs_cleanup = T.let(false, T::Boolean)
+    copy_forbidden = T.let(false, T::Boolean)
+    clone_arms = T.let([], T::Array[MIR::UnionMatchArm])
+
+    facts.each do |fact|
+      data = fact.data
+      if data.nil?
+        cleanup_arms << MIR::UnionMatchArm.new(variant: fact.name, payload: nil, body: [])
+        clone_arms << MIR::UnionMatchArm.new(
+          variant: fact.name,
+          payload: nil,
+          body: [MIR::ReturnStmt.new(
+            MIR::StructInit.new(nil, [{ name: fact.name, value: MIR::Lit.new("void{}") }]),
+          )],
+        )
+        next
+      end
+
+      payload = "__payload_#{zig_safe_name(fact.name)}"
+      body = T.let([], T::Array[MIR::Emittable])
+      copy_strategy = T.let(:bit_copy, Symbol)
+      if fact.inline_struct
+        inline = T.cast(data, Schemas::InlineStructVariant)
+        # `deinit_entries` covers a payload that closes a resource. It does not
+        # see a field that owns only through a capability -- an `@shared` field
+        # is an Arc whose refcount this drop has to release -- so the registry
+        # is what decides, exactly as it does for a non-inline variant.
+        drop_payload = T.let(inline.deinit_entries.any?, T::Boolean)
+        inline.fields.each_value do |field|
+          plan = lifecycle_registry.fetch(Type.from_input(field))
+          copy_forbidden ||= plan.copy_strategy == :forbidden
+          copy_strategy = :deep_clone if plan.copy_strategy != :bit_copy
+          drop_payload ||= plan.needs_drop?
+        end
+        if drop_payload
+          body << MIR::ExprStmt.new(
+            emit_builtin(:cleanup, [MIR::Ident.new(fact.zig_type), MIR::Ident.new("alloc"), MIR::Ident.new(payload)]),
+            false,
+          )
+        end
+      else
+        variant_type = Type.from_variant_input(data)
+        plan = lifecycle_registry.fetch(variant_type)
+        copy_forbidden ||= plan.copy_strategy == :forbidden
+        copy_strategy = plan.copy_strategy
+        if plan.drop_strategy == :resource_close
+          body << MIR::ResourceClose.new(MIR::Deref.new(MIR::Ident.new(payload)), T.must(plan.resource_close_plan))
+        elsif plan.needs_drop?
+          body << MIR::ExprStmt.new(
+            emit_builtin(:cleanup, [MIR::Ident.new(fact.zig_type), MIR::Ident.new("alloc"), MIR::Ident.new(payload)]),
+            false,
+          )
+        end
+      end
+
+      needs_cleanup ||= body.any?
+      # The arm captures by pointer: a by-value capture would put a full copy of
+      # every variant's payload on the frame, once per arm.
+      clone_payload = if copy_strategy == :bit_copy
+        "#{payload}.*"
+      else
+        "try CheatLib.dupeValue(@TypeOf(#{payload}.*), #{payload}.*, alloc)"
+      end
+      clone_arms << MIR::UnionMatchArm.new(
+        variant: fact.name,
+        payload: payload,
+        pointer_payload: true,
+        body: [MIR::ReturnStmt.new(
+          MIR::StructInit.new(nil, [{ name: fact.name, value: MIR::Lit.new(clone_payload) }]),
+        )],
+      )
+      cleanup_arms << MIR::UnionMatchArm.new(
+        variant: fact.name,
+        payload: payload,
+        pointer_payload: true,
+        body: body,
+      )
+    end
+
+    methods = T.let([], T::Array[MIR::FnDef])
+    # Emitted even when no variant owns anything. `__clear_drop` is the type's
+    # ownership contract, and cleanup consults it BEFORE falling back to
+    # representation-driven reflection -- which cannot tell an owned String
+    # from a `String@symbol` or a borrow, since all three are []const u8, and
+    # frees the rodata behind a symbol. A union that owns nothing has to say so.
+    statements = T.let([
+      MIR::Suppress.new("alloc"),
+      MIR::UnionMatchStmt.new(MIR::Deref.new(MIR::Ident.new("self")), cleanup_arms, nil),
+    ], T::Array[MIR::Stmt])
+    methods << MIR::FnDef.new(
+      "__clear_drop",
+      [MIR::Param.new("self", "*@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
+      "void",
+      statements,
+      :pub,
+      false,
+      [],
+    )
+    # Drop and clone are ONE contract: the runtime reads drop-without-clone as
+    # "linear" and rejects the copy. Now that drop is unconditional, a copyable
+    # union has to carry its clone too, whether or not a variant owns anything.
+    unless copy_forbidden
+      # A switch EXPRESSION gives every arm its own result temp. On a union with
+      # a hundred variants that is megabytes of frame -- enough to blow a 4 MB
+      # fiber stack in the prologue. Returning from each arm reuses the return
+      # slot instead.
+      methods << MIR::FnDef.new(
+        "__clear_clone",
+        [MIR::Param.new("self", "@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
+        "@This()",
+        # A union whose variants all bit-copy never touches the allocator.
+        [MIR::Suppress.new("alloc"), MIR::UnionMatchStmt.new(MIR::Ident.new("self"), clone_arms, nil)],
+        :pub,
+        true,
+        [],
+      )
+    end
+    methods
+  end
+  private :lower_union_lifecycle_methods
+
+  sig { params(node: AST::UnionDef).returns(T::Array[UnionVariantLoweringFact]) }
+  def union_variant_lowering_facts(node)
+    node.variants.map do |var_name, var_data|
+      inline_struct = Schemas.inline_struct?(var_data)
+      name = var_name.to_s
+      zig_type =
+        if var_data.nil?
+          "void"
+        elsif inline_struct
+          "#{node.name}_#{name}"
+        else
+          transpile_type(var_data, is_field: true)
+        end
+      UnionVariantLoweringFact.new(
+        owner_name: node.name.to_s,
+        name: name,
+        data: var_data,
+        inline_struct: inline_struct,
+        zig_type: zig_type,
+      )
+    end
+  end
+
+  # Module roots that resolve as Zig MODULES (not relative .zig files):
+  # - std, builtin: Zig stdlib
+  # - cheat_runtime: CLEAR runtime, wired via build.zig as a module
+  EXTERN_MODULE_ROOTS = T.let(%w[std builtin cheat_runtime].to_set.freeze, T::Set[String])
+
+  # Returns MIR::Node, not MIR::Cast: widening `CAST(sym AS String)` is a
+  # field read of the interned handle, and a noreturn value passes through
+  # unchanged.
+  sig { params(node: AST::Cast).returns(MIR::Node) }
+  def lower_cast(node)
+    inner = lower(node.value)
+    # A NoReturn value coerces to every type in Zig; `@as(T, @panic(...))` is
+    # unreachable code at the use site. `CAST(panic("...") AS T)` is how the
+    # translation spells an unreachable fallback.
+    return inner if Hoist.noreturn_value?(node.value)
+
+    narrowed = lower_union_payload_narrowing(inner, node)
+    return narrowed if narrowed
+
+    target_type = transpile_type(node.target)
+
+    # `CAST(sym AS String)` IS the widening from an interned handle to the
+    # bytes behind it -- not a coercion Zig can do, now that Symbol is its own
+    # type. Read the field instead of casting. The condition is the TYPE's,
+    # not the rendered Zig string's: semantic decisions in lowering come from
+    # Type stamps (INV-7 territory), and two types may render alike.
+    cast_target = Type.new(node.target)
+    if cast_target.byte_string? && !cast_target.optional?
+      widened = widen_symbol_to_bytes(inner, node.value)
+      return widened unless widened.equal?(inner)
+    end
+
+    # Int -> enum: emit `@enumFromInt(value)` instead of `@as(EnumT, value)`.
+    # Modern Zig rejects `@as(EnumT, intExpr)` (type coercion is enum-from-
+    # int, which is its own builtin). Detected by checking whether the
+    # target's underlying type matches a registered enum schema.
+    #
+    # Strip the optional `?` and error-union `!` prefixes from the resolved
+    # name before lookup so `CAST(x AS ?MyEnum)` and `CAST(x AS !MyEnum)`
+    # also route through the builtin -- otherwise the schema lookup misses
+    # and we emit `@as(?MyEnum, intExpr)` which Zig also rejects.
+    target_base = Type.new(node.target).value_payload_type.resolved
+    if enum_schemas.key?(target_base)
+      return MIR::Cast.new(inner, target_type, :enumFromInt)
+    end
+
+    MIR::Cast.new(inner, target_type, :as)
+  end
+
+  # ================================================================
+  # Concurrent / capability blocks
+  # ================================================================
+
+  # WITH-capture helpers. Group 1 (sync/ownership) on a binding can apply
+  # to either the whole binding (Identifier capture) or to a specific
+  # field of it (GetField capture, e.g. `WITH EXCLUSIVE env.vars AS v`).
+  # These helpers paper over the difference for the lowering loop.
+
+  # User-visible name of the bound entity — used for naming guard vars.
+  sig { params(node: AST::StaticCall).returns(MIR::Node) }
+  def lower_static_call(node)
+    inherent_call = node.inherent_call
+    return lower_func_call(inherent_call) if inherent_call
+
+    # Structural MIR::InlineBc when the matched stdlib_def opts in via
+    # bc:true. Both backends consume the same node: Zig emits via
+    # emit_inline_bc_as_zig (substituting {0}, {1}, ... from stdlib_def[:zig]),
+    # BC dispatches by op symbol in compile_inline_bc.
+    stdlib_def = FunctionSignature.unwrap(node.matched_stdlib_def)
+    raise "lower_static_call: missing stdlib signature for #{node.class.name}" unless stdlib_def
+
+    if stdlib_def.intrinsic_bc?
+      mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
+      return MIR::InlineBc.new(stdlib_def.intrinsic_bc_op_or(node.method_name.to_s.to_sym), mir_args, stdlib_def)
+    end
+
+    # Hoist any heap-allocating args to named Lets via hoist_alloc so the
+    # checker can verify their cleanup. Non-allocating args (and frame allocs)
+    # stay as MIR children of the registry call expression.
+    mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
+    MIR::RegistryCall.new(
+      entry: stdlib_def,
+      args: mir_args.map { |arg| MIR::RegistryCallArg.new(expr: arg) },
+      reason: "static_call",
+    )
+  end
+
+  sig { params(node: AST::OrElseExit).returns(MIR::ScopeBlock) }
+  def lower_or_else_exit(node)
+    facts = or_else_exit_facts(node, node.token.line)
+
+    # Register VM: structural sibling of the Zig backend sequence below.
+    # The bc emitter cannot parse Zig (CLAUDE.md), so carry the
+    # reassignment as one InlineBc with structured fields. The Zig
+    # backend path (target != :bc) is byte-for-byte unchanged.
+    if bc_target?
+      msg_mir = node.message ? lower(node.message) : nil
+      return MIR::ScopeBlock.new([
+        MIR::ExprStmt.new(or_else_exit_bc_reassign(facts, msg_mir), false),
+        MIR::ReturnStmt.new(MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
+      ])
+    end
+
+    msg_mir = node.message ? lower(node.message) : nil
+    or_else_exit_scope(facts, msg_mir, MIR::FieldGet.new(MIR::Ident.new("error"), "CheatError"))
+  end
+
+  # Test-framework MIR lowering (lower_test_block, lower_assert_raises,
+  # lower_stub_decl, lower_benchmark, lower_smash, lower_profile,
+  # stub_intercept_for, stub_local_idents, TEST_PREAMBLE) is mixed in
+  # from src/mir/test_lowering.rb (TestLowering module).
+
+  sig { params(node: AST::RequireNode).returns(LoweredMir) }
+  def lower_require(node)
+    # Stdlib packages auto-resolve to <repo>/stdlib/<name>/src/lib.clear
+    # and are inlined into single-binary builds (no separate .zig is
+    # produced for them). User-registered packages (--pkg name=...)
+    # keep the @import emission so an outer build.zig can orchestrate
+    # per-package compilation.
+    importer = program_state.importer
+    pkg_inline = node.kind == :package && importer && importer.stdlib_package?(node.path)
+
+    if node.kind == :package && !pkg_inline
+      # Only the OWNING package of a multi-file group is built, so both the
+      # import and the type aliases below must name it -- otherwise the same
+      # CLEAR type reaches Zig as two distinct types.
+      import_name = node.namespace || node.path
+      import_name = importer.owning_package_name(import_name) if importer && importer.respond_to?(:owning_package_name)
+      zig_import_name = zig_module_alias(import_name)
+      # The same package can be required by the root and by an inlined local
+      # module; both land in one Zig compilation unit, so emit each import
+      # alias once.
+      return [] unless program_state.emitted_require_modules.add?("pkg-import:#{import_name}")
+      items = T.let([MIR::Import.new(zig_import_name, "#{import_name}.zig", nil)], T::Array[MIR::Emittable])
+      # CLEAR source references imported package types unqualified, so alias
+      # each pub type to the imported module in the emitted Zig — the same
+      # contract EXTERN STRUCT already emits for foreign types.
+      pkg_mod = importer&.compile_package(node.path, caller_dir: T.must(program_state.source_dir))
+      # MATCH dispatch reads union_schemas to decide switch-with-payload vs a
+      # tag equality chain. Without the imported package's schemas an
+      # `Imported.Variant AS payload` arm silently lowered to `value ==
+      # Imported.Variant` and never bound the payload.
+      merge_module_schemas!(pkg_mod) if pkg_mod
+      record_module_const_init!(pkg_mod, zig_import_name)
+      pkg_scope = pkg_mod&.global_scope
+      if pkg_scope
+        alias_target = zig_import_name
+        pkg_scope.types.each do |type_name, type_entry|
+          vis = type_entry.schema.visibility || :package
+          next unless vis == :pub
+          next unless program_state.emitted_import_type_aliases.add?(type_name.to_s)
+          items << MIR::TypeAlias.new(type_name.to_s, "#{alias_target}.#{type_name}")
+        end
+      end
+      items
+    else
+      # Local require / stdlib package: compile the module and inline its
+      # structural MIR. Local uses compile_file (path); stdlib uses
+      # compile_package (name → resolved path).
+      raise "MIRLowering: REQUIRE \"#{node.path}\" but no importer available" unless importer
+
+      mod = if pkg_inline
+        importer.compile_package(node.path, caller_dir: T.must(program_state.source_dir))
+      else
+        importer.compile_file(node.path, caller_dir: T.must(program_state.source_dir))
+      end
+
+      # Merge schemas so downstream code can resolve imported types
+      merge_module_schemas!(T.must(mod))
+
+      # Propagate fn_sigs from imported functions. When `full_type` is
+      # not a FunctionSignature (some annotator paths leave it as a
+      # `Type`), reconstruct from the FunctionDef's own param list so
+      # call-site routing decisions that consult `callee_sig.params[idx]`
+      # (MUTABLE @list detection, takes/borrow, etc.) work for cross-file
+      # callees too. Without this, the lowering silently sees an empty
+      # param list and emits the wrong arg shape (e.g. `.items` instead
+      # of `&xs` for a MUTABLE @list parameter).
+      if T.must(mod).ast
+        T.must(mod).ast.statements.each do |stmt|
+          next unless stmt.is_a?(AST::FunctionDef)
+          next if stmt.name == Compiler::Entrypoint::NAME
+          fn_sigs[stmt.name] = FunctionSignature.from_function_def(stmt)
+        end
+        # The module's functions are re-lowered in this root context, so the
+        # signatures it imported (e.g. package functions) must be visible for
+        # needs_rt/can_fail classification of its call sites too.
+        module_scope = T.must(mod).global_scope
+        FunctionSignature.merge_imported_signatures!(fn_sigs, module_scope) if module_scope
+      end
+
+      # Emit visible type definitions at file scope, then imported functions in
+      # a structural namespace wrapper. The namespace body is imported MIR from
+      # ModuleImporter, not a pre-rendered Zig blob, so checker/emitter traversal
+      # still sees function bodies and nested imports.
+      same_dir = T.must(mod).source_dir == program_state.source_dir
+      dependency_items = imported_module_dependency_items(T.must(mod))
+      namespace_items = with_lifecycle_registry(T.must(mod).lifecycle_registry) do
+        imported_module_items(T.must(mod))
+      end
+
+      # VM target also needs the imported function bodies as MIR FnDefs so the
+      # bytecode emitter can lay out helpers and resolve namespaced calls
+      # (e.g. `require_helper.addPub`). Lower each public function from the
+      # module AST and tag its name with the importer namespace; the call-site
+      # lookup in bc_emitter treats `<ns>.<fn>` as a synonym for the bare name.
+      if bc_target?
+        helper_fns = imported_bc_helper_fns(T.must(mod), namespace_items)
+        return helper_fns if helper_fns.any?
+      end
+
+      module_key = T.must(mod).object_id
+      return [] unless program_state.emitted_require_modules.add?(module_key.to_s)
+
+      [
+        *dependency_items,
+        *imported_module_extern_items(T.must(mod)),
+        *visible_type_items(T.must(mod), same_dir: same_dir),
+        MIR::ModuleNamespace.new(zig_module_alias(node.namespace), namespace_items),
+      ]
+    end
+  end
+
+  # EXTERN declarations of an inlined module emit at file scope: hoisted
+  # visible type defs reference the extern aliases, and Zig resolves
+  # file-scope decls from nested namespaces, so one placement serves both.
+  sig { params(mod: ModuleImporter::CompiledModule).returns(T::Array[MIR::Emittable]) }
+  def imported_module_extern_items(mod)
+    return [] unless mod.ast
+
+    mod.ast.statements.filter_map do |stmt|
+      next nil unless stmt.is_a?(AST::ExternFnDecl) || stmt.is_a?(AST::ExternStructDecl)
+      lower(stmt)
+    end.flatten.select { |item| item.is_a?(MIR::Emittable) }
+  end
+
+  # A module's runtime-initialized consts sit in its own Zig file as
+  # `undefined` until its initializer runs. Remember the ones that have an
+  # initializer so the root can call it before anything reads them.
+  sig { params(mod: T.nilable(ModuleImporter::CompiledModule), alias_name: String).void }
+  def record_module_const_init!(mod, alias_name)
+    items = mod&.mir_items
+    return unless items
+    has_init = items.flatten.any? { |item| item.is_a?(MIR::FnDef) && item.name.to_s == CONST_INIT_FN }
+    program_state.module_const_inits << alias_name if has_init
+  end
+
+  sig { params(mod: ModuleImporter::CompiledModule).void }
+  def merge_module_schemas!(mod)
+    struct_schemas = mod.struct_schemas
+    enum_schemas = mod.enum_schemas
+    union_schemas = mod.union_schemas
+
+    lowering_schemas.merge!(
+      struct_schemas: struct_schemas,
+      enum_schemas: enum_schemas,
+      union_schemas: union_schemas,
+    )
+  end
+
+  sig { params(mod: ModuleImporter::CompiledModule, same_dir: T::Boolean).returns(T::Array[MIR::Emittable]) }
+  def visible_type_items(mod, same_dir: false)
+    items = mod.type_items
+    return [] unless items
+
+    visible_names = visible_imported_type_names(mod, same_dir: same_dir)
+    return [] if visible_names.empty?
+
+    items.filter_map do |item|
+      next nil unless item.is_a?(MIR::Emittable)
+      next nil unless item.is_a?(MIR::NamedEmittable)
+
+      item if visible_names.include?(item.name.to_s)
+    end
+  end
+
+  sig { params(mod: ModuleImporter::CompiledModule, same_dir: T::Boolean).returns(T::Set[String]) }
+  def visible_imported_type_names(mod, same_dir: false)
+    visible_names = Set.new
+    return visible_names unless mod.ast
+
+    mod.ast.statements.each do |stmt|
+      case stmt
+      when AST::StructDef, AST::EnumDef, AST::UnionDef
+        vis = stmt.visibility || :package
+        next if vis == :private
+        next unless (vis == :pub) || same_dir
+        name = stmt.name.to_s
+        next if program_state.emitted_types.include?(name)
+        visible_names.add(name)
+        program_state.emitted_types.add(name)
+        if stmt.is_a?(AST::UnionDef)
+          stmt.variants.each do |var_name, var_data|
+            next unless Schemas.inline_struct?(var_data)
+            syn = "#{stmt.name}_#{var_name}"
+            visible_names.add(syn)
+            program_state.emitted_types.add(syn)
+          end
+        end
+      end
+    end
+
+    visible_names
+  end
+
+  sig { params(mod: ModuleImporter::CompiledModule).returns(T::Array[MIR::Emittable]) }
+  def imported_module_items(mod)
+    if mod.ast
+      hidden_type_items = mod.ast.statements.filter_map do |stmt|
+        next nil unless hidden_imported_type_statement?(stmt, mod)
+        lower(stmt)
+      end
+
+      fn_items = mod.ast.statements.filter_map do |stmt|
+        next nil if stmt.is_a?(AST::FunctionDef) && stmt.name == Compiler::Entrypoint::NAME
+        next lower_function_def(stmt) if stmt.is_a?(AST::FunctionDef)
+        # EXTERN declarations hoist to file scope (imported_module_extern_items):
+        # visible type defs emitted there reference the extern aliases directly.
+        # Module-scope immutable bindings live inside the namespace wrapper so
+        # the module's functions can reference them unqualified.
+        next lower(stmt) if stmt.is_a?(AST::VarDecl) || stmt.is_a?(AST::BindExpr)
+
+        nil
+      end.flatten.select { |item| item.is_a?(MIR::Emittable) }
+
+      return [hidden_type_items, fn_items].flatten.select { |item| item.is_a?(MIR::Emittable) }
+    end
+
+    items = mod.mir_items
+    return items.select { |item| importable_module_item?(item) } if items.is_a?(Array)
+    []
+  end
+
+  sig { params(stmt: AST::Node, mod: ModuleImporter::CompiledModule).returns(T::Boolean) }
+  def hidden_imported_type_statement?(stmt, mod)
+    return false unless stmt.is_a?(AST::StructDef) || stmt.is_a?(AST::EnumDef) || stmt.is_a?(AST::UnionDef)
+
+    same_dir = mod.source_dir == program_state.source_dir
+    vis = stmt.visibility || :package
+    return false if vis == :pub
+    return false if vis == :package && same_dir
+
+    true
+  end
+  private :hidden_imported_type_statement?
+
+  sig { params(item: MIR::Node).returns(T::Boolean) }
+  def importable_module_item?(item)
+    return false if item.is_a?(MIR::FnDef) && item.name.to_s == Compiler::Entrypoint::NAME
+    # Dependencies are emitted once at file scope by
+    # imported_module_dependency_items. Keeping their namespace wrappers in
+    # the importing module body nests duplicate `const types = struct` (and
+    # similar) declarations, producing ambiguous Zig references in diamonds.
+    return false if item.is_a?(MIR::ModuleNamespace)
+
+    true
+  end
+  private :importable_module_item?
+
+  sig { params(mod: ModuleImporter::CompiledModule).returns(T::Array[MIR::Emittable]) }
+  def imported_module_dependency_items(mod)
+    return [] unless mod.ast
+
+    prev_source_dir = program_state.source_dir
+    program_state.source_dir = mod.source_dir
+    mod.ast.statements.filter_map do |stmt|
+      next nil unless stmt.is_a?(AST::RequireNode)
+      lower_require(stmt)
+    end.flatten.select { |item| item.is_a?(MIR::Emittable) }
+  ensure
+    program_state.source_dir = prev_source_dir
+  end
+
+  sig { params(mod: ModuleImporter::CompiledModule, items: T::Array[MIR::Emittable]).returns(T::Array[MIR::FnDef]) }
+  def imported_bc_helper_fns(mod, items)
+    items.filter_map do |item|
+      next nil unless item.is_a?(MIR::FnDef)
+      item
+    end
+  end
+
+  # ================================================================
+  # Helpers for concurrent blocks
+  # ================================================================
+
+  STACK_SIZE_ZIG_VARIANT = T.let({
+    nil       => "Standard",
+    :micro    => "Micro", :standard => "Standard", :large => "Large", :xl => "Xl",
+    "micro"   => "Micro", "standard" => "Standard", "large" => "Large", "xl" => "Xl",
+    :service  => "Huge",
+  }.freeze, T::Hash[T.untyped, T.untyped])
+
+  TIER_RANK = T.let({ "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze, T::Hash[T.untyped, T.untyped])
+
+  sig { params(stack_size: T.nilable(Symbol), computed_tier: T.nilable(Symbol)).returns(String) }
+  def task_config_variant(stack_size, computed_tier)
+    default = program_state.debug_mode ? "Large" : "Standard"
+    if stack_size
+      if stack_size == :stack
+        STACK_SIZE_ZIG_VARIANT.fetch(computed_tier || :standard, default)
+      else
+        STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default)
+      end
+    elsif computed_tier
+      computed = STACK_SIZE_ZIG_VARIANT.fetch(computed_tier, default)
+      TIER_RANK.fetch(computed, 0) >= TIER_RANK.fetch(default, 0) ? computed : default
+    else
+      default
+    end
+  end
+
+  sig { params(dispatch: BackgroundDispatch).returns(Integer) }
+  def profile_dispatch_id(dispatch)
+    case dispatch
+    when :parallel then 2
+    when :shared then 3
+    else 1
+    end
+  end
+
+  sig { params(site_id: Integer, line: Integer, col: Integer, dispatch: BackgroundDispatch, form: Symbol).returns(String) }
+  def bg_profile_site_comment(site_id, line, col, dispatch, form)
+    "// CLEAR_PROFILE_TASK_SITE id=#{site_id} kind=BG line=#{line} column=#{col} dispatch=#{dispatch} form=#{form}"
+  end
+
+  # ================================================================
+  # Expressions
+  # ================================================================
+
+  sig { params(subject: MIR::Ident, pat: AST::StructPattern).returns([T::Array[MIR::Node], T::Array[MIR::Let]]) }
+  def lower_struct_pattern(subject, pat)
+    conditions = T.let([], T::Array[MIR::Node])
+    bindings = T.let([], T::Array[MIR::Let])
+
+    pat.fields.each do |f|
+      next if f.wildcard?
+      if f.bind?
+        field_access = MIR::FieldGet.new(subject, f.name.to_s)
+        bindings << MIR::Let.new(f.name.to_s, field_access, false, nil, "_ = &#{f.name};")
+      else
+        val = T.cast(lower(T.must(f.expr)), MIR::Node)
+        field_access = MIR::FieldGet.new(subject, f.name.to_s)
+        conditions << MIR::BinOp.new("==", field_access, val)
+      end
+    end
+
+    [conditions, bindings]
+  end
+
+  sig { params(node: AST::FuncCall).returns(MIR::Call) }
+  def lower_macro_print(node)
+    formats = node.args.map { |arg| zig_format_for_type(arg.full_type!) }.join(" ")
+    args_mir = node.args.map { |a| hoist_alloc(widen_symbol_to_bytes(lower(a), a), a) }
+    format_lit = MIR::Lit.new("\"#{formats}\\n\"")
+    tuple = MIR::TupleLiteral.new(args_mir)
+    MIR::Call.new("std.debug.print", [format_lit, tuple], false, false, MIR::CallableContract.no_ownership(2))
+  end
+
+  sig { params(flux_type: Type).returns(String) }
+  def zig_format_for_type(flux_type)
+    return "{s}" if flux_type.string? ||
+      (flux_type.array? && flux_type.element_type&.byte?)
+    return "{d}" if flux_type.resolved == :Number || flux_type.resolved == :Int64 || flux_type.byte?
+    return "{}" if flux_type.resolved == :Bool || flux_type.resolved == :Boolean || flux_type.void?
+
+    "{any}"
+  end
+
+  sig { params(name: String).returns(T::Boolean) }
+  def callee_can_fail?(name)
+    return true if name.to_s.empty?
+    sig = fn_sig_for(name)
+    sig ? sig.can_fail != false : true
+  end
+
+  sig { params(nodes: AST::RawBody).returns(T::Set[String]) }
+  def collect_identifier_names(nodes)
+    names = Set.new
+    AST.each_locatable(nodes) do |node|
+      names.add(node.name) if node.is_a?(AST::Identifier)
+    end
+    names
+  end
+
+  # Emit a builtin operation from BUILTIN_OPS registry with structured MIR
+  # children and stdlib_def attached so the MIR checker can verify ownership.
+  sig { params(name: Symbol, args: T::Array[MIR::Emittable]).returns(T.any(MIR::InlineBc, MIR::RegistryCall)) }
+  def emit_builtin(name, args)
+    entry = FunctionSignature.unwrap(IntrinsicRegistry.lookup(BUILTIN_OPS, name))
+    raise "emit_builtin: unknown builtin :#{name}" unless entry
+    if bc_target? && entry.intrinsic_bc?
+      return MIR::InlineBc.new(entry.intrinsic_bc_op_or(name), args, entry)
+    end
+    MIR::RegistryCall.new(
+      entry: entry,
+      args: args.map { |arg| MIR::RegistryCallArg.new(expr: arg) },
+      reason: "builtin_#{name}",
+    )
+  end
+
+  sig { params(ast_node: AST::Node, type_info: Type).returns(T::Boolean) }
+  def direct_slice_backed_expr?(ast_node, type_info)
+    return true if type_info.fixed?
+    return true if ast_node.is_a?(AST::GetField)
+    ast_node.is_a?(AST::Identifier) ? current_function_param_name?(ast_node.name) : false
+  end
+
+  sig { params(target: MIR::Node, index: MIR::Node, ast_node: AST::Node, type_info: Type).returns(T.nilable(MIR::IndexGet)) }
+  def direct_index_get(target, index, ast_node, type_info)
+    ti = Type.new(type_info)
+    # @list types defer to their registry accessor (bounds-safe getAtOpt for
+    # reads). The runtime helper dispatches ArrayList vs slice via comptime
+    # @hasField, so we don't
+    # re-derive container shape from "is this a param?" here. Keep direct
+    # IndexGet only for true slice-backed exprs (string@raw, fixed slices).
+    return nil if ti.list_collection?
+    return nil unless direct_slice_backed_expr?(ast_node, ti)
+    cast_idx = MIR::Cast.new(index, "usize", :intCast)
+    MIR::IndexGet.new(target, cast_idx)
+  end
+
+  sig { params(node: T.any(AST::FuncCall, AST::MethodCall)).returns(T.nilable(MIR::Cast)) }
+  def lower_direct_length(node)
+    recv_ast = node.is_a?(AST::MethodCall) ? node.object : node.args.first
+    return nil unless recv_ast
+
+    recv_ti = Type.from_node!(recv_ast, context: "direct length")
+
+    ti = Type.new(recv_ti)
+    # Containers (list/array/slice) all defer to CheatLib.len, which dispatches
+    # ArrayList vs slice via comptime @hasField. Returning nil here falls back
+    # to the regular stdlib-registry path that emits CheatLib.len({0}). The
+    # runtime is the single source of truth for container shape — the lowering
+    # MUST NOT re-derive shape from "is this a param?" or similar shortcuts
+    # (TAKES @list params receive ArrayList; borrow @list params receive a
+    # slice via .items; the runtime helper handles both).
+    return nil if ti.direct_indexable_collection?
+
+    recv = rc_payload_value(T.cast(lower(recv_ast), MIR::Node), recv_ti)
+    recv = hoist_alloc(recv, recv_ast) if mir_allocates?(recv)
+    return nil unless ti.string?
+
+    # `.len` reads bytes; a Symbol receiver widens like any String position.
+    MIR::Cast.new(MIR::ListLength.new(widen_symbol_to_bytes(recv, recv_ast)), "i64", :intCast)
+  end
+
+  # Rc/Arc capability values expose ordinary methods and TAKES boundaries in
+  # terms of their managed payload, not the ref-counting handle.  Keep this
+  # projection structural so every caller (direct intrinsics, method calls and
+  # argument materialization) agrees on the same `ctrl.data` representation.
+  sig { params(value: MIR::Node, type_info: Type).returns(MIR::Node) }
+  def rc_payload_value(value, type_info)
+    return value unless type_info.any_rc?
+    # For `?T@shared` / `!?T@shared`, the ref-counted handle is inside the
+    # optional/error wrapper. Projecting `.ctrl.data` on the wrapper itself
+    # emits invalid Zig (`?*Arc(...).ctrl`). Consumers must first unwrap it.
+    return value if type_info.optional? || type_info.error_union?
+
+    MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(value, "ctrl"), "data"))
+  end
+
+  sig { params(node: MIR::Node).returns(T.nilable(String)) }
+  def emit_expr(node)
+    emitter = runtime_state.emitter!
+    emitter.rt_name = runtime_binding_name
+    emitter.emit(node)
+  end
+
+  # Strip try-wrapping from a MIR node so it can be used inside catch/orelse.
+  # Returns a new node without try, or the original node if not try-wrapped.
+  sig { params(left: MIR::Node, catch_body: MIR::Node, capture: T.nilable(String), fallback: T.nilable(T.any(AST::Node, MIR::Node))).returns(MIR::TryCatch) }
+  def try_catch_with_provenance(left, catch_body, capture, fallback: nil)
+    stripped = strip_try(left)
+    out = MIR::TryCatch.new(stripped, catch_body, capture)
+    if stripped.respond_to?(:result_type) && T.unsafe(stripped).result_type
+      out.result_type = Type.new(T.unsafe(stripped).result_type)
+    elsif fallback && fallback.respond_to?(:full_type!)
+      out.result_type = Type.new(T.unsafe(fallback).full_type!(context: "try-catch fallback result"))
+    end
+    out
+  end
+
+  sig { params(mir_node: MIR::Node).returns(MIR::Node) }
+  def strip_try(mir_node)
+    mir_node.respond_to?(:without_try) ? mir_node.without_try : mir_node
+  end
+
+  # Emit a list of MIR statements as Zig body text, adding semicolons
+  # to expression nodes used as statements. Mirrors MIREmitter#emit_body.
+  sig { params(mir_nodes: T::Array[MIR::Node], indent: String).returns(String) }
+  def emit_stmts_zig(mir_nodes, indent: "")
+    mir_nodes.filter_map { |s|
+      code = emit_expr(s)
+      next nil unless code
+      stripped = code.strip
+      if zig_statement_semicolon_required?(s, stripped)
+        "#{indent}#{code};"
+      else
+        "#{indent}#{code}"
+      end
+    }.join("\n")
+  end
+
+  sig { params(stmt: MIR::Node, stripped: String).returns(T::Boolean) }
+  def zig_statement_semicolon_required?(stmt, stripped)
+    stmt.expr? && !stripped.end_with?(";") &&
+      !stripped.end_with?("}") && !stripped.end_with?("{")
+  end
+
+  public
+
+  public :task_config_variant, :emit_expr, :emit_builtin,
+    :lower_head, :append_ownership_transfers_for_mir_body
+
+  sig { params(node: AST::Node, alloc: Symbol).returns(MIR::Node) }
+  def pipeline_lower_node_with_decl_alloc(node, alloc)
+    with_decl_alloc(alloc) do
+      T.cast(lower(node), MIR::Node)
+    end
+  end
+
+  sig do
+    params(
+      value: MIR::Node,
+      name: String,
+      fallback_alloc: Symbol,
+      type_info: T.nilable(Type),
+      ast_node: T.nilable(AST::Node),
+      context: String,
+      known_allocating: T::Boolean,
+      accept_owned_call: T::Boolean,
+      include_cleanup: T::Boolean,
+    ).returns(T.nilable(PipelineAllocMarkFact))
+  end
+  def pipeline_alloc_mark_fact(value, name, fallback_alloc:, type_info: nil, ast_node: nil,
+                               context: "pipeline allocation", known_allocating: false,
+                               accept_owned_call: false, include_cleanup: false)
+    owns_call_result = accept_owned_call && value.is_a?(MIR::Call) && value.owned_return?
+    effect = MIR::OwnershipEffect.of(value)
+    return nil unless known_allocating || mir_allocates?(value) || owns_call_result || effect.produces_owned
+
+    alloc = effect.alloc || mir_owned_alloc(value) || fallback_alloc
+    stamp_allocating_result_target!(value, name, alloc: alloc)
+    mark_type = type_info || mir_alloc_mark_type_info(value, ast_node, context: context)
+    mark = MIR::AllocMark.new(name, alloc, mark_type, MIR::Placement.alloc_scope(alloc))
+    PipelineAllocMarkFact.new(
+      alloc: alloc,
+      mark: mark,
+      cleanup_entry: include_cleanup ? hoist_cleanup_entry(value, ast_node) : nil,
+    )
+  end
+
+  sig { params(value: MIR::Node, ast_node: T.nilable(AST::Node)).returns(T.nilable(CleanupEntry)) }
+  def pipeline_owned_cleanup_entry(value, ast_node)
+    return nil unless mir_owned_alloc(value)
+
+    hoist_cleanup_entry(value, ast_node)
+  end
+
+  # Per-iteration frame rewind pair for a synthetic pipeline loop whose body
+  # allocates frame transients each iteration (a nested pipeline's apparatus,
+  # an owned composite field hoist). Same shape prepend_loop_mark emits for
+  # user loops; the pipeline loop needs it when its element lowering carries
+  # iteration-scoped frame AllocMarks (FRAME_OVERFLOW otherwise).
+  sig do
+    type_parameters(:U)
+      .params(alloc: Symbol, blk: T.proc.returns(T.type_parameter(:U)))
+      .returns(T.type_parameter(:U))
+  end
+  def pipeline_with_decl_alloc(alloc, &blk)
+    with_decl_alloc(alloc, &blk)
+  end
+
+  # Surface DEFER: the user body lowers as an ordinary statement list inside
+  # the existing MIR::DeferStmt — the same node every internal scope-exit
+  # mechanism (AFTER EACH, cleanups) already uses, so the checker and the
+  # emitter need nothing new.
+  sig { params(node: AST::DeferStmt).returns(MIR::DeferStmt) }
+  def lower_defer_stmt(node)
+    body = lower_body(node.body)
+    reject_fallible_defer_body!(node, body)
+    MIR::DeferStmt.new(body.length == 1 ? T.must(body.first) : MIR::ScopeBlock.new(body))
+  end
+
+  # Zig's rule, adopted verbatim: deferred code runs during scope teardown
+  # and has no error channel — `try` is not allowed inside a defer
+  # expression. A fallible or allocating statement in a DEFER body would
+  # emit exactly that, so reject it here with the CLEAR-level diagnostic
+  # instead of a Zig error pointing at generated code.
+  sig { params(node: AST::DeferStmt, body: T::Array[MIR::Emittable]).void }
+  def reject_fallible_defer_body!(node, body)
+    MIR.each_node(body) do |mir_node|
+      # Fallibility is the whole hazard: a defer has no error channel, so the
+      # emitted body may not contain `try`. Owning a value is a different
+      # question -- `list.pop()` moves an existing handle out and releases it
+      # with an infallible cleanup, which Zig runs happily inside a defer, and
+      # which is the only translation of Ruby's `ensure stack.pop`.
+      next unless defer_body_fallible?(mir_node)
+
+      offender = mir_node.class.name.to_s.split('::').last
+      offender += " '#{T.unsafe(mir_node).name}'" if mir_node.respond_to?(:name)
+      offender += " to '#{T.unsafe(mir_node).callee}'" if mir_node.respond_to?(:callee)
+      where = node.token.respond_to?(:line) ? " (DEFER at line #{node.token.line})" : ''
+      Kernel.raise CompilerError.new(node.token,
+        "DEFER body must be infallible: #{offender} is fallible#{where}. Deferred code runs " \
+        "during scope teardown, which has no error channel (Zig defer). Precompute fallible values " \
+        "before the DEFER and keep only plain assignments/infallible calls inside it.",
+        nil)
+    end
+  end
+
+  # A node emits `try` when it is an explicit TRY, carries the try_wrap stamp,
+  # or calls something whose declared return type is an error union.
+  sig { params(mir_node: MIR::Node).returns(T::Boolean) }
+  def defer_body_fallible?(mir_node)
+    return true if mir_node.is_a?(MIR::TryExpr)
+    return true if mir_node.respond_to?(:try_wrap) && T.unsafe(mir_node).try_wrap
+
+    raw = mir_node.respond_to?(:result_type) ? T.unsafe(mir_node).result_type : nil
+    raw ||= mir_node.respond_to?(:callable_contract) ? T.unsafe(mir_node).callable_contract&.signature&.return_type : nil
+    return false unless raw
+
+    Type.new(raw).error_union?
+  end
+
+  # A pipeline emits its own loops, so it has to answer the same question an
+  # AST loop answers: are this body's frame allocations scoped to one
+  # iteration? Without the stamp they keep Placement's default of :iteration
+  # and the checker reads a loop that never rewinds.
+  sig { params(stmts: T::Array[MIR::Emittable], scope: Symbol).void }
+  def pipeline_stamp_loop_scopes(stmts, scope)
+    stamp_loop_frame_alloc_scopes!(stmts, scope)
+  end
+
+  sig { returns(T::Array[MIR::Emittable]) }
+  def pipeline_iteration_loop_marks
+    rt = MIR::Ident.new(runtime_binding_name)
+    mark_var = "__loop_mark_#{lowering_counters.next_loop_mark_id}"
+    [
+      MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false, MIR::CallableContract.no_ownership(0)), false, nil, nil),
+      MIR::DeferStmt.new(MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false, MIR::CallableContract.no_ownership(1))),
+    ]
+  end
+
+  sig do
+    params(
+      insert: MIR::IndexInsert,
+      value: MIR::Node,
+      value_owns: T::Boolean,
+      target_alloc: Symbol,
+    ).returns(MIR::IndexInsert)
+  end
+  def pipeline_index_insert_with_ownership(insert, value, value_owns, target_alloc:)
+    return insert unless value_owns || mir_allocates?(value)
+
+    T.cast(with_ownership_consumption(
+      insert,
+      mir_ident_names(value),
+      "MIR::IndexInsert",
+      target_alloc: target_alloc,
+      require_visible: false,
+    ), MIR::IndexInsert)
+  end
+
+  # Temporarily installs a fiber capture map and rt alias, runs the block, then restores.
+  # Used by DoBlock, BgBlock, and PipelineHost (for concurrent pipeline operators).
+  #
+  # `capture_symbols` carries the LIVE
+  # SymbolEntry for each captured name so body-lowering passes that need
+  # current sync/storage (especially WITH EXCLUSIVE's Arc-vs-bare dispatch)
+  # read post-`propagate_caller_sync!` state, not the AST-snapshot state
+  # that var_node.symbol may carry. Without this,
+  # a `WITH EXCLUSIVE c` inside a CONCURRENT/BG/DO callback that captures
+  # c (received via REQUIRES LOCKED) emits the polymorphic `c.*` deref
+  # path instead of the direct `c.ctrl.data.*` Arc-unwrap, and the Zig
+  # compile fails with "cannot dereference non-pointer type Arc(...)".
+  # See transpile-tests/257_concurrent_capture_locked_param.clear.
+  sig do
+    type_parameters(:U)
+      .params(
+        new_entries: T::Hash[String, String],
+        capture_symbols: T::Hash[String, SymbolEntry],
+        rt_override: String,
+        blk: T.proc.returns(T.type_parameter(:U)),
+      )
+      .returns(T.type_parameter(:U))
+  end
+  def with_fiber_capture_map(new_entries, capture_symbols: {}, rt_override: "__rt", &blk)
+    prev_map = capture_state.do_capture_map || {}
+    prev_syms = capture_state.current_fiber_capture_symbols
+    prev_rt = runtime_binding_name
+    capture_state.do_capture_map = prev_map.merge(new_entries)
+    capture_state.current_fiber_capture_symbols = prev_syms.merge(capture_symbols)
+    runtime_state.rt_name = rt_override
+    result = blk.call
+    capture_state.do_capture_map = prev_map
+    capture_state.current_fiber_capture_symbols = prev_syms
+    runtime_state.rt_name = prev_rt
+    result
+  end
+
+  private
+
+  # Should we inject `rt.checkYield()` at the entry of this fn?
+  # Returns true for non-TIGHT recursive fns (plain :reentrant,
+  # :TAIL_CALL, :MAX_DEPTH(N) when N > BUDGET). Skipped for :THUNK
+  # (the trampoline body emits its own yield) and :NOT_LOGICAL
+  # (depth=1 by assertion -- yield is meaningless).
+  sig { params(node: AST::FunctionDef).returns(T::Boolean) }
+  def needs_recursion_yield?(node)
+    AST.recursion_yield_needed?(node)
+  end
+
+  # Strip pointer prefix from zig type - dupeUnionValue needs bare type (Value not *Value).
+  sig { params(ti: Type).returns(String) }
+  def bare_zig_type(ti)
+    t = transpile_type(ti)
+    t.start_with?("*") ? T.must(t[1..]) : t
+  end
+
+  sig { params(value: MIR::Node, ast_node: T.nilable(AST::Node), sink_alloc: Symbol, sink_type: T.nilable(Type::TypeInput)).returns(MIR::Node) }
+  def materialize_owned_sink_value(value, ast_node, sink_alloc, sink_type = nil)
+    return value unless ast_node
+    source_type = ast_node.is_a?(AST::CopyNode) ? copy_source_type_info(ast_node.value) : Type.from_node!(ast_node, context: "owned sink layout transport")
+    destination_type = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : source_type
+
+    # Layout transport is destination-driven and remains structural in MIR.
+    # A consumed direct value can be moved into a unique box without copying
+    # its payload. Conversely, consuming a unique box into a direct sink moves
+    # the payload out and destroys only the now-empty allocation shell.
+    layout_transport = ast_node.respond_to?(:layout_transport) ? T.unsafe(ast_node).layout_transport : nil
+    if layout_transport == :box && destination_type.indirect? && !source_type.indirect? &&
+        destination_type.resolved == source_type.resolved && !value.is_a?(MIR::HeapCreate)
+      return T.unsafe(with_ownership_consumption(
+        MIR::HeapCreate.new(transpile_type(source_type.resolved.to_s), value, sink_alloc, "box_move"),
+        mir_ident_names(value),
+        "MIR::HeapCreate(layout move)",
+        target_alloc: sink_alloc,
+      ))
+    end
+    if layout_transport == :unbox && source_type.indirect? && !destination_type.indirect? &&
+        destination_type.resolved == source_type.resolved
+      unboxed = MIR::Call.new(
+        "CheatLib.unboxMove",
+        [MIR::Ident.new(transpile_type(destination_type.resolved.to_s)), MIR::AllocatorRef.new(sink_alloc), value],
+        false,
+        false,
+        MIR::CallableContract.no_ownership(3),
+      )
+      return T.unsafe(with_ownership_consumption_for_value(
+        unboxed,
+        value,
+        ast_node,
+        "CheatLib.unboxMove",
+        target_alloc: sink_alloc,
+      ))
+    end
+    plan = owned_sink_plan(value, ast_node, sink_alloc, sink_type)
+    return value if plan.keep?
+
+    case plan.action
+    when :dupe_slice
+      MIR::DupeSlice.new(value, plan.target_alloc)
+    when :deep_copy
+      value = MIR::ItemsAccess.new(value, true) if plan.source_slice_view
+      MIR::DeepCopy.new(value, T.must(plan.zig_type), nil, T.must(plan.copy_mode), plan.target_alloc)
+    when :rc_retain
+      # A retain bumps the refcount of a handle that already exists. A freshly
+      # built value is not one yet, so it is CONSTRUCTED as a handle -- the
+      # same decision the declaration, struct-field and collection-element
+      # paths make. Retaining it emits `rcRetain(T, T{...})`, a Zig type error
+      # with no CLEAR diagnostic. The sink plan reads the DESTINATION; only the
+      # lowered source can say whether a handle exists yet.
+      if value.is_a?(MIR::StructInit)
+        value
+      else
+        MIR::RcRetain.new(value, T.must(plan.zig_type), T.must(plan.rc_func))
+      end
+    when :dupe_union
+      emit_builtin(:dupeUnionValue, [MIR::Ident.new(T.must(plan.zig_type)), value, MIR::AllocatorRef.new(plan.target_alloc)])
+    else
+      value
+    end
+  end
+
+  sig { params(value: MIR::Node, ast_node: AST::Node, sink_alloc: Symbol, sink_type: T.nilable(Type::TypeInput)).returns(OwnedSinkPlan) }
+  def owned_sink_plan(value, ast_node, sink_alloc, sink_type = nil)
+    ti = ast_node.is_a?(AST::CopyNode) ? copy_source_type_info(ast_node.value) : Type.from_node!(ast_node, context: "owned sink materialization")
+    dst_ti = sink_type ? (sink_type.is_a?(Type) ? sink_type : Type.new(sink_type)) : ti
+    lifecycle = lifecycle_registry.fetch(ti)
+    keep = OwnedSinkPlan.new(action: :keep, target_alloc: sink_alloc, zig_type: nil, copy_mode: nil)
+    # @node values are compact generation handles. The store owns the payload;
+    # copying a handle into a field or collection never copies that payload.
+    return keep if ti.node_reference?
+
+    source = owned_sink_source_fact(value, ast_node, sink_alloc, ti)
+
+    if lifecycle.copy_strategy == :bit_copy
+      return keep
+    end
+
+    if lifecycle.copy_strategy == :forbidden
+      return keep unless source.existing_owned_source
+      return keep if owned_sink_value?(value, ast_node) && !ast_node.is_a?(AST::CopyNode)
+      return keep if explicit_owned_sink_transfer?(ast_node, owned_sink_source_node(ast_node))
+      raise "annotation admitted an implicit copy of linear type #{lifecycle.type_key}"
+    end
+
+    # A destination that IS an Rc/Arc handle is filled by retaining, whatever
+    # the lifecycle plan of the surface type says: a structural copy of a
+    # handle fabricates an owner that was never counted.
+    handle_ti = dst_ti.optional? ? dst_ti.wrapped_type : dst_ti
+    if handle_ti&.any_rc? && !source.satisfies_rc_sink?
+      return OwnedSinkPlan.new(
+        action: :rc_retain,
+        target_alloc: sink_alloc,
+        zig_type: rc_payload_zig_type(handle_ti),
+        copy_mode: nil,
+        rc_func: handle_ti.shared? ? "arcRetain" : "rcRetain",
+      )
+    end
+
+    if lifecycle.copy_strategy == :deep_clone || lifecycle.copy_strategy == :generic
+      if source.borrowed_union_sink
+        return OwnedSinkPlan.new(
+          action: :dupe_union,
+          target_alloc: sink_alloc,
+          zig_type: bare_zig_type(ti),
+          copy_mode: nil,
+        )
+      end
+      return keep if source.satisfies_sink?(sink_alloc, ti)
+      return keep unless source.existing_owned_source
+      source_slice_view = T.let(!sink_type.nil? && ti.direct_indexable_collection? && !dst_ti.collection?, T::Boolean)
+      return OwnedSinkPlan.new(
+        action: ti.string? ? :dupe_slice : :deep_copy,
+        target_alloc: sink_alloc,
+        zig_type: ti.string? ? nil : dst_ti.zig_type(is_field: true),
+        copy_mode: ti.string? ? nil : :full_value,
+        source_slice_view: source_slice_view,
+      )
+    end
+
+    if lifecycle.copy_strategy == :retain
+      return keep if source.satisfies_rc_sink?
+      return OwnedSinkPlan.new(
+        action: :rc_retain,
+        target_alloc: sink_alloc,
+        zig_type: rc_payload_zig_type(ti),
+        copy_mode: nil,
+        rc_func: ti.shared? ? "arcRetain" : "rcRetain",
+      )
+    end
+
+    return keep unless source.borrowed_union_sink
+
+    OwnedSinkPlan.new(action: :dupe_union, target_alloc: sink_alloc, zig_type: bare_zig_type(ti), copy_mode: nil)
+  end
+
+  sig { params(value: MIR::Node, ast_node: AST::Node, _sink_alloc: Symbol, ti: Type).returns(OwnedSinkSourceFact) }
+  def owned_sink_source_fact(value, ast_node, _sink_alloc, ti)
+    source_node = owned_sink_source_node(ast_node)
+    entry = owned_sink_source_entry(source_node)
+    value_alloc = mir_owned_alloc(value) || placement_for_node(ast_node)
+
+    OwnedSinkSourceFact.new(
+      source_alloc: value_alloc,
+      moved_without_copy: explicit_owned_sink_transfer?(ast_node, source_node),
+      owned_parameter: owned_parameter_source_node?(source_node),
+      needs_heap_create: !!(ast_node.respond_to?(:needs_heap_create) && ast_node.needs_heap_create),
+      same_alloc_verifiable: entry.needs_cleanup?,
+      same_alloc_transfer_source: entry.present?,
+      transfer_without_local_cleanup: entry.present? && !entry.needs_cleanup?,
+      already_owned_value: owned_sink_value?(value, ast_node),
+      existing_owned_source: existing_owned_source_node?(source_node),
+      borrowed_union_sink: borrowed_union_sink_source?(ast_node, source_node, ti),
+    )
+  end
+
+  sig { params(ast_node: AST::Node).returns(AST::Node) }
+  def owned_sink_source_node(ast_node)
+    node = ast_node
+    node = node.value if node.is_a?(AST::MoveNode)
+    node
+  end
+
+  sig { params(ast_node: AST::Node, source_node: AST::Node).returns(T::Boolean) }
+  def explicit_owned_sink_transfer?(ast_node, source_node)
+    return false if ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::KeepNode)
+    return true if ast_node.is_a?(AST::MoveNode)
+    return false if borrowed_destination_node?(source_node)
+
+    owner_transfer_node?(source_node)
+  end
+
+  sig { params(source_node: AST::Node).returns(CleanupEntry) }
+  def owned_sink_source_entry(source_node)
+    return CleanupEntry::NONE unless source_node.is_a?(AST::Identifier)
+
+    function_state.bindings[source_node.name.to_s] || CleanupEntry::NONE
+  end
+
+  sig { params(source_node: AST::Node).returns(T::Boolean) }
+  def owned_parameter_source_node?(source_node)
+    return false unless source_node.is_a?(AST::Identifier)
+    symbol = source_node.symbol
+    !!(symbol&.is_param && symbol.takes)
+  end
+
+  sig { params(value: MIR::Node, ast_node: AST::Node).returns(T::Boolean) }
+  def owned_sink_value?(value, ast_node)
+    return owned_sink_value?(value.expr, ast_node) if value.is_a?(MIR::Cast)
+    return owned_sink_value?(value.expr, ast_node) if value.is_a?(MIR::TryExpr) || value.is_a?(MIR::TryOptional)
+    return true if ast_node.is_a?(AST::MoveNode) || ast_node.is_a?(AST::KeepNode)
+    if ast_node.is_a?(AST::CopyNode)
+      # COPY is also the explicit spelling for bit-copy values. Treating that
+      # passthrough as a newly owned value manufactures TransferMarks without
+      # an allocation source (notably for ?String@symbol fields).
+      copy_type = copy_source_type_info(ast_node.value)
+      return lifecycle_registry.fetch(copy_type).copy_strategy != :bit_copy
+    end
+    return true if mir_allocates?(value)
+    return true if value.is_a?(MIR::Call) && value.owned_return?
+    false
+  end
+
+  sig { params(source_node: AST::Node).returns(T::Boolean) }
+  def existing_owned_source_node?(source_node)
+    return false if unit_union_variant_constructor?(source_node)
+
+    source_node.is_a?(AST::Identifier) || source_node.is_a?(AST::GetField) ||
+      source_node.is_a?(AST::GetIndex) || source_node.is_a?(AST::OptionalUnwrap)
+  end
+
+  # `Value.Nil` is represented by the parser as a static GetField, but it is a
+  # fresh payload-free union value rather than a borrow from existing storage.
+  # Treating it as an owned source forces every sink to recursively dupe the
+  # whole union even though this variant has nothing to copy.
+  sig { params(source_node: AST::Node).returns(T::Boolean) }
+  def unit_union_variant_constructor?(source_node)
+    return false unless source_node.is_a?(AST::GetField)
+    target = source_node.target
+    return false unless target.is_a?(AST::Identifier)
+
+    schema = union_schemas[target.name.to_sym]
+    return false unless schema&.variants&.key?(source_node.field.to_s)
+
+    T.must(schema).variants[source_node.field.to_s].nil?
+  end
+
+  sig { params(ast_node: AST::Node, source_node: AST::Node, ti: Type).returns(T::Boolean) }
+  def borrowed_union_sink_source?(ast_node, source_node, ti)
+    return false if ast_node.is_a?(AST::MoveNode) || ast_node.is_a?(AST::CopyNode) || ast_node.is_a?(AST::KeepNode)
+    return false unless source_node.is_a?(AST::Identifier) || source_node.is_a?(AST::GetIndex)
+    root = AST.root_identifier(ast_node) rescue nil
+    borrowed = (root&.symbol&.borrow_provenance?) || AST.container_borrow?(ast_node)
+    return false unless borrowed
+    return false unless union_schemas.key?(ti.resolved)
+    return false if ti.respond_to?(:implicitly_copyable?) && ti.implicitly_copyable?(T.unsafe(mir_schema_lookup))
+    true
+  end
+
+  # Check if a value node is an Rc/Arc identifier that needs retain (not moved, not unwrapped)
+  sig { params(value_node: AST::Node).returns(T::Boolean) }
+  def rc_retain_needed?(value_node)
+    return false unless value_node.is_a?(AST::Identifier)
+    ti = Type.from_node!(value_node, context: "rc retain")
+    # The retain decision reads the SOURCE's declared model. A coercion to
+    # an @multiowned destination must not turn a plain payload into a
+    # handle - that edge deep-copies and wraps instead.
+    declared = value_node.symbol&.type
+    if declared.is_a?(Type) && !declared.any_rc? && ti.any_rc? &&
+        value_node.symbol&.rc_stored? != true
+      return false
+    end
+    return false unless ti.any_rc?
+    return false if ti.atomic_ptr?
+    rc_map = capability_state.rc_unwrap_map || {}
+    return false if rc_map.key?(value_node.name)
+    true
+  end
+
+  sig { params(value_node: AST::Identifier).returns(MIR::RcRetain) }
+  def make_rc_retain(value_node)
+    ti = Type.from_node!(value_node, context: "rc retain emit")
+    func = ti.shared? ? "arcRetain" : "rcRetain"
+    zig_base = rc_payload_zig_type(ti)
+    MIR::RcRetain.new(lower(value_node), zig_base, func)
+  end
+
+  # Lazy-create PipelineHost for complex pipeline operator dispatch.
+  sig { returns(PipelineHost) }
+  def pipeline_host
+    cached = program_state.pipeline_host
+    return cached if cached
+
+    program_state.pipeline_host = PipelineHost.new(
+      lowering: self,
+      emitter: runtime_state.emitter!
+    )
+    T.must(program_state.pipeline_host)
+  end
+
+  private :append_implicit_alloc_fact!,
+    :append_block_result_transfer!,
+    :append_lowered_statement_packet!,
+    :append_move_guard_for_transfer_mark!,
+    :append_ownership_facts_for_owned_result!,
+    :append_ownership_transfer_facts_for_contract!,
+    :append_transfer_marks!,
+    :apply_lowered_coercion,
+    :finalize_lowered_body_construction!,
+    :mark_ownership_finalized_node!,
+    :merge_body_mark_names!,
+    :owned_or_destination?,
+    :ownership_finalized_body?,
+    :record_ownership_finalization_node!
+  private :append_already_finalized_node!
+  private :append_lowered_items!
+  private :append_nested_ownership_transfers_for_mir_body
+  private :append_ownership_facts_for_mir_node!
+  private :append_ownership_facts_for_structural_node!
+  private :append_ownership_finalized_node!
+  private :append_ownership_store_facts_for_consumption!
+  private :append_ownership_transfer_facts_for_consumption!
+  private :append_ownership_transfer_targets_for_surface_node!
+  private :append_pending_packet_nodes!
+  private :append_transfer_marks_to_body!
+  private :borrowed_destination_node?
+  private :borrowed_string_destination?
+  private :borrowed_ownership_ast?
+  private :cast_wrapped_or?
+  private :cleanup_entry_moved_guard?
+  private :construct_lowered_body
+  private :current_function_collection_param?
+  private :current_function_protocol_map_allocator
+  private :current_function_heap_carry_return?
+  private :current_function_param_name?
+  private :destination_keep_plan
+  private :destination_placement_plan
+  private :destination_source_fact
+  private :destination_source_node
+  private :destination_type
+  private :discard_expr_stmt?
+  private :discard_owned_zig_type
+  private :emit_expr
+  private :ensure_lowered_node_id
+  private :escaping_value_alloc
+  private :finalize_nested_mir_bodies!
+  private :finalize_nested_mir_expr_bodies!
+  private :finalize_ownership_for_mir_node!
+  private :fn_sig_for
+  private :heap_indirect_destination?
+  private :heap_owned_result?
+  private :if_bind_ownership_fact_targets
+  private :implicit_alloc_mark_for_mir_node
+  private :implicit_allocating_result_fact
+  private :initial_ownership_finalization_context
+  private :lowered_stmt_packet
+  private :lowering_schemas
+  private :lowering_state
+  private :mark_ownership_finalized_body!
+  private :mark_ownership_finalized_nodes!
+  private :materialize_statement_discard
+  private :non_consuming_owned_value_expr?
+  private :or_binary?
+  private :owned_branch_result_value
+  private :owner_cleanup_for_transfer
+  private :owner_transfer_node?
+  private :ownership_consumed_name_operands
+  private :ownership_consumer_requires_fact?
+  private :ownership_consumption_for_node
+  private :ownership_contract_consumes
+  private :ownership_contract_consumes_unwrapped
+  private :ownership_contract_source_node
+  private :ownership_fact_dedupe_key
+  private :ownership_fact_source
+  private :ownership_fact_target_for_expr
+  private :ownership_fact_targets_for_node
+  private :ownership_facts_for_mir_surface
+  private :ownership_finalized_node?
+  private :ownership_operand_type
+  private :ownership_operands_for_sink_value
+  private :ownership_operands_for_value
+  private :ownership_owned_result_fact_relevant?
+  private :ownership_root_name
+  private :rodata_ownership_ast?
+  private :ownership_scanner
+  private :ownership_state
+  private :ownership_transfer_contract_relevant?
+  private :ownership_transfer_only_target
+  private :ownership_transfer_operands_for_node
+  private :ownership_transfers_for_stmt
+  private :place_discarded_owned_branch_value
+  private :place_or_branch_value_for_destination
+  private :program_state
+  private :record_ownership_finalization_surface_node!
+  private :retarget_ownership_operands
+  private :scan_ownership_surface!
+  private :scoped_owning_branch_value
+  private :seed_cleanup_owner_index!
+  private :stack_fixed_array_coercion?
+  private :stamp_source_line!
+  private :stdlib_call_ownership_facts
+  private :visible_owned_operand_value?
+  private :walk_ast_calls
+
+end

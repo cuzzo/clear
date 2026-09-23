@@ -1,0 +1,29 @@
+REQUIRE "pkg:fs"
+REQUIRE "pkg:path"
+REQUIRE "pkg:fnprobe_types"
+
+
+# --- stand-ins for what it calls ---
+FN fsmTransform__coerce_context_field(raw: FsmContextFieldRaw) RETURNS ![]ContextFieldDecl ->
+  MUTABLE rtoc_stub_v: []ContextFieldDecl = List[];
+  RETURN rtoc_stub_v;
+END
+FN castContextFieldListItemToRaw(value: ContextFieldListItem) RETURNS FsmContextFieldRaw ->
+  panic("stub");
+END
+
+# --- mir/fsm_transform.clear : fsmTransform__coerce_context_fields ---
+FN probe__fsmTransform__coerce_context_fields(raw: ?ContextFieldInput) RETURNS ![]ContextFieldDecl EFFECTS REENTRANT ->
+  IF raw EXISTS AS raw_value THEN
+    IF raw_value IS_A []ContextFieldListItem AS array THEN
+      RETURN array |> UNNEST TRY (fsmTransform__coerce_context_field(castContextFieldListItemToRaw(_)));
+    END
+    panic("FSM context fields must be MIR::ContextFieldDecl values, got {}");
+  ELSE
+    RETURN CAST(List[] AS []ContextFieldDecl);
+  END
+END
+
+FN main() RETURNS !Void ->
+  RETURN;
+END

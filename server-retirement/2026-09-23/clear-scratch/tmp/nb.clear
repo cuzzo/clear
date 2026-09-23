@@ -1,0 +1,18 @@
+FN pick(n: Int64) RETURNS ?String ->
+  IF n > 0 THEN
+    RETURN "v";
+  END
+  RETURN NIL;
+END
+
+FN by_predicate(n: Int64) RETURNS Int64 ->
+  v: ?String = pick(n);
+  IF v.nil?() THEN
+    RETURN 0;
+  END
+  RETURN v.length();
+END
+
+FN main() RETURNS Void ->
+  ASSERT by_predicate(1) == 1;
+END

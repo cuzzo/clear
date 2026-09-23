@@ -1,0 +1,24 @@
+FN twice(n: Int64) RETURNS !Int64 ->
+  IF n < 0 THEN
+    RAISE "neg";
+  END
+  RETURN n * 2;
+END
+
+FN big?(n: Int64) RETURNS !Bool ->
+  RETURN n > 2;
+END
+
+FN a_all(xs: []Int64) RETURNS !Bool -> RETURN xs |> ALL TRY (big?(_)); END
+FN b_any(xs: []Int64) RETURNS !Bool -> RETURN xs |> ANY TRY (big?(_)); END
+FN c_select(xs: []Int64) RETURNS ![]Int64 -> RETURN xs |> SELECT TRY (twice(_)); END
+FN d_where(xs: []Int64) RETURNS ![]Int64 -> RETURN xs |> WHERE TRY (big?(_)) |> SELECT COPY _; END
+FN e_find(xs: []Int64) RETURNS !?Int64 -> RETURN xs |> FIND TRY (big?(_)); END
+FN f_reduce(xs: []Int64) RETURNS !Int64 -> RETURN xs |> REDUCE(0) (acc + TRY (twice(_))); END
+FN g_map_all(m: {String}Int64) RETURNS !Bool -> RETURN m |> ALL TRY (big?(_._2)); END
+FN h_map_any(m: {String}Int64) RETURNS !Bool -> RETURN m |> ANY TRY (big?(_._2)); END
+FN i_unnest(xs: []Int64) RETURNS ![]Int64 -> RETURN xs |> UNNEST [TRY (twice(_))]; END
+
+FN main() RETURNS !Void ->
+  print("ok");
+END

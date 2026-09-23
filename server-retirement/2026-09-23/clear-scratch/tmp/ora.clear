@@ -1,0 +1,7 @@
+FN main() RETURNS Int64
+->
+  MUTABLE g: {String}[Set]String = {};
+  g["a"] = ["x"] |> DISTINCT _;
+  MUTABLE callees: [Set]String = (g["a"] OR_ELSE CAST(panic("missing hash key") AS [Set]String));
+  RETURN callees.length();
+END

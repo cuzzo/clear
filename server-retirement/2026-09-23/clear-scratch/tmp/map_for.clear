@@ -1,0 +1,6 @@
+FN main() RETURNS !Void ->
+  MUTABLE m: {String}Int64 = {"a": 1, "b": 2};
+  FOR pair IN m DO
+    print("${pair._1}=${pair._2.toString()}");
+  END
+END

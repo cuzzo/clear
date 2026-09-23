@@ -1,0 +1,11 @@
+FN pairs() RETURNS []Tuple<String, Int64> ->
+  RETURN [Tuple{"a", 1}, Tuple{"b", 2}];
+END
+FN main() RETURNS !Void ->
+  MUTABLE ps = pairs();
+  FOR p IN ps DO
+    MUTABLE k: String = COPY p._1;
+    MUTABLE v: Int64 = p._2;
+    print("${k}=${v.toString()}");
+  END
+END

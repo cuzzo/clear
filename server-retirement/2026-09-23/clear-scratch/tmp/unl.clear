@@ -1,0 +1,11 @@
+FN describe(paths: []String) RETURNS Int64
+->
+  MUTABLE total = 0;
+  FOR p IN paths DO
+    MUTABLE parts = [p] |> UNNEST (IF p == "x" THEN [COPY "wild"] ELSE [UNWRAP (p.split(".").first())] END);
+    total = total + parts.length();
+  END
+  RETURN total;
+END
+
+FN main() RETURNS Int64 -> RETURN describe(["a.b", "x"]); END

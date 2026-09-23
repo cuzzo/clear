@@ -1,0 +1,9 @@
+UNION KwValue { StringValue: String, Int64Value: Int64 }
+FN describe(a: {String@symbol}KwValue) RETURNS Void -> print("${a.length().toString()}"); END
+FN main() RETURNS Int64
+->
+  MUTABLE kw: {String@symbol}KwValue = {};
+  kw[:kind] = KwValue{ StringValue: COPY "set" };
+  MUTABLE m2: {String@symbol}KwValue = {:kind: (kw[:kind] OR_ELSE KwValue{ StringValue: COPY "" })}; describe(m2);
+  RETURN 0;
+END

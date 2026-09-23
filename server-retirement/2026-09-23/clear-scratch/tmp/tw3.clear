@@ -1,0 +1,8 @@
+FN main() RETURNS Int64
+->
+  m: {String@symbol}Any@multiowned = {};
+  default: String@symbol = COPY CAST(m[:k] AS String@symbol);
+  alts: []String@symbol = List[];
+  ranked = ([default] + alts);
+  RETURN ranked.length();
+END

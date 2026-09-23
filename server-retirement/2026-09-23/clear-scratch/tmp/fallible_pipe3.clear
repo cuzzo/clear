@@ -1,0 +1,27 @@
+UNION Node { Leaf: Int64, Branch: []Node@boxed }
+
+FN all_positive?(node: ?Node) RETURNS !Bool
+  EFFECTS REENTRANT
+->
+  IF node EXISTS AS value THEN
+    IF value IS_A Leaf AS n THEN
+      IF n < 0 THEN
+        RAISE "negative";
+      END
+      RETURN n > 0;
+    END
+    IF value IS_A Branch AS kids THEN
+      RETURN kids |> ALL TRY (all_positive?(_));
+    END
+  END
+  RETURN TRUE;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE ok: Bool = TRY (all_positive?(Node{ Leaf: 3 }));
+  IF ok THEN
+    print("positive");
+  ELSE
+    print("no");
+  END
+END

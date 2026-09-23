@@ -1,0 +1,11 @@
+FN pick(n: Int64) RETURNS ?String ->
+  IF n > 0 THEN
+    RETURN "v";
+  END
+  RETURN NIL;
+END
+
+FN main() RETURNS Void ->
+  v: ?String = pick(1);
+  ASSERT v != NIL;
+END

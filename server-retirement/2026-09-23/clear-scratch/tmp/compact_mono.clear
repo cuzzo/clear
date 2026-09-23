@@ -1,0 +1,20 @@
+FN compact_str(items: []?String) RETURNS []String ->
+  MUTABLE out: []String = List[];
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    IF items[i] EXISTS AS value THEN
+      &out.append(COPY value);
+    END
+    i = i + 1;
+  END
+  RETURN out;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE opts: []?String = List[];
+  MUTABLE a: ?String = "x";
+  MUTABLE b: ?String = NIL;
+  &opts.append(COPY a);
+  &opts.append(COPY b);
+  print(compact_str(opts).length().toString());
+END

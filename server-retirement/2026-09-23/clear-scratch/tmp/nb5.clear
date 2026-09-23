@@ -1,0 +1,12 @@
+FN pick(n: Int64) RETURNS ?String ->
+  IF n > 0 THEN
+    MUTABLE s = "v${n.toString()}";
+    RETURN s;
+  END
+  RETURN NIL;
+END
+
+FN main() RETURNS Void ->
+  v: ?String = pick(1);
+  ASSERT v != NIL;
+END

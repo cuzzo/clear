@@ -1,0 +1,13 @@
+STRUCT Sink { text: String }
+
+FN build() RETURNS !String ->
+  MUTABLE parts: []String = ["a", "b"];
+  MUTABLE joined: String = parts.join("-");
+  RETURN joined;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE s: Sink = Sink{ text: COPY "" };
+  s.text = TRY (build());
+  ASSERT s.text == "a-b";
+END

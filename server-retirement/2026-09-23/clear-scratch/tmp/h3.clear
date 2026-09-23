@@ -1,0 +1,11 @@
+UNION KwValue { StringValue: String, Int64Value: Int64 }
+FN takes_map(a: {String@symbol}Any) RETURNS Void ->
+  print("${a.length().toString()}");
+END
+FN main() RETURNS Int64
+->
+  MUTABLE kw: {String@symbol}KwValue = {};
+  kw[:type] = KwValue{ StringValue: COPY "x" };
+  MUTABLE t = (kw[:type] OR_ELSE KwValue{ StringValue: COPY "" }); takes_map(CAST({:type: t} AS {String@symbol}Any));
+  RETURN 0;
+END

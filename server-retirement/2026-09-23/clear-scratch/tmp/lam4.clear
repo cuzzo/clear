@@ -1,0 +1,8 @@
+STRUCT D { name: String }
+FN run(b: FN() -> ?[]D) RETURNS Int64 -> RETURN 1; END
+FN main() RETURNS Int64
+->
+  MUTABLE drops: ?[]D = NIL;
+  MUTABLE one: FN() -> ?[]D = %() USE(drops) -> drops;
+  RETURN run(one);
+END

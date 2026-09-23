@@ -1,0 +1,13 @@
+STRUCT D { name: String }
+
+FN run(branches: []FN() -> ?[]D) RETURNS Int64 ->
+  RETURN branches.length();
+END
+
+FN main() RETURNS Int64
+->
+  MUTABLE drops: ?[]D = NIL;
+  RETURN run([(%() USE(drops) -> {
+    drops
+  })]);
+END

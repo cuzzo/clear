@@ -1,0 +1,4 @@
+FN maybe(n: Int64) RETURNS !?String -> IF n > 1 THEN RETURN "y"; END RETURN NIL; END
+FN a(xs: []Int64) RETURNS ![]String -> RETURN xs |> SELECT:? TRY (maybe(_)) |> WHERE _ != NIL |> SELECT COPY UNWRAP _; END
+FN b(xs: []Int64) RETURNS ![]?String -> RETURN xs |> SELECT:? TRY (maybe(_)) |> WHERE _ != NIL; END
+FN main() RETURNS !Void -> print("ok"); END

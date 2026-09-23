@@ -1,0 +1,10 @@
+UNION KV { Int64Value: Int64, StringValue: String }
+
+FN main() RETURNS Int64
+->
+  MUTABLE m: {String@symbol}?KV = {};
+  MUTABLE dline: Int64 = 7;
+  m[:line] = KV{ Int64Value: dline };
+  print("${dline.toString()}");
+  RETURN 0;
+END

@@ -1,0 +1,7 @@
+FN main() RETURNS Int64
+->
+  default: String@symbol = :abc;
+  alts: []String@symbol = List[];
+  ranked: []String@symbol = [default];
+  RETURN ranked.length();
+END

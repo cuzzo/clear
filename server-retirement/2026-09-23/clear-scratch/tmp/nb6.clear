@@ -1,0 +1,8 @@
+FN pick(n: Int64) RETURNS String ->
+  RETURN "v";
+END
+
+FN main() RETURNS Void ->
+  v: String = pick(1);
+  ASSERT v.length() == 1;
+END

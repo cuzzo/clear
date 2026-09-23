@@ -1,0 +1,10 @@
+STRUCT P { name: String }
+
+FN big?(n: Int64) RETURNS !Bool -> RETURN n > 2; END
+FN maybe(n: Int64) RETURNS !?String -> IF n > 1 THEN RETURN "y"; END RETURN NIL; END
+
+FN a_distinct(xs: []Int64) RETURNS []Int64 -> RETURN xs |> DISTINCT _ |> SELECT COPY _; END
+FN b_selectq(xs: []Int64) RETURNS ![]?String -> RETURN xs |> SELECT:? TRY (maybe(_)); END
+FN d_unnest(xs: []Int64) RETURNS ![]Int64 -> RETURN xs |> WHERE TRY (big?(_)) |> SELECT COPY _; END
+FN e_reduce_set(xs: [][Set]String) RETURNS [Set]String -> RETURN xs |> REDUCE(Set[]) { MUTABLE acc2 = COPY acc; FOR s IN _ DO &acc2.insert(COPY s); END acc2 }; END
+FN main() RETURNS !Void -> print("ok"); END

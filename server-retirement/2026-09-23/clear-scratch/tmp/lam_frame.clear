@@ -1,0 +1,14 @@
+FN with_text(blk: FN() -> !String) RETURNS !String ->
+  RETURN TRY (blk());
+END
+
+FN render(parts: []String) RETURNS !String ->
+  RETURN TRY (with_text(%() USE(parts) -> {
+    MUTABLE joined: String = parts.join("\n");
+    joined
+  }));
+END
+
+FN main() RETURNS !Void ->
+  print(TRY (render(["a", "b"])));
+END

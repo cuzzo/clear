@@ -1,0 +1,6 @@
+FN main() RETURNS Void ->
+  MUTABLE a: ?String = NIL;
+  IF a == NIL THEN
+    print("nil");
+  END
+END

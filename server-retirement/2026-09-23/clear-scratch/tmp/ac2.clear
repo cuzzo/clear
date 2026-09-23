@@ -1,0 +1,22 @@
+UNION VV { SymbolValue: String@symbol, StringValue: String }
+
+FN pick(m: ?{String@symbol}?VV, k: String@symbol) RETURNS Int64
+->
+  MUTABLE var_data: ?VV = NIL;
+  IF (m OR_ELSE {})[k] EXISTS AS v THEN
+    var_data = COPY v;
+  END
+  IF var_data EXISTS AS d THEN
+    IF d IS_A StringValue AS s THEN
+      RETURN s.codepointCount();
+    END
+  END
+  RETURN 0;
+END
+
+FN main() RETURNS Int64
+->
+  MUTABLE m: {String@symbol}?VV = {};
+  m[:a] = VV{ StringValue: COPY "xy" };
+  RETURN pick(m, :a);
+END

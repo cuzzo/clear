@@ -1,0 +1,14 @@
+FN maybe(n: Int64) RETURNS ?String ->
+  IF n > 1 THEN
+    RETURN "y";
+  END
+  RETURN NIL;
+END
+
+FN names(xs: []Int64) RETURNS []String ->
+  RETURN (xs |> SELECT:? maybe(_)).compact();
+END
+
+FN main() RETURNS !Void ->
+  print(names([1, 2, 3]).length().toString());
+END

@@ -1,0 +1,10 @@
+FN main() RETURNS Int64
+->
+  MUTABLE m: {String@symbol}Any@multiowned = {};
+  m[:k] = CAST(1 AS Any@multiowned);
+  MUTABLE entry: ?{String@symbol}Any@multiowned = COPY m;
+  MUTABLE default: String@symbol = COPY CAST(entry[:k] AS String@symbol);
+  MUTABLE alts: []String@symbol = List[];
+  MUTABLE ranked = ([default] + alts);
+  RETURN ranked.length();
+END

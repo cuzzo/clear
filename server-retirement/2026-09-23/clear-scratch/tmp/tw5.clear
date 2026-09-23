@@ -1,0 +1,6 @@
+FN main() RETURNS Int64
+->
+  d: String@symbol = :abc;
+  ranked = [d];
+  RETURN ranked.length();
+END

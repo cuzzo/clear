@@ -1,0 +1,41 @@
+FN find_index<T>(items: []T, predicate: FN(T) -> Bool) RETURNS !?Int64 ->
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    IF items[i] EXISTS AS item THEN
+      IF predicate(item) THEN
+        RETURN i;
+      END
+    END
+    i = i + 1;
+  END
+  RETURN NIL;
+END
+
+FN compact<T>(items: []?T) RETURNS []T ->
+  MUTABLE out: []T = List[];
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    IF items[i] EXISTS AS value THEN
+      &out.append(COPY value);
+    END
+    i = i + 1;
+  END
+  RETURN out;
+END
+
+STRUCT P { name: String }
+
+FN main() RETURNS !Void ->
+  MUTABLE ps: []P = [P{ name: "a" }, P{ name: "b" }];
+  MUTABLE idx: ?Int64 = TRY (find_index(ps, %(p: P) -> p.name == "b"));
+  print((idx OR_ELSE -1).toString());
+  MUTABLE opts: []?String = List[];
+  MUTABLE first: ?String = "x";
+  MUTABLE none: ?String = NIL;
+  MUTABLE last: ?String = "y";
+  &opts.append(COPY first);
+  &opts.append(COPY none);
+  &opts.append(COPY last);
+  MUTABLE got: []String = compact(opts);
+  print(got.length().toString());
+END

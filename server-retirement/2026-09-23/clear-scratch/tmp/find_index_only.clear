@@ -1,0 +1,20 @@
+FN find_index<T>(items: []T, predicate: FN(T) -> Bool) RETURNS !?Int64 ->
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    IF items[i] EXISTS AS item THEN
+      IF predicate(item) THEN
+        RETURN i;
+      END
+    END
+    i = i + 1;
+  END
+  RETURN NIL;
+END
+
+STRUCT P { name: String }
+
+FN main() RETURNS !Void ->
+  MUTABLE ps: []P = [P{ name: "a" }, P{ name: "b" }];
+  MUTABLE idx: ?Int64 = TRY (find_index(ps, %(p: P) -> p.name == "b"));
+  print((idx OR_ELSE -1).toString());
+END

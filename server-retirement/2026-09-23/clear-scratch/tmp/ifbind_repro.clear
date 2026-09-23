@@ -1,0 +1,27 @@
+STRUCT Holder {
+  label: String
+}
+
+FN find_holder(items: []Holder@multiowned, name: String) RETURNS !?Holder@multiowned ->
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    IF (items[i])?.label == name THEN
+      RETURN KEEP (items[i])?;
+    END
+    i = i + 1;
+  END
+  RETURN NIL;
+END
+
+FN describe(items: []Holder@multiowned, name: String) RETURNS !String ->
+  IF TRY (find_holder(items, name)) EXISTS AS found THEN
+    RETURN COPY found.label;
+  END
+  RETURN "none";
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE items: []Holder@multiowned = [Holder{ label: "abc" }, Holder{ label: "xyz" }];
+  print(TRY (describe(items, "xyz")));
+  print(TRY (describe(items, "nope")));
+END

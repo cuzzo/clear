@@ -1,0 +1,12 @@
+FN run(blk: FN() -> !String) RETURNS !String ->
+  RETURN TRY (blk());
+END
+
+FN build() RETURNS !String ->
+  RETURN "lit";
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE t: String = TRY (run(%() -> TRY (build())));
+  ASSERT t == "lit";
+END

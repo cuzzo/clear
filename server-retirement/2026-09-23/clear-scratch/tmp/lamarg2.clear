@@ -1,0 +1,16 @@
+STRUCT Sink { text: String }
+
+FN sink__take(MUTABLE self: Sink, blk: FN() -> !String) RETURNS !Void ->
+  self.text = TRY (blk());
+  RETURN;
+END
+
+FN build() RETURNS !String ->
+  RETURN "lit";
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE s: Sink = Sink{ text: COPY "" };
+  TRY (sink__take(&s, %() -> TRY (build())));
+  ASSERT s.text == "lit";
+END

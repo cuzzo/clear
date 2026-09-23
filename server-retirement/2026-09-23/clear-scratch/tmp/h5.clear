@@ -1,0 +1,10 @@
+UNION KwValue { StringValue: String, Int64Value: Int64 }
+FN takes_any(a: {String@symbol}Any) RETURNS Void -> print("${a.length().toString()}"); END
+FN main() RETURNS Int64
+->
+  MUTABLE kw: {String@symbol}KwValue = {};
+  fallback = KwValue{ StringValue: COPY "" };
+  kw[:type] = KwValue{ StringValue: COPY "x" };
+  takes_any(CAST({:type: (kw[:type] OR_ELSE KwValue{ StringValue: COPY "" })} AS {String@symbol}Any));
+  RETURN 0;
+END

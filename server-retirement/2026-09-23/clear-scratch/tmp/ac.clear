@@ -1,0 +1,14 @@
+FN pick(m: ?{String@symbol}String, k: String@symbol) RETURNS Int64
+->
+  IF (m OR_ELSE {})[k] EXISTS AS v THEN
+    RETURN v.codepointCount();
+  END
+  RETURN 0;
+END
+
+FN main() RETURNS Int64
+->
+  MUTABLE m: {String@symbol}String = {};
+  m[:a] = COPY "xy";
+  RETURN pick(m, :a);
+END

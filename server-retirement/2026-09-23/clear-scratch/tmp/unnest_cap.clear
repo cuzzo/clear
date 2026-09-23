@@ -1,0 +1,17 @@
+STRUCT Item { name: String }
+
+FN kids(n: Int64) RETURNS []Item@multiowned ->
+  MUTABLE out: []Item@multiowned = List[];
+  MUTABLE one: Item@multiowned = Item{ name: "x" };
+  &out.append(one);
+  RETURN out;
+END
+
+FN all_kids(xs: []Int64) RETURNS []Item@multiowned ->
+  RETURN xs |> UNNEST kids(_);
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE r = all_kids([1, 2]);
+  print(r.length().toString());
+END

@@ -1,0 +1,17 @@
+FN pick(flag: Bool) RETURNS ?String@symbol
+->
+  IF flag THEN
+    RETURN :alpha;
+  END
+  RETURN NIL;
+END
+
+FN main() RETURNS Int64
+->
+  MUTABLE a: ?String@symbol = pick(TRUE);
+  MUTABLE b: ?String@symbol = pick(FALSE);
+  IF (a == b) THEN
+    RETURN 1;
+  END
+  RETURN 0;
+END

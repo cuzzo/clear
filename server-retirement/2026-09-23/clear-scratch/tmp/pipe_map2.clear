@@ -1,0 +1,2 @@
+FN a(m: {String}Int64) RETURNS Void -> m |> EACH print(_); END
+FN main() RETURNS !Void -> print("ok"); END

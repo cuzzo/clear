@@ -1,0 +1,34 @@
+FN pick(n: Int64) RETURNS ?String ->
+  IF n > 0 THEN
+    RETURN "v";
+  END
+  RETURN NIL;
+END
+
+FN a_eq(n: Int64) RETURNS Int64 ->
+  v: ?String = pick(n);
+  IF v == NIL THEN
+    RETURN 0;
+  END
+  RETURN v.length();
+END
+
+FN b_nilq(n: Int64) RETURNS Int64 ->
+  v: ?String = pick(n);
+  IF v.nil?() THEN
+    RETURN 0;
+  END
+  RETURN v.length();
+END
+
+FN c_bang(n: Int64) RETURNS Int64 ->
+  v: ?String = pick(n);
+  IF ! (v) THEN
+    RETURN 0;
+  END
+  RETURN v.length();
+END
+
+FN main() RETURNS !Void ->
+  print("${a_eq(1).toString()}");
+END

@@ -1,0 +1,10 @@
+STRUCT Stat { count: Int64 }
+
+FN main() RETURNS Int64
+->
+  MUTABLE agg: {String@symbol}Stat = {};
+  agg[:a] = Stat{ count: 3 };
+  MUTABLE kept = agg |> WHERE (_.count == 3);
+  print("${kept.length()}");
+  RETURN 0;
+END

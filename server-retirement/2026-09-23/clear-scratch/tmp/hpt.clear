@@ -1,0 +1,11 @@
+FN takes_str(a: String) RETURNS Void ->
+  print(a);
+END
+
+FN main() RETURNS Int64
+->
+  MUTABLE kw: {String@symbol}String = {};
+  kw[:type] = COPY "x";
+  takes_str((kw[:type] OR_ELSE COPY "d"));
+  RETURN 0;
+END

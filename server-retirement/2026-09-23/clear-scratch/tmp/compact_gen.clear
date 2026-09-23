@@ -1,0 +1,21 @@
+FN compact<T>(items: []?T) RETURNS []T ->
+  MUTABLE out: []T = List[];
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    MUTABLE slot: ?T = items[i]?;
+    IF slot EXISTS AS value THEN
+      &out.append(COPY value);
+    END
+    i = i + 1;
+  END
+  RETURN out;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE opts: []?String = List[];
+  MUTABLE a: ?String = "x";
+  MUTABLE b: ?String = NIL;
+  &opts.append(COPY a);
+  &opts.append(COPY b);
+  print(compact(opts).length().toString());
+END

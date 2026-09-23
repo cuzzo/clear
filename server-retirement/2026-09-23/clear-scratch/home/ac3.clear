@@ -1,0 +1,27 @@
+UNION VV { SymbolValue: String@symbol, StringValue: String }
+
+FN vmap(flag: Bool) RETURNS ?{String@symbol}?VV
+->
+  IF flag THEN
+    MUTABLE m: {String@symbol}?VV = {};
+    m[:a] = VV{ StringValue: COPY "xy" };
+    RETURN m;
+  END
+  RETURN NIL;
+END
+
+FN pick(flag: Bool) RETURNS Int64
+->
+  MUTABLE var_data: ?VV = NIL;
+  IF (vmap(flag) OR_ELSE {})[:a] EXISTS AS v THEN
+    var_data = COPY v;
+  END
+  IF var_data EXISTS AS d THEN
+    IF d IS_A StringValue AS s THEN
+      RETURN s.codepointCount();
+    END
+  END
+  RETURN 0;
+END
+
+FN main() RETURNS Int64 -> RETURN pick(TRUE); END

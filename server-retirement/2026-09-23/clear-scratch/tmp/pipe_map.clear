@@ -1,0 +1,2 @@
+FN a(m: {String}Int64) RETURNS []Int64 -> RETURN m |> SELECT COPY _._2; END
+FN main() RETURNS !Void -> print("ok"); END

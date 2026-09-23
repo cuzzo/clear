@@ -1,0 +1,18 @@
+FN compact<T>(items: []?T) RETURNS []T ->
+  RETURN CAST((items |> WHERE _ != NIL) AS []T);
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE opts: []?String = List[];
+  MUTABLE a: ?String = "x";
+  MUTABLE b: ?String = NIL;
+  MUTABLE c: ?String = "z";
+  &opts.append(COPY a);
+  &opts.append(COPY b);
+  &opts.append(COPY c);
+  MUTABLE got: []String = compact(opts);
+  print(got.length().toString());
+  FOR s IN got DO
+    print(s);
+  END
+END

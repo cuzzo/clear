@@ -1,0 +1,20 @@
+FN count_present<T>(items: []?T) RETURNS Int64 ->
+  MUTABLE n = 0;
+  MUTABLE i = 0;
+  WHILE i < items.length() DO
+    IF items[i]? != NIL THEN
+      n = n + 1;
+    END
+    i = i + 1;
+  END
+  RETURN n;
+END
+
+FN main() RETURNS !Void ->
+  MUTABLE opts: []?String = List[];
+  MUTABLE a: ?String = "x";
+  MUTABLE b: ?String = NIL;
+  &opts.append(COPY a);
+  &opts.append(COPY b);
+  print(count_present(opts).toString());
+END

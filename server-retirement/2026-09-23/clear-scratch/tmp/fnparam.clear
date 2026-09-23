@@ -1,0 +1,11 @@
+FN apply(p: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+  RETURN p(n);
+END
+
+FN main() RETURNS !Void ->
+  IF apply(%(x: Int64) -> x > 2, 5) THEN
+    print("yes");
+  ELSE
+    print("no");
+  END
+END
